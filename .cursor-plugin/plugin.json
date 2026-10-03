@@ -1,0 +1,25 @@
+{
+  "name": "openqodex",
+  "version": "0.2.1",
+  "description": "Code review before you push, in Cursor. Scanners (Semgrep, Gitleaks, OSV-Scanner and more) check the lines you changed for security issues, secrets, vulnerable dependencies and lint errors, then the agent reviews the change on the model Cursor already runs. No API key, no account.",
+  "author": {
+    "name": "Qodex",
+    "url": "https://qodex.ai"
+  },
+  "homepage": "https://github.com/openqodex/openqodex",
+  "repository": "https://github.com/openqodex/openqodex",
+  "license": "Apache-2.0",
+  "keywords": [
+    "code-review",
+    "ai-code-review",
+    "security",
+    "sast",
+    "secret-scanning",
+    "static-analysis",
+    "lint",
+    "pre-push",
+    "semgrep",
+    "gitleaks"
+  ],
+  "logo": "assets/mark.svg"
+}

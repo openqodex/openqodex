@@ -1,4 +1,7 @@
-<!-- banner: added before launch -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/readme-banner-dark.png">
+  <img alt="OpenQodex" src="https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/readme-banner-light.png" width="1280">
+</picture>
 
 # OpenQodex
 
@@ -6,7 +9,7 @@
 [![licence](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
 [![CI](https://github.com/openqodex/openqodex/actions/workflows/ci.yml/badge.svg)](https://github.com/openqodex/openqodex/actions/workflows/ci.yml)
 
-OpenQodex is open source code review that runs inside your coding agent, before you push. It works out your change: the commits not yet pushed plus everything uncommitted. It runs the scanners that fit the changed files and keeps only findings on the lines you changed. Your agent then reviews the change on its own model and writes its findings in a fixed shape. OpenQodex checks those findings without a model and writes the report. It needs no key, no account and no server.
+OpenQodex is open source AI code review for Claude Code, Cursor, Codex and Cline. It runs inside your coding agent, before you push. It works out your change: the commits not yet pushed plus everything uncommitted. It runs the scanners that fit the changed files and keeps only findings on the lines you changed. Your agent then reviews the change on its own model and writes its findings in a fixed shape. OpenQodex checks those findings without a model and writes the report. It needs no key, no account and no server.
 
 ## Install
 
@@ -139,11 +142,12 @@ The docs ship inside the package. `npx openqodex guide <topic>` prints a page of
 - [Agents](docs/agents.md)
 - [GitHub Action](docs/github-action.md)
 - [Security](docs/security.md)
+- [Privacy](docs/privacy.md)
 - [FAQ](docs/faq.md)
 
 ## Telemetry
 
-None. OpenQodex sends no usage data. semgrep runs with its own metrics switched off. See [docs/telemetry.md](docs/telemetry.md).
+None. OpenQodex sends no usage data. semgrep runs with its own metrics switched off. See [docs/telemetry.md](docs/telemetry.md) and the privacy policy, [docs/privacy.md](docs/privacy.md).
 
 ## Security
 
@@ -154,6 +158,8 @@ Report a vulnerability through GitHub's private vulnerability reporting on this 
 OpenQodex is new and on the way to 1.0. Commands, flags and the config file can change between minor releases. [CHANGELOG.md](https://github.com/openqodex/openqodex/blob/main/CHANGELOG.md) records every change.
 
 ## Made by Qodex
+
+[![Made by Qodex](https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/made-by-qodex.svg)](https://qodex.ai?utm_source=openqodex&utm_medium=readme)
 
 OpenQodex is made by [Qodex](https://qodex.ai?utm_source=openqodex&utm_medium=readme), which also runs a hosted review on every pull request.
 

@@ -26,4 +26,5 @@ These pages ship inside the npm package. `npx openqodex guide <topic>` prints on
 - `github-action`: run the scan on pull requests.
 - `security`: what runs, what is sent where, and where files go.
 - `telemetry`: there is none.
+- `privacy`: the privacy policy: what OpenQodex collects (nothing) and every network call it makes.
 - `faq`: short answers.

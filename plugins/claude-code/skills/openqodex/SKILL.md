@@ -1,6 +1,6 @@
 ---
 name: openqodex
-description: Review the current code change before it is pushed. Runs the security and lint scanners that fit the changed files, then guides you through verifying their findings and reviewing the change yourself, and writes a report. Use before every git push, when asked to review changes, and when a push was blocked or warned by OpenQodex.
+description: Code review for the current change, before it is pushed. Runs the security, secret, dependency and lint scanners that fit the changed files, then guides you through verifying their findings and reviewing the change yourself, and writes a report. Use before every git push, when asked for a code review, a security scan, or to review changes, a diff or a pull request, and when a push was blocked or warned by OpenQodex.
 ---
 
 # OpenQodex: review the change before it is pushed

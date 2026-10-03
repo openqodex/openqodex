@@ -1,18 +1,26 @@
 {
   "name": "openqodex",
   "version": "0.2.1",
-  "description": "Code review before you push: the scanners that fit your change, any scanner by link, and a review by Claude itself. No key, no account.",
+  "description": "Code review before you push, inside Claude Code. Runs the scanners that fit your change (Semgrep, Gitleaks, OSV-Scanner, ShellCheck, Ruff and more) on the lines you changed for security vulnerabilities, hardcoded secrets, vulnerable dependencies and lint errors. Claude then reviews the change on its own model, and a final step with no model checks each finding's format, whether it sits on a changed line, and any scanner it cites. Use after writing or changing code and before git push. Free and open source, no API key, no account.",
   "author": {
     "name": "Qodex",
     "url": "https://qodex.ai"
   },
-  "homepage": "https://openqodex.com",
+  "homepage": "https://github.com/openqodex/openqodex",
   "repository": "https://github.com/openqodex/openqodex",
   "license": "Apache-2.0",
   "keywords": [
     "code-review",
+    "ai-code-review",
     "security",
+    "sast",
+    "secret-scanning",
+    "static-analysis",
+    "lint",
     "pre-push",
-    "static-analysis"
-  ]
+    "semgrep",
+    "gitleaks"
+  ],
+  "icon": "./assets/avatar-1024.png",
+  "privacyPolicyUrl": "https://github.com/openqodex/openqodex/blob/main/docs/privacy.md"
 }

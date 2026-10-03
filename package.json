@@ -15,6 +15,7 @@
     "gate": "bash scripts/gate.sh",
     "changeset": "changeset",
     "docs:index": "node scripts/docs-index.mjs",
+    "build:codex-plugin": "node scripts/validate-skill.mjs && node scripts/build-codex-plugin.mjs",
     "version-packages": "changeset version && node scripts/sync-version.mjs && pnpm install --lockfile-only",
     "release": "pnpm build && changeset publish",
     "toolchain:verify": "node scripts/refresh-toolchain.mjs --verify"

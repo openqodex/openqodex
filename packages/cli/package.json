@@ -1,7 +1,7 @@
 {
   "name": "openqodex",
   "version": "0.2.1",
-  "description": "Open source code review that runs inside your coding agent, before you push.",
+  "description": "Open source AI code review inside Claude Code, Cursor, Codex and Cline, before you push: scanners on your changed lines, then a review on your agent's own model.",
   "type": "module",
   "license": "Apache-2.0",
   "homepage": "https://github.com/openqodex/openqodex#readme",
@@ -15,12 +15,28 @@
   },
   "keywords": [
     "code-review",
+    "ai-code-review",
+    "code-review-tool",
     "static-analysis",
+    "sast",
+    "security",
+    "secret-scanning",
+    "linter",
+    "code-quality",
+    "pre-commit",
+    "pre-push",
+    "git-hooks",
     "claude-code",
+    "claude-code-plugin",
+    "agent-skills",
     "cursor",
     "codex",
     "cline",
-    "pre-commit"
+    "coding-agent",
+    "semgrep",
+    "gitleaks",
+    "osv-scanner",
+    "cli"
   ],
   "engines": {
     "node": ">=22"

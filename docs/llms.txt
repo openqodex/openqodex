@@ -7,6 +7,7 @@
 - [FAQ](faq.md)
 - [GitHub Action](github-action.md)
 - [OpenQodex docs](index.md)
+- [Privacy](privacy.md)
 - [Quickstart](quickstart.md)
 - [Scanners](scanners.md)
 - [Security](security.md)

@@ -1,0 +1,47 @@
+{
+  "name": "openqodex",
+  "version": "0.2.1",
+  "description": "Open source AI code review for Claude Code, Cursor, Codex and Cline, before you push. Scanners (SAST, secrets, dependencies, lint) on the lines you changed, then a review on your agent's own model. No API key.",
+  "author": {
+    "name": "Qodex",
+    "email": "siddhant@qodex.ai",
+    "url": "https://qodex.ai"
+  },
+  "homepage": "https://github.com/openqodex/openqodex",
+  "repository": "https://github.com/openqodex/openqodex",
+  "license": "Apache-2.0",
+  "keywords": [
+    "code-review",
+    "ai-code-review",
+    "security",
+    "sast",
+    "secret-scanning",
+    "static-analysis",
+    "lint",
+    "pre-push",
+    "semgrep",
+    "gitleaks"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "OpenQodex Code Review",
+    "shortDescription": "Code review before you push",
+    "longDescription": "OpenQodex is open source AI code review that runs inside Codex before you push. It runs the scanners that fit your change (Semgrep, Gitleaks, OSV-Scanner, ShellCheck, Ruff and more) on the lines you changed for security vulnerabilities, hardcoded secrets, vulnerable dependencies and lint errors. Codex then reviews the change on its own model and writes its findings in a fixed format, and a final step with no model checks each finding's format, whether it sits on a changed line, and any scanner it cites. No API key, no account, no telemetry. Apache 2.0.",
+    "developerName": "Qodex",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/openqodex/openqodex",
+    "privacyPolicyURL": "https://github.com/openqodex/openqodex/blob/main/docs/privacy.md",
+    "defaultPrompt": [
+      "Review my change with openqodex before I push",
+      "Run a security scan on my uncommitted changes",
+      "Review the whole repo with openqodex"
+    ],
+    "composerIcon": "./assets/avatar-1024.png",
+    "logo": "./assets/avatar-1024.png"
+  }
+}

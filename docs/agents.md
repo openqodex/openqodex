@@ -128,6 +128,8 @@ Before each push it runs `openqodex hook pre-push` through the launcher, which s
 
 - The skill alone: `npx skills add openqodex/openqodex`. This writes the skill but no hook.
 - Claude Code plugin: the repository holds a plugin marketplace with an `openqodex` plugin. The plugin carries the skill and the push gate hook. Its hook calls `npx -y openqodex@<version>`.
+- Codex plugin: `plugins/codex/` packages the skill alone for the OpenAI plugin directory. It writes no hook and no instruction file.
+- Cursor plugin: `.cursor-plugin/plugin.json` at the repository root makes the repository a Cursor plugin that carries the skill alone. It holds no rule. The rule that asks Cursor to review before every push comes from `init`, which writes `.cursor/rules/openqodex.mdc` in your repository. A rule shipped inside the plugin would go in a `rules/` folder at the repository root.
 
 ## Inside a sandbox
 
