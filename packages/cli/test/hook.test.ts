@@ -220,7 +220,8 @@ describe("hook check through the launcher", () => {
     expect(noNode.stdout).toBe("");
     expect(noNode.stderr).toContain("openqodex");
 
-    writeFileSync(launcher, text.replace(/dist\/bin\.js/, "dist/missing.js"));
+    // Every runtime path, so the runtime/current pointer cannot find one either.
+    writeFileSync(launcher, text.replace(/dist\/bin\.js/g, "dist/missing.js"));
     const broken = spawnSync("/bin/sh", [launcher, "hook", "check"], { input, encoding: "utf8", env: env(s) });
     expect(broken.status).toBe(0);
     expect(broken.stderr).toContain("openqodex");

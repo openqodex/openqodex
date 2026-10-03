@@ -62,8 +62,9 @@ const REVIEWER_LINE = {
 } as const;
 
 // The manifest version `review` writes now. From 2 on, a submission must say
-// who reviewed; a run briefed before that may leave it out.
-export const MANIFEST_VERSION = 2;
+// who reviewed; a run briefed before that may leave it out. From 3 on, the
+// manifest names the openqodex version that wrote the brief.
+export const MANIFEST_VERSION = 3;
 
 const REVIEWER_UNRECORDED = "The reviewer was not recorded: this run was briefed before openqodex asked for it.";
 

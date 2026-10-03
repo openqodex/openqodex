@@ -19,7 +19,8 @@ import { readText, sha256, writeAtomic, writeBackup } from "../agents/files.js";
 import { gitPath, repoRootOf } from "../agents/git.js";
 import { ownedFile, type Action } from "../agents/plan.js";
 import { pushFolders } from "../agents/push-command.js";
-import { loadRecord, saveRecord, serialize, withLock, type InstallRecord } from "../agents/record.js";
+import { withBoundary } from "../agents/lock.js";
+import { loadRecord, saveRecord, serialize, type InstallRecord } from "../agents/record.js";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { launcherPath, openqodexHomeDir, planRuntime, shQuote } from "../launcher.js";
 
@@ -458,7 +459,7 @@ async function install(args: string[]): Promise<number> {
     return EXIT_OK;
   }
 
-  return withLock(home, async () => {
+  return withBoundary(home, { wait: 60_000 }, async () => {
     const record = loadRecord(home);
     const recordBefore = serialize(record);
     try {
@@ -494,7 +495,7 @@ async function uninstall(args: string[]): Promise<number> {
   const target = await hookFile();
   if (target === null) return fail("openqodex hook uninstall: run it inside a git repository");
   const home = openqodexHomeDir();
-  return withLock(home, async () => {
+  return withBoundary(home, { wait: 60_000 }, async () => {
     const record = loadRecord(home);
     const recordBefore = serialize(record);
     try {

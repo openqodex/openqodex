@@ -46,6 +46,16 @@ pnpm changeset
 
 Pick the `openqodex` package and the bump. Write one line in plain English about what the user sees. The release workflow turns changesets into `CHANGELOG.md`.
 
+## After a release
+
+The self-update can only be proven between two real releases. After a publish, run the release check from the previous release to the new one:
+
+```
+node scripts/check-self-update.mjs --from <previous> --to <new> --now
+```
+
+It installs `<previous>` from npm into a temporary home with `init`, runs the update through the launcher and requires that the launcher then runs `<new>`. Without `--now` it starts the daily check through a normal command instead, which installs only a release at least 24 hours old.
+
 ## Docs
 
 The docs in `docs/` ship inside the package. A change to a config key, a flag or a command updates its page in the same pull request. `pnpm docs:index` regenerates `docs/llms.txt`.

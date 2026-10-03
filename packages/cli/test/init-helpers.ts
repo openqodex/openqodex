@@ -44,7 +44,9 @@ export function sandbox(files: Record<string, string> = {}, rootName = "oq test 
 }
 
 export function env(s: Sandbox, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const e: NodeJS.ProcessEnv = { ...process.env, HOME: s.home, OPENQODEX_HOME: s.oqHome };
+  // No update worker from a test run through the launcher: it would reach
+  // the registry and leave update.json behind. self-update.test.ts turns it on.
+  const e: NodeJS.ProcessEnv = { ...process.env, HOME: s.home, OPENQODEX_HOME: s.oqHome, OPENQODEX_AUTO_UPDATE: "0" };
   delete e.OPENQODEX_SKIP;
   // Codex's home would otherwise point init at the real one.
   delete e.CODEX_HOME;

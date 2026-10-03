@@ -37,14 +37,16 @@ OpenQodex needs Node 22 or newer and git. It runs on macOS and Linux. On Windows
 
 ## What it does today
 
+Four commands: `init`, `review`, `update` and `trust`. The commands hooks and agents call are listed in [docs/plumbing.md](docs/plumbing.md).
+
 - `openqodex review --agent` writes a review brief for your agent: the scanner findings to verify, review patterns that fit the change, and the diff.
 - `openqodex review --finalize` checks the agent's findings without a model and writes `report.md`, `report.json` and `report.sarif`.
-- `openqodex scan` runs the scanners only, for git hooks, pre-commit and CI.
+- `openqodex review` with neither flag runs the scanners only and prints their report. Git hooks, pre-commit and CI run the same check as `openqodex scan`.
 - Thirteen built-in scanners. Every downloaded scanner is pinned to one version. Each runs only when the change holds a file it reads.
 - Any scanner by its GitHub link, after you approve it with `openqodex trust`.
 - A push gate for Claude Code and Codex. It warns by default. It blocks only when `.openqodex.yaml` sets `review.block_on_severity`.
 - A GitHub Action and a pre-commit hook that run `openqodex scan`.
-- `openqodex demo` builds a small repo with planted bugs and scans it.
+- `npx openqodex demo` builds a small repo with planted bugs and scans it.
 
 ## What it does not do yet
 
@@ -114,10 +116,19 @@ npx openqodex trust
 - When the change holds a lockfile, osv-scanner sends dependency names and versions to osv.dev. It never sends code.
 
 - `openqodex trust` reads the custom scanner's release from the GitHub API and downloads it.
+- For an install made with `init`, a version check at most once a day: the openqodex release list from registry.npmjs.org, and for a newer release its tarball and signed build record. It sends no code and nothing about you.
 
-`--offline` skips osv-scanner and semgrep and turns scanner downloads off.
+`--offline` skips osv-scanner and semgrep and turns scanner downloads and the version check off.
 
 The built-in scanners send no code anywhere. Your agent's model sees what your agent reads, as always. A custom scanner you approved does whatever its own command does. [docs/security.md](docs/security.md) gives the full list.
+
+## Updates
+
+An install made with `npx openqodex init` from 0.3.0 on keeps itself up to date. At most once a day, after a review, a scan or a push check, a background process looks for a new release. The command never waits for it. A release is installed only when it is at least 24 hours old and its signed build record (npm provenance) shows it was built by this repository's release workflow. It goes into a folder of its own beside the version you run, and the switch is one rename of a small file, so a failed or interrupted update leaves the working version in place. An update never rewrites your agent files: in user scope they call the launcher, and the skill asks it for the procedure of whatever version is active. The next command says once which version it moved to. `openqodex update --rollback` goes back.
+
+Turn it off with `openqodex update --off`, `update: off` in `~/.openqodex/config.yaml` or `OPENQODEX_AUTO_UPDATE=0`. It is also off with `--offline` and when `CI` is set.
+
+These do not update: files committed with `init --project`, the review section `init` adds to a repository's `CLAUDE.md` and `AGENTS.md`, the skill from `npx skills add`, the GitHub Action pin, and machines that are offline or stop background processes. An active install is usually one to two days behind a release. An install made with any earlier version needs one `npx openqodex init` to start updating.
 
 ## Packages
 
@@ -133,6 +144,7 @@ The docs ship inside the package. `npx openqodex guide <topic>` prints a page of
 
 - [Quickstart](docs/quickstart.md)
 - [Commands](docs/cli.md)
+- [Plumbing commands](docs/plumbing.md)
 - [Configuration](docs/config.md)
 - [Scanners](docs/scanners.md)
 - [Custom scanners](docs/custom-scanners.md)

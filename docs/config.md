@@ -216,3 +216,12 @@ The code graph lists the callers and importers of the code a change touches, for
 - `graph.budget_ms`: the time the graph may take, in milliseconds. The default is `10000`.
 - `graph.max_files`: the most files the graph reads. The default is `4000`.
 - `graph.max_file_bytes`: a file larger than this, in bytes, is left out of the graph. The default is `524288`.
+
+## The user config, ~/.openqodex/config.yaml
+
+One file in your home folder holds what is yours, not the team's. It has one key today, and `OPENQODEX_HOME` moves it with the rest of `~/.openqodex/`.
+
+- `update`: `on` or `off`. The default is `on`. `off` stops the daily version check. `openqodex update --off` and `--on` write it.
+
+A file that does not parse, or an `update` value that is neither `on` nor `off`, turns updates off until it is fixed. `openqodex doctor` says why updates are off.
+

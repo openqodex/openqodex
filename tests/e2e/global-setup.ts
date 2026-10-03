@@ -1,6 +1,18 @@
 import { beforeAll, afterAll } from "vitest";
-import { mkdirSync } from "node:fs";
-import { root, run, toolsHome, printReceipt, installed } from "./support.js";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { receipt, root, run, toolsHome, printReceipt, installed } from "./support.js";
+
+// The shared home keeps the scanners between runs, and also the runtime copy
+// an earlier build installed under the same version. A runtime copy is never
+// replaced, so a rebuilt CLI would be refused: each run starts without one.
+beforeAll(() => {
+  const marker = join(receipt, "runtime-reset");
+  if (existsSync(marker)) return;
+  rmSync(join(toolsHome, "runtime"), { recursive: true, force: true });
+  mkdirSync(receipt, { recursive: true });
+  writeFileSync(marker, "");
+});
 
 // Imported by each group. Vitest runs files serially, and the shared marker
 // avoids a second install when a test file has a separate module isolate.

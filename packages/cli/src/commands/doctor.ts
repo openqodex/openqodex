@@ -10,6 +10,7 @@ import { installTools, openqodexHome, toolStatuses, trustState } from "@openqode
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
 import { progress } from "../pipeline.js";
+import { statusLines } from "./update.js";
 
 const run$ = promisify(execFile);
 
@@ -30,6 +31,7 @@ type Report = {
   scanners: ToolStatus[];
   custom: { name: string; source: string; trust: string }[];
   home: string;
+  update: string[];
 };
 
 const STATE_WORDS: Record<ToolStatus["state"], string> = {
@@ -59,6 +61,7 @@ function text(r: Report): string {
     lines.push("", "Custom scanners");
     for (const c of r.custom) lines.push(`  ${c.name}  ${c.source}  ${c.trust}`);
   }
+  lines.push("", "Updates", ...r.update.map((l) => `  ${l}`));
   if (r.scanners.some((s) => s.state === "will_install")) {
     lines.push("", "To install every scanner now: npx openqodex doctor --install");
   }
@@ -118,6 +121,7 @@ export async function run(args: string[]): Promise<number> {
     scanners,
     custom,
     home: openqodexHome(),
+    update: statusLines(openqodexHome()),
   };
   process.stdout.write(bools.has("--json") ? `${JSON.stringify(report, null, 2)}\n` : text(report));
   return git === null || inputError ? EXIT_TOOL_FAILED : EXIT_OK;

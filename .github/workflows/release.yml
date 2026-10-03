@@ -5,6 +5,8 @@ name: Release
 #   pull request, which bumps the version and writes CHANGELOG.md;
 # - when that pull request has merged and no changeset is left, it publishes
 #   the new version to npm with provenance, tags it and makes a GitHub release.
+#   Once the version is on the registry, the last step tags it v<version> and
+#   moves the v0 tag the GitHub Action is used by.
 # Nothing else runs this workflow: not pull requests, not other branches.
 
 on:
@@ -37,6 +39,7 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - name: Version pull request or publish
+        id: changesets
         # v1 of the action works with Changesets CLI 2, which this repo uses.
         uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
@@ -52,3 +55,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
+      - name: Tag v<version> and move v<major>
+        # Only after a publish. Tags only, never a branch: the major tag of the
+        # published version is the one that moves, so `uses: openqodex/openqodex@v0`
+        # gets each 0.x release and never a 1.0.0.
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          version=$(node -e 'const p = JSON.parse(process.env.PUBLISHED).find((x) => x.name === "openqodex"); if (p) process.stdout.write(p.version)')
+          if [ -z "$version" ]; then echo "openqodex was not published in this run"; exit 0; fi
+          # The registry can take a moment to show a new version.
+          for attempt in 1 2 3 4 5 6; do
+            if [ "$(npm view "openqodex@$version" version 2>/dev/null)" = "$version" ]; then break; fi
+            if [ "$attempt" = 6 ]; then echo "openqodex@$version is not on the registry; no tag moved"; exit 1; fi
+            sleep 20
+          done
+          git rev-parse -q --verify "refs/tags/v$version" >/dev/null || git tag "v$version"
+          git push origin "refs/tags/v$version"
+          major=${version%%.*}
+          case "$major" in ''|*[!0-9]*) echo "cannot read the major version of $version; no major tag moved"; exit 1 ;; esac
+          git tag -f "v$major"
+          git push --force origin "refs/tags/v$major"

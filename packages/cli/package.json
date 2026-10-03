@@ -45,12 +45,14 @@
     "build": "tsup",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": {},
   "devDependencies": {
     "@clack/prompts": "^1.8.1",
     "@openqodex/core": "workspace:*",
     "@openqodex/graph": "workspace:*",
     "@openqodex/scanners": "workspace:*",
+    "@sigstore/bundle": "5.0.0",
+    "@sigstore/protobuf-specs": "0.5.2",
+    "@sigstore/verify": "4.1.2",
     "commander": "^14.0.3",
     "picocolors": "^1.1.1",
     "yaml": "^2.9.1",

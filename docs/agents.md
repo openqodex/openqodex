@@ -30,6 +30,24 @@ Inside a repository, `init` also asks: "Add the git pre-push hook, so every push
 
 The tables below name the file for each agent. Cursor has no instruction file in the home folder, so its rule in the repository carries the same section. In an existing file, the section is appended and your own text stays as it is. `--uninstall` removes exactly that section, and nothing around it.
 
+## The team section in the repository
+
+Inside a repository, `init` in user scope also asks: "Add a review section to this repo's CLAUDE.md and AGENTS.md, so teammates' agents review before they push too?" The default is yes, and `--yes` answers yes. `--no-repo` answers no. The answer is recorded for that repository and asked no more; `--yes` or `--no-repo` on a later `init` replaces it.
+
+The section goes into `CLAUDE.md` and `AGENTS.md` at the root of the repository, and `init` creates a file that is not there. It is meant for a teammate who has installed nothing, so it names only the pinned `npx` command:
+
+```
+<!-- openqodex:start -->
+## Review with OpenQodex before you push
+- Before any `git push`, run `npx -y openqodex@<version> review --agent` from the repository root and follow the brief it prints to the end, including the finalize command it names.
+- Run that review in a separate subagent when your agent has one: the agent that wrote the code does not judge its own work.
+- Do not push on a blocked verdict unless the developer says so after seeing the findings.
+- The report is in `.openqodex/reviews/`.
+<!-- openqodex:end -->
+```
+
+The two files show in `git status`, and `init` says to commit them. `init` writes neither file through a symbolic link. A section you edited is yours: a later `init` and `--uninstall` leave it as it is. `--uninstall` removes our untouched section, and deletes a file only when `init` created it and nothing else is in it. In project scope the same two files carry the instruction section instead, never both.
+
 ## The review runs in a separate subagent
 
 The skill hands the review to a subagent whose only task is the review, so the agent that wrote the code does not judge its own work. In Claude Code, that is a subagent started with the Agent tool. In Codex, Cursor and other hosts, the skill uses their sub-task or background agent feature when there is one. Where the host has none, the agent tells you the review is not independent, and the report's summary says so on its first line.
@@ -47,15 +65,17 @@ Both are meant to be committed, so the whole team shares them. A file that exist
 
 ## User scope and project scope
 
-The default is user scope. `init` writes into your home folder, so one install works in every repository. A rule file it must put inside a repository is added to `.git/info/exclude`, so it does not show in `git status`. The two repo folder files below are the exception: they are meant to be committed.
+The default is user scope. `init` writes into your home folder, so one install works in every repository. A rule file it must put inside a repository is added to `.git/info/exclude`, so it does not show in `git status`. The two repo folder files and the team section above are the exception: they are meant to be committed.
 
 `--project` writes the files into the repository instead, for a team to commit. Run it inside a git repository.
 
 ## The launcher
 
-In user scope, the push gate hooks call a launcher, not npx. `init` copies the package to `~/.openqodex/runtime/<version>/` and checks the copy runs. It then writes `~/.openqodex/bin/openqodex`, a small script that runs that copy with your Node. The hooks call that script by its full path, so they do not depend on npx or your `PATH`.
+In user scope, the push gate hooks, the skill and the Cursor and Cline rules call a launcher, not npx. Every user-scope install gets it, with or without a hook. `init` copies the package to `~/.openqodex/runtime/<version>/` and checks the copy runs. It writes the version to the first line of `~/.openqodex/runtime/current`, then writes `~/.openqodex/bin/openqodex`, a small script that runs the copy that line names with your Node. When the line is missing, is not a version, or names a copy that is gone, the script runs the version `init` installed. The hooks and the skill's commands call that script by its full path, so they do not depend on npx or your `PATH`. A copy is never changed once written: when a folder of the same version with other contents is in the way, `init` stops and names it.
 
-In project scope, the hooks call `npx -y openqodex@<version>`, because the launcher path would not exist on a teammate's machine.
+The user-scope skill is a short stub: when to run, who reviews (a separate subagent where the host has one), and one command, `<launcher> guide skill`, which prints the full procedure of the version the launcher runs, with every command written for the launcher. No file `init` writes in user scope names a version or holds the procedure, so an update changes none of them. In user scope the Cursor and Cline rules call the launcher too, and say to run `<launcher> guide skill` when the skill is not loaded.
+
+In project scope, the hooks, the skill and the rules call `npx -y openqodex@<version>` and the skill holds the full procedure, because the launcher path would not exist on a teammate's machine. These files, and the review section `init` adds to a repository's `CLAUDE.md` and `AGENTS.md`, stay on the version they name: an update never changes them. Run `init` again to move them.
 
 ## Claude Code
 
@@ -64,8 +84,15 @@ In project scope, the hooks call `npx -y openqodex@<version>`, because the launc
 | Skill | `~/.claude/skills/openqodex/SKILL.md` | `.claude/skills/openqodex/SKILL.md` |
 | Push gate hook | merged into `~/.claude/settings.json` | merged into `.claude/settings.json` |
 | Instructions | a marked section in `~/.claude/CLAUDE.md` | a marked section in `CLAUDE.md` |
+| Permission rules | merged into `permissions.allow` of `~/.claude/settings.json` | none |
 
 The hook is one `PreToolUse` entry. It matches the `Bash` tool and runs only for `git push` commands. It calls `openqodex hook check`.
+
+In user scope, `init` adds rules so Claude Code runs these review commands without asking, and the agent can review unattended: `<launcher> review --agent`, `review --finalize`, `review --agent --all` and `review --finalize --all`, each also with ` --offline` at the end, plus `guide`, `guide skill` and `guide <topic>`. Each rule matches one exact line, so the same command with any other flag, such as `--output` or `--config`, or chained with `&&`, still asks you. `scan`, `doctor`, `trust`, `update`, `init` and `report` still ask you. The brief's finalize command is one of these lines too, unless the review was run with `--config`. Project scope writes no permission rule: a committed settings file would decide for every teammate. A rule you already had is left alone, and `init --uninstall` removes only the rules `init` added. When a later version grants a different set, the next `init` removes the rules an earlier version added and adds the new ones. When your home path holds a space or another character the shell would read, the launcher is written in single quotes in the skill and in the rules alike. When the launcher's path holds `*`, which Claude Code reads as a wildcard, `init` writes no rule and says so in one line; Claude Code then asks before each review command.
+
+A skill, rule or permission rule an earlier `init` wrote, such as the full-text skill of 0.2.1, is replaced by the next `init` only while it is still exactly as written. One you edited is left as it is, and `init` says so.
+
+Neither the skill `init` writes nor `guide skill` carries the sentence that tells an agent to prefer `~/.openqodex/bin/openqodex`: in user scope the launcher already runs every command, and in project scope the skill keeps the version the team committed.
 
 ## Codex CLI
 

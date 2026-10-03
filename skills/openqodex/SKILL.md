@@ -26,6 +26,8 @@ If you are the review subagent, follow the procedure yourself and do not start a
 
 ## Procedure
 
+When the file `~/.openqodex/bin/openqodex` exists, run it in place of `npx -y openqodex@<version>` in every command of this skill: it is the copy `openqodex init` installed.
+
 1. From the repository, run:
 
    ```

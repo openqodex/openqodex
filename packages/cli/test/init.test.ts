@@ -91,10 +91,10 @@ describe("init, user scope, all agents", () => {
     first = cli(s, ["init", "--yes", "--agent", "all"]);
   });
 
-  it("writes every user-scope file the templates README lists; git status gains only the repo folder's team files", () => {
+  it("writes every user-scope file the templates README lists; git status gains only the team files", () => {
     expect(first.status, first.stderr).toBe(0);
     for (const f of userFiles(s)) expect(existsSync(f), f).toBe(true);
-    expect(status(s)).toBe(`${statusBefore}${REPO_FOLDER_STATUS}`);
+    expect(status(s)).toBe(`${statusBefore}${REPO_FOLDER_STATUS}?? AGENTS.md\n?? CLAUDE.md\n`);
   });
 
   it("writes hook commands that run through sh from a home path with a space", () => {
@@ -250,8 +250,9 @@ describe("init, files the developer owns or edited", () => {
     const s = sandbox();
     const other = join(s.root, "other worktree");
     git(s.repo, "worktree", "add", "-q", "-b", "other", other);
-    expect(cli(s, ["init", "--yes", "--agent", "cursor"]).status).toBe(0);
-    expect(cli(s, ["init", "--yes", "--agent", "cursor"], { cwd: other }).status).toBe(0);
+    // --no-repo: only the rule's exclude line is under test here.
+    expect(cli(s, ["init", "--yes", "--no-repo", "--agent", "cursor"]).status).toBe(0);
+    expect(cli(s, ["init", "--yes", "--no-repo", "--agent", "cursor"], { cwd: other }).status).toBe(0);
     expect(cli(s, ["init", "--uninstall", "--yes", "--agent", "cursor"]).status).toBe(0);
     expect(git(other, "status", "--porcelain", "--untracked-files=all")).toBe(REPO_FOLDER_STATUS);
   });

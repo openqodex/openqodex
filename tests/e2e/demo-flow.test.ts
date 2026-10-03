@@ -69,11 +69,13 @@ describe("init", () => {
     expect(homeAfterSecondInit).toEqual(homeAfterFirstInit);
   });
   // User scope puts the Cursor rule in the repo, hidden by .git/info/exclude
-  // (templates/README.md, Cursor): that one file is the only change allowed.
-  it("adds only its git-excluded Cursor rule to the repo and leaves the index and git status unchanged", () => {
-    expect(changedFiles(snaps.start.files, snaps.init.files)).toEqual([".cursor/rules/openqodex.mdc"]);
+  // (templates/README.md, Cursor), and the team review section in CLAUDE.md
+  // and AGENTS.md, which git status shows so the developer commits them.
+  it("adds the git-excluded Cursor rule and the two visible team files, and leaves the index unchanged", () => {
+    expect(changedFiles(snaps.start.files, snaps.init.files)).toEqual([".cursor/rules/openqodex.mdc", "AGENTS.md", "CLAUDE.md"]);
     expect(snaps.init.index).toBe(snaps.start.index);
-    expect(snaps.init.status).toBe(snaps.start.status);
+    const lines = (status: string) => status.split("\n").filter(Boolean).sort();
+    expect(lines(snaps.init.status)).toEqual([...lines(snaps.start.status), "?? AGENTS.md", "?? CLAUDE.md"].sort());
   });
 });
 

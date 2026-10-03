@@ -5,8 +5,9 @@
 //   --all              the whole repository instead of the change: the scanners
 //                      on every file, then the brief, with or without --agent.
 //                      There is never a scan-only report of the whole repo.
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, constants, openSync, readSync, realpathSync } from "node:fs";
+import { closeSync, constants, existsSync, openSync, readSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   MANIFEST_VERSION,
@@ -39,7 +40,9 @@ import {
 import type { ChangeScope, ImpactSummary, Latest, SelectedLens, WholeRepo } from "@openqodex/core";
 import { renderImpactBlock } from "@openqodex/graph";
 import { announceRepoFiles, instructionsTemplate } from "../agents/repo-folder.js";
-import { EXIT_OK } from "../exit-codes.js";
+import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
+import { launcherPath, launcherRunner, launcherStarted, openqodexHomeDir, runtimeBin } from "../launcher.js";
+import { HANDED_OFF } from "../update/trigger.js";
 import { readInstructions } from "../instructions.js";
 import { ALL, NO_GRAPH, parseFlags, scannerList } from "../flags.js";
 import type { GlobalFlags } from "../flags.js";
@@ -69,7 +72,7 @@ type RunFile = { version: 1; scope: ChangeScope | "all" };
 
 export async function run(args: string[]): Promise<number> {
   const { global, bools, values, positionals } = parseFlags(args, {
-    bools: [...SCOPE_BOOLS, "--agent", "--finalize", ALL, NO_GRAPH],
+    bools: [...SCOPE_BOOLS, "--agent", "--finalize", ALL, NO_GRAPH, HANDED_OFF],
     values: [...SCOPE_VALUES, "--only", "--skip"],
     positionals: 1,
   });
@@ -84,7 +87,7 @@ export async function run(args: string[]): Promise<number> {
 
   // Finalize reads the scope from the run; --all only picks the newest
   // whole-repo run when no findings path is given.
-  if (finalize) return runFinalize(global, positionals[0], bools.has(ALL));
+  if (finalize) return runFinalize(global, positionals[0], bools.has(ALL), args, bools.has(HANDED_OFF));
   if (bools.has(ALL)) return runAll(global, agent, values.get("--only"), values.get("--skip"), noGraph);
   const scope = scopeFrom(bools, values);
   if (agent) return runAgent(global, scope, values.get("--only"), values.get("--skip"), noGraph);
@@ -99,13 +102,24 @@ function shellQuote(arg: string): string {
   return /^[A-Za-z0-9_./:@=-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
-// The exact command that finalizes this run, from any folder: the repo and an
-// explicit config are named so the config hash and the change match.
-function finalizeCommand(repoRoot: string, config: string | undefined, findingsPath: string): string {
-  const args = ["npx", "-y", `openqodex@${__OPENQODEX_VERSION__}`, "review", "--finalize", "--cwd", repoRoot];
-  if (config !== undefined) args.push("--config", isAbsolute(config) ? config : resolve(repoRoot, config));
+// The command that finalizes this run. Started through the launcher, it is
+// the plain line the Claude Code permission rules cover, run from the
+// repository root: `<launcher> review --finalize`, with --all and --offline
+// as the brief was made, and finalize finds the run through latest.json or
+// latest-all.json. When an update moved the launcher on in between, finalize
+// hands the run to the version that wrote the brief by its findings file.
+// An explicit --config, or a run not started through the launcher, gets the
+// full line that works from any folder: the repo, the config and the
+// findings file named, with the pinned npx version.
+function finalizeCommand(repoRoot: string, flags: GlobalFlags, findingsPath: string, all: boolean): string {
+  if (launcherStarted() && flags.config === undefined) {
+    return [launcherRunner(launcherPath(openqodexHomeDir())), "review", "--finalize", ...(all ? ["--all"] : []), ...(flags.offline ? ["--offline"] : [])].join(" ");
+  }
+  const runner = launcherStarted() ? launcherRunner(launcherPath(openqodexHomeDir())) : `npx -y openqodex@${__OPENQODEX_VERSION__}`;
+  const args = ["review", "--finalize", "--cwd", repoRoot];
+  if (flags.config !== undefined) args.push("--config", isAbsolute(flags.config) ? flags.config : resolve(repoRoot, flags.config));
   args.push(findingsPath);
-  return args.map(shellQuote).join(" ");
+  return [runner, ...args.map(shellQuote)].join(" ");
 }
 
 // sha256 of the instructions file, null when there is none. Finalize compares
@@ -143,6 +157,7 @@ async function runAgent(flags: GlobalFlags, scope: ChangeScope, only: string | u
     created_at: new Date().toISOString(),
     lenses: lenses.map((l) => ({ name: l.name, confidenceFloor: l.confidenceFloor })),
     instructions_hash: instructions.hash,
+    runtime_version: __OPENQODEX_VERSION__,
   });
   writeScan(p.repoRoot, dir, p.scan);
   const impact = await buildImpact(p, flags, noGraph);
@@ -153,7 +168,7 @@ async function runAgent(flags: GlobalFlags, scope: ChangeScope, only: string | u
     config: p.config,
     secrets: p.secrets,
     findingsPath: join(dir, FINDINGS_FILE),
-    finalizeCommand: finalizeCommand(p.repoRoot, flags.config, join(dir, FINDINGS_FILE)),
+    finalizeCommand: finalizeCommand(p.repoRoot, flags, join(dir, FINDINGS_FILE), false),
     impactBlock: renderImpactBlock(impact),
     instructions: instructions.text,
   });
@@ -243,6 +258,7 @@ async function runAll(flags: GlobalFlags, agent: boolean, only: string | undefin
     created_at: new Date().toISOString(),
     lenses: lenses.map((l) => ({ name: l.name, confidenceFloor: l.confidenceFloor })),
     instructions_hash: instructions.hash,
+    runtime_version: __OPENQODEX_VERSION__,
   });
   writeScan(repoRoot, dir, p.scan);
   const { impact, hot, note } = await buildHotSpots(p, flags, noGraph);
@@ -254,7 +270,7 @@ async function runAll(flags: GlobalFlags, agent: boolean, only: string | undefin
     config,
     secrets: p.secrets,
     findingsPath: join(dir, FINDINGS_FILE),
-    finalizeCommand: finalizeCommand(repoRoot, flags.config, join(dir, FINDINGS_FILE)),
+    finalizeCommand: finalizeCommand(repoRoot, flags, join(dir, FINDINGS_FILE), true),
     inventory,
     inventoryPath: join(dir, INVENTORY_FILE),
     hot,
@@ -342,7 +358,7 @@ function checkRunDir(repoRoot: string, dir: string, findingsPath: string): { dir
 // The report folder this submission belongs to: the newest run when no path
 // is given (the newest whole-repo run with --all), else the folder that
 // holds the findings file.
-function findRun(repoRoot: string, path: string | undefined, all: boolean): { dir: string; submission: unknown } {
+function findRun(repoRoot: string, path: string | undefined, all: boolean): { dir: string; findingsPath: string; submission: unknown } {
   let dir: string;
   let findingsPath: string;
   if (path === undefined) {
@@ -360,13 +376,46 @@ function findRun(repoRoot: string, path: string | undefined, all: boolean): { di
   }
   const submission = readJsonFile(repoRoot, findingsPath, "agent findings");
   if (submission === null) throw new OpenQodexError(`agent findings not found at ${findingsPath}`);
-  return { dir, submission };
+  return { dir, findingsPath, submission };
 }
 
-async function runFinalize(flags: GlobalFlags, path: string | undefined, all: boolean): Promise<number> {
+const PLAIN_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+// A brief written by another version is finalized by that version: the brief's
+// rules and the finalize checks belong together. It runs only
+// <home>/runtime/<x.y.z>/dist/bin.js, built from the developer's home folder
+// and a plain version, never a path read from the manifest; a repository
+// cannot write into the home folder.
+// The child gets the findings file this process selected, by path, so it
+// finalizes the same run even when latest.json moves on in between, and the
+// hidden --handed-off argument, so it never hands off again. An environment
+// variable would be inherited from whatever started this process.
+function finalizeOnVersion(version: unknown, args: string[], path: string | undefined, findingsPath: string, handedOff: boolean): number {
+  if (handedOff) {
+    throw new OpenQodexError(`this finalize was handed here by another openqodex version, and the brief names ${String(version)}; run openqodex review --agent again`);
+  }
+  if (typeof version !== "string" || !PLAIN_VERSION.test(version)) {
+    throw new OpenQodexError("the brief names no valid openqodex version; run openqodex review --agent again");
+  }
+  const bin = runtimeBin(openqodexHomeDir(), version);
+  if (!existsSync(bin)) {
+    throw new OpenQodexError(`this brief was written by openqodex ${version}, which is not installed here; run openqodex review --agent again`);
+  }
+  // The flags as given, without the path, then -- and the selected path, so a
+  // path after -- or one that starts with a dash reaches the child as a path.
+  const dash = args.indexOf("--");
+  const flags = dash !== -1 ? args.slice(0, dash) : path === undefined ? args : args.filter((a, i) => i !== args.indexOf(path));
+  const child = spawnSync(process.execPath, [bin, "review", HANDED_OFF, ...flags, "--", findingsPath], { stdio: "inherit" });
+  return child.status ?? EXIT_TOOL_FAILED;
+}
+
+async function runFinalize(flags: GlobalFlags, path: string | undefined, all: boolean, args: string[], handedOff: boolean): Promise<number> {
   const { repoRoot, config } = await loadRepo(flags);
-  const { dir, submission } = findRun(repoRoot, path, all);
+  const { dir, findingsPath, submission } = findRun(repoRoot, path, all);
   const manifest = readManifest(repoRoot, dir);
+  if (manifest !== null && manifest.runtime_version !== undefined && manifest.runtime_version !== __OPENQODEX_VERSION__) {
+    return finalizeOnVersion(manifest.runtime_version, args, path, findingsPath, handedOff);
+  }
   const scan = readScan(repoRoot, dir);
   const runFile = readJsonFile(repoRoot, join(dir, RUN_FILE), "run file") as RunFile | null;
   if (manifest === null || scan === null || runFile === null) {

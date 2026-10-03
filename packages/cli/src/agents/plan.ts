@@ -5,6 +5,7 @@
 // teammate's) counts a thing as ours only when it equals the current output.
 import { readdirSync, rmdirSync, rmSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { removeRepoFile, writeRepoFile } from "@openqodex/core";
 import type { AgentId } from "./detect.js";
 import { assertNoSymlinkInRepo, readText, sha256, writeAtomic, writeBackup } from "./files.js";
 import { canonical, type InstallRecord } from "./record.js";
@@ -28,7 +29,11 @@ export type Action = {
 
 export type Ctx = { record: InstallRecord; scope: Scope; repoRoot: string | null };
 
-type Settings = { hooks?: { PreToolUse?: unknown[]; [k: string]: unknown }; [k: string]: unknown };
+type Settings = {
+  hooks?: { PreToolUse?: unknown[]; [k: string]: unknown };
+  permissions?: { allow?: unknown[]; [k: string]: unknown };
+  [k: string]: unknown;
+};
 
 function json(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -48,6 +53,10 @@ function parseSettings(text: string): Settings | string {
     return "does not parse as JSON";
   }
   if (!isObject(data)) return "is not a JSON object";
+  if (data.permissions !== undefined) {
+    if (!isObject(data.permissions)) return '"permissions" is not an object';
+    if (data.permissions.allow !== undefined && !Array.isArray(data.permissions.allow)) return '"permissions.allow" is not a list';
+  }
   if (data.hooks !== undefined) {
     if (!isObject(data.hooks)) return '"hooks" is not an object';
     const pre = data.hooks.PreToolUse;
@@ -74,6 +83,51 @@ function removeGroups(data: Settings, entries: unknown[]): number {
   else delete data.hooks!.PreToolUse;
   if (Object.keys(data.hooks!).length === 0) delete data.hooks;
   return removed;
+}
+
+// Removes one entry of each rule from permissions.allow; drops the list and
+// the object when left empty.
+function removeAllow(data: Settings, rules: string[]): void {
+  const allow = data.permissions?.allow;
+  if (!allow) return;
+  const left = [...allow];
+  for (const rule of rules) {
+    const i = left.indexOf(rule);
+    if (i !== -1) left.splice(i, 1);
+  }
+  if (left.length > 0) data.permissions!.allow = left;
+  else delete data.permissions!.allow;
+  if (Object.keys(data.permissions!).length === 0) delete data.permissions;
+}
+
+// The permission rules init added to this settings file. Only user scope
+// has them, so the record always knows them.
+function ourRules(ctx: Ctx, path: string): string[] {
+  return ctx.record.allowRules.filter((r) => r.path === path).map((r) => r.rule);
+}
+
+// What this process wrote to each settings file. The hook and the permission
+// rules share settings.json: the rules' action, applied right after the hook's,
+// accepts the file as the plan saw it or as the hook's action left it, and
+// refuses anything else, as every other action's guard does.
+const writtenThisRun = new Map<string, string | null>();
+
+function writeSettings(path: string, text: string, mode?: number): void {
+  writeAtomic(path, text, mode);
+  writtenThisRun.set(path, text);
+}
+
+function removeSettings(path: string): void {
+  removeFile(path);
+  writtenThisRun.set(path, null);
+}
+
+function unchangedSincePlan(path: string, before: string | null): string | null {
+  const now = readText(path);
+  if (now !== before && !(writtenThisRun.has(path) && writtenThisRun.get(path) === now)) {
+    throw new Error(`changed while init was running, nothing written to ${path}`);
+  }
+  return now;
 }
 
 // Removes the file, then its folder when the folder is named openqodex and
@@ -111,6 +165,19 @@ function checkRepoPath(t: Target, ctx: Ctx): void {
   if (t.inRepo && ctx.repoRoot !== null) assertNoSymlinkInRepo(ctx.repoRoot, t.path);
 }
 
+// A markdown file inside the repo is written and removed by the repo-state
+// helpers, which refuse a link at the moment of the write, not only when the
+// plan was made. Other files keep writeAtomic, which follows a dotfile link.
+function writeMarkdown(t: Target, ctx: Ctx, content: string): void {
+  if (t.inRepo && ctx.repoRoot !== null) writeRepoFile(ctx.repoRoot, t.path, content);
+  else writeAtomic(t.path, content);
+}
+
+function removeMarkdown(t: Target, ctx: Ctx): void {
+  if (t.inRepo && ctx.repoRoot !== null) removeRepoFile(ctx.repoRoot, t.path);
+  else removeFile(t.path);
+}
+
 export function planInstall(t: Target, ctx: Ctx): Action {
   const { record } = ctx;
   checkRepoPath(t, ctx);
@@ -120,7 +187,7 @@ export function planInstall(t: Target, ctx: Ctx): Action {
     case "file": {
       const write = (): void => {
         writeAtomic(t.path, t.content);
-        setFile(record, t.path, t.content);
+        setFile(record, t.path, t.content, t.usesLauncher);
       };
       if (before === null) return { ...base, verb: "create", note: t.label, apply: write };
       if (before === t.content) return { ...base, verb: "skip", note: `${t.label} already present` };
@@ -141,7 +208,7 @@ export function planInstall(t: Target, ctx: Ctx): Action {
           verb: "create",
           note: t.label,
           apply: () => {
-            writeAtomic(t.path, json({ hooks: { PreToolUse: [t.group] } }), t.inRepo ? 0o644 : 0o600);
+            writeSettings(t.path, json({ hooks: { PreToolUse: [t.group] } }), t.inRepo ? 0o644 : 0o600);
             record.hooks.push({ ...entry, createdFile: true });
           },
         };
@@ -166,7 +233,7 @@ export function planInstall(t: Target, ctx: Ctx): Action {
           verb: "update",
           note: `${t.label}, replacing the one an earlier openqodex wrote`,
           apply: () => {
-            writeAtomic(t.path, json(data));
+            writeSettings(t.path, json(data));
             record.hooks = record.hooks.filter((r) => r !== old);
             record.hooks.push({ ...entry, createdFile: old.createdFile });
           },
@@ -185,8 +252,50 @@ export function planInstall(t: Target, ctx: Ctx): Action {
         note: `${t.label}, other settings kept${hasBackup ? "" : ` (the file as it was is saved beside it as ${basename(t.path)}.openqodex.bak)`}`,
         apply: () => {
           if (!hasBackup) record.backups.push({ path: writeBackup(t.path, before), of: t.path });
-          writeAtomic(t.path, json(data));
+          writeSettings(t.path, json(data));
           record.hooks.push({ ...entry, createdFile: false });
+        },
+      };
+    }
+    case "allow-rules": {
+      const data = before === null ? {} : parseSettings(before);
+      if (typeof data === "string") return { ...base, verb: "refuse", failed: true, note: `${t.label}: the file ${data}; left untouched` };
+      const have = (data.permissions?.allow ?? []) as unknown[];
+      // Rules an earlier version granted and this one does not: removed while
+      // still there as recorded. A rule the record does not name is never touched.
+      const recorded = ourRules(ctx, t.path);
+      const stale = recorded.filter((r) => !t.rules.includes(r));
+      const staleThere = stale.filter((r) => have.includes(r));
+      const missing = t.rules.filter((r) => !have.includes(r));
+      const forgetStale = (): void => {
+        record.allowRules = record.allowRules.filter((r) => r.path !== t.path || !stale.includes(r.rule));
+      };
+      if (missing.length === 0 && staleThere.length === 0) {
+        forgetStale();
+        return { ...base, verb: "skip", note: t.rules.length > 0 ? `${t.label} already present` : `${t.label}: none in project scope` };
+      }
+      const parts = [
+        ...(missing.length > 0 ? [`Claude Code runs these review commands without asking: ${missing.join(", ")}`] : []),
+        ...(staleThere.length > 0 ? [`no longer allowed: ${staleThere.join(", ")}`] : []),
+      ];
+      // No guard field: the hook's action writes the same file just before.
+      // unchangedSincePlan does the guard's work at write time.
+      return {
+        path: t.path,
+        agent: t.agent,
+        verb: recorded.length > 0 ? "update" : "merge",
+        note: `${t.label}: ${parts.join("; ")}`,
+        apply: () => {
+          const text = unchangedSincePlan(t.path, before);
+          const now = text === null ? {} : parseSettings(text);
+          if (typeof now === "string") throw new Error(`the file ${now}`);
+          removeAllow(now, staleThere.filter((r) => ((now.permissions?.allow ?? []) as unknown[]).includes(r)));
+          const allow = (now.permissions?.allow ?? []) as unknown[];
+          const add = t.rules.filter((r) => !allow.includes(r));
+          if (add.length > 0) now.permissions = { ...now.permissions, allow: [...allow, ...add] };
+          writeSettings(t.path, json(now), t.inRepo ? 0o644 : 0o600);
+          forgetStale();
+          for (const rule of add) record.allowRules.push({ path: t.path, rule });
         },
       };
     }
@@ -203,7 +312,7 @@ export function planInstall(t: Target, ctx: Ctx): Action {
           verb: "create",
           note: t.label,
           apply: () => {
-            writeAtomic(t.path, `${section}\n`);
+            writeMarkdown(t, ctx, `${section}\n`);
             remember(true);
           },
         };
@@ -216,7 +325,7 @@ export function planInstall(t: Target, ctx: Ctx): Action {
           verb: "append",
           note: `${t.label} section`,
           apply: () => {
-            writeAtomic(t.path, joined);
+            writeMarkdown(t, ctx, joined);
             remember(false);
           },
         };
@@ -226,15 +335,15 @@ export function planInstall(t: Target, ctx: Ctx): Action {
         if (!rec) remember(false);
         return { ...base, verb: "skip", note: `${t.label} section already present` };
       }
-      if (rec && existing === rec.text) {
+      if ((rec && existing === rec.text) || t.replaces?.includes(existing)) {
         const replaced = before.slice(0, at.start) + section + before.slice(at.end);
         return {
           ...base,
           verb: "replace",
           note: `${t.label} section`,
           apply: () => {
-            writeAtomic(t.path, replaced);
-            remember(rec.createdFile);
+            writeMarkdown(t, ctx, replaced);
+            remember(rec?.createdFile ?? false);
           },
         };
       }
@@ -287,6 +396,9 @@ export function planUninstall(t: Target, ctx: Ctx): Action | null {
           : null;
       }
       const candidates = [...recs.map((r) => r.entry), ...(recs.length === 0 && scope === "project" ? [t.group] : [])];
+      // Our permission rules in the same file go too, so the file can match
+      // its copy from before install.
+      removeAllow(data, ourRules(ctx, t.path));
       if (removeGroups(data, candidates) === 0) {
         forget();
         return recs.length > 0 ? { ...base, verb: "keep", note: `${t.label} was edited after install; left in place` } : null;
@@ -303,7 +415,7 @@ export function planUninstall(t: Target, ctx: Ctx): Action | null {
           verb: "restore",
           note: `${t.label} removed; the file is back as it was before install`,
           apply: () => {
-            writeAtomic(t.path, backupText);
+            writeSettings(t.path, backupText);
             rmSync(backup.path, { force: true });
             dropBackup();
             forget();
@@ -317,7 +429,7 @@ export function planUninstall(t: Target, ctx: Ctx): Action | null {
           verb: "remove",
           note: `${t.label} (init created this file)`,
           apply: () => {
-            removeFile(t.path);
+            removeSettings(t.path);
             forget();
           },
         };
@@ -327,8 +439,44 @@ export function planUninstall(t: Target, ctx: Ctx): Action | null {
         verb: "update",
         note: `${t.label} removed, other settings kept${backup ? ` (the copy from before install stays at ${backup.path})` : ""}`,
         apply: () => {
-          writeAtomic(t.path, json(data));
+          writeSettings(t.path, json(data));
           dropBackup();
+          forget();
+        },
+      };
+    }
+    case "allow-rules": {
+      const rules = ourRules(ctx, t.path);
+      const forget = (): void => {
+        record.allowRules = record.allowRules.filter((r) => r.path !== t.path);
+      };
+      if (rules.length === 0 || before === null) {
+        forget();
+        return null;
+      }
+      const data = parseSettings(before);
+      if (typeof data === "string") return { ...base, verb: "refuse", failed: true, note: `${t.label}: the file ${data}; left untouched` };
+      if (!rules.some((r) => (data.permissions?.allow ?? []).includes(r))) {
+        forget();
+        return null;
+      }
+      const created = record.hooks.some((h) => h.path === t.path && h.createdFile);
+      return {
+        path: t.path,
+        agent: t.agent,
+        verb: "update",
+        note: `${t.label} removed: ${rules.join(", ")}`,
+        apply: () => {
+          const text = unchangedSincePlan(t.path, before);
+          const now = text === null ? null : parseSettings(text);
+          if (typeof now === "string") throw new Error(`the file ${now}`);
+          // The hook's removal may already have taken the rules out, or put
+          // the file back as it was: then there is nothing to write.
+          if (now !== null && rules.some((r) => (now.permissions?.allow ?? []).includes(r))) {
+            removeAllow(now, rules);
+            if (created && Object.keys(now).length === 0) removeSettings(t.path);
+            else writeSettings(t.path, json(now));
+          }
           forget();
         },
       };
@@ -361,7 +509,7 @@ export function planUninstall(t: Target, ctx: Ctx): Action | null {
           verb: "remove",
           note: `${t.label} (only our section was in it)`,
           apply: () => {
-            removeFile(t.path);
+            removeMarkdown(t, ctx);
             forget();
           },
         };
@@ -371,7 +519,7 @@ export function planUninstall(t: Target, ctx: Ctx): Action | null {
         verb: "update",
         note: `${t.label} section removed`,
         apply: () => {
-          writeAtomic(t.path, rest);
+          writeMarkdown(t, ctx, rest);
           forget();
         },
       };

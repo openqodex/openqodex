@@ -353,7 +353,7 @@ export type Report = {
 // `review --finalize` so a review is bound to the change, the config and the
 // scan it was briefed on.
 export type RunManifest = {
-  version: 1 | 2; // 2: the submission must name its reviewer
+  version: 1 | 2 | 3; // 2: the submission must name its reviewer; 3: runtime_version is set
   change_id: string;
   config_hash: string; // sha256 of the canonical JSON of the effective Config
   created_at: string;
@@ -361,6 +361,9 @@ export type RunManifest = {
   // sha256 of .openqodex/custom-instructions.md as the brief read it, null
   // when there was none; absent in runs made before the field existed.
   instructions_hash?: string | null;
+  // The openqodex version that wrote the brief; finalize runs on that
+  // version. Absent in manifests before version 3.
+  runtime_version?: string;
 };
 
 // What the agent hook does. It never allows: allowing would skip the

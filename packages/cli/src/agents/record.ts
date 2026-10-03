@@ -1,9 +1,9 @@
 // The installation record, <openqodex home>/install.json: what `init` and
 // `hook install` wrote, so a later run changes or removes only what is still
 // exactly as we wrote it. A developer's edit makes a thing theirs.
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { errorCode, readText, writeAtomic } from "./files.js";
+import { readText, writeAtomic } from "./files.js";
 
 export type InstallRecord = {
   version: 1;
@@ -17,7 +17,8 @@ export type InstallRecord = {
   excludes: { file: string; line: string; repo: string }[];
   // Copies of files as they were before we changed them.
   backups: { path: string; of: string }[];
-  // Runtime folders we created.
+  // Runtime folders, as versions before 0.3 recorded them. Nothing reads
+  // them now; uninstall clears them.
   runtimes: string[];
   // The answer to init's pre-push hook question, per repo work tree, so a
   // second init does not ask again.
@@ -25,10 +26,31 @@ export type InstallRecord = {
   // Files we rewrote in place (the Day 0 .gitignore holding "*"): the
   // original bytes, and the sha256 of what we wrote, so uninstall restores them.
   migrations: { path: string; original: string; sha256: string }[];
+  // The launcher's record files, as versions before 0.3 recorded them.
+  // Nothing reads them now; uninstall clears them.
+  pointers: string[];
+  // The answer to init's team section question, per repo work tree.
+  teamChoices: { repo: string; write: boolean }[];
+  // Claude Code permission rules we added to a settings file's
+  // permissions.allow; a rule that was there before is not listed.
+  allowRules: { path: string; rule: string }[];
 };
 
 export function emptyRecord(): InstallRecord {
-  return { version: 1, files: [], hooks: [], sections: [], excludes: [], backups: [], runtimes: [], hookChoices: [], migrations: [] };
+  return {
+    version: 1,
+    files: [],
+    hooks: [],
+    sections: [],
+    excludes: [],
+    backups: [],
+    runtimes: [],
+    hookChoices: [],
+    migrations: [],
+    pointers: [],
+    teamChoices: [],
+    allowRules: [],
+  };
 }
 
 export function recordPath(home: string): string {
@@ -49,7 +71,17 @@ export function loadRecord(home: string): InstallRecord {
 
 export function isEmpty(record: InstallRecord): boolean {
   return (
-    record.files.length + record.hooks.length + record.sections.length + record.excludes.length + record.backups.length + record.runtimes.length + record.hookChoices.length + record.migrations.length ===
+    record.files.length +
+      record.hooks.length +
+      record.sections.length +
+      record.excludes.length +
+      record.backups.length +
+      record.runtimes.length +
+      record.hookChoices.length +
+      record.migrations.length +
+      record.pointers.length +
+      record.teamChoices.length +
+      record.allowRules.length ===
     0
   );
 }
@@ -73,47 +105,4 @@ export function canonical(value: unknown): string {
       ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
       : v,
   );
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return errorCode(error) === "EPERM";
-  }
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-// One `init` or `hook install` at a time per home folder. A lock left by a
-// process that is gone is taken over.
-export async function withLock<T>(home: string, fn: () => Promise<T>): Promise<T> {
-  mkdirSync(home, { recursive: true });
-  const lock = join(home, "install.lock");
-  const deadline = Date.now() + 120_000;
-  for (;;) {
-    try {
-      const fd = openSync(lock, "wx", 0o600);
-      writeSync(fd, `${process.pid}\n`);
-      closeSync(fd);
-      break;
-    } catch (error) {
-      if (errorCode(error) !== "EEXIST") throw error;
-      let holder = 0;
-      try {
-        holder = Number(readFileSync(lock, "utf8").trim());
-      } catch {
-        // removed between the two calls
-      }
-      if (holder > 0 && !alive(holder)) rmSync(lock, { force: true });
-      else if (Date.now() > deadline) throw new Error(`another openqodex init is running (lock ${lock})`);
-      else await sleep(100);
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    rmSync(lock, { force: true });
-  }
 }

@@ -22,7 +22,8 @@ export type Result = { status: number | null; stdout: string; stderr: string; ms
 export function run(label: string, cwd: string, args: string[], options: { home?: string; tools?: string; input?: string; timeout?: number; shell?: boolean } = {}): Result {
   const home = options.home ?? mkdtempSync(join(tmpdir(), "oq-e2e-user-"));
   mkdirSync(home, { recursive: true });
-  const env = { ...process.env, HOME: home, OPENQODEX_HOME: options.tools ?? toolsHome, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
+  // OPENQODEX_AUTO_UPDATE=0: a command run through the launcher starts no update worker here.
+  const env = { ...process.env, HOME: home, OPENQODEX_HOME: options.tools ?? toolsHome, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", OPENQODEX_AUTO_UPDATE: "0" };
   const command = options.shell ? "sh" : process.execPath;
   const argv = options.shell ? ["-c", args[0]!] : [bin, ...args];
   const started = Date.now();
