@@ -154,6 +154,17 @@ if (present(marketplace)) {
   }
 }
 
+// GitHub Marketplace refuses to list an Action whose description is 125
+// characters or longer. It says so only on the release page, after a release.
+const action = "action.yml";
+if (present(action)) {
+  const line = readFileSync(join(root, action), "utf8").split("\n").find((l) => l.startsWith("description:")) ?? "";
+  const description = line.slice("description:".length).trim().replace(/^"(.*)"$/, "$1");
+  if (!description) errors.push(`${action}: missing description`);
+  else if (description.length >= 125) errors.push(`${action}: description is ${description.length} characters, GitHub Marketplace needs fewer than 125`);
+  else console.log(`ok: ${action}`);
+}
+
 if (errors.length) {
   for (const error of errors) console.error(`error: ${error}`);
   process.exit(1);

@@ -1,5 +1,5 @@
 name: "OpenQodex Scan: SAST, Secret Scanning and Lint for Pull Requests"
-description: "Scan the lines a pull request changed with 13 built-in scanners (Semgrep, Gitleaks, OSV-Scanner, ShellCheck, Ruff and more) and upload the findings to code scanning. The scanner half of OpenQodex code review: scanners only, not a review. No API key."
+description: "Code review scanners for pull requests: SAST, secrets, dependencies and lint on changed lines. Scanners only, not a review."
 author: OpenQodex
 branding:
   icon: check-circle
