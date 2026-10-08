@@ -503,7 +503,7 @@ async function prepare(o: ReviewOptions, repoRoot: string, config: Config, keep:
       }
       const snapshot = await addTargetCheckout(repoRoot, t.headSha, `${change.shortId}-`);
       keep(snapshot);
-      placeSettings(repoRoot, snapshot.tree, false);
+      placeSettings(repoRoot, snapshot.tree, false, o.reportDir === undefined);
       const lfs = await lfsPaths(snapshot.tree, change.changedPaths);
       if (lfs > 0) warn(`${lfs} changed ${lfs === 1 ? "file is" : "files are"} stored in Git LFS and not fetched: the review sees the pointer files`);
       const target: RunTarget = { spec: o.target, base_ref: t.baseRef, base_source: t.baseSource, base_sha: t.baseSha, merge_base: t.mergeBase, head_sha: t.headSha, repo_root: repoRoot, checkout: snapshot.tree };
