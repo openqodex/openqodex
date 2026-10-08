@@ -17,18 +17,73 @@
 //  8. With Codex as the reviewer, the planted change gives no report, a
 //     report that does not name Codex, or one that claims reads it never
 //     measured.
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+//  9. A target review with --report-dir follows caller symlinks, fails to
+//     write fallback artifacts, or leaves a checkout.
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Candidate, Report } from "@openqodex/core";
 import "./global-setup.js";
-import { baseline, codexMissing, demo, generatedSecret, readJson, reportDir, reviewerMissing, root, run, noReviewerEnv, toolsHome } from "./support.js";
+import { baseline, codexMissing, demo, generatedSecret, git, readJson, reportDir, reviewerMissing, root, run, noReviewerEnv, snapshot, toolsHome } from "./support.js";
 
 type Bug = { id: string; file: string; lines: [number, number] };
 const expected = readJson<{ bugs: Bug[] }>(join(root, "examples/demo-repo/expected.json"));
 const ours = () => (existsSync(join(toolsHome, "checkouts")) ? readdirSync(join(toolsHome, "checkouts")).filter((n) => n.startsWith("work-")) : []);
 
 describe("without a reviewer", () => {
+  it("9. a target review with --report-dir ignores caller symlinks, writes fallback artifacts and removes its checkout", () => {
+    const dir = baseline();
+    const outside = mkdtempSync(join(tmpdir(), "oq-total-target-"));
+    const home = join(outside, "home");
+    const folder = join(outside, "report");
+    const canary = join(outside, "canary.md");
+    const canaryText = "Harmless outside instructions.\n";
+    const invalidConfig = "review: [\n";
+    writeFileSync(canary, canaryText);
+    git(dir, "branch", "-M", "main");
+    git(dir, "switch", "-c", "feature");
+    const code = join(dir, "app/server.py");
+    writeFileSync(code, `${readFileSync(code, "utf8")}\ndef greeting(name):\n    return f"Hello {name}"\n`);
+    mkdirSync(join(dir, ".openqodex"));
+    writeFileSync(join(dir, ".openqodex/config.yaml"), invalidConfig);
+    symlinkSync(canary, join(dir, ".openqodex/custom-instructions.md"));
+    git(dir, "add", "-f", "app/server.py", ".openqodex/config.yaml", ".openqodex/custom-instructions.md");
+    git(dir, "commit", "-qm", "Add greeting and unsafe target settings");
+    git(dir, "switch", "main");
+    mkdirSync(join(dir, ".openqodex"));
+    writeFileSync(join(dir, ".openqodex/config.yaml"), invalidConfig);
+    symlinkSync(canary, join(dir, ".openqodex/custom-instructions.md"));
+    const before = snapshot(dir);
+    const worktrees = git(dir, "worktree", "list", "--porcelain");
+
+    const out = run("total-target-report-dir", dir, [
+      "review", "feature", "--base", "main", "--report-dir", folder,
+      "--offline", "--only", "hadolint", "--no-install", "--no-graph",
+    ], { tools: home, env: noReviewerEnv() });
+
+    expect(snapshot(dir)).toEqual(before);
+    expect(readdirSync(join(dir, ".openqodex")).sort()).toEqual(["config.yaml", "custom-instructions.md"]);
+    expect(lstatSync(join(dir, ".openqodex/custom-instructions.md")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(dir, ".openqodex/custom-instructions.md"))).toBe(canary);
+    expect(readFileSync(canary, "utf8")).toBe(canaryText);
+    expect(readFileSync(join(dir, ".openqodex/config.yaml"), "utf8")).toBe(invalidConfig);
+    expect(readdirSync(join(home, "checkouts"))).toEqual([]);
+    expect(git(dir, "worktree", "list", "--porcelain")).toBe(worktrees);
+    expect(out.status, out.stderr).toBe(2);
+    expect(out.stdout).toBe("");
+    expect(out.stderr).not.toContain("symbolic link");
+    expect(out.stderr).toContain("Full review unavailable");
+    expect(readdirSync(folder).sort()).toEqual(["reviewer.json", "unchecked-candidates.json"]);
+    const reviewer = readJson<{ started: boolean; reasons: string[] }>(join(folder, "reviewer.json"));
+    expect(reviewer.started).toBe(false);
+    expect(reviewer.reasons.length).toBeGreaterThan(0);
+    const unchecked = readJson<{ label: string; change_id: string; candidates: Candidate[] }>(join(folder, "unchecked-candidates.json"));
+    expect(unchecked.label).toBe("unchecked scanner candidates, not a review: no reviewer checked them");
+    expect(unchecked.change_id).not.toBe("");
+    expect(unchecked.candidates).toEqual([]);
+  });
+
   it("4, 6. exits 2 with Full review unavailable, prints no finding and leaves no snapshot", () => {
     const dir = demo("total-none");
     const before = ours();

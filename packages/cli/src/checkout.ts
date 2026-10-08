@@ -176,10 +176,12 @@ const STATE_SETTINGS = [".openqodex/config.yaml", ".openqodex/custom-instruction
 // a fresh real folder. A target review leaves the root config as the target
 // has it: it is part of the code under review, and its config is read from
 // the developer's repository instead.
-export function placeSettings(repoRoot: string, tree: string, rootConfig: boolean): void {
+// With `copySettings` false, leave the fresh folder empty without reading the work tree.
+export function placeSettings(repoRoot: string, tree: string, rootConfig: boolean, copySettings = true): void {
   rmSync(join(tree, ".openqodex"), { recursive: true, force: true });
   if (rootConfig) rmSync(join(tree, ".openqodex.yaml"), { recursive: true, force: true });
   mkdirSync(join(tree, ".openqodex"));
+  if (!copySettings) return;
   for (const rel of rootConfig ? [".openqodex.yaml", ...STATE_SETTINGS] : STATE_SETTINGS) {
     // From the work tree through the repo state reader: a link there stops the scan with one line.
     const text = readRepoFile(repoRoot, rel);
