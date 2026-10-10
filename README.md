@@ -24,13 +24,13 @@ npx openqodex init
 For agents, the same install, run by the agent for itself with no question:
 
 ```
-npx -y openqodex@0.11.0 init --yes --agent <host>
+npx -y openqodex@0.11.1 init --yes --agent <host>
 ```
 
 `<host>` is `claude-code`, `codex`, `cursor` or `cline`. Or paste this prompt into your agent:
 
 ```
-Install OpenQodex for yourself with `npx -y openqodex@0.11.0 init --yes --agent <host>`, where <host> is the agent you are: claude-code, codex, cursor or cline. Run it from this repository and allow it up to ten minutes: when a reviewer can start, it ends with a review of my current change.
+Install OpenQodex for yourself with `npx -y openqodex@0.11.1 init --yes --agent <host>`, where <host> is the agent you are: claude-code, codex, cursor or cline. Run it from this repository and allow it up to ten minutes: when a reviewer can start, it ends with a review of my current change.
 Then tell me the verdict and the findings, or what its last lines say is missing.
 ```
 

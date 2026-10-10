@@ -1,5 +1,17 @@
 # openqodex
 
+## 0.11.1
+
+### Patch Changes
+
+- [#98](https://github.com/openqodex/openqodex/pull/98) [`6b65f88`](https://github.com/openqodex/openqodex/commit/6b65f889a578fe6cefde8d4ab026a4cb51148e26) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - - The code graph builds faster: each JavaScript or TypeScript file's parse tree is walked once for the call graph and the Express, React and Next.js plugins (the Django, Rails, FastAPI and Go readers keep their own walk), a node of the tree is read only where a rule needs it, and each file's project and Rails application are looked up once per build. On this repository a build with no kept facts takes about 1.4 times as long as before the framework plugins (it took 1.7 times), and a build from kept facts about 1.4 times (it took 1.7 times).
+
+  - The kept facts in `.openqodex/graph/` are smaller: the Express plugin keeps a variable's value only where it can read it (16.4 MB on this repository, from 22.2 MB). The plugin interface is now version 4 and the Express plugin version 7, so the first build after the update parses every file again.
+
+- [#96](https://github.com/openqodex/openqodex/pull/96) [`52b9383`](https://github.com/openqodex/openqodex/commit/52b9383ee86a7502838370994d2f3f60cd2343cf) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - - A large review no longer ends incomplete because Claude Code, as the reviewer, tried to read back a long search result it had saved in its own configuration folder. A read of the output saved for that review's session counts as the agent's own; a read of anything else in that folder still makes the review incomplete.
+  - A large review no longer ends incomplete because of a deletion the brief had no room for. The correction round now shows the removed lines between the two lines around the deletion, and the round no longer promises that ranges it can never send will follow.
+  - `review.paths.exclude` now applies to both paths of a renamed file. A file renamed out of an excluded folder is reviewed as a new file, without the excluded file's removed lines, and a file renamed into an excluded folder is reviewed as a deleted file.
+
 ## 0.11.0
 
 ### Minor Changes

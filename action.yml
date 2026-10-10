@@ -9,7 +9,7 @@ inputs:
   version:
     description: The openqodex version to run, an exact release version such as 0.6.1. The release workflow sets the default to the version it publishes.
     required: false
-    default: "0.11.0"
+    default: "0.11.1"
   review:
     description: auto runs the full review when the step's environment holds ANTHROPIC_API_KEY, and the scanners only without it. off always runs the scanners only. required always attempts the review and fails the job unless the review completes or the change has nothing to review.
     required: false

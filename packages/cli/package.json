@@ -1,6 +1,6 @@
 {
   "name": "openqodex",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Open source AI code review for Claude Code and Codex, before you push: scanners on your changed lines, then a separate reviewer that checks every scanner finding and is given every changed line.",
   "type": "module",
   "license": "Apache-2.0",

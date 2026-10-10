@@ -2,7 +2,7 @@
   "mcpServers": {
     "openqodex": {
       "command": "npx",
-      "args": ["-y", "openqodex@0.11.0", "mcp"]
+      "args": ["-y", "openqodex@0.11.1", "mcp"]
     }
   }
 }
