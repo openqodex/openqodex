@@ -4,10 +4,13 @@
 // (tree-sitter keeps no parent pointers), so it turns quadratic on such a
 // file: the React reader once took forty seconds on 20,000 nested blocks.
 // The readers keep their ancestors on stacks instead; this test holds them
-// to that.
+// to that. The smaller input is read as many times over as it takes to pass
+// the noise floor (expectLinearRepeated): read once, a quarter of the depth
+// costs a few milliseconds, and a quadratic reader at the full depth still
+// fits eight times the floor (issue #101: 5,000 nested elements, 105 ms).
 import { describe, it } from "vitest";
 import type { Node } from "web-tree-sitter";
-import { expectLinear, readerCpuMs } from "../../test-timing.js";
+import { expectLinearRepeated, readerCpuMs } from "../../test-timing.js";
 import type { Lang } from "../../types.js";
 import { express } from "../express/index.js";
 import { fastapi } from "../fastapi/index.js";
@@ -33,7 +36,8 @@ describe("the fact readers on deeply nested code", () => {
       if (!plugin.languages.includes(lang as Lang)) continue;
       it(`the ${plugin.id} reader reads ${lang} nested thousands of levels deep in time that grows with the depth, so nesting cannot make it quadratic`, async () => {
         const read = (root: Node) => plugin.facts(root, lang as Lang);
-        expectLinear(`the ${plugin.id} reader on ${lang} nested ${N / 4} and ${N} deep`, await readerCpuMs(lang as Lang, [SOURCES[lang](N / 4)], read), await readerCpuMs(lang as Lang, [SOURCES[lang](N)], read));
+        const at = (n: number) => (repeats: number) => readerCpuMs(lang as Lang, Array<string>(repeats).fill(SOURCES[lang](n)), read);
+        await expectLinearRepeated(`the ${plugin.id} reader on ${lang} nested ${N / 4} and ${N} deep`, at(N / 4), at(N), { maxRepeats: 16 });
       });
     }
   }

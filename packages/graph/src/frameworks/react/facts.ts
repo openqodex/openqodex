@@ -7,7 +7,8 @@
 // One pass over the tree with a stack of frames (functions and classes),
 // kept by depth as the walk enters and leaves them; whether an element is
 // returned is read from the types of its ancestors, which the walk keeps.
-// No step climbs the parents, so a deeply nested file stays linear.
+// No step climbs the parents, and the one climb through the ancestors' types
+// stops at the nearest element above, so a deeply nested file stays linear.
 import type { Node } from "web-tree-sitter";
 import type { FactReader, FrameworkFactBase } from "../plugin.js";
 import { readAlone } from "../../walk.js";
@@ -117,13 +118,16 @@ export function reader(root: Node): FactReader<ReactFact> {
   // Names declared by the functions on the stack, with how many frames declare each.
   const locals = new Map<string, number>();
   const topFn = (): (Frame & { t: "fn" }) | null => fnFrames[fnFrames.length - 1] ?? null;
+  // The answer of `returned` for each element on the path from the root to
+  // the node entered, innermost last, popped as the walk leaves them (pop).
+  const elements: { depth: number; returned: boolean }[] = [];
   // Whether the node entered is what the innermost function returns: an
   // arrow function's expression body, or, for an element, one under a
   // return statement or such a body through nothing but PASS_THROUGH nodes
   // and other elements. A function, a class, or any other node between
   // them ends the returned position (`return () => <X />` returns a
   // function; `return f(<X />)` the call's value).
-  const returned = (type: string, field: () => string | null, upType: UpType): boolean => {
+  const returned = (type: string, field: () => string | null, upType: UpType, depth: number): boolean => {
     if (topFn() === null) return false;
     if (upType(1) === "arrow_function" && type !== "statement_block" && field() === "body") return true;
     if (!JSX_TYPES.has(type)) return false;
@@ -132,10 +136,20 @@ export function reader(root: Node): FactReader<ReactFact> {
       if (t === null) return false;
       // An arrow function holds a node from these types only as its body.
       if (t === "return_statement" || (upType(k + 1) === "arrow_function" && t !== "statement_block")) return !FN_TYPES.has(t);
-      if (!PASS_THROUGH.has(t) && !JSX_TYPES.has(t)) return false;
+      if (JSX_TYPES.has(t)) {
+        // The nearest element above has its answer, and the climb from it
+        // would be this one's: n nested elements climb n steps in all, not
+        // n squared (issue #101). An element the walk did not enter (none
+        // is known) is climbed through as before.
+        const above = elements[elements.length - 1];
+        if (above !== undefined && above.depth === depth - k) return above.returned;
+        continue;
+      }
+      if (!PASS_THROUGH.has(t)) return false;
     }
   };
   const pop = (depth: number) => {
+    while (elements.length > 0 && (elements[elements.length - 1] as { depth: number }).depth >= depth) elements.pop();
     while (frames.length > 0 && (frames[frames.length - 1] as Frame).depth >= depth) {
       const f = frames.pop() as Frame;
       if (f.t === "fn") {
@@ -228,7 +242,9 @@ export function reader(root: Node): FactReader<ReactFact> {
         const nameNode = type === "jsx_element" ? (node.childForFieldName("open_tag")?.childForFieldName("name") ?? null) : node.childForFieldName("name");
         const name = namePath(nameNode);
         const fn = topFn();
-        if (fn && returned(type, field, upType) && fn.fact !== null) {
+        const ret = returned(type, field, upType, depth);
+        elements.push({ depth, returned: ret });
+        if (fn && ret && fn.fact !== null) {
           const f = out[fn.fact];
           if (f && f.kind === "component") f.returnsJsx = true;
         }
@@ -239,7 +255,7 @@ export function reader(root: Node): FactReader<ReactFact> {
         }
       } else if (type === "jsx_fragment" || (type === "jsx_opening_element" && node.childForFieldName("name") === null)) {
         const fn = topFn();
-        if (fn && returned(type, field, upType) && fn.fact !== null) {
+        if (fn && returned(type, field, upType, depth) && fn.fact !== null) {
           const f = out[fn.fact];
           if (f && f.kind === "component") f.returnsJsx = true;
         }
