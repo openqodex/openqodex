@@ -7,7 +7,7 @@
           {
             "type": "command",
             "if": "Bash(git push*)",
-            "command": "npx -y openqodex@0.11.0 hook check"
+            "command": "npx -y openqodex@0.11.1 hook check"
           }
         ]
       }

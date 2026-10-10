@@ -3,7 +3,7 @@
 ## Paste this prompt into your agent
 
 ```
-Install OpenQodex for yourself with `npx -y openqodex@0.11.0 init --yes --agent <host>`, where <host> is the agent you are: claude-code, codex, cursor or cline. Run it from this repository and allow it up to ten minutes: when a reviewer can start, it ends with a review of my current change.
+Install OpenQodex for yourself with `npx -y openqodex@0.11.1 init --yes --agent <host>`, where <host> is the agent you are: claude-code, codex, cursor or cline. Run it from this repository and allow it up to ten minutes: when a reviewer can start, it ends with a review of my current change.
 Then tell me the verdict and the findings, or what its last lines say is missing.
 ```
 
@@ -28,7 +28,7 @@ In your own terminal:
 npx openqodex init
 ```
 
-From inside an agent, the line is `npx -y openqodex@0.11.0 init --yes --agent <host>`, as in the prompt above.
+From inside an agent, the line is `npx -y openqodex@0.11.1 init --yes --agent <host>`, as in the prompt above.
 
 `init` finds Claude Code, Cursor, Codex CLI and Cline on your machine. It prints each file it will write, for you and for the team, then asks once: "Write these files?". `--yes` skips the question. `agents` lists every file for each agent.
 

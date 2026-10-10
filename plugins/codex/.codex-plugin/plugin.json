@@ -1,6 +1,6 @@
 {
   "name": "openqodex",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Open source AI code review for Claude Code and Codex, before you push. Scanners (SAST, secrets, dependencies, lint) on the lines you changed, then a separate reviewer process that checks every scanner finding and is given every changed line. No other API key.",
   "author": {
     "name": "Qodex",

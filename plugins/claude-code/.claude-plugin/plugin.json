@@ -1,7 +1,7 @@
 {
   "name": "openqodex",
   "displayName": "OpenQodex",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Code review before you push, inside Claude Code. One command runs the scanners that fit your change (Semgrep, Gitleaks, OSV-Scanner, ShellCheck, Ruff and more) on the lines you changed for security vulnerabilities, hardcoded secrets, vulnerable dependencies and lint errors. It then starts a separate reviewer, a fresh Claude Code or Codex process that checks every scanner finding and is given every changed line, and scripts check the reviewer's answer. Use after writing or changing code and before git push. Free and open source, on your own Claude Code or Codex login, with no other key or account.",
   "author": {
     "name": "Qodex",
