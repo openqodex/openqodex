@@ -59,6 +59,7 @@ import path from "node:path";
 import { describeFailure, execTool, runInChunks, stderrTail } from "../exec.js";
 import { safeFileArgs } from "../safe-args.js";
 import { withStage } from "./iac.js";
+import type { Scratch } from "../scratch.js";
 import type { Adapter } from "./index.js";
 import { suchAs } from "./words.js";
 
@@ -101,6 +102,7 @@ export async function runSqlfluff(args: {
   repoDir: string;
   changedPaths: string[];
   tool: ResolvedTool | null;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const files = sqlFiles(args.changedPaths);
   if (files.length === 0) return { findings: [], error: null };
@@ -122,7 +124,7 @@ export async function runSqlfluff(args: {
     "--",
     ...chunk,
   ];
-  return withStage(args.repoDir, [], sqlfluffStageFiles(files), async (stage) => {
+  return withStage(args.scratch.temp, args.repoDir, [], sqlfluffStageFiles(files), async (stage) => {
     await fs.writeFile(path.join(stage.home, ".sqlfluff"), DEFAULT_SETTINGS);
     const staged = new Set(stage.files);
     const present = files.filter((f) => staged.has(f));

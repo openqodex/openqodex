@@ -11,7 +11,7 @@
 import { OpenQodexError } from "@openqodex/core";
 import { openqodexHomeDir } from "../launcher.js";
 import { readUserConfig, unknownKeysWarning } from "../user-config.js";
-import { REVIEWER_NAMES } from "./driver.js";
+import { REVIEWER_NAMES } from "@openqodex/review";
 
 // The one place the default lives. On (owner's decision, 2026-10-04): the
 // reviewer can look up a library or an advisory while it reviews. A reviewer

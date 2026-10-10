@@ -57,6 +57,7 @@ function fromFinding(f: ReportFinding): SarifResult {
     category: f.category,
     ...(f.confidence !== null ? { confidence: f.confidence } : {}),
     ...(f.suggested_change ? { suggested_change: f.suggested_change } : {}),
+    ...(f.found_by ? { found_by: f.found_by } : {}),
   });
 }
 

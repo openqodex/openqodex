@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Entry point. The Node version check runs before anything else is loaded, so
 // an old Node prints the requirement instead of a syntax or import error.
 const REQUIRED_MAJOR = 22;

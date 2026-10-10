@@ -24,6 +24,7 @@ import path from "node:path";
 import type { AdapterResult, ResolvedTool, ScannerSeverity, StaticFinding } from "@openqodex/core";
 import { describeFailure, execTool, stderrTail } from "../exec.js";
 import type { RepoFacts } from "../detect.js";
+import type { Scratch } from "../scratch.js";
 import type { Adapter } from "./index.js";
 import { fileTexts, folderOf, folderVerdict, iacKind, indexFile, isTerraformPath, stagedPath, withStage } from "./iac.js";
 import { repoFileOrReason } from "./read.js";
@@ -39,6 +40,7 @@ export async function runTrivy(args: {
   changedPaths: string[];
   tool: ResolvedTool | null;
   facts: RepoFacts;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const files = trivyFiles(args.changedPaths, args.facts);
   if (files.length === 0) return { findings: [], error: null };
@@ -56,7 +58,7 @@ export async function runTrivy(args: {
   if (folders.length === 0 && others.length === 0) return { findings: [], error: null, skipped: heldNote };
 
   try {
-    return await withStage(args.repoDir, folders, others, async (stage) => {
+    return await withStage(args.scratch.temp, args.repoDir, folders, others, async (stage) => {
       // The repository's own ignore list, at its root, as trivy reads it from
       // the folder it runs in: a list of check ids, nothing it can run.
       const ignore = await repoFileOrReason(args.repoDir, ".trivyignore", 1024 * 1024).catch(() => ({ reason: "absent" }));

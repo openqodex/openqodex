@@ -1,10 +1,11 @@
 // The scan pipeline every command shares: find the repo, load the config,
 // work out the change, run the scanners on it. Progress goes to stderr.
+// The scan and the graph themselves are @openqodex/review's; the wrappers
+// here give them the CLI's parts from the flags.
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, constants, lstatSync, openSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, parse, resolve, sep } from "node:path";
 import {
-  DIFF_CAP_BYTES,
   OpenQodexError,
   DEFAULT_CONFIG,
   closeWider,
@@ -12,7 +13,6 @@ import {
   getChange,
   isRepoState,
   loadConfig,
-  loadLensCatalog,
   redactSecrets,
   renderHtml,
   renderJson,
@@ -21,14 +21,14 @@ import {
   renderReview,
   renderSarif,
   renderTerminal,
-  safeGit,
-  selectLensesForDiff,
   writeRepoFile,
 } from "@openqodex/core";
-import type { Change, ChangeScope, Config, Display, HotSpot, ImpactSummary, Report, RuleCoverage, ScanResult, ScannerSource, SelectedLens, WholeRepo } from "@openqodex/core";
-import { buildGraph, detectImpact, emptyImpact, hotSymbols, isManifest, langOf, openStore } from "@openqodex/graph";
-import type { Graph, GraphStore, Lease } from "@openqodex/graph";
-import { createToolResolver, customAdapters, openqodexHome, runScanners } from "@openqodex/scanners";
+import type { Change, ChangeScope, Config, Display, HotSpot, ImpactSummary, Report, ScannerSource } from "@openqodex/core";
+import { openStore } from "@openqodex/graph";
+import type { GraphStore } from "@openqodex/graph";
+import { buildGraphRun as reviewGraphRun, buildHotSpots as reviewHotSpots, nothingToReviewLine, redactWith, scanChange as reviewScan } from "@openqodex/review";
+import type { GraphHost, GraphRun, PipelineResult, ScanHost } from "@openqodex/review";
+import { createToolResolver, openqodexHome } from "@openqodex/scanners";
 import { Guard } from "./agents/guarded-fs.js";
 import { instructionsTemplate } from "./agents/repo-folder.js";
 import { EXIT_FINDINGS, EXIT_OK, EXIT_TOOL_FAILED } from "./exit-codes.js";
@@ -46,28 +46,6 @@ export function progress(flags: GlobalFlags): (line: string) => void {
 
 export function warn(line: string): void {
   process.stderr.write(`${line}\n`);
-}
-
-export type PipelineResult = {
-  // The developer's repository: its config, its run folders, its approvals.
-  repoRoot: string;
-  // Where the changed files are read and the scanners run: repoRoot, or the
-  // temporary checkout of a branch or a pull request under review.
-  workDir: string;
-  config: Config;
-  change: Change;
-  // null when the change is empty and nothing was scanned.
-  scan: ScanResult | null;
-  // Raw matched secrets, in memory only. Never written or printed.
-  secrets: string[];
-  // The rules scanners that ran checked, token to files, for the lenses.
-  checked: Map<string, Set<string>>;
-};
-
-// Whether a scanner rule ran on a file in this run: a lens that rule covers
-// stands down for that file.
-export function ruleCoverage(p: PipelineResult): RuleCoverage {
-  return (token, file) => p.checked.get(token)?.has(file) ?? false;
 }
 
 // `checkoutSettings` false (`--report-dir`): without `--config` the built-in
@@ -93,8 +71,25 @@ export async function runPipeline(args: {
   return scanChange({ ...args, repoRoot, config, change });
 }
 
-// The scanners on a change already worked out. For the whole repository no
-// coverage is passed: every finding in a file of the inventory is kept.
+// The scan's parts from the flags: scanners resolved from the pinned table,
+// installed on first use unless --no-install and waited for up to
+// `installBudgetMs` (INSTALL_BUDGET_MS when left out); progress on stderr;
+// a scanner that failed queues the feedback offer.
+export function scanHost(flags: GlobalFlags, repoRoot: string, installBudgetMs?: number): ScanHost {
+  const onProgress = progress(flags);
+  return {
+    resolveTool: createToolResolver({
+      allowInstall: !flags.noInstall,
+      installBudgetMs: installBudgetMs ?? INSTALL_BUDGET_MS,
+      onProgress,
+    }),
+    onProgress,
+    onScan: (scan) => noteScan(repoRoot, scan),
+  };
+}
+
+// The scanners on a change already worked out (@openqodex/review's
+// scanChange), with the parts from the flags.
 export async function scanChange<C extends Change>(args: {
   repoRoot: string;
   workDir?: string;
@@ -108,74 +103,7 @@ export async function scanChange<C extends Change>(args: {
   // unless the caller says otherwise (the review init ends with).
   installBudgetMs?: number;
 }): Promise<PipelineResult & { change: C }> {
-  const { repoRoot, config, change, flags } = args;
-  const workDir = args.workDir ?? repoRoot;
-  if (change.files.length === 0) return { repoRoot, workDir, config, change, scan: null, secrets: [], checked: new Map() };
-
-  const onProgress = progress(flags);
-  const { scan, secrets, checked } = await runScanners({
-    repoDir: workDir,
-    changedPaths: change.changedPaths,
-    coverage: args.wholeRepo ? undefined : change.coverage,
-    baseText: async (path) => {
-      const r = await safeGit(repoRoot, ["show", "--no-textconv", `${change.baseSha}:${path}`]);
-      return r.code === 0 ? r.stdout.toString("utf8") : null;
-    },
-    config,
-    resolveTool: createToolResolver({
-      allowInstall: !flags.noInstall,
-      installBudgetMs: args.installBudgetMs ?? INSTALL_BUDGET_MS,
-      onProgress,
-    }),
-    // Approvals and the scanner list belong to the developer's repository and
-    // its config; an approved scanner runs in workDir, where the files are.
-    custom: config.custom.length > 0 ? customAdapters(repoRoot, config) : [],
-    only: args.only,
-    skip: args.skip,
-    onProgress,
-  });
-  noteScan(repoRoot, scan);
-  return { repoRoot, workDir, config, change, scan: redactStored(scan, secrets), secrets, checked };
-}
-
-// Every string in the scan passes through the secret redaction before it is
-// kept or written: the runner redacts messages, but a matched secret can sit
-// in any other string too (a file name). Candidate ids and tokens are the
-// citations finalize matches on and are kept as they are.
-export function redactStored<T>(value: T, secrets: string[]): T {
-  return secrets.length === 0 ? value : redactWith(value, (text) => redactSecrets(text, secrets));
-}
-
-// The scanner citations finalize matches on, kept as the scan wrote them:
-// a candidate's `id` and `token`, at exactly these paths of a scan result or
-// a report (a number stands for any index). Every other string is redacted,
-// a field named `id` or `token` anywhere else included (a symbol id of the
-// code graph, a field the reviewer made up).
-const CITATIONS: string[][] = [
-  ["candidates", "#", "id"],
-  ["candidates", "#", "token"],
-  ["not_reviewed", "#", "id"],
-  ["not_reviewed", "#", "token"],
-  ["dropped", "#", "candidate", "id"],
-  ["dropped", "#", "candidate", "token"],
-];
-
-function isCitation(path: string[]): boolean {
-  return CITATIONS.some((c) => c.length === path.length && c.every((part, i) => part === path[i]));
-}
-
-// Every string in `value` through `redact`, but the scanner citations: the
-// same walk for every caller.
-export function redactWith<T>(value: T, redact: (text: string) => string): T {
-  const walk = (v: unknown, path: string[]): unknown => {
-    if (typeof v === "string") return isCitation(path) ? v : redact(v);
-    if (Array.isArray(v)) return v.map((x) => walk(x, [...path, "#"]));
-    if (v !== null && typeof v === "object") {
-      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, [...path, k])]));
-    }
-    return v;
-  };
-  return walk(value, []) as T;
+  return reviewScan({ repoRoot: args.repoRoot, workDir: args.workDir, config: args.config, change: args.change, wholeRepo: args.wholeRepo, only: args.only, skip: args.skip, host: scanHost(args.flags, args.repoRoot, args.installBudgetMs) });
 }
 
 export type ReviewOutputs = {
@@ -206,15 +134,14 @@ export function reviewOutputs(args: { report: Report; display: Display | null; d
 }
 
 // The graph folder of the developer's repository for this run, or null when
-// the run keeps nothing (--report-dir writes nothing under .openqodex/) or
 // the folder cannot be used (a link, a tracked file, a folder other users
 // can write): the graph is then built in memory, the run goes on, and
-// `refused` says why, for the build's reasons.
-async function graphStore(p: PipelineResult, persist: boolean): Promise<{ store: GraphStore | null; refused?: string }> {
-  if (!persist) return { store: null };
+// `refused` says why, for the build's reasons. A run that keeps nothing
+// (--report-dir writes nothing under .openqodex/) never asks for it.
+export async function graphStore(repoRoot: string, config: Config): Promise<{ store: GraphStore | null; refused?: string }> {
   let refused: string;
   try {
-    const opened = await openStore(p.repoRoot, { home: openqodexHome(), maxCacheMb: p.config.graph.maxCacheMb });
+    const opened = await openStore(repoRoot, { home: openqodexHome(), maxCacheMb: config.graph.maxCacheMb });
     if (opened.ok) return { store: opened.store };
     refused = opened.reason;
   } catch (error) {
@@ -224,64 +151,16 @@ async function graphStore(p: PipelineResult, persist: boolean): Promise<{ store:
   return { store: null, refused };
 }
 
-// The graph for this run, or the summary saying why there is none. For the
-// whole repo (no base) it reads only the inventory. The graph runs when a
-// changed file is code in a supported language or a manifest that decides
-// how imports resolve (package.json, tsconfig.json, pyproject.toml, go.mod,
-// ...). Never throws: a graph that cannot be built is reported as "failed"
-// with one line and the review goes on.
-async function graphFor(p: PipelineResult, flags: GlobalFlags, noGraph: boolean, withBase: boolean, persist: boolean): Promise<Graph | ImpactSummary> {
-  if (noGraph) return emptyImpact("off", "--no-graph was given");
-  if (!p.config.graph.enabled) return emptyImpact("off", "graph.enabled is false in the config");
-  const relevant = (path: string | null) => path !== null && (langOf(path) !== null || isManifest(path));
-  if (!p.change.files.some((f) => relevant(f.path) || relevant(f.oldPath))) {
-    return emptyImpact("skipped", `no ${withBase ? "changed " : ""}file is TypeScript, JavaScript, Python, Go or Ruby code or a manifest`);
-  }
-  try {
-    const { store, refused } = await graphStore(p, persist);
-    return await buildGraph({
-      repoRoot: p.workDir,
-      store,
-      storeRefused: refused,
-      capture: store === null ? null : p.workDir === p.repoRoot ? "working-tree" : "snapshot",
-      files: withBase ? p.change.changedPaths : undefined,
-      only: withBase ? undefined : p.change.changedPaths,
-      budgetMs: p.config.graph.budgetMs,
-      maxFiles: p.config.graph.maxFiles,
-      maxFileBytes: p.config.graph.maxFileBytes,
-      maxHeapMb: p.config.graph.maxHeapMb,
-      onProgress: progress(flags),
-      base: withBase ? { sha: p.change.baseSha, files: p.change.files } : undefined,
-    });
-  } catch (error) {
-    const reason = ((error as Error).message ?? String(error)).split("\n")[0] ?? "unknown error";
-    warn(`openqodex: the code graph could not be built: ${reason}`);
-    return emptyImpact("failed", reason);
-  }
+// The graph's parts from the flags: the repository's kept store unless
+// `persist` is false (--report-dir), progress on stderr, warnings on stderr.
+function graphHost(p: PipelineResult, flags: GlobalFlags, persist: boolean): GraphHost {
+  return { store: persist ? () => graphStore(p.repoRoot, p.config) : undefined, onProgress: progress(flags), warn };
 }
 
-const isGraph = (g: Graph | ImpactSummary): g is Graph => "nodes" in g;
-
-// The graph of a review and its view of the change. The build the review
-// read is held with a lease until `lease.release()`, so a build that
-// another review publishes meanwhile never collects it.
-export type GraphRun = { impact: ImpactSummary; graph: Graph | null; lease: Lease | null };
-
+// The graph of a review and its view of the change (@openqodex/review's
+// buildGraphRun), with the parts from the flags.
 export async function buildGraphRun(p: PipelineResult, flags: GlobalFlags, noGraph: boolean, persist = true): Promise<GraphRun> {
-  const graph = await graphFor(p, flags, noGraph, true, persist);
-  if (!isGraph(graph)) return { impact: graph, graph: null, lease: null };
-  let lease: Lease | null = null;
-  if (persist && graph.status.generation) {
-    const { store } = await graphStore(p, persist);
-    try {
-      lease = (await store?.lease({ id: graph.status.generation }, "review"))?.lease ?? null;
-    } catch (error) {
-      // The graph is in memory already; without the lease another process
-      // may collect the kept build meanwhile, which this review never reads.
-      warn(`openqodex: the code graph's build is not held for this review: ${((error as Error).message ?? String(error)).split("\n")[0]}`);
-    }
-  }
-  return { impact: redactStored(detectImpact(graph, p.change), p.secrets), graph, lease };
+  return reviewGraphRun(p, graphHost(p, flags, persist), noGraph);
 }
 
 // The code graph's view of the change, for a run that holds no build open.
@@ -289,45 +168,19 @@ export async function buildImpact(p: PipelineResult, flags: GlobalFlags, noGraph
   return (await buildGraphRun(p, flags, noGraph, persist)).impact;
 }
 
-const HOT_SYMBOLS = 20;
-const SITES_PER_HOT_SYMBOL = 3;
-
-// For the whole repository: every file is touched, so the impact of the
-// change would list everything. The graph is built once (which also warms
-// its cache for later change reviews), the impact is taken over an empty
-// change for its build counts, and the most-called symbols say where to start.
+// For the whole repository: the graph's most-called symbols (@openqodex/review's
+// buildHotSpots), with the parts from the flags.
 export async function buildHotSpots(
   p: PipelineResult,
   flags: GlobalFlags,
   noGraph: boolean,
   persist = true,
 ): Promise<{ impact: ImpactSummary; hot: HotSpot[]; note: string | null }> {
-  const graph = await graphFor(p, flags, noGraph, false, persist);
-  if (!isGraph(graph)) {
-    const lead = graph.status === "off" ? "The code graph is off" : graph.status === "skipped" ? "The code graph was skipped" : "The code graph could not be built";
-    return { impact: graph, hot: [], note: `${lead}: ${graph.reasons.join("; ")}. Find the most-used code with your own tools.` };
-  }
-  const impact = redactStored(detectImpact(graph, { files: [], coverage: new Map() }), p.secrets);
-  const hot = hotSymbols(graph, HOT_SYMBOLS).map((h) => ({
-    name: h.symbol.name,
-    kind: h.symbol.kind,
-    file: h.symbol.file,
-    line: h.symbol.startLine,
-    callers: h.callers,
-    sites: (graph.in.get(h.symbol.id) ?? [])
-      .flatMap((e) => e.sites)
-      .slice(0, SITES_PER_HOT_SYMBOL)
-      .map((s) => `${s.file}:${s.line}`),
-  }));
-  const note =
-    impact.status === "partial"
-      ? `The graph is partial: ${impact.reasons.join("; ")}. Callers in the files left out are missing from the counts.`
-      : null;
-  return { impact, hot: redactStored(hot, p.secrets), note };
+  return reviewHotSpots(p, graphHost(p, flags, persist), noGraph);
 }
 
 export function nothingToReview(change: Change): number {
-  warn(`Nothing to review: no changes against ${change.baseRef}`);
+  warn(nothingToReviewLine(change));
   return EXIT_OK;
 }
 
@@ -517,35 +370,4 @@ export function instructionsHash(text: string): string | null {
 export function ownersInstructions(repoRoot: string, secrets: string[], path?: string): { text: string; hash: string | null } {
   const raw = path === undefined ? readInstructions(repoRoot) : readInstructionsAt(repoRoot, path);
   return { text: raw === "" || raw === instructionsTemplate() ? "" : redactSecrets(raw, secrets), hash: instructionsHash(raw) };
-}
-
-// The lens triggers over the whole repo: every line counts as changed. Each
-// text file contributes its first bytes, an equal share of the 5 MB the
-// brief's diff may carry, so a late file is sampled as fully as an early
-// one; the matches are then ranked and capped as for a change.
-const LENS_SAMPLE_MIN_BYTES = 1024;
-
-export function wholeRepoLenses(change: WholeRepo, covered?: RuleCoverage): SelectedLens[] {
-  const text = [...change.lines.keys()];
-  const share = Math.max(LENS_SAMPLE_MIN_BYTES, Math.floor(DIFF_CAP_BYTES / Math.max(1, text.length)));
-  const buf = Buffer.alloc(share);
-  let diff = "";
-  for (const path of text) {
-    let fd: number;
-    try {
-      fd = openSync(join(change.repoRoot, path), constants.O_RDONLY | constants.O_NOFOLLOW);
-    } catch {
-      continue;
-    }
-    let read = 0;
-    try {
-      read = readSync(fd, buf, 0, share, 0);
-    } catch {
-      // unreadable now: it contributes nothing
-    } finally {
-      closeSync(fd);
-    }
-    for (const line of buf.subarray(0, read).toString("utf8").split("\n")) diff += `+${line}\n`;
-  }
-  return selectLensesForDiff({ diff, files: change.changedPaths, catalog: loadLensCatalog(), covered });
 }

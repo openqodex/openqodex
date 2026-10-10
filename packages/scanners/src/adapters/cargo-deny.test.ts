@@ -19,12 +19,18 @@
 //   7. The owned config lets a repository's deny.toml in, keeps the advisory
 //      database outside the OpenQodex home, or checks yanked crates through
 //      the developer's index cache.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+// Added after the code review of the library branch:
+//   8. A server run's own Cargo home gets from the preinstalled one other
+//      than what the lock's registry crates need (each registry's settings,
+//      the crates' index entries and archives), takes a lock name that is no
+//      crate name as a path, copies through a link, or writes in the
+//      preinstalled home.
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { cargoDenyConfig, cargoPathProblem, metadataFailure, parseCargoDenyOutput } from "./cargo-deny.js";
+import { cargoDenyConfig, cargoPathProblem, metadataFailure, parseCargoDenyOutput, seedCargoHome } from "./cargo-deny.js";
 
 // The temp folders this file made, removed when it ends: a source-package
 // test cannot import tests/temp-dirs.mjs, so it keeps its own list.
@@ -235,5 +241,84 @@ describe("cargoPathProblem", () => {
     });
     expect(await cargoPathProblem(repo, "")).toBeNull();
     expect(await cargoPathProblem(repo, "crates/app")).toBeNull();
+  });
+});
+
+describe("a server run's own Cargo home", () => {
+  const put = (path: string, text: string) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, text);
+  };
+  // Every file under `dir`, with its text.
+  const files = (dir: string): Record<string, string> =>
+    Object.fromEntries(
+      readdirSync(dir, { recursive: true, withFileTypes: true })
+        .filter((e) => e.isFile() || e.isSymbolicLink())
+        .map((e) => join(e.parentPath, e.name))
+        .map((p) => [p.slice(dir.length + 1), e2text(p)])
+        .sort(),
+    );
+  const e2text = (p: string) => {
+    try {
+      return readFileSync(p, "utf8");
+    } catch {
+      return "(unreadable)";
+    }
+  };
+
+  it("8. gets each registry's settings and the index entries and archives of the lock's crates, and nothing else", () => {
+    const from = tempDir("oq-cargo-from-");
+    const reg = "index.crates.io-1949cf8c6b5b557f";
+    const index = join(from, "registry", "index", reg);
+    const archives = join(from, "registry", "cache", reg);
+    put(join(index, "config.json"), '{"dl":"https://static.crates.io/crates"}');
+    put(join(index, ".cache", "sm", "al", "smallvec"), "index smallvec");
+    put(join(index, ".cache", "3", "l", "log"), "index log");
+    put(join(index, ".cache", "2", "cc"), "index cc, not in the lock");
+    put(join(archives, "smallvec-1.6.0.crate"), "archive smallvec 1.6.0");
+    put(join(archives, "smallvec-1.5.0.crate"), "archive smallvec 1.5.0, another version");
+    put(join(archives, "log-0.4.0.crate"), "archive log");
+    const outside = tempDir("oq-cargo-outside-");
+    put(join(outside, "secret.crate"), "a file outside the Cargo home");
+    symlinkSync(join(outside, "secret.crate"), join(archives, "linked-1.0.0.crate"));
+    const before = files(from);
+    const lock = [
+      "version = 4",
+      "",
+      "[[package]]",
+      'name = "smallvec"',
+      'version = "1.6.0"',
+      'source = "registry+https://github.com/rust-lang/crates.io-index"',
+      "",
+      "[[package]]",
+      'name = "log"',
+      'version = "0.4.0"',
+      'source = "sparse+https://index.crates.io/"',
+      "",
+      "[[package]]",
+      'name = "linked"',
+      'version = "1.0.0"',
+      'source = "registry+https://github.com/rust-lang/crates.io-index"',
+      "",
+      "[[package]]",
+      'name = "../../secret"',
+      'version = "1.0.0"',
+      'source = "registry+https://github.com/rust-lang/crates.io-index"',
+      "",
+      "[[package]]",
+      'name = "tiny"',
+      'version = "0.1.0"',
+      "",
+    ].join("\n");
+    const to = join(tempDir("oq-cargo-to-"), "cargo-home");
+    seedCargoHome({ from, to, lockText: lock });
+    expect(files(to)).toEqual({
+      [join("registry", "cache", reg, "log-0.4.0.crate")]: "archive log",
+      [join("registry", "cache", reg, "smallvec-1.6.0.crate")]: "archive smallvec 1.6.0",
+      [join("registry", "index", reg, ".cache", "3", "l", "log")]: "index log",
+      [join("registry", "index", reg, ".cache", "sm", "al", "smallvec")]: "index smallvec",
+      [join("registry", "index", reg, "config.json")]: '{"dl":"https://static.crates.io/crates"}',
+    });
+    expect(files(from)).toEqual(before);
   });
 });

@@ -36,11 +36,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import type { Report } from "@openqodex/core";
 import { parseFlags } from "../src/flags.js";
 import { runReview } from "../src/review-run.js";
-import { claudeArgs } from "../src/reviewers/claude.js";
-import { codexDriver } from "../src/reviewers/codex.js";
-import { cursorDriver } from "../src/reviewers/cursor.js";
-import { DEPTH_ENV } from "../src/reviewers/driver.js";
-import type { ReviewerDriver, ReviewerSession, Turn } from "../src/reviewers/driver.js";
+import { DEPTH_ENV, claudeArgs, codexDriver, cursorDriver } from "@openqodex/review";
+import type { ReviewerDriver, ReviewerSession, Turn } from "@openqodex/review";
 import { DEFAULT_REVIEWER_WEB } from "../src/reviewers/settings.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 

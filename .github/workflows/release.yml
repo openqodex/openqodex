@@ -101,8 +101,12 @@ jobs:
     # release before this one for all four agents, edits their files the way
     # a developer does, updates on the daily route and with update --now, and
     # fails when an update wrote anything outside its runtime state or left
-    # the agents' permission rules short of the new procedure. A failure
-    # marks the run; it cannot publish, tag, push or roll anything back.
+    # the agents' permission rules short of the new procedure. Then it
+    # preinstalls every scanner of the new version into a clean install root
+    # on Linux and runs each one on its check case (the clean-root preinstall
+    # test, which the pull request gate skips for its 1 GB of downloads). A
+    # failure marks the run; it cannot publish, tag, push or roll anything
+    # back.
     needs: release
     if: needs.release.outputs.version != ''
     runs-on: ubuntu-latest
@@ -117,6 +121,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+      # golangci-lint needs Go on PATH for the clean-root preinstall; the
+      # check fails when any scanner is missing.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # golangci-lint 2.12.2 is built with Go 1.26 and cannot check a newer Go.
+          go-version: "1.26"
+          cache: false
       # The esbuild and Sigstore modules the check verifies with; no
       # dependency's install script runs.
       - run: pnpm install --frozen-lockfile --ignore-scripts
@@ -124,3 +135,12 @@ jobs:
         env:
           VERSION: ${{ needs.release.outputs.version }}
         run: node scripts/check-self-update.mjs --from previous --to "$VERSION" --route both
+      # Runs whatever the self-update check found, unless the run was cancelled.
+      - name: Build the new version
+        if: ${{ !cancelled() }}
+        run: pnpm build
+      - name: Preinstall every scanner into a clean install root
+        if: ${{ !cancelled() }}
+        env:
+          OPENQODEX_PREINSTALL_FULL: "1"
+        run: pnpm exec vitest run --config vitest.e2e.config.ts tests/e2e/preinstall-full.test.ts

@@ -30,6 +30,7 @@ import path from "node:path";
 import type { AdapterResult, DiffCoverage, ResolvedTool, StaticFinding } from "@openqodex/core";
 import { describeFailure, execTool, stderrTail } from "../exec.js";
 import type { RepoFacts } from "../detect.js";
+import type { Scratch } from "../scratch.js";
 import type { Adapter } from "./index.js";
 import { fileTexts, folderOf, folderVerdict, iacKind, indexFile, isTerraformPath, stagedPath, withStage } from "./iac.js";
 import { folderList, suchAs } from "./words.js";
@@ -45,6 +46,7 @@ export async function runCheckov(args: {
   tool: ResolvedTool | null;
   facts: RepoFacts;
   coverage?: DiffCoverage;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const files = checkovFiles(args.changedPaths, args.facts);
   if (files.length === 0) return { findings: [], error: null };
@@ -62,7 +64,7 @@ export async function runCheckov(args: {
   if (folders.length === 0 && others.length === 0) return { findings: [], error: null, skipped: heldNote };
 
   try {
-    return await withStage(args.repoDir, folders, others, async (stage) => {
+    return await withStage(args.scratch.temp, args.repoDir, folders, others, async (stage) => {
       const cliArgs = [
         "-d",
         stage.tree,
@@ -85,8 +87,11 @@ export async function runCheckov(args: {
         // CKV_IGNORE_HIDDEN_DIRECTORIES=false: checkov's Kubernetes runner
         // skips a file whose absolute path holds "/." anywhere, so a staging
         // folder under a hidden temporary folder (~/.cache/tmp) would hide
-        // every manifest. The stage holds only the files chosen for it.
+        // every manifest. The stage holds only the files chosen for it. The
+        // scratch's variables first (none on the laptop): on a server run,
+        // no bytecode written into the install root.
         env: {
+          ...args.scratch.env,
           PATH: path.dirname(tool.path),
           HOME: stage.home,
           TMPDIR: stage.tmp,

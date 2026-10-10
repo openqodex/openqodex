@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-FN5RTyPsN+WX6fne30TBSPgUfQWXgVGpQhagOChpxSY='; script-src 'none'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>OpenQodex review: Passed with warnings</title>
+<style>
+/* Hallmark · genre: modern-minimal · macrostructure: Long Document · theme: custom (vibe: "a printed review, cool paper, one blue signal", system sans + system mono, paper oklch(98% 0.004 250), accent oklch(47% 0.17 258) cool) · nav: N9 edge-aligned masthead + sticky verdict bar · footer: Ft4 dense colophon · enrichment: none · pre-emit critique: P4 H5 E4 S5 R5 V5 */
+:root {
+  color-scheme: light dark;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.375rem;
+  --text-xl: 1.75rem;
+  --text-code: 0.8125rem;
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --rule: 1px;
+  --page-max: 90rem;
+  --gutter: clamp(1rem, 3vw, 2.5rem);
+  --files-col: 16rem;
+  --bar-h: 2.75rem;
+
+  --color-paper: oklch(98% 0.004 250);
+  --color-paper-2: oklch(95.5% 0.006 250);
+  --color-paper-3: oklch(92.5% 0.008 250);
+  --color-rule: oklch(87% 0.008 250);
+  --color-rule-strong: oklch(74% 0.01 250);
+  --color-ink: oklch(21% 0.012 250);
+  --color-ink-2: oklch(40% 0.012 250);
+  --color-ink-3: oklch(45% 0.01 250);
+  --color-accent: oklch(46% 0.17 258);
+  --color-focus: oklch(55% 0.2 258);
+  --color-pass: oklch(44% 0.14 150);
+  --color-pass-bg: oklch(95% 0.04 150);
+  --color-fail: oklch(47% 0.19 25);
+  --color-fail-bg: oklch(95% 0.03 25);
+  --sev-critical: oklch(45% 0.19 25);
+  --sev-critical-bg: oklch(95% 0.03 25);
+  --sev-major: oklch(45% 0.15 50);
+  --sev-major-bg: oklch(95% 0.035 60);
+  --sev-minor: oklch(44% 0.12 85);
+  --sev-minor-bg: oklch(95.5% 0.045 90);
+  --sev-nitpick: oklch(44% 0.03 250);
+  --sev-nitpick-bg: oklch(94% 0.01 250);
+  --sev-info: oklch(45% 0.14 250);
+  --sev-info-bg: oklch(95% 0.03 250);
+  --diff-add-bg: oklch(96.5% 0.04 150);
+  --diff-add-num: oklch(92% 0.07 150);
+  --diff-del-bg: oklch(96% 0.03 25);
+  --diff-del-num: oklch(91.5% 0.055 25);
+  --diff-hunk-bg: oklch(95% 0.02 258);
+  --diff-hunk-ink: oklch(40% 0.08 258);
+}
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: oklch(16% 0.01 250);
+    --color-paper-2: oklch(19.5% 0.012 250);
+    --color-paper-3: oklch(24% 0.014 250);
+    --color-rule: oklch(30% 0.012 250);
+    --color-rule-strong: oklch(44% 0.012 250);
+    --color-ink: oklch(93% 0.006 250);
+    --color-ink-2: oklch(76% 0.01 250);
+    --color-ink-3: oklch(68% 0.01 250);
+    --color-accent: oklch(76% 0.12 258);
+    --color-focus: oklch(80% 0.15 258);
+    --color-pass: oklch(78% 0.13 150);
+    --color-pass-bg: oklch(24% 0.05 150);
+    --color-fail: oklch(76% 0.15 25);
+    --color-fail-bg: oklch(25% 0.06 25);
+    --sev-critical: oklch(76% 0.15 25);
+    --sev-critical-bg: oklch(26% 0.07 25);
+    --sev-major: oklch(78% 0.13 55);
+    --sev-major-bg: oklch(26% 0.06 55);
+    --sev-minor: oklch(80% 0.12 90);
+    --sev-minor-bg: oklch(27% 0.06 90);
+    --sev-nitpick: oklch(74% 0.02 250);
+    --sev-nitpick-bg: oklch(26% 0.012 250);
+    --sev-info: oklch(76% 0.11 250);
+    --sev-info-bg: oklch(26% 0.05 250);
+    --diff-add-bg: oklch(22% 0.04 150);
+    --diff-add-num: oklch(28% 0.07 150);
+    --diff-del-bg: oklch(22% 0.035 25);
+    --diff-del-num: oklch(28% 0.06 25);
+    --diff-hunk-bg: oklch(21% 0.025 258);
+    --diff-hunk-ink: oklch(72% 0.08 258);
+  }
+}
+
+/* severity classes set one pair of variables; badges and lines consume them */
+.sev-critical { --sev: var(--sev-critical); --sev-bg: var(--sev-critical-bg); }
+.sev-major { --sev: var(--sev-major); --sev-bg: var(--sev-major-bg); }
+.sev-minor { --sev: var(--sev-minor); --sev-bg: var(--sev-minor-bg); }
+.sev-nitpick { --sev: var(--sev-nitpick); --sev-bg: var(--sev-nitpick-bg); }
+.sev-info { --sev: var(--sev-info); --sev-bg: var(--sev-info-bg); }
+.sev-unknown { --sev: var(--color-ink-2); --sev-bg: var(--color-paper-3); }
+
+/* base */
+html, body { overflow-x: clip; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font: 400 var(--text-base) / 1.55 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+h1, h2, h3, h4 { font-style: normal; margin: 0; line-height: 1.2; letter-spacing: -0.01em; }
+h2 { font-size: var(--text-md); font-weight: 650; margin-bottom: var(--space-md); }
+h3 { font-size: var(--text-base); font-weight: 650; margin: var(--space-lg) 0 var(--space-sm); }
+h4 { font-size: var(--text-base); font-weight: 650; }
+p { margin: 0 0 var(--space-sm); }
+a { color: var(--color-accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.15em; text-decoration-color: var(--color-rule-strong); }
+a:hover { text-decoration-color: currentColor; }
+a:active, summary:active { color: var(--color-ink); }
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+code, pre, .mono { font-family: var(--font-mono); }
+code { font-size: 0.9em; }
+pre { margin: 0; white-space: pre-wrap; }
+.muted { color: var(--color-ink-3); }
+.count { color: var(--color-ink-3); font-weight: 400; }
+.added { color: var(--color-pass); }
+.removed { color: var(--color-fail); }
+.page { max-width: var(--page-max); padding-inline: var(--gutter); }
+section { padding-block: var(--space-xl); border-top: var(--rule) solid var(--color-rule); }
+
+/* masthead: N9, wordmark hard left, state hard right, the verdict is the h1 */
+.masthead { padding-block: var(--space-lg) var(--space-lg); }
+.masthead-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-md); }
+.wordmark { font-family: var(--font-mono); font-size: var(--text-sm); letter-spacing: 0.02em; color: var(--color-ink-2); }
+.masthead-kind { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-ink-3); }
+.verdict { font-size: var(--text-xl); font-weight: 650; letter-spacing: -0.015em; margin: var(--space-md) 0 var(--space-lg); max-width: 40ch; }
+.verdict-passed { color: var(--color-pass); }
+.verdict-failed { color: var(--color-fail); }
+.missing { color: var(--color-fail); margin-bottom: var(--space-lg); }
+.missing h2 { color: inherit; margin-bottom: var(--space-xs); }
+.missing ul { margin: 0; padding-left: 1.2em; }
+.meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-sm) var(--space-xl); margin: 0; font-size: var(--text-sm); }
+.meta-item { min-width: 0; }
+.meta dt { font-size: var(--text-xs); color: var(--color-ink-3); letter-spacing: 0.04em; text-transform: uppercase; }
+.meta dd { margin: 0; color: var(--color-ink); }
+.meta dd code { font-size: 0.95em; }
+
+/* sticky verdict bar: verdict word, counts, section jumps */
+.verdict-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-md);
+  min-height: var(--bar-h); box-sizing: border-box; padding: var(--space-xs) var(--gutter);
+  background: var(--color-paper-2); border-top: var(--rule) solid var(--color-rule); border-bottom: var(--rule) solid var(--color-rule);
+  font-size: var(--text-sm); z-index: 2;
+}
+.verdict-bar .verdict-word { font-weight: 650; white-space: nowrap; }
+.verdict-bar .counts { color: var(--color-ink-2); white-space: nowrap; }
+.jumps { display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-md); margin-left: auto; }
+.jumps a { white-space: nowrap; color: var(--color-ink); text-decoration-color: var(--color-rule-strong); }
+
+/* summary */
+.summary .prose { max-width: 70ch; }
+.summary .prose p:first-child { font-size: var(--text-md); color: var(--color-ink-2); }
+
+/* coverage strip: a tinted band, four facts */
+.coverage { background: var(--color-paper-2); padding: var(--space-lg) var(--gutter); margin-inline: calc(-1 * var(--gutter)); }
+.coverage dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-md) var(--space-xl); margin: 0; font-size: var(--text-sm); }
+.coverage dt { font-size: var(--text-xs); color: var(--color-ink-3); letter-spacing: 0.04em; text-transform: uppercase; }
+.coverage dd { margin: 0; }
+
+/* review body: files column on wide screens, stacked on narrow */
+.review-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-xl); padding-block: var(--space-xl); border-top: var(--rule) solid var(--color-rule); }
+.review-body section { border-top: 0; padding-block: 0; }
+.review-main { display: grid; gap: var(--space-2xl); min-width: 0; }
+
+.files ol { list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); }
+.files li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 var(--space-sm); padding: var(--space-xs) 0; border-top: var(--rule) solid var(--color-rule); }
+.files li a { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-ink); text-decoration: none; }
+.files li a:hover { text-decoration: underline; }
+.files .file-meta { font-size: var(--text-xs); color: var(--color-ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+.files .file-meta-2 { grid-column: 1 / -1; text-align: left; }
+.files-note { font-size: var(--text-xs); color: var(--color-ink-3); margin-top: var(--space-sm); }
+
+.findings-index ol { list-style: none; margin: 0; padding: 0; }
+.findings-index li { display: grid; grid-template-columns: 2rem auto minmax(0, 1fr); gap: var(--space-2xs) var(--space-sm); align-items: baseline; padding: var(--space-sm) 0; border-top: var(--rule) solid var(--color-rule); }
+.findings-index li:last-child { border-bottom: var(--rule) solid var(--color-rule); }
+.index-n { font-family: var(--font-mono); color: var(--color-ink-3); font-variant-numeric: tabular-nums; }
+.index-title { font-weight: 600; color: var(--color-ink); text-decoration: none; }
+.index-title:hover { text-decoration: underline; }
+.index-where { grid-column: 3; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-ink-3); }
+.index-where .category { font-family: var(--font-sans); color: var(--color-ink-2); margin-right: var(--space-xs); }
+
+.severity {
+  display: inline-block; font: 600 var(--text-xs) / 1.2 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--sev); background: var(--sev-bg); padding: 0.15em 0.45em; border-radius: var(--radius-sm); white-space: nowrap;
+}
+
+/* per file */
+.file-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2xs) var(--space-sm); padding-bottom: var(--space-sm); font-size: var(--text-sm); }
+.file-path { font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 700; letter-spacing: 0; margin: 0; }
+.file-old, .file-status, .file-findings { color: var(--color-ink-3); }
+.file-counts { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.file-omitted { color: var(--color-ink-3); font-size: var(--text-sm); border: var(--rule) dashed var(--color-rule-strong); padding: var(--space-sm) var(--space-md); border-radius: var(--radius-md); }
+.file-unanchored { margin-top: var(--space-md); display: grid; gap: var(--space-md); }
+.file-unanchored h4 { font-size: var(--text-sm); color: var(--color-ink-3); font-weight: 600; }
+
+/* unified diff: four columns, old number, new number, sign, code */
+.diff { width: 100%; border-collapse: collapse; table-layout: fixed; border: var(--rule) solid var(--color-rule); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: var(--text-code); line-height: 1.5; tab-size: 4; }
+.diff .col-num { width: 3.25rem; }
+.diff .col-sign { width: 1.25rem; }
+.diff td { padding: 0; vertical-align: top; }
+.diff .num { text-align: right; padding-inline: var(--space-xs); color: var(--color-ink-2); background: var(--color-paper-2); font-size: var(--text-xs); line-height: 1.625; user-select: none; }
+.diff .num::before { content: attr(data-n); }
+.diff .sign { text-align: center; color: var(--color-ink-3); user-select: none; }
+.diff .code { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: var(--space-sm); }
+.line-add { background: var(--diff-add-bg); }
+.line-add .num { background: var(--diff-add-num); }
+.line-add .sign { color: var(--color-pass); font-weight: 700; }
+.line-del { background: var(--diff-del-bg); }
+.line-del .num { background: var(--diff-del-num); }
+.line-del .sign { color: var(--color-fail); font-weight: 700; }
+.line-flagged .num-new { color: var(--sev); font-weight: 700; }
+.hunk-header td { background: var(--diff-hunk-bg); color: var(--diff-hunk-ink); padding: var(--space-2xs) var(--space-xs); font-size: var(--text-xs); }
+.hunk-header .hunk-context { color: var(--color-ink-3); }
+.finding-row > td, .dropped-row > td { padding: var(--space-sm) var(--space-sm) var(--space-md); background: var(--color-paper); }
+
+/* finding card: the review comment under its line */
+.finding-card { border: var(--rule) solid var(--color-rule-strong); border-radius: var(--radius-md); background: var(--color-paper); font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.5; max-width: 80ch; }
+.finding-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2xs) var(--space-sm); padding: var(--space-sm) var(--space-md); border-bottom: var(--rule) solid var(--color-rule); }
+.finding-id { font-family: var(--font-mono); font-weight: 700; color: var(--color-ink); text-decoration: none; min-width: 1.5em; }
+.finding-head .category { color: var(--color-ink-2); }
+.finding-title { flex: 1 1 100%; order: 1; font-size: var(--text-base); margin-top: var(--space-2xs); }
+.finding-where { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-ink-3); margin-left: auto; }
+.finding-body { margin: 0; padding: var(--space-sm) var(--space-md) 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2xs) var(--space-md); }
+.finding-body dt { font-size: var(--text-xs); color: var(--color-ink-3); letter-spacing: 0.04em; text-transform: uppercase; padding-top: 0.2em; }
+.finding-body dd { margin: 0 0 var(--space-sm); }
+.finding-body dd p { margin: 0 0 var(--space-xs); }
+.suggested { margin: 0 var(--space-md) var(--space-sm); }
+.suggested summary, .dropped summary { cursor: pointer; color: var(--color-ink-2); font-size: var(--text-sm); list-style: none; }
+.suggested summary::-webkit-details-marker, .dropped summary::-webkit-details-marker { display: none; }
+.suggested summary::before, .dropped summary::before { content: "+"; display: inline-block; width: 1.2em; font-family: var(--font-mono); color: var(--color-ink-3); }
+details[open] > summary::before { content: "\2212"; }
+.suggested pre { margin-top: var(--space-xs); padding: var(--space-sm) var(--space-md); background: var(--color-paper-2); border-radius: var(--radius-sm); font-size: var(--text-code); line-height: 1.5; }
+.finding-foot { display: flex; flex-wrap: wrap; gap: var(--space-2xs) var(--space-md); padding: var(--space-xs) var(--space-md) var(--space-sm); border-top: var(--rule) solid var(--color-rule); font-size: var(--text-xs); color: var(--color-ink-3); }
+.finding-back { margin-left: auto; white-space: nowrap; }
+
+/* dropped candidates: collapsed, muted */
+.dropped { font-family: var(--font-sans); font-size: var(--text-xs); color: var(--color-ink-3); }
+.dropped-list { margin: var(--space-xs) 0 0; padding-left: 1.2em; }
+.dropped-id, .dropped-token { font-family: var(--font-mono); }
+
+/* evidence tables */
+.table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.table th { text-align: left; font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-ink-3); padding: 0 var(--space-md) var(--space-xs) 0; border-bottom: var(--rule) solid var(--color-rule-strong); }
+.table td { padding: var(--space-xs) var(--space-md) var(--space-xs) 0; border-bottom: var(--rule) solid var(--color-rule); vertical-align: top; }
+.table .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.table-narrow { max-width: 48rem; }
+.table-keyed { max-width: 64rem; }
+.table .mono { font-size: var(--text-xs); }
+.scanner-status { white-space: nowrap; }
+.scanner-ran { color: var(--color-pass); }
+.scanner-failed, .scanner-untrusted, .scanner-not_installed { color: var(--color-fail); }
+.blast-radius h3 { margin-top: var(--space-xl); }
+.blast-radius p { max-width: 80ch; }
+.scanners p { max-width: 80ch; }
+
+/* footer: dense colophon */
+.footer { padding-block: var(--space-xl) var(--space-2xl); border-top: var(--rule) solid var(--color-rule-strong); font-size: var(--text-sm); color: var(--color-ink-2); max-width: 80ch; }
+.footer .ask code { display: inline-block; padding: var(--space-xs) var(--space-sm); background: var(--color-paper-2); border-radius: var(--radius-sm); color: var(--color-ink); }
+.footer .closing { color: var(--color-ink-3); margin-top: var(--space-lg); }
+
+/* wide screens: the bar sticks, the files column sticks beside the diffs */
+@media (min-width: 40rem) {
+  .table-keyed th:first-child, .table-keyed td:first-child { width: 1%; white-space: nowrap; }
+  .finding-body { grid-template-columns: 8rem minmax(0, 1fr); }
+  .finding-body dd { margin-bottom: var(--space-xs); }
+  .finding-title { flex: 1 1 auto; order: 0; margin-top: 0; }
+}
+@media (min-width: 60rem) {
+  .verdict-bar { position: sticky; top: 0; flex-wrap: nowrap; }
+  .jumps { flex-wrap: nowrap; }
+  .counts-dropped { display: none; }
+  .review-body { grid-template-columns: var(--files-col) minmax(0, 1fr); gap: var(--space-2xl); }
+  .files { position: sticky; top: calc(var(--bar-h) + var(--space-md)); align-self: start; max-height: calc(100vh - var(--bar-h) - var(--space-xl)); overflow-y: auto; }
+}
+@media (min-width: 70rem) {
+  .counts-dropped { display: inline; }
+}
+@media (max-width: 40rem) {
+  .diff .col-num { width: 2.5rem; }
+  .diff .num { padding-inline: var(--space-2xs); }
+  .finding-row > td, .dropped-row > td { padding-inline: var(--space-xs); }
+}
+
+/* print: one column, nothing sticky, disclosures open where the browser allows */
+@media print {
+  @page { margin: 1.5cm; }
+  :root { --color-paper: oklch(100% 0 0); }
+  body { font-size: 10.5pt; }
+  * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .files { position: static; }
+  .verdict-bar, .finding-back { display: none; }
+  .review-body { display: block; }
+  .files { margin-bottom: var(--space-xl); }
+  .finding-card, .files li, .table tr, .hunk-header { break-inside: avoid; }
+  a { color: inherit; text-decoration: none; }
+  .footer .closing a { text-decoration: underline; }
+  details::details-content { content-visibility: visible; }
+  .suggested summary::before, .dropped summary::before { content: ""; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+<header class="masthead">
+<div class="masthead-row">
+<span class="wordmark">OpenQodex review</span>
+<span class="masthead-kind">review complete</span>
+</div>
+<h1 class="verdict verdict-passed">Passed with warnings: 17 findings (7 major, 10 minor)</h1>
+
+<dl class="meta"><div class="meta-item"><dt>Change</dt><dd><code>597352237e51</code> against <code>HEAD</code> <code>3df34a143822</code></dd></div><div class="meta-item"><dt>Size</dt><dd>11 files, <span class="added">+45</span> <span class="removed">-16</span></dd></div><div class="meta-item"><dt>Block threshold</dt><dd>none set, findings warn and never block</dd></div><div class="meta-item"><dt>Reviewer</dt><dd>codex 0.160.0, <SECONDS> s, 1 turn, 1,000 tokens in, 500 out</dd></div><div class="meta-item"><dt>Generated</dt><dd><TIMESTAMP></dd></div><div class="meta-item"><dt>Blast radius</dt><dd><a href="#blast-radius">risk low (2 symbols touched, 0 callers in 0 files)</a></dd></div></dl>
+</header>
+</div>
+<div class="verdict-bar">
+<span class="verdict-word verdict-passed">Passed with warnings</span>
+<span class="counts">17 findings: 7 major, 10 minor</span>
+<span class="counts counts-dropped">0 scanner candidates dropped</span>
+<nav class="jumps" aria-label="Sections"><a href="#summary">Summary</a><a href="#findings">Findings (17)</a><a href="#files">Files (11)</a><a href="#scanners">Scanners</a><a href="#blast-radius">Blast radius</a></nav>
+</div>
+<main class="page">
+<section class="summary" id="summary"><h2>Summary</h2><div class="prose"><p>Reviewed the fixed planted change.</p></div></section>
+<section class="coverage" aria-label="Coverage"><dl><div class="coverage-item"><dt>Changed ranges given to the reviewer</dt><dd>18 of 18</dd></div><div class="coverage-item"><dt>Files the reviewer opened</dt><dd>not recorded by Codex</dd></div><div class="coverage-item"><dt>Scanner candidates</dt><dd>24 on changed lines: 17 raised, 0 dropped, 0 not reviewed</dd></div><div class="coverage-item"><dt>Scanners not included</dt><dd>none</dd></div></dl></section>
+<div class="review-body">
+<nav class="files" id="files" aria-label="Changed files">
+<h2>Files <span class="count">(11)</span></h2>
+<ol><li><a href="#file-1">.github/workflows/ci.yml</a><span class="file-meta"><span class="added">+2</span> <span class="removed">-0</span></span><span class="file-meta file-meta-2">modified, 1 finding</span></li><li><a href="#file-2">Dockerfile</a><span class="file-meta"><span class="added">+5</span> <span class="removed">-6</span></span><span class="file-meta file-meta-2">modified, 5 findings</span></li><li><a href="#file-3">app/config.py</a><span class="file-meta"><span class="added">+3</span> <span class="removed">-0</span></span><span class="file-meta file-meta-2">added, 1 finding</span></li><li><a href="#file-4">app/search.py</a><span class="file-meta"><span class="added">+17</span> <span class="removed">-0</span></span><span class="file-meta file-meta-2">added, 1 finding</span></li><li><a href="#file-5">app/server.py</a><span class="file-meta"><span class="added">+4</span> <span class="removed">-1</span></span><span class="file-meta file-meta-2">modified, 0 findings</span></li><li><a href="#file-6">db/migrations/002_index_item_names.sql</a><span class="file-meta"><span class="added">+2</span> <span class="removed">-0</span></span><span class="file-meta file-meta-2">added, 1 finding</span></li><li><a href="#file-7">deploy/deployment.yaml</a><span class="file-meta"><span class="added">+3</span> <span class="removed">-1</span></span><span class="file-meta file-meta-2">modified, 4 findings</span></li><li><a href="#file-8">infra/main.tf</a><span class="file-meta"><span class="added">+2</span> <span class="removed">-1</span></span><span class="file-meta file-meta-2">modified, 2 findings</span></li><li><a href="#file-9">package-lock.json</a><span class="file-meta"><span class="added">+4</span> <span class="removed">-4</span></span><span class="file-meta file-meta-2">modified, 0 findings</span></li><li><a href="#file-10">package.json</a><span class="file-meta"><span class="added">+1</span> <span class="removed">-1</span></span><span class="file-meta file-meta-2">modified, 0 findings</span></li><li><a href="#file-11">scripts/deploy.sh</a><span class="file-meta"><span class="added">+2</span> <span class="removed">-2</span></span><span class="file-meta file-meta-2">modified, 2 findings</span></li></ol>
+
+</nav>
+<div class="review-main">
+<section class="findings-index" id="findings"><h2>Findings <span class="count">(17)</span></h2><ol><li id="index-f1" class="sev-major"><span class="index-n">1</span><span class="severity sev-major">major</span><a class="index-title" href="#f1">Planted problem number 1</a><span class="index-where"><span class="category">bug</span> app/config.py:2</span></li><li id="index-f2" class="sev-major"><span class="index-n">2</span><span class="severity sev-major">major</span><a class="index-title" href="#f2">Planted problem number 2</a><span class="index-where"><span class="category">bug</span> .github/workflows/ci.yml:17</span></li><li id="index-f3" class="sev-major"><span class="index-n">3</span><span class="severity sev-major">major</span><a class="index-title" href="#f3">Planted problem number 3</a><span class="index-where"><span class="category">bug</span> Dockerfile:6</span></li><li id="index-f4" class="sev-major"><span class="index-n">4</span><span class="severity sev-major">major</span><a class="index-title" href="#f4">Planted problem number 4</a><span class="index-where"><span class="category">bug</span> infra/main.tf:28</span></li><li id="index-f5" class="sev-major"><span class="index-n">5</span><span class="severity sev-major">major</span><a class="index-title" href="#f5">Planted problem number 5</a><span class="index-where"><span class="category">bug</span> deploy/deployment.yaml:42</span></li><li id="index-f6" class="sev-major"><span class="index-n">6</span><span class="severity sev-major">major</span><a class="index-title" href="#f6">Planted problem number 6</a><span class="index-where"><span class="category">bug</span> deploy/deployment.yaml:43</span></li><li id="index-f7" class="sev-major"><span class="index-n">7</span><span class="severity sev-major">major</span><a class="index-title" href="#f7">Planted problem number 7</a><span class="index-where"><span class="category">bug</span> scripts/deploy.sh:11</span></li><li id="index-f8" class="sev-minor"><span class="index-n">8</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f8">Planted problem number 8</a><span class="index-where"><span class="category">bug</span> db/migrations/002_index_item_names.sql:2</span></li><li id="index-f9" class="sev-minor"><span class="index-n">9</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f9">Planted problem number 9</a><span class="index-where"><span class="category">bug</span> Dockerfile:1</span></li><li id="index-f10" class="sev-minor"><span class="index-n">10</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f10">Planted problem number 10</a><span class="index-where"><span class="category">bug</span> Dockerfile:3</span></li><li id="index-f11" class="sev-minor"><span class="index-n">11</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f11">Planted problem number 11</a><span class="index-where"><span class="category">bug</span> Dockerfile:3</span></li><li id="index-f12" class="sev-minor"><span class="index-n">12</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f12">Planted problem number 12</a><span class="index-where"><span class="category">bug</span> Dockerfile:7</span></li><li id="index-f13" class="sev-minor"><span class="index-n">13</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f13">Planted problem number 13</a><span class="index-where"><span class="category">bug</span> deploy/deployment.yaml:42</span></li><li id="index-f14" class="sev-minor"><span class="index-n">14</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f14">Planted problem number 14</a><span class="index-where"><span class="category">bug</span> deploy/deployment.yaml:43</span></li><li id="index-f15" class="sev-minor"><span class="index-n">15</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f15">Planted problem number 15</a><span class="index-where"><span class="category">bug</span> infra/main.tf:28</span></li><li id="index-f16" class="sev-minor"><span class="index-n">16</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f16">Planted problem number 16</a><span class="index-where"><span class="category">bug</span> scripts/deploy.sh:7</span></li><li id="index-f17" class="sev-minor"><span class="index-n">17</span><span class="severity sev-minor">minor</span><a class="index-title" href="#f17">Planted problem number 17</a><span class="index-where"><span class="category">bug</span> app/search.py:14</span></li></ol></section>
+<section class="file" id="file-1">
+<header class="file-header">
+<h3 class="file-path">.github/workflows/ci.yml</h3>
+
+<span class="file-status">modified</span>
+<span class="file-counts"><span class="added">+2</span> <span class="removed">-0</span></span>
+<span class="file-findings">1 finding</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -13,6 +13,8 @@ <span class="hunk-context">jobs:</span></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="13"></td><td class="num num-new" data-n="13"></td><td class="sign"> </td><td class="code">      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="14"></td><td class="num num-new" data-n="14"></td><td class="sign"> </td><td class="code">        with:</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="15"></td><td class="num num-new" data-n="15"></td><td class="sign"> </td><td class="code">          persist-credentials: false</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="16"></td><td class="sign">+</td><td class="code">      - name: Show the pull request</td></tr>
+<tr class="line line-add line-flagged sev-major"><td class="num num-old"></td><td class="num num-new" data-n="17"></td><td class="sign">+</td><td class="code">        run: echo &quot;Testing ${{ github.event.pull_request.title }}&quot;</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-major" id="f2">
+<header class="finding-head">
+<a class="finding-id" href="#index-f2">2</a>
+<span class="severity sev-major">major</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 2</h4>
+<span class="finding-where">.github/workflows/ci.yml:17</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: actionlint:expression</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c2</span>
+<a class="finding-back" href="#index-f2">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="16"></td><td class="num num-new" data-n="18"></td><td class="sign"> </td><td class="code">      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="17"></td><td class="num num-new" data-n="19"></td><td class="sign"> </td><td class="code">        with:</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="18"></td><td class="num num-new" data-n="20"></td><td class="sign"> </td><td class="code">          python-version: &quot;3.12&quot;</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-2">
+<header class="file-header">
+<h3 class="file-path">Dockerfile</h3>
+
+<span class="file-status">modified</span>
+<span class="file-counts"><span class="added">+5</span> <span class="removed">-6</span></span>
+<span class="file-findings">5 findings</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -1,12 +1,11 @@ <span class="hunk-context"></span></td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="1"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">FROM python:3.12.7-slim-bookworm</td></tr>
+<tr class="line line-add line-flagged sev-minor"><td class="num num-old"></td><td class="num num-new" data-n="1"></td><td class="sign">+</td><td class="code">FROM python:latest</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f9">
+<header class="finding-head">
+<a class="finding-id" href="#index-f9">9</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 9</h4>
+<span class="finding-where">Dockerfile:1</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: hadolint:DL3007</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c9</span>
+<a class="finding-back" href="#index-f9">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="2"></td><td class="num num-new" data-n="2"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="3"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">RUN useradd --create-home --uid 10001 app</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="4"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">WORKDIR /home/app</td></tr>
+<tr class="line line-add line-flagged sev-minor"><td class="num num-old"></td><td class="num num-new" data-n="3"></td><td class="sign">+</td><td class="code">RUN apt-get update &amp;&amp; apt-get install curl</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f10">
+<header class="finding-head">
+<a class="finding-id" href="#index-f10">10</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 10</h4>
+<span class="finding-where">Dockerfile:3</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: hadolint:DL3008</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c10</span>
+<a class="finding-back" href="#index-f10">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f11">
+<header class="finding-head">
+<a class="finding-id" href="#index-f11">11</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 11</h4>
+<span class="finding-where">Dockerfile:3</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: hadolint:DL3014</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c11</span>
+<a class="finding-back" href="#index-f11">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="5"></td><td class="num num-new" data-n="4"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="6"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">COPY requirements.txt .</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="7"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">RUN pip install --no-cache-dir -r requirements.txt</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="5"></td><td class="sign">+</td><td class="code">WORKDIR /app</td></tr>
+<tr class="line line-add line-flagged sev-major"><td class="num num-old"></td><td class="num num-new" data-n="6"></td><td class="sign">+</td><td class="code">ADD requirements.txt .</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-major" id="f3">
+<header class="finding-head">
+<a class="finding-id" href="#index-f3">3</a>
+<span class="severity sev-major">major</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 3</h4>
+<span class="finding-where">Dockerfile:6</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: hadolint:DL3020</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c3</span>
+<a class="finding-back" href="#index-f3">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-add line-flagged sev-minor"><td class="num num-old"></td><td class="num num-new" data-n="7"></td><td class="sign">+</td><td class="code">RUN pip install -r requirements.txt</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f12">
+<header class="finding-head">
+<a class="finding-id" href="#index-f12">12</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 12</h4>
+<span class="finding-where">Dockerfile:7</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: hadolint:DL3042</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c12</span>
+<a class="finding-back" href="#index-f12">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="8"></td><td class="num num-new" data-n="8"></td><td class="sign"> </td><td class="code">COPY app ./app</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="9"></td><td class="num num-new" data-n="9"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="10"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">USER 10001</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="11"></td><td class="num num-new" data-n="10"></td><td class="sign"> </td><td class="code">EXPOSE 5000</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="12"></td><td class="num num-new" data-n="11"></td><td class="sign"> </td><td class="code">CMD [&quot;python&quot;, &quot;-m&quot;, &quot;flask&quot;, &quot;--app&quot;, &quot;app.server&quot;, &quot;run&quot;, &quot;--host&quot;, &quot;0.0.0.0&quot;]</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-3">
+<header class="file-header">
+<h3 class="file-path">app/config.py</h3>
+
+<span class="file-status">added</span>
+<span class="file-counts"><span class="added">+3</span> <span class="removed">-0</span></span>
+<span class="file-findings">1 finding</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -0,0 +1,3 @@ <span class="hunk-context"></span></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="1"></td><td class="sign">+</td><td class="code"># Payment settings for the demo shop.</td></tr>
+<tr class="line line-add line-flagged sev-major"><td class="num num-old"></td><td class="num num-new" data-n="2"></td><td class="sign">+</td><td class="code">STRIPE_KEY = &quot;[redacted]&quot;</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-major" id="f1">
+<header class="finding-head">
+<a class="finding-id" href="#index-f1">1</a>
+<span class="severity sev-major">major</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 1</h4>
+<span class="finding-where">app/config.py:2</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: gitleaks:stripe-access-token</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c1</span>
+<a class="finding-back" href="#index-f1">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="3"></td><td class="sign">+</td><td class="code">CURRENCY = &quot;usd&quot;</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-4">
+<header class="file-header">
+<h3 class="file-path">app/search.py</h3>
+
+<span class="file-status">added</span>
+<span class="file-counts"><span class="added">+17</span> <span class="removed">-0</span></span>
+<span class="file-findings">1 finding</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -0,0 +1,17 @@ <span class="hunk-context"></span></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="1"></td><td class="sign">+</td><td class="code">import sqlite3</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="2"></td><td class="sign">+</td><td class="code"></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="3"></td><td class="sign">+</td><td class="code">from flask import Blueprint, jsonify, request</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="4"></td><td class="sign">+</td><td class="code"></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="5"></td><td class="sign">+</td><td class="code">search = Blueprint(&quot;search&quot;, __name__)</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="6"></td><td class="sign">+</td><td class="code"></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="7"></td><td class="sign">+</td><td class="code"></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="8"></td><td class="sign">+</td><td class="code">@search.get(&quot;/search&quot;)</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="9"></td><td class="sign">+</td><td class="code">def search_items():</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="10"></td><td class="sign">+</td><td class="code">    q = request.args.get(&quot;q&quot;, &quot;&quot;)</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="11"></td><td class="sign">+</td><td class="code">    conn = sqlite3.connect(&quot;items.db&quot;)</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="12"></td><td class="sign">+</td><td class="code">    conn.row_factory = sqlite3.Row</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="13"></td><td class="sign">+</td><td class="code">    cur = conn.cursor()</td></tr>
+<tr class="line line-add line-flagged sev-minor"><td class="num num-old"></td><td class="num num-new" data-n="14"></td><td class="sign">+</td><td class="code">    cur.execute(f&quot;SELECT id, name, price FROM items WHERE name = &#x27;{q}&#x27;&quot;)</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f17">
+<header class="finding-head">
+<a class="finding-id" href="#index-f17">17</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 17</h4>
+<span class="finding-where">app/search.py:14</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: bandit:B608</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c17</span>
+<a class="finding-back" href="#index-f17">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="15"></td><td class="sign">+</td><td class="code">    rows = cur.fetchall()</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="16"></td><td class="sign">+</td><td class="code">    conn.close()</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="17"></td><td class="sign">+</td><td class="code">    return jsonify([dict(row) for row in rows])</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-5">
+<header class="file-header">
+<h3 class="file-path">app/server.py</h3>
+
+<span class="file-status">modified</span>
+<span class="file-counts"><span class="added">+4</span> <span class="removed">-1</span></span>
+<span class="file-findings file-findings-none">no findings</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -2,7 +2,10 @@ <span class="hunk-context">import sqlite3</span></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="2"></td><td class="num num-new" data-n="2"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="3"></td><td class="num num-new" data-n="3"></td><td class="sign"> </td><td class="code">from flask import Flask, jsonify, request</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="4"></td><td class="num num-new" data-n="4"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="5"></td><td class="sign">+</td><td class="code">from app.search import search</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="6"></td><td class="sign">+</td><td class="code"></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="5"></td><td class="num num-new" data-n="7"></td><td class="sign"> </td><td class="code">app = Flask(__name__)</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="8"></td><td class="sign">+</td><td class="code">app.register_blueprint(search)</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="6"></td><td class="num num-new" data-n="9"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="7"></td><td class="num num-new" data-n="10"></td><td class="sign"> </td><td class="code">DATABASE = &quot;items.db&quot;</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="8"></td><td class="num num-new" data-n="11"></td><td class="sign"> </td><td class="code">PAGE_SIZE = 20</td></tr>
+</tbody>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -17,7 +20,7 @@ <span class="hunk-context">def get_db():</span></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="17"></td><td class="num num-new" data-n="20"></td><td class="sign"> </td><td class="code">@app.get(&quot;/items&quot;)</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="18"></td><td class="num num-new" data-n="21"></td><td class="sign"> </td><td class="code">def list_items():</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="19"></td><td class="num num-new" data-n="22"></td><td class="sign"> </td><td class="code">    page = max(int(request.args.get(&quot;page&quot;, &quot;1&quot;)), 1)</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="20"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">    offset = (page - 1) * PAGE_SIZE</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="23"></td><td class="sign">+</td><td class="code">    offset = page * PAGE_SIZE</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="21"></td><td class="num num-new" data-n="24"></td><td class="sign"> </td><td class="code">    with get_db() as conn:</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="22"></td><td class="num num-new" data-n="25"></td><td class="sign"> </td><td class="code">        rows = conn.execute(</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="23"></td><td class="num num-new" data-n="26"></td><td class="sign"> </td><td class="code">            &quot;SELECT id, name, price FROM items ORDER BY id LIMIT ? OFFSET ?&quot;,</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-6">
+<header class="file-header">
+<h3 class="file-path">db/migrations/002_index_item_names.sql</h3>
+
+<span class="file-status">added</span>
+<span class="file-counts"><span class="added">+2</span> <span class="removed">-0</span></span>
+<span class="file-findings">1 finding</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -0,0 +1,2 @@ <span class="hunk-context"></span></td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="1"></td><td class="sign">+</td><td class="code">-- The search endpoint filters items by name.</td></tr>
+<tr class="line line-add line-flagged sev-minor"><td class="num num-old"></td><td class="num num-new" data-n="2"></td><td class="sign">+</td><td class="code">CREATE INDEX items_name_idx ON items (name);</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f8">
+<header class="finding-head">
+<a class="finding-id" href="#index-f8">8</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 8</h4>
+<span class="finding-where">db/migrations/002_index_item_names.sql:2</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: squawk:require-concurrent-index-creation</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c8</span>
+<a class="finding-back" href="#index-f8">Back to the findings list</a>
+</footer>
+</article></td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-7">
+<header class="file-header">
+<h3 class="file-path">deploy/deployment.yaml</h3>
+
+<span class="file-status">modified</span>
+<span class="file-counts"><span class="added">+3</span> <span class="removed">-1</span></span>
+<span class="file-findings">4 findings</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -38,7 +38,9 @@ <span class="hunk-context">spec:</span></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="38"></td><td class="num num-new" data-n="38"></td><td class="sign"> </td><td class="code">          ports:</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="39"></td><td class="num num-new" data-n="39"></td><td class="sign"> </td><td class="code">            - containerPort: 5000</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="40"></td><td class="num num-new" data-n="40"></td><td class="sign"> </td><td class="code">          securityContext:</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="41"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">            allowPrivilegeEscalation: false</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="41"></td><td class="sign">+</td><td class="code">            # The health check pings the database host with raw sockets.</td></tr>
+<tr class="line line-add line-flagged sev-major"><td class="num num-old"></td><td class="num num-new" data-n="42"></td><td class="sign">+</td><td class="code">            privileged: true</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-major" id="f5">
+<header class="finding-head">
+<a class="finding-id" href="#index-f5">5</a>
+<span class="severity sev-major">major</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 5</h4>
+<span class="finding-where">deploy/deployment.yaml:42</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: kube-linter:privileged-container</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c5</span>
+<a class="finding-back" href="#index-f5">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f13">
+<header class="finding-head">
+<a class="finding-id" href="#index-f13">13</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 13</h4>
+<span class="finding-where">deploy/deployment.yaml:42</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: checkov:CKV_K8S_16</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c13</span>
+<a class="finding-back" href="#index-f13">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-add line-flagged sev-major"><td class="num num-old"></td><td class="num num-new" data-n="43"></td><td class="sign">+</td><td class="code">            allowPrivilegeEscalation: true</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-major" id="f6">
+<header class="finding-head">
+<a class="finding-id" href="#index-f6">6</a>
+<span class="severity sev-major">major</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 6</h4>
+<span class="finding-where">deploy/deployment.yaml:43</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: kube-linter:privilege-escalation-container</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c6</span>
+<a class="finding-back" href="#index-f6">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f14">
+<header class="finding-head">
+<a class="finding-id" href="#index-f14">14</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 14</h4>
+<span class="finding-where">deploy/deployment.yaml:43</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: checkov:CKV_K8S_20</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c14</span>
+<a class="finding-back" href="#index-f14">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="42"></td><td class="num num-new" data-n="44"></td><td class="sign"> </td><td class="code">            readOnlyRootFilesystem: true</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="43"></td><td class="num num-new" data-n="45"></td><td class="sign"> </td><td class="code">            capabilities:</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="44"></td><td class="num num-new" data-n="46"></td><td class="sign"> </td><td class="code">              drop: [&quot;ALL&quot;]</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-8">
+<header class="file-header">
+<h3 class="file-path">infra/main.tf</h3>
+
+<span class="file-status">modified</span>
+<span class="file-counts"><span class="added">+2</span> <span class="removed">-1</span></span>
+<span class="file-findings">2 findings</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -24,7 +24,8 @@ <span class="hunk-context">resource &quot;aws_security_group&quot; &quot;api&quot; {</span></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="24"></td><td class="num num-new" data-n="24"></td><td class="sign"> </td><td class="code">    from_port   = 22</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="25"></td><td class="num num-new" data-n="25"></td><td class="sign"> </td><td class="code">    to_port     = 22</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="26"></td><td class="num num-new" data-n="26"></td><td class="sign"> </td><td class="code">    protocol    = &quot;tcp&quot;</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="27"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">    cidr_blocks = [&quot;203.0.113.0/24&quot;]</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="27"></td><td class="sign">+</td><td class="code">    # Open while the office VPN is down.</td></tr>
+<tr class="line line-add line-flagged sev-major"><td class="num num-old"></td><td class="num num-new" data-n="28"></td><td class="sign">+</td><td class="code">    cidr_blocks = [&quot;0.0.0.0/0&quot;]</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-major" id="f4">
+<header class="finding-head">
+<a class="finding-id" href="#index-f4">4</a>
+<span class="severity sev-major">major</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 4</h4>
+<span class="finding-where">infra/main.tf:28</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: trivy:AWS-0107</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c4</span>
+<a class="finding-back" href="#index-f4">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f15">
+<header class="finding-head">
+<a class="finding-id" href="#index-f15">15</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 15</h4>
+<span class="finding-where">infra/main.tf:28</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: checkov:CKV_AWS_24</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c15</span>
+<a class="finding-back" href="#index-f15">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="28"></td><td class="num num-new" data-n="29"></td><td class="sign"> </td><td class="code">  }</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="29"></td><td class="num num-new" data-n="30"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="30"></td><td class="num num-new" data-n="31"></td><td class="sign"> </td><td class="code">  egress {</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-9">
+<header class="file-header">
+<h3 class="file-path">package-lock.json</h3>
+
+<span class="file-status">modified</span>
+<span class="file-counts"><span class="added">+4</span> <span class="removed">-4</span></span>
+<span class="file-findings file-findings-none">no findings</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -8,13 +8,13 @@ <span class="hunk-context"></span></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="8"></td><td class="num num-new" data-n="8"></td><td class="sign"> </td><td class="code">      &quot;name&quot;: &quot;demo-shop&quot;,</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="9"></td><td class="num num-new" data-n="9"></td><td class="sign"> </td><td class="code">      &quot;version&quot;: &quot;1.0.0&quot;,</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="10"></td><td class="num num-new" data-n="10"></td><td class="sign"> </td><td class="code">      &quot;dependencies&quot;: {</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="11"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">        &quot;lodash&quot;: &quot;4.18.1&quot;</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="11"></td><td class="sign">+</td><td class="code">        &quot;lodash&quot;: &quot;4.17.15&quot;</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="12"></td><td class="num num-new" data-n="12"></td><td class="sign"> </td><td class="code">      }</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="13"></td><td class="num num-new" data-n="13"></td><td class="sign"> </td><td class="code">    },</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="14"></td><td class="num num-new" data-n="14"></td><td class="sign"> </td><td class="code">    &quot;node_modules/lodash&quot;: {</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="15"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">      &quot;version&quot;: &quot;4.18.1&quot;,</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="16"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">      &quot;resolved&quot;: &quot;https://registry.npmjs.org/lodash/-/lodash-4.18.1.tgz&quot;,</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="17"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">      &quot;integrity&quot;: &quot;sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==&quot;,</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="15"></td><td class="sign">+</td><td class="code">      &quot;version&quot;: &quot;4.17.15&quot;,</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="16"></td><td class="sign">+</td><td class="code">      &quot;resolved&quot;: &quot;https://registry.npmjs.org/lodash/-/lodash-4.17.15.tgz&quot;,</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="17"></td><td class="sign">+</td><td class="code">      &quot;integrity&quot;: &quot;sha512-8xOcRHvCjnocdS5cpwXQXVzmmh5e5+saE2QGoeQmbKmRS6J3VQppPOIt0MnmE+4xlZoumy0GPG0D0MVIQbNA1A==&quot;,</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="18"></td><td class="num num-new" data-n="18"></td><td class="sign"> </td><td class="code">      &quot;license&quot;: &quot;MIT&quot;</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="19"></td><td class="num num-new" data-n="19"></td><td class="sign"> </td><td class="code">    }</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="20"></td><td class="num num-new" data-n="20"></td><td class="sign"> </td><td class="code">  }</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-10">
+<header class="file-header">
+<h3 class="file-path">package.json</h3>
+
+<span class="file-status">modified</span>
+<span class="file-counts"><span class="added">+1</span> <span class="removed">-1</span></span>
+<span class="file-findings file-findings-none">no findings</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -4,6 +4,6 @@ <span class="hunk-context"></span></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="4"></td><td class="num num-new" data-n="4"></td><td class="sign"> </td><td class="code">  &quot;private&quot;: true,</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="5"></td><td class="num num-new" data-n="5"></td><td class="sign"> </td><td class="code">  &quot;description&quot;: &quot;Front-end helpers for the demo shop.&quot;,</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="6"></td><td class="num num-new" data-n="6"></td><td class="sign"> </td><td class="code">  &quot;dependencies&quot;: {</td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="7"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">    &quot;lodash&quot;: &quot;4.18.1&quot;</td></tr>
+<tr class="line line-add"><td class="num num-old"></td><td class="num num-new" data-n="7"></td><td class="sign">+</td><td class="code">    &quot;lodash&quot;: &quot;4.17.15&quot;</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="8"></td><td class="num num-new" data-n="8"></td><td class="sign"> </td><td class="code">  }</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="9"></td><td class="num num-new" data-n="9"></td><td class="sign"> </td><td class="code">}</td></tr>
+</tbody>
+</table>
+</section>
+<section class="file" id="file-11">
+<header class="file-header">
+<h3 class="file-path">scripts/deploy.sh</h3>
+
+<span class="file-status">modified</span>
+<span class="file-counts"><span class="added">+2</span> <span class="removed">-2</span></span>
+<span class="file-findings">2 findings</span>
+</header>
+<table class="diff"><colgroup><col class="col-num"><col class="col-num"><col class="col-sign"><col class="col-code"></colgroup>
+<tbody class="hunk">
+<tr class="hunk-header"><td class="num" colspan="2"></td><td class="code" colspan="2">@@ -4,10 +4,10 @@ <span class="hunk-context">set -euo pipefail</span></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="4"></td><td class="num num-new" data-n="4"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="5"></td><td class="num num-new" data-n="5"></td><td class="sign"> </td><td class="code">DEPLOY_DIR=&quot;${DEPLOY_DIR:-/srv/demo}&quot;</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="6"></td><td class="num num-new" data-n="6"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="7"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">rm -rf &quot;${DEPLOY_DIR:?}/&quot;</td></tr>
+<tr class="line line-add line-flagged sev-minor"><td class="num num-old"></td><td class="num num-new" data-n="7"></td><td class="sign">+</td><td class="code">rm -rf $DEPLOY_DIR/</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-minor" id="f16">
+<header class="finding-head">
+<a class="finding-id" href="#index-f16">16</a>
+<span class="severity sev-minor">minor</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 16</h4>
+<span class="finding-where">scripts/deploy.sh:7</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: shellcheck:SC2115</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c16</span>
+<a class="finding-back" href="#index-f16">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="8"></td><td class="num num-new" data-n="8"></td><td class="sign"> </td><td class="code">mkdir -p &quot;$DEPLOY_DIR&quot;</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="9"></td><td class="num num-new" data-n="9"></td><td class="sign"> </td><td class="code">cp -R app requirements.txt &quot;$DEPLOY_DIR/&quot;</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="10"></td><td class="num num-new" data-n="10"></td><td class="sign"> </td><td class="code"></td></tr>
+<tr class="line line-del"><td class="num num-old" data-n="11"></td><td class="num num-new"></td><td class="sign">-</td><td class="code">for file in &quot;$DEPLOY_DIR&quot;/*; do</td></tr>
+<tr class="line line-add line-flagged sev-major"><td class="num num-old"></td><td class="num num-new" data-n="11"></td><td class="sign">+</td><td class="code">for file in $(ls $DEPLOY_DIR); do</td></tr>
+<tr class="finding-row"><td colspan="4"><article class="finding-card sev-major" id="f7">
+<header class="finding-head">
+<a class="finding-id" href="#index-f7">7</a>
+<span class="severity sev-major">major</span>
+<span class="category">bug</span>
+<h4 class="finding-title">Planted problem number 7</h4>
+<span class="finding-where">scripts/deploy.sh:11</span>
+</header>
+<dl class="finding-body">
+<dt>Problem</dt><dd><p>This changed line introduces an unsafe operation.</p></dd><dt>Why it matters</dt><dd><p>The affected behavior can fail when this path runs.</p></dd><dt>Fix</dt><dd><p>Correct the flagged operation before using this change.</p></dd>
+</dl>
+
+<footer class="finding-foot">
+<span class="finding-source">Source: shellcheck:SC2045</span>
+<span class="finding-confidence">confidence 1</span>
+<span class="finding-candidate">raises c7</span>
+<a class="finding-back" href="#index-f7">Back to the findings list</a>
+</footer>
+</article></td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="12"></td><td class="num num-new" data-n="12"></td><td class="sign"> </td><td class="code">  echo &quot;deployed: $file&quot;</td></tr>
+<tr class="line line-ctx"><td class="num num-old" data-n="13"></td><td class="num num-new" data-n="13"></td><td class="sign"> </td><td class="code">done</td></tr>
+</tbody>
+</table>
+</section>
+</div>
+</div>
+<section class="accounting" id="accounting"><h2>Review accounting</h2><table class="table table-keyed"><thead><tr><th>What</th><th class="n">Count</th><th>Detail</th></tr></thead><tbody><tr><td>Raised by the reviewer</td><td class="n">17</td><td>0 from its own reading, 17 from scanner candidates</td></tr><tr><td>Dropped by the reviewer</td><td class="n">0</td><td>none</td></tr><tr><td>Not reviewed, counted at scanner severity</td><td class="n">0</td><td>none</td></tr><tr><td>Below the confidence floor</td><td class="n">0</td><td>none</td></tr><tr><td>Below the severity threshold</td><td class="n">7</td><td>left out of the findings, never counted</td></tr><tr><td>Outside the changed lines</td><td class="n">0</td><td>none</td></tr><tr><td>Scanner results not kept</td><td class="n">3</td><td>a result is kept only when it sits on a changed line; zizmor 1, trivy 2</td></tr><tr><td>Left out, change too large</td><td class="n">0</td><td>none</td></tr></tbody></table></section>
+<section class="scanners" id="scanners"><h2>Scanners</h2><p>15 scanners ran, 5 had nothing to check.</p><table class="table "><thead><tr><th>Scanner</th><th>Status</th><th>Version</th><th class="n">Found</th><th class="n">Kept</th><th class="n">Time</th><th>Reason</th></tr></thead><tbody><tr><td><span class="mono">gitleaks</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">8.21.2</span></td><td class="n">1</td><td class="n">1</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">sqllint</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono"></span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">squawk</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">2.66.0</span></td><td class="n">4</td><td class="n">4</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">sqlfluff</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">4.3.0</span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">cargo-deny</span></td><td><span class="scanner-status scanner-no_matching_files">no matching files</span></td><td><span class="mono"></span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">actionlint</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">1.7.7</span></td><td class="n">1</td><td class="n">1</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">zizmor</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">1.30.1</span></td><td class="n">1</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">hadolint</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">2.15.1</span></td><td class="n">7</td><td class="n">7</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">trivy</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">0.75.0</span></td><td class="n">3</td><td class="n">1</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">checkov</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">3.3.22</span></td><td class="n">3</td><td class="n">3</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">tflint</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">0.64.0</span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">kube-linter</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">0.8.3</span></td><td class="n">2</td><td class="n">2</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">kubeconform</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">0.8.0</span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">shellcheck</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">0.10.0</span></td><td class="n">4</td><td class="n">4</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">ruff</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">0.8.4</span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">brakeman</span></td><td><span class="scanner-status scanner-no_matching_files">no matching files</span></td><td><span class="mono"></span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">rubocop</span></td><td><span class="scanner-status scanner-no_matching_files">no matching files</span></td><td><span class="mono"></span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">bandit</span></td><td><span class="scanner-status scanner-ran">ran</span></td><td><span class="mono">1.9.4</span></td><td class="n">1</td><td class="n">1</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">oxlint</span></td><td><span class="scanner-status scanner-no_matching_files">no matching files</span></td><td><span class="mono"></span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr><tr><td><span class="mono">golangci</span></td><td><span class="scanner-status scanner-no_matching_files">no matching files</span></td><td><span class="mono"></span></td><td class="n">0</td><td class="n">0</td><td class="n"><SECONDS> s</td><td></td></tr></tbody></table></section>
+<section class="blast-radius" id="blast-radius"><h2>Blast radius</h2><p>Risk low: 2 symbols touched, 0 callers in 0 files.</p><p class="muted">Built on this machine from the call graph of 4 files in <SECONDS> s; 6 call sites could not be bound to a definition and are not counted. The graph cannot see dynamic calls, so a symbol with no listed caller may still be called.</p><h3>Touched symbols by file <span class="count">(2 symbols in 2 files)</span></h3><table class="table "><thead><tr><th>File</th><th class="n">Symbols</th><th>Names</th></tr></thead><tbody><tr><td><span class="mono">app/search.py</span></td><td class="n">1</td><td><span class="mono">search_items</span></td></tr><tr><td><span class="mono">app/server.py</span></td><td class="n">1</td><td><span class="mono">list_items</span></td></tr></tbody></table><p>No caller of the touched code was found in the graph.</p><h3>Changed files that others import <span class="count">(1 file, 1 importing file)</span></h3><table class="table table-narrow"><thead><tr><th>Changed file</th><th class="n">Imported by</th></tr></thead><tbody><tr><td><span class="mono">app/search.py</span></td><td class="n">1</td></tr></tbody></table></section>
+</main>
+<div class="page">
+<footer class="footer">
+<p>Reviewer: codex 0.160.0, <SECONDS> s, 1 turn, 1,000 tokens in, 500 out. Generated <TIMESTAMP> by openqodex 0.11.0. Report schema version 1.</p>
+<p>report.md, report.json and report.sarif are beside this file. To have your agent fix findings by number, say:</p>
+<p class="ask"><code>Fix OpenQodex findings 1, 2 from <DEMO>/.openqodex/reviews/<RUN_ID>/report.md</code></p>
+<p>This page is a file on your disk. It loads nothing, runs no script and sends nothing.</p>
+<p class="closing">Made by Qodex: review on every pull request at <a href="https://qodex.ai" rel="noreferrer">https://qodex.ai</a></p>
+</footer>
+</div>
+</body>
+</html>

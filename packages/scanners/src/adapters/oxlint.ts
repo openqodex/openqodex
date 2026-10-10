@@ -32,6 +32,7 @@ import { safeFileArgs } from "../safe-args.js";
 import type { RepoFacts } from "../detect.js";
 import type { Adapter } from "./index.js";
 import { withOwnedConfig } from "./owned-config.js";
+import type { Scratch } from "../scratch.js";
 import { groupBy } from "./group.js";
 import { folderList, listAnd, suchAs } from "./words.js";
 
@@ -84,6 +85,7 @@ export async function runOxlint(args: {
   changedPaths: string[];
   tool: ResolvedTool | null;
   facts: RepoFacts;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const jsFiles = jsTsFiles(args.changedPaths);
   if (jsFiles.length === 0) return { findings: [], error: null };
@@ -101,7 +103,7 @@ export async function runOxlint(args: {
     // One process per group of files with the same plugins, and per chunk
     // of a group, so a whole-repo file list stays under the argument limit;
     // the findings of every run are merged.
-    return await withOwnedConfig("oxlintrc.json", "{}\n", async (configPath) => {
+    return await withOwnedConfig(args.scratch.temp, "oxlintrc.json", "{}\n", async (configPath) => {
       const findings: StaticFinding[] = [];
       for (const [key, files] of oxlintGroups(jsFiles, args.facts)) {
         const flags = key === "" ? [] : key.split(",").map((plugin) => `--${plugin}-plugin`);

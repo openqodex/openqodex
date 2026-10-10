@@ -38,7 +38,7 @@ A repository with no commits checks every file with `scan`; `review` needs a fir
 - `--no-install`: do not download missing scanners. The report lists them as not installed.
 - `--offline`: no built-in scanner goes online. osv-scanner and semgrep are skipped and listed as disabled. Scanner downloads are off. The daily version check does not start after this run.
 
-`doctor --install` together with `--offline` or `--no-install` exits 2, and so does `--all-scanners` without `--install`.
+`doctor --install` together with `--offline` or `--no-install` exits 2, and so does `--all-scanners` without `--install`, or `--require-all` without `--install --all-scanners`. `doctor --install --all-scanners --require-all` exits 2 when a scanner is missing after the install or does not report its check case.
 
 Progress goes to stderr. A scan's report goes to stdout; a review prints its receipt there.
 

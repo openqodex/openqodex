@@ -43,8 +43,8 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { CODEX_TESTED, PROBE_REFUSED, codexArgs, codexDriver, codexEnv, codexVersion, olderThanTested, probeSandbox, probeVerdict } from "../src/reviewers/codex.js";
-import { DEPTH_ENV, findOnPath } from "../src/reviewers/driver.js";
+import { CODEX_TESTED, PROBE_REFUSED, codexArgs, codexDriver, codexEnv, codexVersion, olderThanTested, probeSandbox, probeVerdict } from "@openqodex/review";
+import { DEPTH_ENV, findOnPath } from "@openqodex/review";
 import { openqodexHomeDir } from "../src/launcher.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 

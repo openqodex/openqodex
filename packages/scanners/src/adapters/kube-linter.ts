@@ -37,6 +37,7 @@ import { safeFileArgs } from "../safe-args.js";
 import type { Adapter } from "./index.js";
 import { anchorLine, findDocument, kubeDocuments, type Anchor, type KubeDoc } from "./kube-yaml.js";
 import { withOwnedConfig } from "./owned-config.js";
+import type { Scratch } from "../scratch.js";
 import { readRepoFile } from "./read.js";
 import { suchAs } from "./words.js";
 
@@ -147,6 +148,7 @@ export async function runKubeLinter(args: {
   changedPaths: string[];
   tool: ResolvedTool | null;
   facts: RepoFacts;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const files = kubernetesFiles(args.changedPaths, args.facts);
   if (files.length === 0) return { findings: [], error: null };
@@ -160,7 +162,7 @@ export async function runKubeLinter(args: {
     // The plain spelling is enough.
   }
   try {
-    const findings = await withOwnedConfig("kube-linter.yaml", KUBE_LINTER_CONFIG, (configPath) =>
+    const findings = await withOwnedConfig(args.scratch.temp, "kube-linter.yaml", KUBE_LINTER_CONFIG, (configPath) =>
       runInChunks("kube-linter", safeFileArgs(files), KUBE_LINTER_TIMEOUT_MS, async (chunk, left) => {
         // --config: the owned config, so the repo's .kube-linter.yaml is
         // never looked for. -- ends the flags before the file names.

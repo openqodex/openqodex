@@ -3,9 +3,14 @@
 // Each case guards the invocation, the output parser, the changed-line
 // filter and tool resolution together; the proxy cases hold the network
 // promises in docs/scanners.md. Run by the end-to-end config.
+//
+// Added after the code review of the library branch, one more way it could
+// fail: a server run of cargo-deny writes in the preinstalled Cargo home
+// (its lock file, its last-use record, unpacked crates), or, with a Cargo
+// home of its own, cannot read the crates the preinstalled one holds.
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +18,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { parseConfig } from "@openqodex/core";
 import type { BuiltinScanner } from "@openqodex/core";
 import { runScanners } from "@openqodex/scanners";
-import { installedOnly, resolveFirst, scan, withLoggingProxy } from "./subprocess-support.js";
+import { installedOnly, plant, resolveFirst, scan, withLoggingProxy } from "./subprocess-support.js";
 import type { Case } from "./subprocess-support.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
@@ -253,6 +258,49 @@ describe("Kubernetes and Rust scanner subprocesses", () => {
     ran++;
     expect(status.status, status.reason ?? "").toBe("ran");
     expect(result.scan.candidates).toContainEqual(expect.objectContaining({ source: "cargo-deny", ruleId: "RUSTSEC-2021-0003", filePath: "Cargo.lock", lineStart: 6, lineEnd: 7 }));
+  }, 300_000);
+
+  // The same lock in a server run: cargo-deny's Cargo home is the run's own,
+  // filled from the preinstalled one, which is read and never written.
+  it("cargo-deny in a server run reads the crates the preinstalled Cargo home holds and writes nothing there", async () => {
+    if (offline()) {
+      skipped++;
+      process.stdout.write("cargo-deny server run: skipped, OPENQODEX_E2E_OFFLINE=1\n");
+      return;
+    }
+    if (!primeCargo(RUST_PROJECT)) {
+      skipped++;
+      process.stdout.write("cargo-deny server run: skipped, this machine has no cargo\n");
+      return;
+    }
+    const cargoHome = process.env.CARGO_HOME ?? join(userInfo().homedir, ".cargo");
+    // Every entry of the Cargo home with its kind, size and time.
+    const listing = () =>
+      Object.fromEntries(
+        readdirSync(cargoHome, { recursive: true, withFileTypes: true }).map((e) => {
+          const p = join(e.parentPath, e.name);
+          const st = lstatSync(p);
+          return [p, st.isDirectory() ? "dir" : `${st.size} ${st.mtimeMs}`];
+        }),
+      );
+    const before = listing();
+    const spec = { scanner: "cargo-deny" as const, rule: "", files: RUST_PROJECT, anchor: "" };
+    const repo = plant(spec);
+    const paths = Object.keys(RUST_PROJECT);
+    const result = await runScanners({
+      repoDir: repo,
+      changedPaths: paths,
+      coverage: new Map(paths.map((p) => [p, new Set(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))])),
+      config: parseConfig("").config,
+      resolveTool: installedOnly(),
+      only: ["cargo-deny"],
+      scratchRoot: join(tempDir("oq-cargo-server-"), "scratch"),
+    });
+    const status = result.scan.scanners[0]!;
+    ran++;
+    expect(status.status, status.reason ?? "").toBe("ran");
+    expect(result.scan.candidates).toContainEqual(expect.objectContaining({ source: "cargo-deny", ruleId: "RUSTSEC-2021-0003", filePath: "Cargo.lock", lineStart: 6, lineEnd: 7 }));
+    expect(listing()).toEqual(before);
   }, 300_000);
 
   // osv-scanner (through osv.dev) and cargo-deny (through the RustSec

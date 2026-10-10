@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url";
 // The only variables a process the check starts receives, besides the ones
 // the check sets (HOME, OPENQODEX_HOME and the like): what node, git and tar
 // need to run and to reach the registry. Built from an allowlist, as the
-// reviewer drivers build theirs (packages/cli/src/reviewers/claude.ts), so
+// reviewer drivers build theirs (packages/review/src/agents/claude.ts), so
 // no token of the job (NPM_TOKEN, NODE_AUTH_TOKEN, GITHUB_TOKEN, the Actions
 // OIDC request token, a cloud key) reaches a package under test.
 export const ALLOWED_ENV = ["PATH", "LANG", "TZ", "TMPDIR", "TERM", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"];

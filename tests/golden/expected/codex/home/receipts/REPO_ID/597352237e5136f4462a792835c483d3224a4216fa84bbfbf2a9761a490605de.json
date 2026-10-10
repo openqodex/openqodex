@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "change_id": "597352237e5136f4462a792835c483d3224a4216fa84bbfbf2a9761a490605de",
+  "kind": "complete",
+  "verdict": "passed",
+  "block_on_severity": null,
+  "base": {
+    "ref": "HEAD",
+    "sha": "3df34a143822f5d11221fbcb144b05ce0f11e222"
+  },
+  "report": ".openqodex/reviews/<RUN_ID>/report.md",
+  "html": "<DEMO>/.openqodex/reviews/<RUN_ID>/report.html",
+  "counts": "7 major, 10 minor",
+  "missing": null,
+  "written_at": "<TIMESTAMP>"
+}

@@ -10,11 +10,11 @@
 // Its temp files go to a folder of its own, removed after the scan.
 
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import type { AdapterResult, ResolvedTool, StaticFinding } from "@openqodex/core";
 import { describeFailure, execTool, runInChunks, isOffline, stderrTail } from "../exec.js";
 import { safeFileArgs } from "../safe-args.js";
+import type { Scratch } from "../scratch.js";
 import type { Adapter } from "./index.js";
 
 const SEMGREP_TIMEOUT_MS = 60_000;
@@ -47,6 +47,7 @@ export type SemgrepRunArgs = {
   // args so semgrep only scans changed files, not the whole repo.
   changedPaths: string[];
   tool: ResolvedTool | null;
+  scratch: Scratch;
 };
 
 export async function runSemgrep(args: SemgrepRunArgs): Promise<AdapterResult> {
@@ -82,7 +83,7 @@ export async function runSemgrep(args: SemgrepRunArgs): Promise<AdapterResult> {
   // whatever the exit.
   let tmp: string;
   try {
-    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openqodex-semgrep-"));
+    tmp = await fs.mkdtemp(path.join(args.scratch.temp, "openqodex-semgrep-"));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { findings: [], error: `mkdtemp: ${message.slice(0, 200)}` };

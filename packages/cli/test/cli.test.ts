@@ -48,7 +48,8 @@
 // 23. doctor --install in a repository installs scanners its files do not
 //     call for (brakeman in a TypeScript repo) or ones its config switches
 //     off; outside a repository, or with --all-scanners, it installs less
-//     than every scanner; --all-scanners is taken without --install.
+//     than every scanner; --all-scanners is taken without --install, or
+//     --require-all without --install --all-scanners.
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
@@ -395,6 +396,9 @@ describe("doctor", () => {
     const alone = cli(["doctor", "--all-scanners"], repo);
     expect(alone.code).toBe(2);
     expect(alone.stderr).toContain("--all-scanners goes with --install");
+    const requireAlone = cli(["doctor", "--install", "--require-all"], repo);
+    expect(requireAlone.code).toBe(2);
+    expect(requireAlone.stderr).toContain("--require-all goes with --install --all-scanners");
   });
 
   it("doctor exits 0 for a --config or --cwd that does not exist", () => {

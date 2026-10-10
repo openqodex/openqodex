@@ -3,7 +3,7 @@
 // indent) or for markdown (headings, bullets and bold labels). The words and
 // their order are the same in both; only the markup differs.
 import pc from "picocolors";
-import type { Report, ReportFinding, ReviewerRecord } from "../types.js";
+import type { ModelCompletionRecord, Report, ReportFinding, ReviewerRecord } from "../types.js";
 import { candidateLocation, coverageLine, display, escapeMarkdown, location, notOpenedLabel, orderFindings, severityBreakdown, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
 
@@ -33,6 +33,23 @@ export function reviewerLine(r: ReviewerRecord | null): string {
   return `Reviewer: ${parts.join(", ")}`;
 }
 
+// The reviewer line of a model review, from the brain's own record of every
+// attempt: the requested model (and the models that answered, when another
+// one did), the calls made, and the tokens and cost the responses reported.
+// A value no response reported is "not reported", never a zero.
+export function modelReviewerLine(record: ModelCompletionRecord): string {
+  const r = record.reviewer;
+  const answered = record.attempts.filter((a) => a.usage !== null);
+  // A sum is known only when every response that came back reported its part.
+  const sum = (values: (number | null | undefined)[]): number | null => (values.length > 0 && values.every((v) => typeof v === "number") ? (values as number[]).reduce((n, v) => n + v, 0) : null);
+  const input = sum(answered.map((a) => a.usage?.inputTokens));
+  const output = sum(answered.map((a) => a.usage?.outputTokens));
+  const cost = sum(answered.map((a) => a.usage?.costUsd));
+  const served = r.servedModels.length > 0 && (r.servedModels.length !== 1 || r.servedModels[0] !== r.model) ? ` (served by ${r.servedModels.join(", ")})` : "";
+  const shown = (n: number | null) => (n === null ? "not reported" : n.toLocaleString("en-US"));
+  return `Reviewed by a model reviewer, ${r.model}${served}, ${plural(r.calls, "call", "calls")}, tokens in ${shown(input)}, out ${shown(output)}, cost ${cost === null ? "not reported" : `$${cost.toFixed(2)}`}`;
+}
+
 // "1. Critical security: Search query built from request input"
 const findingLabel = (f: ReportFinding, n: number) => `${n}. ${f.severity[0]?.toUpperCase()}${f.severity.slice(1)} ${f.category}: ${f.title}`;
 
@@ -44,6 +61,16 @@ function findingLines(f: ReportFinding, n: number): Line[] {
     { kind: "field", label: "Why it matters", text: f.consequence ?? "" },
     { kind: "field", label: "Fix", text: f.fix ?? "" },
     { kind: "field", label: "Source", text: f.source ?? "the reviewer" },
+    ...(f.found_by ? [{ kind: "field" as const, label: "Found by", text: f.found_by.join(", ") }] : []),
+  ];
+}
+
+// A dropped candidate, as one item and its source.
+function droppedLines(d: Report["dropped"][number]): Line[] {
+  const cited = d.cited ? ` (see ${d.cited.file_path}:${d.cited.line_number})` : "";
+  return [
+    { kind: "item", text: `${d.candidate.id} at ${candidateLocation(d.candidate)}: ${d.reason}${cited}` },
+    { kind: "field", label: "Source", text: d.candidate.token },
   ];
 }
 
@@ -77,11 +104,20 @@ function lines(report: Report): Line[] {
 
   if (report.dropped.length > 0) {
     out.push({ kind: "heading", text: `Dropped scanner candidates (${report.dropped.length})` });
-    for (const d of report.dropped) {
-      const cited = d.cited ? ` (see ${d.cited.file_path}:${d.cited.line_number})` : "";
-      out.push({ kind: "item", text: `${d.candidate.id} at ${candidateLocation(d.candidate)}: ${d.reason}${cited}` });
-      out.push({ kind: "field", label: "Source", text: d.candidate.token });
-    }
+    for (const d of report.dropped) out.push(...droppedLines(d));
+  }
+  if (report.second_dropped && report.second_dropped.length > 0) {
+    out.push({ kind: "heading", text: `Dropped by the second reviewer (${report.second_dropped.length})` });
+    for (const d of report.second_dropped) out.push(...droppedLines(d));
+  }
+  const disagreements = c?.contract === "openqodex-model-review-1" ? (c.disagreements ?? []) : [];
+  if (disagreements.length > 0) {
+    out.push({ kind: "heading", text: `Disagreements (${disagreements.length})` });
+    for (const d of disagreements) out.push({ kind: "item", text: `${d.candidate}: raised by ${d.raisedBy}, dropped by ${d.droppedBy}${d.reason ? ` (${d.reason})` : ""}` });
+  }
+  if (report.notes && report.notes.length > 0) {
+    out.push({ kind: "heading", text: "Notes" });
+    for (const n of report.notes) out.push({ kind: "text", text: n });
   }
   if (report.low_confidence.length > 0) {
     out.push({ kind: "heading", text: "Below the confidence floor (not counted)" });
@@ -102,7 +138,7 @@ function lines(report: Report): Line[] {
   }
   if (report.not_reviewed_paths.length > 0) out.push({ kind: "field", label: "Left out, change too large", text: report.not_reviewed_paths.join(", ") });
   out.push({ kind: "text", text: `Scanners: ${coverageLine(report.scanners)}` });
-  out.push({ kind: "text", text: reviewerLine(c?.reviewer ?? null) });
+  out.push({ kind: "text", text: c?.contract === "openqodex-model-review-1" ? modelReviewerLine(c) : reviewerLine(c?.reviewer ?? null) });
   out.push({ kind: "text", text: CLOSING });
   return out;
 }

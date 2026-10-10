@@ -26,7 +26,7 @@ import { commitLines, INSTRUCTIONS_LINE, planRepoFiles, planRepoFilesRemoval, RO
 import { clineCliData, targetsFor, teamSection, teamTargets, type Scope, type Target } from "../agents/targets.js";
 import { runningContract } from "../contract.js";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
-import { hostAgent } from "../reviewers/driver.js";
+import { hostAgent } from "@openqodex/review";
 import { launcherPath, launcherRunner, launcherUsers, oldLocks, openqodexHomeDir, planRuntime, planRuntimeRemoval, pruneRuntimes, removeOldLocks, staleRuntimes } from "../launcher.js";
 import { planGitHook, planGitHookRemoval, setHookChoice } from "./hook.js";
 import { firstReviewLine, reviewAfterInit } from "./init-review.js";

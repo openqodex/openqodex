@@ -1,0 +1,18 @@
+{
+  "version": 3,
+  "change_id": "597352237e5136f4462a792835c483d3224a4216fa84bbfbf2a9761a490605de",
+  "config_hash": "bb5a14e29e83019aee75407355284dc4e41382c99ceb8724b852c108e08210d3",
+  "created_at": "<TIMESTAMP>",
+  "lenses": [
+    {
+      "name": "missing-rate-limit-on-auth",
+      "confidenceFloor": 0.7
+    },
+    {
+      "name": "sql-string-concatenation",
+      "confidenceFloor": 0.75
+    }
+  ],
+  "instructions_hash": "76ebe99d5ac7eb3bfcf8cfce3800e7d9645de07707f045d5846c1563f7ec5ab4",
+  "runtime_version": "0.11.0"
+}

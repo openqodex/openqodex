@@ -32,6 +32,7 @@ import { describeFailure, execTool, stderrTail } from "../exec.js";
 import type { RepoFacts } from "../detect.js";
 import type { Adapter } from "./index.js";
 import { withOwnedConfig } from "./owned-config.js";
+import type { Scratch } from "../scratch.js";
 import { folderList } from "./words.js";
 
 // Brakeman walks the whole app tree, so give it more headroom than the
@@ -75,6 +76,7 @@ export async function runBrakeman(args: {
   changedPaths: string[];
   tool: ResolvedTool | null;
   facts: RepoFacts;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const apps = railsApps(railsFiles(args.changedPaths, args.facts), args.facts);
   if (apps.length === 0) return { findings: [], error: null };
@@ -89,7 +91,7 @@ export async function runBrakeman(args: {
     // -q quiet, -f json the stable machine shape, --no-progress to keep
     // stdout pure JSON. No path arg: brakeman defaults to the cwd we set,
     // the app's folder. One app that fails keeps the others' findings.
-    return await withOwnedConfig("brakeman.yml", "--- {}\n", async (configPath) => {
+    return await withOwnedConfig(args.scratch.temp, "brakeman.yml", "--- {}\n", async (configPath) => {
       const cliArgs = ["-c", configPath, "-q", "-f", "json", "--no-progress"];
       const findings: StaticFinding[] = [];
       const errors: string[] = [];

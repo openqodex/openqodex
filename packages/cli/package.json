@@ -48,6 +48,15 @@
   "bin": {
     "openqodex": "./dist/bin.js"
   },
+  "main": "./dist/lib.js",
+  "types": "./dist/lib.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib.d.ts",
+      "import": "./dist/lib.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "lenses",
@@ -71,6 +80,7 @@
     "@openqodex/core": "workspace:*",
     "@openqodex/graph": "workspace:*",
     "@openqodex/mcp": "workspace:*",
+    "@openqodex/review": "workspace:*",
     "@openqodex/scanners": "workspace:*",
     "@sigstore/bundle": "5.0.0",
     "@sigstore/protobuf-specs": "0.5.2",

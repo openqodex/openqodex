@@ -5,9 +5,9 @@
 // the change calls for, from the files, the project each file is in and the
 // config; the tool is resolved only for those, everything runs in
 // parallel, then one pipeline: paths rebased to repo-relative, the
-// changed-line filter, the fixture filter, `disabled_rules`, cross-scanner
-// dedup, a severity sort, candidate ids. Custom scanners join after the
-// builtins through the same pipeline.
+// changed-line filter, the fixture filter, `disabled_rules`, one fixed
+// order, cross-scanner dedup, a severity sort, candidate ids. Custom
+// scanners join after the builtins through the same pipeline.
 //
 // Nothing a scanner does can reject this function: a missing tool, a
 // failed install, a timeout, bad JSON or a thrown error all become a status
@@ -48,17 +48,19 @@ import type { SettingsReader } from "./shared-settings.js";
 import { readRepoFile, repoFileOrReason, scannerInputs } from "./adapters/read.js";
 import type { Adapter } from "./adapters/index.js";
 import { dropFixtureFindings, filterToChangedLines } from "./filter.js";
+import { laptopScratch, scratchAt, type Scratch } from "./scratch.js";
 import { SEMGREP_MAX_TARGET_BYTES } from "./adapters/semgrep.js";
 import { findMarkers, SUPPRESSION_MARKERS } from "./suppression.js";
 
 // A custom scanner prepared by the custom module. `skipped` is set when the
 // entry must not run (untrusted, changed since approval); the runner then
-// records that summary and never calls `run`.
+// records that summary and never calls `run`. `scratch`: where the run may
+// write (scratch.ts); the laptop's places when left out.
 export type CustomAdapter = {
   source: ScannerSource;
   skipped: ScannerRunSummary | null;
   wants(changedPaths: string[]): boolean;
-  run(args: { repoDir: string; changedPaths: string[] }): Promise<AdapterResult & { version: string | null }>;
+  run(args: { repoDir: string; changedPaths: string[]; scratch?: Scratch }): Promise<AdapterResult & { version: string | null }>;
 };
 
 export type RunScannersResult = {
@@ -96,9 +98,16 @@ export async function runScanners(args: {
   only?: ScannerSource[];
   skip?: ScannerSource[];
   onProgress?: (line: string) => void;
+  // Where the run writes (scratch.ts). Left out, the laptop's places: caches
+  // under the OpenQodex home, temporary folders in the system temp folder.
+  // Given, for a server run: every folder the run makes or fills is under
+  // this one, and every scanner process gets its HOME and TMPDIR there. The
+  // caller removes it when the run is done.
+  scratchRoot?: string;
 }): Promise<RunScannersResult> {
   const selected = (source: ScannerSource): boolean =>
     (!args.only || args.only.includes(source)) && !(args.skip ?? []).includes(source);
+  const scratch = args.scratchRoot === undefined ? laptopScratch() : scratchAt(args.scratchRoot);
 
   // Read once for the whole run: every scanner and the suppression check ask
   // the same questions about the same files.
@@ -114,7 +123,7 @@ export async function runScanners(args: {
   );
   const builtins = ADAPTERS.filter((a) => selected(a.source)).map((adapter) =>
     guard(adapter.source, async () => {
-      const outcome = await runBuiltin(adapter, choices.get(adapter.source)!, facts, { ...args, changedPaths: inputs });
+      const outcome = await runBuiltin(adapter, choices.get(adapter.source)!, facts, { ...args, changedPaths: inputs, scratch });
       const held = refused.size === 0 || outcome.summary.status === "disabled" ? [] : adapter.files([...refused.keys()], facts);
       if (held.length === 0) return outcome;
       const named = held.map((p) => `${p}: ${refused.get(p)}`).join("; ");
@@ -123,7 +132,7 @@ export async function runScanners(args: {
   );
   const customs = (args.custom ?? [])
     .filter((c) => selected(c.source))
-    .map((custom) => guard(custom.source, () => runCustom(custom, args)));
+    .map((custom) => guard(custom.source, () => runCustom(custom, { ...args, scratch })));
   const outcomes = await Promise.all([...builtins, ...customs]);
 
   const secrets = outcomes.flatMap((o) => o.secrets);
@@ -180,10 +189,17 @@ export async function runScanners(args: {
           (f) => !args.config.disabledRules.some((glob) => matchesGlob(`${f.source}:${f.ruleId}`, glob)),
         );
 
-  // Cross-scanner dedup, then a severity sort that is stable within a
-  // severity, so ties keep the ensemble order (semgrep before gitleaks).
+  // One fixed order, whatever order the scanners printed in (checkov on
+  // Linux prints its framework reports as they finish, issue #89): by
+  // scanner in ensemble order (builtins, then custom scanners as configured),
+  // then file, line start, line end, rule id and message. The dedup then sees
+  // the same input every run, and the stable severity sort after it gives
+  // the candidates, and so their ids, the order severity, scanner, file,
+  // line start, line end, rule id, message.
+  const ensemble = [...ADAPTERS.map((a) => a.source), ...(args.custom ?? []).map((c) => c.source)];
+  const ordered = [...postRules].sort(placeOrder(ensemble));
   const mergedInto = new Map<StaticFinding, string[]>();
-  const deduped = dedupByRuleClass(postRules, mergedInto);
+  const deduped = dedupByRuleClass(ordered, mergedInto);
   deduped.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
 
   const candidates: Candidate[] = deduped.map((f, i) => ({
@@ -380,6 +396,7 @@ async function runBuiltin(
     coverage?: DiffCoverage;
     config: Config;
     resolveTool: ResolveTool;
+    scratch: Scratch;
   },
 ): Promise<Outcome> {
   const started = Date.now();
@@ -392,7 +409,10 @@ async function runBuiltin(
   if (!IN_PROCESS.has(source)) {
     const resolution = await args.resolveTool(source);
     if (!resolution.ok) return skippedOutcome(source, resolution.status, resolution.reason, started);
-    tool = resolution.tool;
+    // The tool's own environment on the laptop; on a scratch root, the
+    // scratch's variables on top and a Go or Cargo tool's caches moved into
+    // it (scratch.ts).
+    tool = args.scratch.laptop ? resolution.tool : { ...resolution.tool, env: args.scratch.toolEnv(resolution.tool.env) };
   }
 
   const ranFrom = Date.now();
@@ -402,20 +422,21 @@ async function runBuiltin(
     tool,
     coverage: args.coverage,
     facts,
+    scratch: args.scratch,
   });
   return ranOutcome(source, result, tool?.version ?? null, ranFrom);
 }
 
 async function runCustom(
   custom: CustomAdapter,
-  args: { repoDir: string; changedPaths: string[] },
+  args: { repoDir: string; changedPaths: string[]; scratch: Scratch },
 ): Promise<Outcome> {
   const started = Date.now();
   if (custom.skipped) return { summary: custom.skipped, findings: [], secrets: [] };
   if (!custom.wants(args.changedPaths)) {
     return skippedOutcome(custom.source, "no_matching_files", null, started);
   }
-  const result = await custom.run({ repoDir: args.repoDir, changedPaths: args.changedPaths });
+  const result = await custom.run({ repoDir: args.repoDir, changedPaths: args.changedPaths, scratch: args.scratch });
   return ranOutcome(custom.source, result, result.version, started);
 }
 
@@ -602,6 +623,26 @@ function severityRank(s: ScannerSeverity): number {
   return SEVERITY_RANK[s] ?? 0;
 }
 
+// Code unit order, the same on every machine (localeCompare is not).
+function byText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// Scanner (by its place in `ensemble`; one not there after them, by name),
+// file, line start, line end, rule id, message.
+function placeOrder(ensemble: ScannerSource[]): (a: StaticFinding, b: StaticFinding) => number {
+  const place = new Map(ensemble.map((s, i) => [s, i]));
+  const rank = (s: ScannerSource) => place.get(s) ?? ensemble.length;
+  return (a, b) =>
+    rank(a.source) - rank(b.source) ||
+    byText(a.source, b.source) ||
+    byText(a.filePath, b.filePath) ||
+    a.lineStart - b.lineStart ||
+    a.lineEnd - b.lineEnd ||
+    byText(a.ruleId, b.ruleId) ||
+    byText(a.message, b.message);
+}
+
 // Coarse category used for cross-scanner dedup. Different rule IDs for
 // the same vulnerability class should collapse on the same span; rules
 // that don't fit a known class get a class string unique to themselves
@@ -672,8 +713,10 @@ const WORD_CLASSED: ReadonlySet<string> = new Set<BuiltinScanner>([
 // first occurrence: semgrep precedes gitleaks in the input order, and its
 // rule message is the more descriptive). Two different rules from one
 // scanner on one span are two problems and both stay; only an exact repeat
-// (same scanner, same rule) collapses. Findings on different lines never
-// merge, even where their spans overlap.
+// (same scanner, same rule) collapses, to its highest-severity hit (ties go
+// to the first occurrence, which the fixed input order makes the first
+// message), so a repeat never lowers a candidate's severity. Findings on
+// different lines never merge, even where their spans overlap.
 //
 // `merged`, when given, receives for each finding kept the tokens
 // ("<source>:<ruleId>") of the other scanners' findings merged into it, in
@@ -692,7 +735,8 @@ export function dedupByRuleClass(findings: StaticFinding[], merged?: Map<StaticF
     const winner = [...bucket].sort(
       (a, b) => severityRank(b.severity) - severityRank(a.severity),
     )[0];
-    const seenRules = new Set<string>();
+    // The winner's scanner keeps one hit per rule: its highest severity.
+    const kept = new Map<string, StaticFinding>();
     const others: string[] = [];
     for (const f of bucket) {
       if (f.source !== winner.source) {
@@ -700,10 +744,10 @@ export function dedupByRuleClass(findings: StaticFinding[], merged?: Map<StaticF
         if (!others.includes(token)) others.push(token);
         continue;
       }
-      if (seenRules.has(f.ruleId)) continue;
-      seenRules.add(f.ruleId);
-      emitted.add(f);
+      const held = kept.get(f.ruleId);
+      if (!held || severityRank(f.severity) > severityRank(held.severity)) kept.set(f.ruleId, f);
     }
+    for (const f of kept.values()) emitted.add(f);
     if (merged && others.length > 0) merged.set(winner, others);
   }
   // Walk the input once so survivors keep their input order.

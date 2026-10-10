@@ -12,8 +12,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import type { Report } from "@openqodex/core";
 import { parseFlags } from "../src/flags.js";
 import { runReview } from "../src/review-run.js";
-import { DEPTH_ENV } from "../src/reviewers/driver.js";
-import type { ReviewerDriver, ReviewerSession, Turn } from "../src/reviewers/driver.js";
+import { DEPTH_ENV } from "@openqodex/review";
+import type { ReviewerDriver, ReviewerSession, Turn } from "@openqodex/review";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);

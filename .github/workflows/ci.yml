@@ -30,6 +30,10 @@ jobs:
           # golangci-lint 2.12.2 is built with Go 1.26 and cannot check a newer Go.
           go-version: "1.26"
           cache: false
+      # cargo-deny needs Cargo, and the macOS runner image has no Rust
+      # toolchain; the end-to-end tests fail in CI when any scanner is missing.
+      - if: runner.os == 'macOS'
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
       - run: pnpm install --frozen-lockfile
       # The end-to-end tests install the pinned scanners once into this folder.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -55,6 +59,10 @@ jobs:
         env:
           OPENQODEX_E2E_HOME: ${{ runner.temp }}/openqodex-e2e-home
           GITHUB_TOKEN: ${{ github.token }}
+      # The review of the demo's planted change with both reviewer drivers,
+      # compared file by file with tests/golden/expected.
+      - name: Golden run
+        run: pnpm golden:check
       - name: Skill and plugin manifests
         run: node scripts/validate-skill.mjs
       - name: Config docs

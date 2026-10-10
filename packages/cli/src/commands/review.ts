@@ -43,8 +43,10 @@ import {
 } from "@openqodex/core";
 import type { Change, ChangeScope, Config, Display, ImpactSummary, Latest, RunManifest, RunTarget, ScanResult, Severity, WholeRepo } from "@openqodex/core";
 import { renderImpactBlock } from "@openqodex/graph";
+import { checkoutsDir, redactStored, ruleCoverage, wholeRepoLenses } from "@openqodex/review";
+import type { PipelineResult } from "@openqodex/review";
 import { announceRepoFiles } from "../agents/repo-folder.js";
-import { addTargetCheckout, checkoutOwner, checkoutsDir, inCheckouts, lfsPaths, placeSettings, removeTargetCheckout, sweepCheckouts } from "../checkout.js";
+import { addTargetCheckout, checkoutOwner, inCheckouts, lfsPaths, placeSettings, removeTargetCheckout, sweepCheckouts } from "../checkout.js";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { directRunner, launcherPath, launcherRunner, launcherStarted, openqodexHomeDir, runtimeBin } from "../launcher.js";
 import { HANDED_OFF } from "../update/trigger.js";
@@ -63,17 +65,13 @@ import {
   loadRepo,
   nothingToReview,
   ownersInstructions,
-  redactStored,
   reviewOutputs,
   progress,
-  ruleCoverage,
   runPipeline,
   scanChange,
   warn,
-  wholeRepoLenses,
   writeReportHtml,
 } from "../pipeline.js";
-import type { PipelineResult } from "../pipeline.js";
 import { dropTempRef, resolveTarget, sweepTempRefs } from "../target.js";
 import type { Resolved } from "../target.js";
 import { SCOPE_BOOLS, SCOPE_VALUES, scopeFrom } from "./scan.js";

@@ -9,12 +9,17 @@
 // included), no submodule. It carries a marker file beside the tree that
 // names the repository, so a later review can tell an abandoned one of its
 // own from anything else.
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { OpenQodexError, quoteAlternate, readRepoFile, safeGit } from "@openqodex/core";
-import { openqodexHomeDir } from "./launcher.js";
+import { checkoutsDir, lfsPaths } from "@openqodex/review";
+import type { SnapshotMaker } from "@openqodex/review";
+
+// How many changed files a checkout stores in Git LFS: the review core's
+// count, which the server's snapshots use too.
+export { lfsPaths };
 
 const execFileAsync = promisify(execFile);
 
@@ -33,10 +38,6 @@ async function gitOut(cwd: string, args: string[], env?: NodeJS.ProcessEnv): Pro
   } catch {
     return null;
   }
-}
-
-export function checkoutsDir(): string {
-  return join(openqodexHomeDir(), "checkouts");
 }
 
 // The same folder, however it is spelled (/var and /private/var on macOS).
@@ -101,6 +102,13 @@ export async function removeCheckout(repoRoot: string, folder: string): Promise<
   rmSync(folder, { recursive: true, force: true });
 }
 
+// The same at once and synchronously, for a signal handler that exits right
+// after it: the folder goes, then git forgets the work tree.
+export function removeCheckoutNow(repoRoot: string, checkout: Checkout): void {
+  rmSync(checkout.folder, { recursive: true, force: true });
+  spawnSync("git", ["worktree", "prune"], { cwd: repoRoot, stdio: "ignore", timeout: 5_000 });
+}
+
 // The marker of a target checkout folder, or null when it is not one of
 // ours: a real folder (never a link) directly under <home>/checkouts/,
 // holding a regular marker file.
@@ -152,18 +160,6 @@ export async function sweepCheckouts(repoRoot: string): Promise<void> {
   if (removed && existsSync(repoRoot)) await gitOut(repoRoot, ["worktree", "prune"]);
 }
 
-// How many of `paths` the checkout stores in Git LFS: their content was not
-// fetched, so the files hold pointers.
-export async function lfsPaths(tree: string, paths: string[]): Promise<number> {
-  if (paths.length === 0) return 0;
-  const r = await safeGit(tree, ["check-attr", "-z", "--stdin", "filter"], `${paths.join("\0")}\0`);
-  if (r.code !== 0) return 0;
-  const parts = r.stdout.toString("utf8").split("\0");
-  let n = 0;
-  for (let i = 0; i + 2 < parts.length; i += 3) if (parts[i + 2] === "lfs") n++;
-  return n;
-}
-
 // The repo's settings files as they are in its work tree, never the ones the
 // checked-out commit holds.
 const STATE_SETTINGS = [".openqodex/config.yaml", ".openqodex/custom-instructions.md", ".openqodex/.gitignore"];
@@ -186,3 +182,15 @@ export function placeSettings(repoRoot: string, tree: string, rootConfig: boolea
     if (text !== null) writeFileSync(join(tree, rel), text, { flag: "wx" });
   }
 }
+
+// The review's snapshots, as the review core makes and removes them: a
+// detached work tree under <home>/checkouts/ (the working state, or a
+// target's head with the developer's settings files placed over the
+// commit's).
+export const laptopSnapshots: SnapshotMaker = {
+  make: addTargetCheckout,
+  placeSettings: (repoRoot, tree) => placeSettings(repoRoot, tree, false),
+  lfsPaths,
+  remove: (repoRoot, snapshot) => removeTargetCheckout(repoRoot, snapshot.tree),
+  removeNow: removeCheckoutNow,
+};

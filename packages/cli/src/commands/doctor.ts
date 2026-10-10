@@ -1,22 +1,25 @@
-// `openqodex doctor [--install [--all-scanners]] [--json]`: what this
-// machine has, what each scanner needs, which scanners this repository's
-// files call for and why, and where OpenQodex keeps its files. Installs
-// nothing unless --install is given, and then waits for every install:
-// inside a repository the scanners its files call for (the selector a
-// review uses, over every tracked and untracked file, less the config's
-// excludes and disabled scanners); outside one, or with --all-scanners,
-// every scanner this machine supports.
+// `openqodex doctor [--install [--all-scanners [--require-all]]] [--json]`:
+// what this machine has, what each scanner needs, which scanners this
+// repository's files call for and why, and where OpenQodex keeps its files.
+// Installs nothing unless --install is given, and then waits for every
+// install: inside a repository the scanners its files call for (the
+// selector a review uses, over every tracked and untracked file, less the
+// config's excludes and disabled scanners); outside one, or with
+// --all-scanners, every scanner this machine supports. --require-all, for
+// an image build, then checks every scanner (checkScanners): each must be
+// installed at its pinned version with its runtime and report its check
+// case's finding; one stderr line per missing scanner, and exit 2.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { statSync } from "node:fs";
 import { OpenQodexError, findRepoRoot, loadConfig } from "@openqodex/core";
 import type { ToolStatus } from "@openqodex/core";
-import { choiceLine, downloadsFor, installTools, openqodexHome, repoInventory, selectScanners, toolchainHash, toolStatuses, trustState } from "@openqodex/scanners";
-import type { ScannerChoice } from "@openqodex/scanners";
+import { checkScanners, choiceLine, downloadsFor, installTools, openqodexHome, repoInventory, selectScanners, toolchainHash, toolsDir, toolStatuses, trustState } from "@openqodex/scanners";
+import type { PreinstallResult, ScannerChoice } from "@openqodex/scanners";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
 import { progress } from "../pipeline.js";
-import { REVIEWER_NAMES } from "../reviewers/driver.js";
+import { REVIEWER_NAMES } from "@openqodex/review";
 import { DEFAULT_REVIEWER_WEB } from "../reviewers/settings.js";
 import { readUserConfig, unknownKeysWarning } from "../user-config.js";
 import { statusLines } from "./update.js";
@@ -51,6 +54,8 @@ type Report = {
   home: string;
   settings: { file: string; values: Setting[]; warnings: string[] };
   update: string[];
+  // With --require-all: every scanner checked after the install.
+  required?: PreinstallResult;
 };
 
 type Setting = { key: string; value: string; source: string };
@@ -129,6 +134,10 @@ function text(r: Report): string {
   for (const s of r.settings.values) lines.push(`  ${s.key.padEnd(12)}  ${s.value} (${s.source})`);
   for (const w of r.settings.warnings) lines.push(`  ${w}`);
   lines.push("", "Updates", ...r.update.map((l) => `  ${l}`));
+  if (r.required) {
+    const ready = r.required.tools.filter((t) => t.ok).length;
+    lines.push("", "Required scanners", r.required.ok ? `  all ${ready} ready, each tool reported its check case` : `  ${ready} ready, ${r.required.missing.length} missing (listed on stderr)`);
+  }
   const waiting = r.scanners.filter((s) => s.state === "will_install" && (r.downloads === null || r.downloads.includes(s.scanner)));
   if (waiting.length > 0) {
     lines.push(
@@ -142,12 +151,15 @@ function text(r: Report): string {
 }
 
 export async function run(args: string[]): Promise<number> {
-  const { global, bools, values } = parseFlags(args, { bools: ["--install", "--all-scanners", "--json"] });
+  const { global, bools, values } = parseFlags(args, { bools: ["--install", "--all-scanners", "--json", "--require-all"] });
   if (bools.has("--install") && global.noInstall) {
     throw new OpenQodexError("--install cannot be used with --offline or --no-install");
   }
   if (bools.has("--all-scanners") && !bools.has("--install")) {
     throw new OpenQodexError("--all-scanners goes with --install");
+  }
+  if (bools.has("--require-all") && !(bools.has("--install") && bools.has("--all-scanners"))) {
+    throw new OpenQodexError("--require-all goes with --install --all-scanners");
   }
   const git = await gitVersion();
 
@@ -198,6 +210,7 @@ export async function run(args: string[]): Promise<number> {
     progress(global)("Not in a git repository: installing every scanner. Run it inside a repository to install only what that repository needs.");
   }
   const installed = bools.has("--install") ? await installTools(downloads, progress(global)) : null;
+  const required = bools.has("--require-all") ? await checkScanners({ installRoot: toolsDir(openqodexHome()), require: "all", onProgress: progress(global) }) : null;
   // The table always lists every scanner.
   const statuses = await toolStatuses();
   const scanners = installed === null ? statuses : statuses.map((s) => installed.find((i) => i.scanner === s.scanner) ?? s);
@@ -214,7 +227,9 @@ export async function run(args: string[]): Promise<number> {
     home: openqodexHome(),
     settings: userSettings(openqodexHome(), process.env),
     update: statusLines(openqodexHome()),
+    ...(required ? { required } : {}),
   };
   process.stdout.write(bools.has("--json") ? `${JSON.stringify(report, null, 2)}\n` : text(report));
-  return git === null || inputError ? EXIT_TOOL_FAILED : EXIT_OK;
+  for (const line of required?.missing ?? []) process.stderr.write(`openqodex: missing: ${line}\n`);
+  return git === null || inputError || (required !== null && !required.ok) ? EXIT_TOOL_FAILED : EXIT_OK;
 }

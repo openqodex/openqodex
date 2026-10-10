@@ -2,13 +2,13 @@
 // Action and pre-commit; not a review.
 import { relative, resolve } from "node:path";
 import { OpenQodexError, SEVERITIES, openReportDir, scanReport, writeLatestScan, writeReportFiles, writeScan } from "@openqodex/core";
+import type { PipelineResult } from "@openqodex/review";
 import { announceRepoFiles } from "../agents/repo-folder.js";
 import { keepRunStateOutOfRepo } from "../feedback.js";
 import type { ChangeScope, Report, Severity } from "@openqodex/core";
 import { parseFlags, scannerList } from "../flags.js";
 import type { GlobalFlags } from "../flags.js";
 import { checkReportFolder, emitReport, exitFor, nothingToReview, reportFiles, runPipeline, writeReportCopies } from "../pipeline.js";
-import type { PipelineResult } from "../pipeline.js";
 
 export const SCOPE_BOOLS = ["--uncommitted"];
 export const SCOPE_VALUES = ["--base"];

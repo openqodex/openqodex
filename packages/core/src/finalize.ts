@@ -26,7 +26,9 @@ import type {
 } from "./types.js";
 import { OpenQodexError } from "./types.js";
 
-const GLOBAL_CONFIDENCE_FLOOR = 0.7;
+// The lowest confidence a finding may have unless the caller sets its own
+// floor (checkSubmission's confidenceFloor); a lens's higher floor still wins.
+export const GLOBAL_CONFIDENCE_FLOOR = 0.7;
 
 const severity = z.enum(["critical", "major", "minor", "nitpick", "info"]);
 const category = z.enum(["bug", "security", "performance", "maintainability", "style"]);
@@ -210,14 +212,22 @@ function checkInRepo(sub: AgentSubmission, lines: Map<string, number>, clean: (t
   });
 }
 
+// What makes two findings the same finding, for dedup here and for merging
+// two reviewers' findings: the file, the range, the category, and the
+// candidate, or the source when no candidate is cited, or the title when
+// neither is.
+export function findingKey(f: Pick<ReportFinding, "file_path" | "line_number" | "line_end" | "category" | "candidate" | "source" | "title">): string {
+  const what = f.candidate ? `candidate\0${f.candidate}` : f.source ? `source\0${f.source}` : `title\0${f.title}`;
+  return [f.file_path, f.line_number, f.line_end, f.category, what].join("\0");
+}
+
 // Removes only true duplicates: same file, range and category, and the same
 // candidate, or the same source when no candidate is cited, or the same title
 // when neither is. Keeps the higher severity, then the first.
 function dedup(findings: ReportFinding[]): ReportFinding[] {
   const kept = new Map<string, ReportFinding>();
   for (const f of findings) {
-    const what = f.candidate ? `candidate\0${f.candidate}` : f.source ? `source\0${f.source}` : `title\0${f.title}`;
-    const key = [f.file_path, f.line_number, f.line_end, f.category, what].join("\0");
+    const key = findingKey(f);
     const prev = kept.get(key);
     if (!prev || severityRank(f.severity) > severityRank(prev.severity)) kept.set(key, f);
   }
@@ -252,7 +262,7 @@ function ownIds(scan: ScanResult): Set<string> {
   return new Set(scan.candidates.filter(isOwnCandidate).map((c) => c.id));
 }
 
-function verdictFor(threshold: Severity | null, severities: Severity[]): Verdict {
+export function verdictFor(threshold: Severity | null, severities: Severity[]): Verdict {
   return threshold && severities.some((s) => atOrAbove(s, threshold)) ? "blocked" : "passed";
 }
 
@@ -456,6 +466,10 @@ export function checkSubmission(args: {
   submission: unknown;
   lineCount: (path: string) => number | null;
   wholeRepo?: { lines: Map<string, number> };
+  // The lowest confidence a finding may have, the same value the brief
+  // states (buildReviewerBrief's confidenceFloor); GLOBAL_CONFIDENCE_FLOOR
+  // when left out. A lens's higher floor still wins.
+  confidenceFloor?: number;
 }): SubmissionCheck {
   const { change, scan, manifest, config } = args;
   const clean = (text: string) => redactByFingerprint(text, scan.secretFingerprints);
@@ -531,7 +545,7 @@ export function checkSubmission(args: {
     const source = f.source ?? null;
     if (disabled(source, config)) continue;
     const lensFloor = source?.startsWith("lens:") ? floors.get(source.slice("lens:".length)) : undefined;
-    const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
+    const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
     if (f.confidence < floor) {
       lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor });
       continue;

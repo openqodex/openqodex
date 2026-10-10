@@ -56,9 +56,9 @@ const FIXTURE_PATH_PATTERNS: RegExp[] = [
   /\.snap$/i,
 ];
 
-// True when the path looks like a test fixture / mock / snapshot.
-// Exported for unit tests; production code reaches this through
-// dropFixtureFindings.
+// True when the path looks like a test fixture / mock / snapshot. The scan
+// reaches it through dropFixtureFindings; the library exports it for a host
+// that sorts findings the same way.
 export function isFixturePath(path: string): boolean {
   return FIXTURE_PATH_PATTERNS.some((re) => re.test(path));
 }

@@ -1,0 +1,792 @@
+{
+  "version": 1,
+  "kind": "review",
+  "impact": {
+    "version": 2,
+    "status": "ok",
+    "reasons": [],
+    "risk": "low",
+    "build": {
+      "durationMs": "<DURATION_MS>",
+      "cacheHits": 0,
+      "parses": 5,
+      "eligibleFiles": 4,
+      "parsedFiles": 4,
+      "omittedFiles": 0,
+      "unresolvedSites": 6,
+      "externalSites": 21,
+      "mode": "fresh",
+      "generation": "<GRAPH_GENERATION>"
+    },
+    "symbols": [
+      {
+        "id": "app/search.py#search_items@8:5",
+        "file": "app/search.py",
+        "name": "search_items",
+        "kind": "function",
+        "startLine": 8,
+        "endLine": 17,
+        "snapshot": "current"
+      },
+      {
+        "id": "app/server.py#list_items@20:5",
+        "file": "app/server.py",
+        "name": "list_items",
+        "kind": "function",
+        "startLine": 20,
+        "endLine": 29,
+        "snapshot": "current"
+      },
+      {
+        "id": "app/server.py#get_db@14:5",
+        "file": "app/server.py",
+        "name": "get_db",
+        "kind": "function",
+        "startLine": 14,
+        "endLine": 17,
+        "snapshot": "current"
+      },
+      {
+        "id": "app/server.py",
+        "file": "app/server.py",
+        "name": "server.py",
+        "kind": "file",
+        "startLine": 1,
+        "endLine": 40,
+        "snapshot": "current"
+      }
+    ],
+    "touched": [
+      "app/search.py#search_items@8:5",
+      "app/server.py#list_items@20:5"
+    ],
+    "removed": [],
+    "callers": [],
+    "possible": [],
+    "references": [],
+    "callees": [
+      {
+        "seed": "app/server.py#list_items@20:5",
+        "edges": [
+          {
+            "from": "app/server.py#list_items@20:5",
+            "to": "app/server.py#get_db@14:5",
+            "kind": "calls",
+            "sites": [
+              {
+                "file": "app/server.py",
+                "line": 24,
+                "column": 10,
+                "tier": "certain",
+                "evidence": "same-scope",
+                "via": null,
+                "note": null,
+                "rule": "same-scope"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "importers": [
+      {
+        "from": "app/server.py",
+        "to": "app/search.py",
+        "kind": "imports",
+        "sites": [
+          {
+            "file": "app/server.py",
+            "line": 5,
+            "column": 1,
+            "tier": "certain",
+            "evidence": "py-root",
+            "via": {
+              "file": "app/server.py",
+              "line": 5,
+              "spec": "app.search"
+            },
+            "note": null,
+            "rule": "py-walk-root"
+          }
+        ]
+      }
+    ],
+    "hubs": [],
+    "exports": [],
+    "unknown": {
+      "floor": false,
+      "seeds": [
+        {
+          "seed": "app/search.py#search_items@8:5",
+          "floor": false,
+          "reasons": []
+        },
+        {
+          "seed": "app/server.py#list_items@20:5",
+          "floor": false,
+          "reasons": []
+        }
+      ],
+      "causes": {
+        "no-receiver-type": 6
+      },
+      "near": [
+        {
+          "file": "app/search.py",
+          "line": 14,
+          "name": "execute",
+          "cause": "no-receiver-type",
+          "scope": "file",
+          "note": "the type conn.cursor is not found in the graph",
+          "candidates": null
+        },
+        {
+          "file": "app/search.py",
+          "line": 15,
+          "name": "fetchall",
+          "cause": "no-receiver-type",
+          "scope": "file",
+          "note": "the type conn.cursor is not found in the graph",
+          "candidates": null
+        },
+        {
+          "file": "app/server.py",
+          "line": 28,
+          "name": "fetchall",
+          "cause": "no-receiver-type",
+          "scope": "file",
+          "note": "the type conn.execute is not found in the graph",
+          "candidates": null
+        },
+        {
+          "file": "app/server.py",
+          "line": 25,
+          "name": "execute",
+          "cause": "no-receiver-type",
+          "scope": "file",
+          "note": null,
+          "candidates": null
+        },
+        {
+          "file": "app/server.py",
+          "line": 37,
+          "name": "fetchone",
+          "cause": "no-receiver-type",
+          "scope": "file",
+          "note": "the type conn.execute is not found in the graph",
+          "candidates": null
+        },
+        {
+          "file": "app/server.py",
+          "line": 35,
+          "name": "execute",
+          "cause": "no-receiver-type",
+          "scope": "file",
+          "note": null,
+          "candidates": null
+        }
+      ],
+      "nearTotal": 6,
+      "notRead": [],
+      "notReadTotal": 0
+    },
+    "cuts": [],
+    "truncated": {
+      "walk": false,
+      "inline": false,
+      "omittedSites": null
+    },
+    "packet": ".openqodex-review/graph/",
+    "frameworks": {
+      "plugins": [],
+      "routes": [],
+      "routesTotal": 0,
+      "renders": [],
+      "renderedBy": [],
+      "models": [],
+      "migrations": [],
+      "tests": [],
+      "testsTotal": 0,
+      "roles": [],
+      "unknown": [],
+      "unknownTotal": 0,
+      "changedFiles": [
+        ".github/workflows/ci.yml",
+        "Dockerfile",
+        "app/config.py",
+        "app/search.py",
+        "app/server.py",
+        "db/migrations/002_index_item_names.sql",
+        "deploy/deployment.yaml",
+        "infra/main.tf",
+        "package-lock.json",
+        "package.json",
+        "scripts/deploy.sh"
+      ],
+      "routeIds": []
+    }
+  },
+  "change_id": "597352237e5136f4462a792835c483d3224a4216fa84bbfbf2a9761a490605de",
+  "base": {
+    "ref": "HEAD",
+    "sha": "3df34a143822f5d11221fbcb144b05ce0f11e222"
+  },
+  "generated_at": "<TIMESTAMP>",
+  "verdict": "passed",
+  "block_on_severity": null,
+  "summary": "Reviewed the fixed planted change.",
+  "findings": [
+    {
+      "origin": "agent",
+      "severity": "major",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "app/config.py",
+      "line_number": 2,
+      "line_end": 2,
+      "title": "Planted problem number 1",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "gitleaks:stripe-access-token",
+      "candidate": "c1",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "major",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": ".github/workflows/ci.yml",
+      "line_number": 17,
+      "line_end": 17,
+      "title": "Planted problem number 2",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "actionlint:expression",
+      "candidate": "c2",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "major",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "Dockerfile",
+      "line_number": 6,
+      "line_end": 6,
+      "title": "Planted problem number 3",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "hadolint:DL3020",
+      "candidate": "c3",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "major",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "infra/main.tf",
+      "line_number": 28,
+      "line_end": 28,
+      "title": "Planted problem number 4",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "trivy:AWS-0107",
+      "candidate": "c4",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "major",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "deploy/deployment.yaml",
+      "line_number": 42,
+      "line_end": 42,
+      "title": "Planted problem number 5",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "kube-linter:privileged-container",
+      "candidate": "c5",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "major",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "deploy/deployment.yaml",
+      "line_number": 43,
+      "line_end": 43,
+      "title": "Planted problem number 6",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "kube-linter:privilege-escalation-container",
+      "candidate": "c6",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "major",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "scripts/deploy.sh",
+      "line_number": 11,
+      "line_end": 11,
+      "title": "Planted problem number 7",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "shellcheck:SC2045",
+      "candidate": "c7",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "db/migrations/002_index_item_names.sql",
+      "line_number": 2,
+      "line_end": 2,
+      "title": "Planted problem number 8",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "squawk:require-concurrent-index-creation",
+      "candidate": "c8",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "Dockerfile",
+      "line_number": 1,
+      "line_end": 1,
+      "title": "Planted problem number 9",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "hadolint:DL3007",
+      "candidate": "c9",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "Dockerfile",
+      "line_number": 3,
+      "line_end": 3,
+      "title": "Planted problem number 10",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "hadolint:DL3008",
+      "candidate": "c10",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "Dockerfile",
+      "line_number": 3,
+      "line_end": 3,
+      "title": "Planted problem number 11",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "hadolint:DL3014",
+      "candidate": "c11",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "Dockerfile",
+      "line_number": 7,
+      "line_end": 7,
+      "title": "Planted problem number 12",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "hadolint:DL3042",
+      "candidate": "c12",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "deploy/deployment.yaml",
+      "line_number": 42,
+      "line_end": 42,
+      "title": "Planted problem number 13",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "checkov:CKV_K8S_16",
+      "candidate": "c13",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "deploy/deployment.yaml",
+      "line_number": 43,
+      "line_end": 43,
+      "title": "Planted problem number 14",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "checkov:CKV_K8S_20",
+      "candidate": "c14",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "infra/main.tf",
+      "line_number": 28,
+      "line_end": 28,
+      "title": "Planted problem number 15",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "checkov:CKV_AWS_24",
+      "candidate": "c15",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "scripts/deploy.sh",
+      "line_number": 7,
+      "line_end": 7,
+      "title": "Planted problem number 16",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "shellcheck:SC2115",
+      "candidate": "c16",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    },
+    {
+      "origin": "agent",
+      "severity": "minor",
+      "category": "bug",
+      "confidence": 1,
+      "file_path": "app/search.py",
+      "line_number": 14,
+      "line_end": 14,
+      "title": "Planted problem number 17",
+      "description": "This changed line introduces an unsafe operation. The affected behavior can fail when this path runs. Correct the flagged operation before using this change.",
+      "suggested_change": null,
+      "source": "bandit:B608",
+      "candidate": "c17",
+      "notes": [],
+      "problem": "This changed line introduces an unsafe operation.",
+      "consequence": "The affected behavior can fail when this path runs.",
+      "fix": "Correct the flagged operation before using this change."
+    }
+  ],
+  "below_threshold": 7,
+  "outside_change": [],
+  "low_confidence": [],
+  "not_reviewed": [],
+  "dropped": [],
+  "scanners": [
+    {
+      "scanner": "gitleaks",
+      "status": "ran",
+      "version": "8.21.2",
+      "rawCount": 1,
+      "keptCount": 1,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "sqllint",
+      "status": "ran",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "squawk",
+      "status": "ran",
+      "version": "2.66.0",
+      "rawCount": 4,
+      "keptCount": 4,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "sqlfluff",
+      "status": "ran",
+      "version": "4.3.0",
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "cargo-deny",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "actionlint",
+      "status": "ran",
+      "version": "1.7.7",
+      "rawCount": 1,
+      "keptCount": 1,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "zizmor",
+      "status": "ran",
+      "version": "1.30.1",
+      "rawCount": 1,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "hadolint",
+      "status": "ran",
+      "version": "2.15.1",
+      "rawCount": 7,
+      "keptCount": 7,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "trivy",
+      "status": "ran",
+      "version": "0.75.0",
+      "rawCount": 3,
+      "keptCount": 1,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "checkov",
+      "status": "ran",
+      "version": "3.3.22",
+      "rawCount": 3,
+      "keptCount": 3,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "tflint",
+      "status": "ran",
+      "version": "0.64.0",
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "kube-linter",
+      "status": "ran",
+      "version": "0.8.3",
+      "rawCount": 2,
+      "keptCount": 2,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "kubeconform",
+      "status": "ran",
+      "version": "0.8.0",
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "shellcheck",
+      "status": "ran",
+      "version": "0.10.0",
+      "rawCount": 4,
+      "keptCount": 4,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "ruff",
+      "status": "ran",
+      "version": "0.8.4",
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "brakeman",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "rubocop",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "bandit",
+      "status": "ran",
+      "version": "1.9.4",
+      "rawCount": 1,
+      "keptCount": 1,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "oxlint",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "golangci",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    }
+  ],
+  "not_reviewed_paths": [],
+  "stats": {
+    "files": 11,
+    "additions": 45,
+    "deletions": 16
+  },
+  "completion": {
+    "version": 1,
+    "contract": "openqodex-review-2",
+    "status": "complete",
+    "missing": [],
+    "reviewer": {
+      "driver": "claude",
+      "version": "2.1.289",
+      "pid": "<REVIEWER_PID>",
+      "started_at": "<TIMESTAMP>",
+      "ended_at": "<TIMESTAMP>",
+      "duration_ms": "<DURATION_MS>",
+      "rounds": 1,
+      "usage": {
+        "turns": 1,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cost_usd": 0.01
+      }
+    },
+    "snapshot": {
+      "change_id": "597352237e5136f4462a792835c483d3224a4216fa84bbfbf2a9761a490605de",
+      "tree": "1690bb6c15728e79e3a0d53f0aaf2fbeb0facfa6",
+      "before": "15211cedb0c185b00dfb7a180e0e782333526c4f13abe06281692079da183e36",
+      "after": "15211cedb0c185b00dfb7a180e0e782333526c4f13abe06281692079da183e36"
+    },
+    "candidates": {
+      "total": 24,
+      "disposed": 24
+    },
+    "coverage": {
+      "hunks": 18,
+      "covered": 18,
+      "unread": [],
+      "files_read": [
+        "app/server.py"
+      ],
+      "files_not_read": [
+        ".github/workflows/ci.yml",
+        "Dockerfile",
+        "app/config.py",
+        "app/search.py",
+        "db/migrations/002_index_item_names.sql",
+        "deploy/deployment.yaml",
+        "infra/main.tf",
+        "package-lock.json",
+        "package.json",
+        "scripts/deploy.sh"
+      ]
+    },
+    "outside_reads": [],
+    "trace_complete": true
+  }
+}

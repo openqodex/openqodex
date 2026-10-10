@@ -8,8 +8,8 @@ import { homedir } from "node:os";
 import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
-import { claudeHome } from "../agents/homes.js";
-import { checkoutsDir } from "../checkout.js";
+import { checkoutsDir } from "../checkouts.js";
+import { claudeHome } from "./homes.js";
 import { DEPTH_ENV, findOnPath, killGroup, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
@@ -137,6 +137,8 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
   let traceChars = 0;
   let usage: ReviewerUsage = { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null };
   let sessionId: string | null = null;
+  // The models the last result event named (its modelUsage keys).
+  let models: string[] = [];
   let failure: string | null = null;
   let waiting: ((t: Turn) => void) | null = null;
   let exited = false;
@@ -144,7 +146,7 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
   const finish = (finalText: string, why: string | null): void => {
     const done = waiting;
     waiting = null;
-    const turn: Turn = { finalText, calls, usage, sessionId, failure: why, own: sessionId === null ? null : { configDir, sessionId } };
+    const turn: Turn = { finalText, calls, usage, sessionId, failure: why, ...(models.length > 0 ? { models } : {}), own: sessionId === null ? null : { configDir, sessionId } };
     calls = [];
     traceChars = 0;
     done?.(turn);
@@ -199,8 +201,10 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
       return;
     }
     if (e.type === "result") {
-      const models = Object.values((e.modelUsage ?? {}) as Record<string, Record<string, unknown>>);
-      const sum = (key: string) => (models.length === 0 ? null : models.reduce((n, m) => n + (num(m[key]) ?? 0), 0));
+      const byModel = (e.modelUsage ?? {}) as Record<string, Record<string, unknown>>;
+      models = Object.keys(byModel);
+      const each = Object.values(byModel);
+      const sum = (key: string) => (each.length === 0 ? null : each.reduce((n, m) => n + (num(m[key]) ?? 0), 0));
       const input = sum("inputTokens");
       usage = {
         turns: usage.turns + (num(e.num_turns) ?? 0),

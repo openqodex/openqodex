@@ -46,20 +46,34 @@ export function openqodexHome(): string {
   return fromEnv && fromEnv.length > 0 ? resolve(fromEnv) : join(homedir(), ".openqodex");
 }
 
+// The install root of an OpenQodex home: <home>/tools.
 export function toolsDir(home: string): string {
   return join(home, "tools");
 }
 
-export function toolDir(home: string, tool: string): string {
-  return join(home, "tools", tool);
+// Where installs go. `root`, the install root, holds one folder per tool
+// (on the laptop <home>/tools); `cache` holds the installers' download
+// caches (on the laptop <home>/cache); `owner` is the folder that holds the
+// place (on the laptop the home): installers run in it, and a message names
+// it when it cannot be written.
+export type InstallPlace = { root: string; cache: string; owner: string };
+
+// The laptop's place: the OpenQodex home's tools and caches.
+export function homePlace(home: string = openqodexHome()): InstallPlace {
+  return { root: toolsDir(home), cache: join(home, "cache"), owner: home };
+}
+
+// The folder of one tool in an install root.
+export function toolDir(root: string, tool: string): string {
+  return join(root, tool);
 }
 
 // The folder of one install. A registry install's folder also names its
 // lock's sha256, so a new lock (a dependency pin moved, the version did not)
 // installs afresh instead of reusing the old tree.
-export function versionDir(home: string, tool: string, recipe: Recipe): string {
-  if (recipe.method === "github-release") return join(home, "tools", tool, recipe.version);
-  return join(home, "tools", tool, lockedFolder(recipe.version, lockText(tool)));
+export function versionDir(root: string, tool: string, recipe: Recipe): string {
+  if (recipe.method === "github-release") return join(root, tool, recipe.version);
+  return join(root, tool, lockedFolder(recipe.version, lockText(tool)));
 }
 
 // "1.9.4-<first 12 hex of the lock's sha256>".
@@ -68,13 +82,13 @@ export function lockedFolder(version: string, lock: string | null): string {
 }
 
 // Where the executable sits once installed.
-export function binaryPath(home: string, tool: string, recipe: Recipe): string {
-  return join(versionDir(home, tool, recipe), "bin", recipe.binary);
+export function binaryPath(root: string, tool: string, recipe: Recipe): string {
+  return join(versionDir(root, tool, recipe), "bin", recipe.binary);
 }
 
 // Written last by every install; a version folder without it is not installed.
-export function markerPath(home: string, tool: string, recipe: Recipe): string {
-  return join(versionDir(home, tool, recipe), ".installed");
+export function markerPath(root: string, tool: string, recipe: Recipe): string {
+  return join(versionDir(root, tool, recipe), ".installed");
 }
 
 export function currentPlatform(): Platform | null {

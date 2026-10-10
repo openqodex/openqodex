@@ -9,7 +9,7 @@ PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm test:e2e
 
 `OPENQODEX_E2E_HOME` selects the shared scanner tools folder. It defaults to `<os tmpdir>/openqodex-e2e-home`. The suite runs `doctor --install` into it once before the scanner cases; the first install from an empty folder may take 20 minutes, later runs reuse it. Each subprocess gets its own temporary `HOME`, so the real home folder is never touched.
 
-`OPENQODEX_E2E_OFFLINE=1` skips the semgrep, osv-scanner and custom GitHub release assertions, with a printed reason. With `CI` set, the builtin scanner check fails when any scanner was skipped (brakeman and rubocop need Ruby, golangci-lint needs Go).
+`OPENQODEX_E2E_OFFLINE=1` skips the semgrep, osv-scanner and custom GitHub release assertions, with a printed reason. `OPENQODEX_PREINSTALL_FULL=1` runs `preinstall-full`, the strict preinstall of every scanner into a clean install root (about 1 GB of downloads); without it that file is skipped with a printed reason. The release workflow's check after each publish sets it. With `CI` set, the builtin scanner check fails when any scanner was skipped (brakeman and rubocop need Ruby, golangci-lint needs Go).
 
 Every subprocess also gets `OPENQODEX_AUTO_UPDATE=0`, so a command run through the launcher starts no update worker. The `self-update` cases remove it.
 

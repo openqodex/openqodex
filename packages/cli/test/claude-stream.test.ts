@@ -22,8 +22,7 @@ import { chmodSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { claudeDriver } from "../src/reviewers/claude.js";
-import { classify } from "../src/reviewers/trace.js";
+import { claudeDriver, classify } from "@openqodex/review";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);

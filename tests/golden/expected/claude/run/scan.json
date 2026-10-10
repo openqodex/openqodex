@@ -1,0 +1,514 @@
+{
+  "candidates": [
+    {
+      "source": "gitleaks",
+      "ruleId": "stripe-access-token",
+      "filePath": "app/config.py",
+      "lineStart": 2,
+      "lineEnd": 2,
+      "severity": "high",
+      "message": "Found a Stripe Access Token, posing a risk to payment processing services and sensitive financial data.",
+      "reference": null,
+      "id": "c1",
+      "token": "gitleaks:stripe-access-token",
+      "reviewSeverity": "major"
+    },
+    {
+      "source": "actionlint",
+      "ruleId": "expression",
+      "filePath": ".github/workflows/ci.yml",
+      "lineStart": 17,
+      "lineEnd": 17,
+      "severity": "high",
+      "message": "\"github.event.pull_request.title\" is potentially untrusted. avoid using it directly in inline scripts. instead, pass it through an environment variable. see https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions for more details",
+      "reference": "https://github.com/rhysd/actionlint/blob/main/docs/checks.md",
+      "id": "c2",
+      "token": "actionlint:expression",
+      "reviewSeverity": "major",
+      "alsoReportedBy": [
+        "zizmor:template-injection"
+      ]
+    },
+    {
+      "source": "hadolint",
+      "ruleId": "DL3020",
+      "filePath": "Dockerfile",
+      "lineStart": 6,
+      "lineEnd": 6,
+      "severity": "high",
+      "message": "Use COPY instead of ADD for files and folders",
+      "reference": "https://github.com/hadolint/hadolint/wiki/DL3020",
+      "id": "c3",
+      "token": "hadolint:DL3020",
+      "reviewSeverity": "major"
+    },
+    {
+      "source": "trivy",
+      "ruleId": "AWS-0107",
+      "filePath": "infra/main.tf",
+      "lineStart": 28,
+      "lineEnd": 28,
+      "severity": "high",
+      "message": "Security groups should not allow unrestricted ingress to SSH or RDP from any IP address: Security group rule allows unrestricted ingress from any IP address.",
+      "reference": "https://avd.aquasec.com/misconfig/aws-0107",
+      "id": "c4",
+      "token": "trivy:AWS-0107",
+      "reviewSeverity": "major"
+    },
+    {
+      "source": "kube-linter",
+      "ruleId": "privileged-container",
+      "filePath": "deploy/deployment.yaml",
+      "lineStart": 42,
+      "lineEnd": 42,
+      "severity": "high",
+      "message": "container \"api\" is privileged. Do not run your container as privileged unless it is required.",
+      "reference": "https://docs.kubelinter.io/#/generated/checks?id=privileged-container",
+      "id": "c5",
+      "token": "kube-linter:privileged-container",
+      "reviewSeverity": "major"
+    },
+    {
+      "source": "kube-linter",
+      "ruleId": "privilege-escalation-container",
+      "filePath": "deploy/deployment.yaml",
+      "lineStart": 43,
+      "lineEnd": 43,
+      "severity": "high",
+      "message": "container \"api\" has AllowPrivilegeEscalation set to true. Ensure containers do not allow privilege escalation by setting allowPrivilegeEscalation=false, privileged=false and removing CAP_SYS_ADMIN capability. See https://kubernetes.io/docs/tasks/configure-pod-container/security-context/ for more details.",
+      "reference": "https://docs.kubelinter.io/#/generated/checks?id=privilege-escalation-container",
+      "id": "c6",
+      "token": "kube-linter:privilege-escalation-container",
+      "reviewSeverity": "major"
+    },
+    {
+      "source": "shellcheck",
+      "ruleId": "SC2045",
+      "filePath": "scripts/deploy.sh",
+      "lineStart": 11,
+      "lineEnd": 11,
+      "severity": "high",
+      "message": "Iterating over ls output is fragile. Use globs.",
+      "reference": "https://www.shellcheck.net/wiki/SC2045",
+      "id": "c7",
+      "token": "shellcheck:SC2045",
+      "reviewSeverity": "major"
+    },
+    {
+      "source": "squawk",
+      "ruleId": "require-concurrent-index-creation",
+      "filePath": "db/migrations/002_index_item_names.sql",
+      "lineStart": 2,
+      "lineEnd": 2,
+      "severity": "medium",
+      "message": "During normal index creation, table updates are blocked, but reads are still allowed. Use `concurrently` to avoid blocking writes.",
+      "reference": "https://squawkhq.com/docs/require-concurrent-index-creation",
+      "id": "c8",
+      "token": "squawk:require-concurrent-index-creation",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "hadolint",
+      "ruleId": "DL3007",
+      "filePath": "Dockerfile",
+      "lineStart": 1,
+      "lineEnd": 1,
+      "severity": "medium",
+      "message": "Using latest is prone to errors if the image will ever update. Pin the version explicitly to a release tag",
+      "reference": "https://github.com/hadolint/hadolint/wiki/DL3007",
+      "id": "c9",
+      "token": "hadolint:DL3007",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "hadolint",
+      "ruleId": "DL3008",
+      "filePath": "Dockerfile",
+      "lineStart": 3,
+      "lineEnd": 3,
+      "severity": "medium",
+      "message": "Pin versions in apt get install. Instead of `apt-get install <package>` use `apt-get install <package>=<version>`",
+      "reference": "https://github.com/hadolint/hadolint/wiki/DL3008",
+      "id": "c10",
+      "token": "hadolint:DL3008",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "hadolint",
+      "ruleId": "DL3014",
+      "filePath": "Dockerfile",
+      "lineStart": 3,
+      "lineEnd": 3,
+      "severity": "medium",
+      "message": "Use the `-y` switch to avoid manual input `apt-get -y install <package>`",
+      "reference": "https://github.com/hadolint/hadolint/wiki/DL3014",
+      "id": "c11",
+      "token": "hadolint:DL3014",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "hadolint",
+      "ruleId": "DL3042",
+      "filePath": "Dockerfile",
+      "lineStart": 7,
+      "lineEnd": 7,
+      "severity": "medium",
+      "message": "Avoid use of cache directory with pip. Use `pip install --no-cache-dir <package>`",
+      "reference": "https://github.com/hadolint/hadolint/wiki/DL3042",
+      "id": "c12",
+      "token": "hadolint:DL3042",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "checkov",
+      "ruleId": "CKV_K8S_16",
+      "filePath": "deploy/deployment.yaml",
+      "lineStart": 42,
+      "lineEnd": 42,
+      "severity": "medium",
+      "message": "Container should not be privileged",
+      "reference": "https://github.com/bridgecrewio/checkov/blob/3.3.22/checkov/kubernetes/checks/resource/k8s/PrivilegedContainers.py",
+      "id": "c13",
+      "token": "checkov:CKV_K8S_16",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "checkov",
+      "ruleId": "CKV_K8S_20",
+      "filePath": "deploy/deployment.yaml",
+      "lineStart": 43,
+      "lineEnd": 43,
+      "severity": "medium",
+      "message": "Containers should not run with allowPrivilegeEscalation",
+      "reference": "https://github.com/bridgecrewio/checkov/blob/3.3.22/checkov/kubernetes/checks/resource/k8s/AllowPrivilegeEscalation.py",
+      "id": "c14",
+      "token": "checkov:CKV_K8S_20",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "checkov",
+      "ruleId": "CKV_AWS_24",
+      "filePath": "infra/main.tf",
+      "lineStart": 28,
+      "lineEnd": 28,
+      "severity": "medium",
+      "message": "Ensure no security groups allow ingress from 0.0.0.0:0 to port 22",
+      "reference": "https://github.com/bridgecrewio/checkov/blob/3.3.22/checkov/terraform/checks/resource/aws/SecurityGroupUnrestrictedIngress22.py",
+      "id": "c15",
+      "token": "checkov:CKV_AWS_24",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "shellcheck",
+      "ruleId": "SC2115",
+      "filePath": "scripts/deploy.sh",
+      "lineStart": 7,
+      "lineEnd": 7,
+      "severity": "medium",
+      "message": "Use \"${var:?}\" to ensure this never expands to / .",
+      "reference": "https://www.shellcheck.net/wiki/SC2115",
+      "id": "c16",
+      "token": "shellcheck:SC2115",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "bandit",
+      "ruleId": "B608",
+      "filePath": "app/search.py",
+      "lineStart": 14,
+      "lineEnd": 14,
+      "severity": "medium",
+      "message": "B608: Possible SQL injection vector through string-based query construction.",
+      "reference": "https://bandit.readthedocs.io/en/1.9.4/plugins/b608_hardcoded_sql_expressions.html",
+      "id": "c17",
+      "token": "bandit:B608",
+      "reviewSeverity": "minor"
+    },
+    {
+      "source": "squawk",
+      "ruleId": "prefer-robust-stmts",
+      "filePath": "db/migrations/002_index_item_names.sql",
+      "lineStart": 2,
+      "lineEnd": 2,
+      "severity": "low",
+      "message": "Missing `IF NOT EXISTS`, the migration can't be rerun if it fails part way through. Use an explicit name for a concurrently created index",
+      "reference": "https://squawkhq.com/docs/prefer-robust-stmts",
+      "id": "c18",
+      "token": "squawk:prefer-robust-stmts",
+      "reviewSeverity": "nitpick"
+    },
+    {
+      "source": "squawk",
+      "ruleId": "require-lock-timeout",
+      "filePath": "db/migrations/002_index_item_names.sql",
+      "lineStart": 2,
+      "lineEnd": 2,
+      "severity": "low",
+      "message": "Missing `set lock_timeout` before potentially slow SHARE lock operations Configure a `lock_timeout` before this statement. Statement requires: SHARE lock; blocking: writes, schema changes.",
+      "reference": "https://squawkhq.com/docs/require-lock-timeout",
+      "id": "c19",
+      "token": "squawk:require-lock-timeout",
+      "reviewSeverity": "nitpick"
+    },
+    {
+      "source": "squawk",
+      "ruleId": "require-statement-timeout",
+      "filePath": "db/migrations/002_index_item_names.sql",
+      "lineStart": 2,
+      "lineEnd": 2,
+      "severity": "low",
+      "message": "Missing `set statement_timeout` before potentially slow operations Configure a `statement_timeout` before this statement",
+      "reference": "https://squawkhq.com/docs/require-statement-timeout",
+      "id": "c20",
+      "token": "squawk:require-statement-timeout",
+      "reviewSeverity": "nitpick"
+    },
+    {
+      "source": "hadolint",
+      "ruleId": "DL3009",
+      "filePath": "Dockerfile",
+      "lineStart": 3,
+      "lineEnd": 3,
+      "severity": "low",
+      "message": "Delete the apt lists (/var/lib/apt/lists) after installing something",
+      "reference": "https://github.com/hadolint/hadolint/wiki/DL3009",
+      "id": "c21",
+      "token": "hadolint:DL3009",
+      "reviewSeverity": "nitpick"
+    },
+    {
+      "source": "hadolint",
+      "ruleId": "DL3015",
+      "filePath": "Dockerfile",
+      "lineStart": 3,
+      "lineEnd": 3,
+      "severity": "low",
+      "message": "Avoid additional packages by specifying `--no-install-recommends`",
+      "reference": "https://github.com/hadolint/hadolint/wiki/DL3015",
+      "id": "c22",
+      "token": "hadolint:DL3015",
+      "reviewSeverity": "nitpick"
+    },
+    {
+      "source": "shellcheck",
+      "ruleId": "SC2086",
+      "filePath": "scripts/deploy.sh",
+      "lineStart": 7,
+      "lineEnd": 7,
+      "severity": "low",
+      "message": "Double quote to prevent globbing and word splitting.",
+      "reference": "https://www.shellcheck.net/wiki/SC2086",
+      "id": "c23",
+      "token": "shellcheck:SC2086",
+      "reviewSeverity": "nitpick"
+    },
+    {
+      "source": "shellcheck",
+      "ruleId": "SC2086",
+      "filePath": "scripts/deploy.sh",
+      "lineStart": 11,
+      "lineEnd": 11,
+      "severity": "low",
+      "message": "Double quote to prevent globbing and word splitting.",
+      "reference": "https://www.shellcheck.net/wiki/SC2086",
+      "id": "c24",
+      "token": "shellcheck:SC2086",
+      "reviewSeverity": "nitpick"
+    }
+  ],
+  "scanners": [
+    {
+      "scanner": "gitleaks",
+      "status": "ran",
+      "version": "8.21.2",
+      "rawCount": 1,
+      "keptCount": 1,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "sqllint",
+      "status": "ran",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "squawk",
+      "status": "ran",
+      "version": "2.66.0",
+      "rawCount": 4,
+      "keptCount": 4,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "sqlfluff",
+      "status": "ran",
+      "version": "4.3.0",
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "cargo-deny",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "actionlint",
+      "status": "ran",
+      "version": "1.7.7",
+      "rawCount": 1,
+      "keptCount": 1,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "zizmor",
+      "status": "ran",
+      "version": "1.30.1",
+      "rawCount": 1,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "hadolint",
+      "status": "ran",
+      "version": "2.15.1",
+      "rawCount": 7,
+      "keptCount": 7,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "trivy",
+      "status": "ran",
+      "version": "0.75.0",
+      "rawCount": 3,
+      "keptCount": 1,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "checkov",
+      "status": "ran",
+      "version": "3.3.22",
+      "rawCount": 3,
+      "keptCount": 3,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "tflint",
+      "status": "ran",
+      "version": "0.64.0",
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "kube-linter",
+      "status": "ran",
+      "version": "0.8.3",
+      "rawCount": 2,
+      "keptCount": 2,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "kubeconform",
+      "status": "ran",
+      "version": "0.8.0",
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "shellcheck",
+      "status": "ran",
+      "version": "0.10.0",
+      "rawCount": 4,
+      "keptCount": 4,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "ruff",
+      "status": "ran",
+      "version": "0.8.4",
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "brakeman",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "rubocop",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "bandit",
+      "status": "ran",
+      "version": "1.9.4",
+      "rawCount": 1,
+      "keptCount": 1,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "oxlint",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    },
+    {
+      "scanner": "golangci",
+      "status": "no_matching_files",
+      "version": null,
+      "rawCount": 0,
+      "keptCount": 0,
+      "durationMs": "<DURATION_MS>",
+      "reason": null
+    }
+  ],
+  "fixturesDropped": 0,
+  "secretFingerprints": [
+    {
+      "length": 32,
+      "sha256": "dcd5e1360eaba82cc5b665e2a7dfa2a92df56246812c732de20f1d33e8f3c301"
+    }
+  ],
+  "projects": [
+    {
+      "root": "",
+      "frameworks": []
+    }
+  ]
+}

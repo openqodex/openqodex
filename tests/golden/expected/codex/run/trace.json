@@ -1,0 +1,10 @@
+[
+  {
+    "tool": "shell",
+    "path": null,
+    "inside": null,
+    "range": null,
+    "ok": true,
+    "detail": "{\"command\":\"/bin/cat app/server.py\"}"
+  }
+]

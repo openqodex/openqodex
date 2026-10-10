@@ -29,14 +29,16 @@ export function isSafeRepoPath(path: string): boolean {
 
 // The bytes of `path` in the commit or tree `sha`, or null when either fails
 // its check, the file is not there, or it is larger than `maxBytes` (its
-// size is asked first, so a larger blob is never read).
-export async function showBlob(root: string, sha: string, path: string, maxBytes: number): Promise<Buffer | null> {
+// size is asked first, so a larger blob is never read). `env`: variables
+// both git calls add (a server review's SERVER_GIT_ENV).
+export async function showBlob(root: string, sha: string, path: string, maxBytes: number, env?: Readonly<Record<string, string>>): Promise<Buffer | null> {
   if (!isSha(sha) || !isSafeRepoPath(path)) return null;
   const object = `${sha}:${path}`;
-  const size = await safeGit(root, ["cat-file", "-s", object]);
+  const extra = env === undefined ? undefined : { ...env };
+  const size = await safeGit(root, ["cat-file", "-s", object], undefined, extra);
   if (size.code !== 0) return null;
   const bytes = Number(size.stdout.toString("utf8").trim());
   if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return null;
-  const r = await safeGit(root, ["cat-file", "blob", object]);
+  const r = await safeGit(root, ["cat-file", "blob", object], undefined, extra);
   return r.code === 0 && r.stdout.length <= maxBytes ? r.stdout : null;
 }

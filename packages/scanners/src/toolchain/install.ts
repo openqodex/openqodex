@@ -1,6 +1,7 @@
-// Installs one pinned tool into the OpenQodex home folder. Runs inside the
-// detached install process (`openqodex __install <tool>`), so a slow install
-// finishes even when the run that started it has exited.
+// Installs one pinned tool into an install root: the OpenQodex home's tools
+// folder inside the detached install process (`openqodex __install <tool>`),
+// so a slow install finishes even when the run that started it has exited,
+// or the root a preinstall names (preinstall.ts).
 import { randomBytes } from "node:crypto";
 import {
   accessSync,
@@ -26,13 +27,13 @@ import { InstallError, downloadVerified, extractArchive, isRegularFileInside, ru
 import {
   binaryPath,
   currentPlatform,
+  homePlace,
   loadToolchain,
   lockFile,
   markerPath,
-  openqodexHome,
   toolDir,
-  toolsDir,
   versionDir,
+  type InstallPlace,
   type Recipe,
   type Toolchain,
 } from "./table.js";
@@ -44,8 +45,8 @@ const LOCK_WAIT_MS = 40 * 60_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export function isInstalled(home: string, tool: string, recipe: Recipe): boolean {
-  return existsSync(markerPath(home, tool, recipe)) && existsSync(binaryPath(home, tool, recipe));
+export function isInstalled(root: string, tool: string, recipe: Recipe): boolean {
+  return existsSync(markerPath(root, tool, recipe)) && existsSync(binaryPath(root, tool, recipe));
 }
 
 // ---------- the developer's runtimes (never installed by OpenQodex) ----------
@@ -175,8 +176,8 @@ export async function missingRuntime(recipe: Recipe): Promise<string | null> {
 
 // The resolved tool, with the environment it needs to start from the small
 // scanner environment.
-export async function resolvedTool(home: string, tool: string, recipe: Recipe): Promise<ResolvedTool> {
-  const dir = versionDir(home, tool, recipe);
+export async function resolvedTool(root: string, tool: string, recipe: Recipe): Promise<ResolvedTool> {
+  const dir = versionDir(root, tool, recipe);
   const runtime = await checkRuntime(recipe);
   let env: Record<string, string> = {};
   if (recipe.method === "uv") {
@@ -188,7 +189,7 @@ export async function resolvedTool(home: string, tool: string, recipe: Recipe): 
   } else {
     env = { ...runtime.env };
   }
-  return { path: binaryPath(home, tool, recipe), version: recipe.version, env };
+  return { path: binaryPath(root, tool, recipe), version: recipe.version, env };
 }
 
 // The plain reason this machine has no way to get the tool, or null.
@@ -205,18 +206,18 @@ export function unsupportedReason(table: Toolchain, recipe: Recipe): string | nu
   return null;
 }
 
-export function cannotWriteReason(home: string): string {
-  return `cannot write ${home} here: run \`npx openqodex doctor --install\` in this repository from your own terminal`;
+export function cannotWriteReason(owner: string): string {
+  return `cannot write ${owner} here: run \`npx openqodex doctor --install\` in this repository from your own terminal`;
 }
 
 // Creates the tool folder, or throws the plain reason it cannot be written.
-export function ensureWritable(home: string, tool: string): string {
-  const dir = toolDir(home, tool);
+export function ensureWritable(place: InstallPlace, tool: string): string {
+  const dir = toolDir(place.root, tool);
   try {
     mkdirSync(dir, { recursive: true });
     accessSync(dir, constants.W_OK);
   } catch {
-    throw new InstallError("not_installed", cannotWriteReason(home));
+    throw new InstallError("not_installed", cannotWriteReason(place.owner));
   }
   return dir;
 }
@@ -236,8 +237,8 @@ export function ensureWritable(home: string, tool: string): string {
 // place, or no longer reads its own token before publishing, discards its own
 // work. The cost of the window is a duplicated download, nothing more.
 
-function lockPath(home: string, tool: string): string {
-  return join(toolDir(home, tool), ".lock");
+function lockPath(root: string, tool: string): string {
+  return join(toolDir(root, tool), ".lock");
 }
 
 export function readLock(path: string): { pid: number; token: string } | null {
@@ -259,13 +260,13 @@ function isAlive(pid: number): boolean {
 }
 
 // True while a live process holds the lock on this tool.
-export function isLocked(home: string, tool: string): boolean {
-  const holder = readLock(lockPath(home, tool));
+export function isLocked(root: string, tool: string): boolean {
+  const holder = readLock(lockPath(root, tool));
   return holder !== null && isAlive(holder.pid);
 }
 
-export function holdsLock(home: string, tool: string, token: string): boolean {
-  return readLock(lockPath(home, tool))?.token === token;
+export function holdsLock(root: string, tool: string, token: string): boolean {
+  return readLock(lockPath(root, tool))?.token === token;
 }
 
 // Replaces a stale lock with the taker's own finished lock file. `observed` is
@@ -284,9 +285,9 @@ export function takeOverStaleLock(lock: string, observed: { pid: number; token: 
   return readLock(lock)?.token === token;
 }
 
-export async function acquireLock(home: string, tool: string): Promise<string> {
-  const dir = toolDir(home, tool);
-  const lock = lockPath(home, tool);
+export async function acquireLock(place: InstallPlace, tool: string): Promise<string> {
+  const dir = toolDir(place.root, tool);
+  const lock = lockPath(place.root, tool);
   const token = randomBytes(8).toString("hex");
   const mine = join(dir, `.lock-${token}`);
   const giveUp = Date.now() + LOCK_WAIT_MS;
@@ -297,7 +298,7 @@ export async function acquireLock(home: string, tool: string): Promise<string> {
         linkSync(mine, lock);
         return token;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw new InstallError("not_installed", cannotWriteReason(home));
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw new InstallError("not_installed", cannotWriteReason(place.owner));
       }
       const holder = readLock(lock);
       if (holder === null || !isAlive(holder.pid)) {
@@ -312,16 +313,16 @@ export async function acquireLock(home: string, tool: string): Promise<string> {
   }
 }
 
-export function releaseLock(home: string, tool: string, token: string): void {
-  if (holdsLock(home, tool, token)) rmSync(lockPath(home, tool), { force: true });
+export function releaseLock(root: string, tool: string, token: string): void {
+  if (holdsLock(root, tool, token)) rmSync(lockPath(root, tool), { force: true });
 }
 
-async function withLock<T>(home: string, tool: string, fn: (token: string) => Promise<T>): Promise<T> {
-  const token = await acquireLock(home, tool);
+async function withLock<T>(place: InstallPlace, tool: string, fn: (token: string) => Promise<T>): Promise<T> {
+  const token = await acquireLock(place, tool);
   try {
     return await fn(token);
   } finally {
-    releaseLock(home, tool, token);
+    releaseLock(place.root, tool, token);
   }
 }
 
@@ -345,20 +346,20 @@ type Published = "published" | "already_installed" | "lost_lock";
 // not, or the version is already installed, it deletes its own folder and
 // publishes nothing.
 export function publishVersion(
-  home: string,
+  root: string,
   tool: string,
   recipe: Recipe,
   built: string,
   token: string,
   how: "move" | "link",
 ): Published {
-  const final = versionDir(home, tool, recipe);
+  const final = versionDir(root, tool, recipe);
   const discard = (result: Published): Published => {
     rmSync(built, { recursive: true, force: true });
     return result;
   };
-  if (isInstalled(home, tool, recipe)) return discard("already_installed");
-  if (!holdsLock(home, tool, token)) return discard("lost_lock");
+  if (isInstalled(root, tool, recipe)) return discard("already_installed");
+  if (!holdsLock(root, tool, token)) return discard("lost_lock");
   // A version folder without its marker is debris from an install that died
   // under the earlier in-place layout; no live worker writes there any more.
   if (existsSync(final) || isSymlink(final)) rmSync(final, { recursive: true, force: true });
@@ -371,7 +372,7 @@ export function publishVersion(
       renameSync(link, final);
     }
   } catch (error) {
-    if (isInstalled(home, tool, recipe)) return discard("already_installed");
+    if (isInstalled(root, tool, recipe)) return discard("already_installed");
     throw error;
   }
   return "published";
@@ -388,7 +389,7 @@ function isSymlink(path: string): boolean {
 // Download, verify, unpack into this worker's own staging folder, then publish
 // the finished version folder, so a half install never looks installed.
 async function installRelease(
-  home: string,
+  root: string,
   tool: string,
   recipe: Extract<Recipe, { method: "github-release" }>,
   token: string,
@@ -396,7 +397,7 @@ async function installRelease(
   const platform = currentPlatform();
   const asset = platform ? recipe.assets[platform] : null;
   if (!asset) throw new InstallError("not_installed", "no download for this platform");
-  const dir = toolDir(home, tool);
+  const dir = toolDir(root, tool);
   const staging = mkdtempSync(join(dir, ".staging-"));
   try {
     const download = join(staging, "download");
@@ -418,7 +419,7 @@ async function installRelease(
     renameSync(source, target);
     chmodSync(target, 0o755);
     writeMarker(ready, recipe.version);
-    return publishVersion(home, tool, recipe, ready, token, "move");
+    return publishVersion(root, tool, recipe, ready, token, "move");
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
@@ -433,10 +434,10 @@ export function npmCommand(): { file: string; args: string[] } | null {
 }
 
 // Installers run with the small environment plus what OpenQodex sets, in the
-// OpenQodex home folder (or a folder of the install's own), never the repo: a
-// variable or a project config file cannot change where they read from or
-// write to.
-async function runInstaller(home: string, file: string, args: string[], extra: Record<string, string>, cwd = home): Promise<void> {
+// folder that holds the install place (the OpenQodex home on the laptop) or
+// a folder of the install's own, never the repo: a variable or a project
+// config file cannot change where they read from or write to.
+async function runInstaller(cwd: string, file: string, args: string[], extra: Record<string, string>): Promise<void> {
   const out = await run(file, args, { cwd, env: smallEnv(extra), timeoutMs: INSTALL_TIMEOUT_MS });
   if (out.timedOut) throw new InstallError("failed", "install failed: not finished after 20 minutes");
   if (out.code !== 0) throw new InstallError("failed", `install failed: ${lastLine(out.stderr) || `exit ${out.code}`}`);
@@ -446,29 +447,29 @@ async function runInstaller(home: string, file: string, args: string[], extra: R
 // paths in scripts), so each worker installs into a folder of its own that
 // stays where it is, writes the marker there, and publishes the version as a
 // link to it.
-async function installInPlace(home: string, tool: string, recipe: Recipe, table: Toolchain, token: string): Promise<Published> {
-  const dir = mkdtempSync(join(toolDir(home, tool), `.build-${recipe.version}-`));
+async function installInPlace(place: InstallPlace, tool: string, recipe: Recipe, table: Toolchain, token: string): Promise<Published> {
+  const dir = mkdtempSync(join(toolDir(place.root, tool), `.build-${recipe.version}-`));
   chmodSync(dir, 0o755);
   try {
     if (recipe.method === "uv") {
       const lock = lockFile(tool);
       if (lock === null) throw new InstallError("not_installed", "no lock file for this platform");
-      const uv = which("uv") ?? (await installTool("uv", { table })).path;
-      const python = join(toolsDir(home), "uv-python");
+      const uv = which("uv") ?? (await installTool("uv", { table, place })).path;
+      const python = join(place.root, "uv-python");
       const env = {
         UV_PYTHON_INSTALL_DIR: python,
         UV_PYTHON_BIN_DIR: join(python, "bin"),
         UV_PYTHON_PREFERENCE: "only-managed",
-        UV_CACHE_DIR: join(home, "cache", "uv"),
+        UV_CACHE_DIR: join(place.cache, "uv"),
         UV_NO_PROGRESS: "1",
       };
       // A Python environment of the tool's own, then exactly the packages of
       // the lock: --require-hashes refuses any file whose sha256 the lock
       // does not name, --no-deps adds nothing the lock leaves out, and
       // --only-binary installs wheels only, so no package's build script runs.
-      await runInstaller(home, uv, ["venv", "--quiet", "--allow-existing", "--python", recipe.python, dir], env);
+      await runInstaller(place.owner, uv, ["venv", "--quiet", "--allow-existing", "--python", recipe.python, dir], env);
       await runInstaller(
-        home,
+        place.owner,
         uv,
         ["pip", "install", "--quiet", "--python", join(dir, "bin", "python"), "--require-hashes", "--no-deps", "--only-binary", ":all:", "-r", lock],
         env,
@@ -490,13 +491,13 @@ async function installInPlace(home: string, tool: string, recipe: Recipe, table:
       }
       const tops = recipe.gems.map((spec) => `${spec.replace(":", "-")}.gem`);
       const args = ["install", "--local", "--no-document", "--install-dir", dir, "--bindir", join(dir, "bin"), ...tops];
-      await runInstaller(home, gem, args, { GEM_HOME: dir, GEM_PATH: dir, GEM_SPEC_CACHE: join(home, "cache", "gem-specs") }, files);
+      await runInstaller(files, gem, args, { GEM_HOME: dir, GEM_PATH: dir, GEM_SPEC_CACHE: join(place.cache, "gem-specs") });
       rmSync(files, { recursive: true, force: true });
     }
     const bin = join(dir, "bin", recipe.binary);
     if (!existsSync(bin)) throw new InstallError("failed", `install failed: ${recipe.binary} missing after install`);
     writeMarker(dir, recipe.version);
-    return publishVersion(home, tool, recipe, dir, token, "link");
+    return publishVersion(place.root, tool, recipe, dir, token, "link");
   } catch (error) {
     rmSync(dir, { recursive: true, force: true });
     throw error;
@@ -521,51 +522,53 @@ export function readGemLock(file: string): { name: string; version: string; sha2
 
 // Installs one tool from the table and returns it. Throws InstallError with the
 // plain reason. Safe to call from several processes at once: one installs, the
-// others wait on the lock and then find it installed.
+// others wait on the lock and then find it installed. `place`: where it
+// goes, by default the OpenQodex home's tools folder.
 export async function installTool(
   tool: string,
-  opts: { table?: Toolchain; onProgress?: (line: string) => void } = {},
+  opts: { table?: Toolchain; onProgress?: (line: string) => void; place?: InstallPlace } = {},
 ): Promise<ResolvedTool> {
   const table = opts.table ?? loadToolchain();
   const recipe = table.tools[tool];
   if (!recipe) throw new InstallError("failed", `${tool} is not in the toolchain table`);
-  const home = openqodexHome();
+  const place = opts.place ?? homePlace();
+  const root = place.root;
   const runtime = await missingRuntime(recipe);
   if (runtime) throw new InstallError("not_installed", runtime);
-  if (isInstalled(home, tool, recipe)) return resolvedTool(home, tool, recipe);
+  if (isInstalled(root, tool, recipe)) return resolvedTool(root, tool, recipe);
   const unsupported = unsupportedReason(table, recipe);
   if (unsupported) throw new InstallError("not_installed", unsupported);
-  const dir = ensureWritable(home, tool);
+  const dir = ensureWritable(place, tool);
   // A worker that lost the lock to another installer goes back to waiting on
   // the lock, then finds the other's install in place.
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const result = await withLock(home, tool, async (token) => {
-      if (isInstalled(home, tool, recipe)) return "already_installed" as const;
+    const result = await withLock(place, tool, async (token) => {
+      if (isInstalled(root, tool, recipe)) return "already_installed" as const;
       opts.onProgress?.(`installing ${tool} ${recipe.version} (first run only)`);
       const published =
         recipe.method === "github-release"
-          ? await installRelease(home, tool, recipe, token)
-          : await installInPlace(home, tool, recipe, table, token);
+          ? await installRelease(root, tool, recipe, token)
+          : await installInPlace(place, tool, recipe, table, token);
       if (published === "published") {
         appendFileSync(join(dir, "install.log"), `${new Date().toISOString()} installed ${tool} ${recipe.version}\n`);
       }
       return published;
     });
-    if (result !== "lost_lock" && isInstalled(home, tool, recipe)) return resolvedTool(home, tool, recipe);
+    if (result !== "lost_lock" && isInstalled(root, tool, recipe)) return resolvedTool(root, tool, recipe);
   }
   throw new InstallError("failed", "install failed: another install kept taking the lock");
 }
 
 // ---------- the detached install process ----------
 
-function errorPath(home: string, tool: string): string {
-  return join(toolDir(home, tool), ".error");
+function errorPath(root: string, tool: string): string {
+  return join(toolDir(root, tool), ".error");
 }
 
 // The reason the last install of this tool failed, if it did.
-export function lastInstallError(home: string, tool: string): { status: "not_installed" | "failed"; reason: string } | null {
+export function lastInstallError(root: string, tool: string): { status: "not_installed" | "failed"; reason: string } | null {
   try {
-    return JSON.parse(readFileSync(errorPath(home, tool), "utf8")) as { status: "not_installed" | "failed"; reason: string };
+    return JSON.parse(readFileSync(errorPath(root, tool), "utf8")) as { status: "not_installed" | "failed"; reason: string };
   } catch {
     return null;
   }
@@ -575,8 +578,8 @@ export function lastInstallError(home: string, tool: string): { status: "not_ins
 // checks the entry first). Returns the exit code: 0 installed, 1 failed with
 // the reason saved for the run that started it.
 export async function runInstall(tool: string): Promise<number> {
-  const home = openqodexHome();
-  rmSync(errorPath(home, tool), { force: true });
+  const root = homePlace().root;
+  rmSync(errorPath(root, tool), { force: true });
   try {
     await installTool(tool);
     return 0;
@@ -586,8 +589,8 @@ export async function runInstall(tool: string): Promise<number> {
         ? error
         : new InstallError("failed", `install failed: ${error instanceof Error ? error.message : String(error)}`);
     try {
-      mkdirSync(toolDir(home, tool), { recursive: true });
-      writeFileSync(errorPath(home, tool), JSON.stringify({ status: failure.status, reason: failure.message }));
+      mkdirSync(toolDir(root, tool), { recursive: true });
+      writeFileSync(errorPath(root, tool), JSON.stringify({ status: failure.status, reason: failure.message }));
     } catch {
       // the home folder cannot be written; the caller already reports that
     }

@@ -1,6 +1,7 @@
-// The toolchain: finds each pinned scanner, installing it on first use into
-// ~/.openqodex/tools/<tool>/<version>/. A builtin scanner is never taken from
-// PATH, so two machines report the same findings.
+// The toolchain: finds each pinned scanner in an install root, by default
+// ~/.openqodex/tools/<tool>/<version>/, installing it there on first use when
+// installs are on. A builtin scanner is never taken from PATH, so two
+// machines report the same findings.
 import { spawn } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -19,11 +20,11 @@ import {
   runInstall,
   unsupportedReason,
 } from "./install.js";
-import { loadToolchain, openqodexHome, type Recipe } from "./table.js";
+import { homePlace, loadToolchain, openqodexHome, toolsDir, type Recipe } from "./table.js";
 
 export { downloadVerified, extractArchive, InstallError } from "./fetch.js";
 export { installTool } from "./install.js";
-export { openqodexHome, toolchainHash } from "./table.js";
+export { loadToolchain, openqodexHome, toolchainHash, toolsDir } from "./table.js";
 export type { Recipe, ReleaseAsset, Toolchain } from "./table.js";
 
 // Every builtin scanner, checked against the type so a new one is not missed.
@@ -134,14 +135,15 @@ function workerProgram(): { entry: string } | { refusal: string } {
   return { entry };
 }
 
-// The worker runs in another folder, so it gets this process's absolute home:
-// a relative OPENQODEX_HOME would otherwise name a different place there.
-function startWorker(entry: string, tool: string) {
+// The worker runs in another folder, so it gets the absolute home: a
+// relative OPENQODEX_HOME would otherwise name a different place there. It
+// installs into that home's tools folder.
+function startWorker(entry: string, tool: string, home: string) {
   return spawn(process.execPath, [entry, INSTALL_WORKER_COMMAND, tool], {
     cwd: homedir(),
     detached: true,
     stdio: "ignore",
-    env: { ...process.env, OPENQODEX_HOME: openqodexHome(), [WORKER_MARKER]: "1" },
+    env: { ...process.env, OPENQODEX_HOME: home, [WORKER_MARKER]: "1" },
   });
 }
 
@@ -165,28 +167,30 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof TI
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function installedResolution(home: string, tool: string, recipe: Recipe): Promise<ToolResolution> {
-  return { ok: true, tool: await resolvedTool(home, tool, recipe) };
+async function installedResolution(root: string, tool: string, recipe: Recipe): Promise<ToolResolution> {
+  return { ok: true, tool: await resolvedTool(root, tool, recipe) };
 }
 
-function failedResolution(home: string, tool: string): ToolResolution {
-  const failure = lastInstallError(home, tool);
+function failedResolution(root: string, tool: string): ToolResolution {
+  const failure = lastInstallError(root, tool);
   return failure ? { ok: false, ...failure } : { ok: false, status: "failed", reason: "install failed" };
 }
 
 // Starts the install in a detached process, so it keeps going if this process
-// exits, and waits for it until `deadline` (null: no limit).
+// exits, and waits for it until `deadline` (null: no limit). The process
+// installs into the tools folder of `home`.
 function installDetached(entry: string, tool: string, recipe: Recipe, home: string, deadline: number | null): Promise<ToolResolution> {
+  const root = toolsDir(home);
   return new Promise((done) => {
     let timer: NodeJS.Timeout | undefined;
-    const child = startWorker(entry, tool);
+    const child = startWorker(entry, tool, home);
     child.once("error", (error) => {
       clearTimeout(timer);
       done({ ok: false, status: "failed", reason: `could not start the install: ${error.message}` });
     });
     child.once("exit", () => {
       clearTimeout(timer);
-      done(isInstalled(home, tool, recipe) ? installedResolution(home, tool, recipe) : failedResolution(home, tool));
+      done(isInstalled(root, tool, recipe) ? installedResolution(root, tool, recipe) : failedResolution(root, tool));
     });
     if (deadline !== null) {
       timer = setTimeout(() => {
@@ -199,55 +203,83 @@ function installDetached(entry: string, tool: string, recipe: Recipe, home: stri
 
 const NO_RECIPE = "no install recipe; this build cannot run it";
 
-type ResolverOptions = { allowInstall: boolean; installBudgetMs: number | null; onProgress?: (line: string) => void };
+// `installRoot`: the folder the pinned tools are read from, one folder per
+// tool; by default the OpenQodex home's tools folder. With `allowInstall`,
+// a missing tool is installed there by the openqodex program in a detached
+// process, which installs only into an OpenQodex home: the install root must
+// then be that home's tools folder. A server fills its own install root with
+// preinstallScanners and reads it with installs off. `installBudgetMs`: how
+// long to wait for the runtime probes and an install; null or left out waits
+// until they finish.
+export type ResolverOptions = { allowInstall: boolean; installRoot?: string; installBudgetMs?: number | null; onProgress?: (line: string) => void };
 
-async function resolveOne(scanner: BuiltinScanner, opts: ResolverOptions): Promise<ToolResolution> {
+type Resolver = { allowInstall: boolean; root: string; home: string; installBudgetMs: number | null; onProgress?: (line: string) => void };
+
+async function resolveOne(scanner: BuiltinScanner, opts: Resolver): Promise<ToolResolution> {
   // The budget covers everything below, the runtime probes included.
   const deadline = opts.installBudgetMs === null ? null : Date.now() + opts.installBudgetMs;
   const table = loadToolchain();
   const recipe = table.tools[scanner];
   if (!recipe) return IN_PROCESS.has(scanner) ? { ok: false, status: "failed", reason: "runs inside openqodex, no tool to resolve" } : { ok: false, status: "not_installed", reason: NO_RECIPE };
-  const home = openqodexHome();
+  const root = opts.root;
   // The probe is shared and may finish in the background; this caller waits
   // for it only as long as its budget allows.
   const probe = missingRuntime(recipe);
   const runtime = deadline === null ? await probe : await withDeadline(probe, remaining(deadline));
   if (runtime === TIMED_OUT) return { ok: false, status: "not_installed", reason: "still checking for the runtime; it will be included next run" };
   if (runtime) return { ok: false, status: "not_installed", reason: runtime };
-  if (isInstalled(home, scanner, recipe)) return installedResolution(home, scanner, recipe);
+  if (isInstalled(root, scanner, recipe)) return installedResolution(root, scanner, recipe);
   const unsupported = unsupportedReason(table, recipe);
   if (unsupported) return { ok: false, status: "not_installed", reason: unsupported };
   if (!opts.allowInstall) return { ok: false, status: "not_installed", reason: "not installed (installs are off)" };
   try {
-    ensureWritable(home, scanner);
+    ensureWritable(homePlace(opts.home), scanner);
   } catch (error) {
     if (error instanceof InstallError) return { ok: false, status: error.status, reason: error.message };
     throw error;
   }
   // Another process is installing it: wait on that one instead of starting another.
-  if (isLocked(home, scanner)) {
-    while (isLocked(home, scanner)) {
+  if (isLocked(root, scanner)) {
+    while (isLocked(root, scanner)) {
       if (deadline !== null && Date.now() >= deadline) return STILL_INSTALLING;
       await sleep(deadline === null ? 250 : Math.min(250, remaining(deadline)));
     }
-    if (isInstalled(home, scanner, recipe)) return installedResolution(home, scanner, recipe);
-    if (lastInstallError(home, scanner)) return failedResolution(home, scanner);
+    if (isInstalled(root, scanner, recipe)) return installedResolution(root, scanner, recipe);
+    if (lastInstallError(root, scanner)) return failedResolution(root, scanner);
   }
   // Only starting an install needs a program to start; waiting on another
   // process's install above does not.
   const worker = workerProgram();
   if ("refusal" in worker) return { ok: false, status: "not_installed", reason: worker.refusal };
   opts.onProgress?.(`installing ${scanner} ${recipe.version} (first run only)`);
-  return installDetached(worker.entry, scanner, recipe, home, deadline);
+  return installDetached(worker.entry, scanner, recipe, opts.home, deadline);
 }
 
-// installBudgetMs null means wait for every install to finish.
+// The same folder, however it is spelled (a link on the way, /var and
+// /private/var on macOS).
+function sameFolder(a: string, b: string): boolean {
+  if (resolve(a) === resolve(b)) return true;
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
+}
+
 export function createToolResolver(opts: ResolverOptions): ResolveTool {
+  const home = openqodexHome();
+  const root = opts.installRoot === undefined ? toolsDir(home) : resolve(opts.installRoot);
+  if (opts.allowInstall && !sameFolder(root, toolsDir(home))) {
+    throw new Error(
+      `installs on demand go only into the OpenQodex home's tools folder (${toolsDir(home)}), not ${root}: fill ${root} with preinstallScanners and read it with allowInstall: false`,
+    );
+  }
+  const resolver: Resolver = { allowInstall: opts.allowInstall, root, home, installBudgetMs: opts.installBudgetMs ?? null, onProgress: opts.onProgress };
   const seen = new Map<BuiltinScanner, Promise<ToolResolution>>();
   return (scanner) => {
     let resolution = seen.get(scanner);
     if (!resolution) {
-      resolution = resolveOne(scanner, opts);
+      resolution = resolveOne(scanner, resolver);
       seen.set(scanner, resolution);
     }
     return resolution;
@@ -262,17 +294,17 @@ async function statusOf(scanner: BuiltinScanner): Promise<ToolStatus> {
   if (!recipe) {
     return IN_PROCESS.has(scanner) ? { scanner, state: "ready", version: "built in", detail: "runs inside openqodex" } : { scanner, state: "unsupported", version: "none", detail: NO_RECIPE };
   }
-  const home = openqodexHome();
+  const root = toolsDir(openqodexHome());
   const version = recipe.version;
   const runtime = await missingRuntime(recipe);
   if (runtime) return { scanner, state: "needs_runtime", version, detail: runtime };
-  if (isInstalled(home, scanner, recipe)) {
-    return { scanner, state: "ready", version, detail: (await resolvedTool(home, scanner, recipe)).path };
+  if (isInstalled(root, scanner, recipe)) {
+    return { scanner, state: "ready", version, detail: (await resolvedTool(root, scanner, recipe)).path };
   }
   const unsupported = unsupportedReason(table, recipe);
   if (unsupported) return { scanner, state: "unsupported", version, detail: unsupported };
-  if (isLocked(home, scanner)) return { scanner, state: "installing", version, detail: null };
-  const failure = lastInstallError(home, scanner);
+  if (isLocked(root, scanner)) return { scanner, state: "installing", version, detail: null };
+  const failure = lastInstallError(root, scanner);
   return { scanner, state: "will_install", version, detail: failure ? `last attempt: ${failure.reason}` : null };
 }
 
@@ -297,11 +329,12 @@ export function installToolsDetached(scanners: BuiltinScanner[] | null): void {
   if ("refusal" in worker) return;
   const table = loadToolchain();
   const home = openqodexHome();
+  const root = toolsDir(home);
   for (const scanner of scanners ?? ALL_SCANNERS) {
     const recipe = table.tools[scanner];
-    if (!recipe || isInstalled(home, scanner, recipe) || isLocked(home, scanner) || unsupportedReason(table, recipe)) continue;
+    if (!recipe || isInstalled(root, scanner, recipe) || isLocked(root, scanner) || unsupportedReason(table, recipe)) continue;
     // The install process checks the runtime itself and records why it stopped.
-    const child = startWorker(worker.entry, scanner);
+    const child = startWorker(worker.entry, scanner, home);
     child.once("error", () => undefined);
     child.unref();
   }

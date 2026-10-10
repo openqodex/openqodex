@@ -44,6 +44,9 @@ importers:
       '@openqodex/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@openqodex/review':
+        specifier: workspace:*
+        version: link:../review
       '@openqodex/scanners':
         specifier: workspace:*
         version: link:../scanners
@@ -99,6 +102,18 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.30.1
         version: 1.30.1(zod@4.6.5)
+      '@openqodex/core':
+        specifier: workspace:*
+        version: link:../core
+      '@openqodex/graph':
+        specifier: workspace:*
+        version: link:../graph
+      '@openqodex/scanners':
+        specifier: workspace:*
+        version: link:../scanners
+
+  packages/review:
+    dependencies:
       '@openqodex/core':
         specifier: workspace:*
         version: link:../core

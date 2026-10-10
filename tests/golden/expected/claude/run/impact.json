@@ -1,0 +1,225 @@
+{
+  "version": 2,
+  "status": "ok",
+  "reasons": [],
+  "risk": "low",
+  "build": {
+    "durationMs": "<DURATION_MS>",
+    "cacheHits": 0,
+    "parses": 5,
+    "eligibleFiles": 4,
+    "parsedFiles": 4,
+    "omittedFiles": 0,
+    "unresolvedSites": 6,
+    "externalSites": 21,
+    "mode": "fresh",
+    "generation": "<GRAPH_GENERATION>"
+  },
+  "symbols": [
+    {
+      "id": "app/search.py#search_items@8:5",
+      "file": "app/search.py",
+      "name": "search_items",
+      "kind": "function",
+      "startLine": 8,
+      "endLine": 17,
+      "snapshot": "current"
+    },
+    {
+      "id": "app/server.py#list_items@20:5",
+      "file": "app/server.py",
+      "name": "list_items",
+      "kind": "function",
+      "startLine": 20,
+      "endLine": 29,
+      "snapshot": "current"
+    },
+    {
+      "id": "app/server.py#get_db@14:5",
+      "file": "app/server.py",
+      "name": "get_db",
+      "kind": "function",
+      "startLine": 14,
+      "endLine": 17,
+      "snapshot": "current"
+    },
+    {
+      "id": "app/server.py",
+      "file": "app/server.py",
+      "name": "server.py",
+      "kind": "file",
+      "startLine": 1,
+      "endLine": 40,
+      "snapshot": "current"
+    }
+  ],
+  "touched": [
+    "app/search.py#search_items@8:5",
+    "app/server.py#list_items@20:5"
+  ],
+  "removed": [],
+  "callers": [],
+  "possible": [],
+  "references": [],
+  "callees": [
+    {
+      "seed": "app/server.py#list_items@20:5",
+      "edges": [
+        {
+          "from": "app/server.py#list_items@20:5",
+          "to": "app/server.py#get_db@14:5",
+          "kind": "calls",
+          "sites": [
+            {
+              "file": "app/server.py",
+              "line": 24,
+              "column": 10,
+              "tier": "certain",
+              "evidence": "same-scope",
+              "via": null,
+              "note": null,
+              "rule": "same-scope"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "importers": [
+    {
+      "from": "app/server.py",
+      "to": "app/search.py",
+      "kind": "imports",
+      "sites": [
+        {
+          "file": "app/server.py",
+          "line": 5,
+          "column": 1,
+          "tier": "certain",
+          "evidence": "py-root",
+          "via": {
+            "file": "app/server.py",
+            "line": 5,
+            "spec": "app.search"
+          },
+          "note": null,
+          "rule": "py-walk-root"
+        }
+      ]
+    }
+  ],
+  "hubs": [],
+  "exports": [],
+  "unknown": {
+    "floor": false,
+    "seeds": [
+      {
+        "seed": "app/search.py#search_items@8:5",
+        "floor": false,
+        "reasons": []
+      },
+      {
+        "seed": "app/server.py#list_items@20:5",
+        "floor": false,
+        "reasons": []
+      }
+    ],
+    "causes": {
+      "no-receiver-type": 6
+    },
+    "near": [
+      {
+        "file": "app/search.py",
+        "line": 14,
+        "name": "execute",
+        "cause": "no-receiver-type",
+        "scope": "file",
+        "note": "the type conn.cursor is not found in the graph",
+        "candidates": null
+      },
+      {
+        "file": "app/search.py",
+        "line": 15,
+        "name": "fetchall",
+        "cause": "no-receiver-type",
+        "scope": "file",
+        "note": "the type conn.cursor is not found in the graph",
+        "candidates": null
+      },
+      {
+        "file": "app/server.py",
+        "line": 28,
+        "name": "fetchall",
+        "cause": "no-receiver-type",
+        "scope": "file",
+        "note": "the type conn.execute is not found in the graph",
+        "candidates": null
+      },
+      {
+        "file": "app/server.py",
+        "line": 25,
+        "name": "execute",
+        "cause": "no-receiver-type",
+        "scope": "file",
+        "note": null,
+        "candidates": null
+      },
+      {
+        "file": "app/server.py",
+        "line": 37,
+        "name": "fetchone",
+        "cause": "no-receiver-type",
+        "scope": "file",
+        "note": "the type conn.execute is not found in the graph",
+        "candidates": null
+      },
+      {
+        "file": "app/server.py",
+        "line": 35,
+        "name": "execute",
+        "cause": "no-receiver-type",
+        "scope": "file",
+        "note": null,
+        "candidates": null
+      }
+    ],
+    "nearTotal": 6,
+    "notRead": [],
+    "notReadTotal": 0
+  },
+  "cuts": [],
+  "truncated": {
+    "walk": false,
+    "inline": false,
+    "omittedSites": null
+  },
+  "packet": ".openqodex-review/graph/",
+  "frameworks": {
+    "plugins": [],
+    "routes": [],
+    "routesTotal": 0,
+    "renders": [],
+    "renderedBy": [],
+    "models": [],
+    "migrations": [],
+    "tests": [],
+    "testsTotal": 0,
+    "roles": [],
+    "unknown": [],
+    "unknownTotal": 0,
+    "changedFiles": [
+      ".github/workflows/ci.yml",
+      "Dockerfile",
+      "app/config.py",
+      "app/search.py",
+      "app/server.py",
+      "db/migrations/002_index_item_names.sql",
+      "deploy/deployment.yaml",
+      "infra/main.tf",
+      "package-lock.json",
+      "package.json",
+      "scripts/deploy.sh"
+    ],
+    "routeIds": []
+  }
+}

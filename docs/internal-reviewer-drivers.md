@@ -23,7 +23,7 @@ claude -p --output-format stream-json --verbose --input-format stream-json
   --no-session-persistence
 ```
 
-The child gets an environment built from an allowlist (`reviewerEnv` in `packages/cli/src/reviewers/claude.ts`): `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, locale, `TERM`, `TZ`, `CLAUDE_CONFIG_DIR`, proxy and CA settings, the `ANTHROPIC_*` key, URL and model variables, and the Bedrock, Vertex or Foundry variables only when the matching `CLAUDE_CODE_USE_*` flag is set; plus `OPENQODEX_REVIEW_DEPTH=1`. No other variable is copied, so no developer token and nothing that ties the child to a running Claude Code session (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, messaging sockets) reaches it. A run from inside a Claude Code session with this environment worked as the runs below did.
+The child gets an environment built from an allowlist (`reviewerEnv` in `packages/review/src/agents/claude.ts`): `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, locale, `TERM`, `TZ`, `CLAUDE_CONFIG_DIR`, proxy and CA settings, the `ANTHROPIC_*` key, URL and model variables, and the Bedrock, Vertex or Foundry variables only when the matching `CLAUDE_CODE_USE_*` flag is set; plus `OPENQODEX_REVIEW_DEPTH=1`. No other variable is copied, so no developer token and nothing that ties the child to a running Claude Code session (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, messaging sockets) reaches it. A run from inside a Claude Code session with this environment worked as the runs below did.
 
 ### What each flag was observed to do
 
@@ -59,7 +59,7 @@ Each `result` event carries `num_turns` and `usage` for that turn (input, output
 
 ### The boundary and the alarm
 
-The boundary is Claude Code's own permission rules: `--tools Read,Grep,Glob` and `--permission-mode dontAsk` with no settings source, which refused every read outside the working folder in the runs above. The alarm is the tool's own check of the event stream (`packages/cli/src/reviewers/trace.ts`), which does not trust the boundary and fails closed:
+The boundary is Claude Code's own permission rules: `--tools Read,Grep,Glob` and `--permission-mode dontAsk` with no settings source, which refused every read outside the working folder in the runs above. The alarm is the tool's own check of the event stream (`packages/review/src/agents/trace.ts`), which does not trust the boundary and fails closed:
 
 - the run fails when the `init` event lists any tool beyond Read, Grep and Glob, any MCP server or a memory path; the `Agent` tool is never listed, so no subagent or nested turn can make a call the stream does not show, and every `tool_use` in the stream is checked whichever turn it came from;
 - every tool call counts from the moment the agent asks for it, with or without a result; a tool name other than the three makes the review incomplete;
@@ -81,7 +81,7 @@ With `--no-session-persistence` and auto memory off, real runs with Claude Code 
 
 ## Codex
 
-Enabled since 0.6.0, with two stated limits. Tested with codex-cli 0.160.0 (`/opt/homebrew/bin/codex --version`) on macOS, 2026-10-03 and 2026-10-04, logged in with a ChatGPT account, on throwaway folders under `~/.openqodex/` with canaries. The driver is `packages/cli/src/reviewers/codex.ts`. It refuses a Codex older than 0.160.0, and a Codex whose `--version` prints no version number.
+Enabled since 0.6.0, with two stated limits. Tested with codex-cli 0.160.0 (`/opt/homebrew/bin/codex --version`) on macOS, 2026-10-03 and 2026-10-04, logged in with a ChatGPT account, on throwaway folders under `~/.openqodex/` with canaries. The driver is `packages/review/src/agents/codex.ts`. It refuses a Codex older than 0.160.0, and a Codex whose `--version` prints no version number.
 
 ### The command line
 
@@ -145,7 +145,7 @@ Observed with codex-cli 0.160.0 (2026-10-04):
 1. The developer's global instructions are loaded. `~/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`) appeared in the prompt input with every flag above, and the model quoted its first sentence. No configuration key removed it (`instructions`, `user_instructions`, `agents_md.enabled`, `include_agents_md`, `features.agents_md` were tried). Only a different `CODEX_HOME` leaves it out, and that moves the login: a copy of `auth.json` would refresh its token on its own and can leave the developer's real login with a used refresh token. The driver keeps the developer's `CODEX_HOME`. In one real run the model looked for `CLAUDE.md` and `AGENT.md` files in the snapshot because the global file told it to.
 2. The event stream does not show every command. Every current model in the catalog (`codex debug models`) has `tool_mode: code_mode_only` except gpt-5.5: the shell is a nested tool inside a code tool. In one run on 2026-10-03, two shell commands ran (their output came back in the answer) and no `command_execution` event appeared in the stream. In the runs on 2026-10-04 every command did appear. Nothing guarantees it, so the driver says `traced: false`.
 
-What `traced: false` changes in the run (`packages/cli/src/review-run.ts`, `packages/core/src/completion.ts`):
+What `traced: false` changes in the run (`packages/review/src/review-change.ts`, `packages/review/src/conversation.ts`, `packages/core/src/completion.ts`):
 
 - No read in the stream counts as coverage. A changed range counts only when its diff is in the brief or the run sent it in a correction round. A range still not sent after two rounds makes the review incomplete ("not given to the reviewer").
 - The commands and searches the stream shows are kept in `trace.json` with `inside: null` and their input under `detail`. They never pass or fail a review: there is no "read outside the snapshot" alarm and no "tool it was not given" check. The sandbox is the boundary.

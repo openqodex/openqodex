@@ -9,7 +9,7 @@
 import type { Candidate, Change, Config, RunManifest, ScanResult } from "@openqodex/core";
 import { fingerprintSecrets, finalizeReview } from "@openqodex/core";
 import { describe, expect, it } from "vitest";
-import { redactStored } from "../src/pipeline.js";
+import { redactStored } from "@openqodex/review";
 
 const SECRET = ["sk", "live", "Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2"].join("_");
 const file = `keys/${SECRET}.txt`;

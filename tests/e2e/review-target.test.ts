@@ -660,7 +660,7 @@ describe("a changed scanner settings file", () => {
     commitAll(dir, "Project file");
     git(dir, "push", "-q", "origin", "HEAD:main", "-f");
     write(dir, "pyproject.toml", `[project]\nname = "app"\n# ${"x".repeat(1024 * 1024 + 10)}\n`);
-    expect(settingsTokens(scan("settings-ruff-unreadable", dir))).toEqual(["ruff:settings-file pyproject.toml", "sqlfluff:settings-file pyproject.toml"]);
+    expect(settingsTokens(scan("settings-ruff-unreadable", dir))).toEqual(["sqlfluff:settings-file pyproject.toml", "ruff:settings-file pyproject.toml"]);
   });
   it("a root .gitleaksignore added with a secret is a candidate in the agent's brief", () => {
     const dir = fresh();

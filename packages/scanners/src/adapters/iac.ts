@@ -23,7 +23,6 @@
 // resource would come back for every change to that resource.
 
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { isAlias, isMap, isScalar, isSeq, parseAllDocuments } from "yaml";
 import { hclMasked } from "../comments.js";
@@ -538,9 +537,10 @@ export type Stage = {
 // allows, copies where it does not. Only a regular file inside the
 // repository, reached through no link, is staged; never a file named
 // `.checkov.yaml` or `.checkov.yml`, which checkov reads as its settings.
+// The stage is made in `tempRoot`, the run's temporary folder (scratch.ts).
 // `use` gets the stage; it is removed afterwards.
-export async function withStage<T>(repoDir: string, folders: string[], files: string[], use: (stage: Stage) => Promise<T>): Promise<T> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "openqodex-iac-"));
+export async function withStage<T>(tempRoot: string, repoDir: string, folders: string[], files: string[], use: (stage: Stage) => Promise<T>): Promise<T> {
+  const root = await fs.mkdtemp(path.join(tempRoot, "openqodex-iac-"));
   try {
     const stage: Stage = { root, tree: path.join(root, "tree"), home: path.join(root, "home"), tmp: path.join(root, "tmp"), files: [] };
     await Promise.all([fs.mkdir(stage.tree), fs.mkdir(stage.home), fs.mkdir(stage.tmp)]);

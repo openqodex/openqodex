@@ -26,6 +26,7 @@ import { describeFailure, execTool, runInChunks, stderrTail } from "../exec.js";
 import type { RepoFacts } from "../detect.js";
 import type { Adapter } from "./index.js";
 import { withOwnedConfig } from "./owned-config.js";
+import type { Scratch } from "../scratch.js";
 import { folderList, suchAs } from "./words.js";
 
 const RUBOCOP_TIMEOUT_MS = 60_000;
@@ -71,6 +72,7 @@ export async function runRubocop(args: {
   changedPaths: string[];
   tool: ResolvedTool | null;
   facts: RepoFacts;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const rubyFiles = args.changedPaths.filter(isRubyLintPath);
   if (rubyFiles.length === 0) return { findings: [], error: null };
@@ -83,16 +85,16 @@ export async function runRubocop(args: {
   for (const rails of [true, false]) {
     const files = rubyFiles.filter((p) => inRails(p, args.facts) === rails);
     if (files.length === 0) continue;
-    const result = await runRubocopOn(tool, args.repoDir, files, ownedConfig(rails));
+    const result = await runRubocopOn(tool, args.repoDir, files, ownedConfig(rails), args.scratch.temp);
     if (result.error !== null) return { findings: [], error: result.error };
     findings.push(...result.findings);
   }
   return { findings, error: null };
 }
 
-async function runRubocopOn(tool: ResolvedTool, repoDir: string, rubyFiles: string[], config: string): Promise<AdapterResult> {
+async function runRubocopOn(tool: ResolvedTool, repoDir: string, rubyFiles: string[], config: string, tempRoot: string): Promise<AdapterResult> {
   try {
-    return await withOwnedConfig("rubocop.yml", config, async (configPath, configDir) => {
+    return await withOwnedConfig(tempRoot, "rubocop.yml", config, async (configPath, configDir) => {
       // rubocop also reads extra command-line arguments from a `.rubocop`
       // file in its working folder, so it runs from the temp folder, never
       // the repo, and gets absolute paths. --format json: stable machine

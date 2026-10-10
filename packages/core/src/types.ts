@@ -565,6 +565,84 @@ export type CompletionRecord = {
   trace_complete: boolean;
 };
 
+// One tool call a model reviewer asked for, as the brain handled it. `path`
+// is relative to the snapshot when `inside`; `range` is the first and last
+// line the result carried (after the size bound). `inside` is null for a
+// call to a tool the brain did not define. `in_scope` is null while the
+// review has no scopes. `served`: the brain put a result (a refusal
+// included) in the transcript; `delivered`: a request that carried it was
+// sent to the model. `reason`: why the call was refused or its result cut,
+// else null.
+export type ModelToolEntry = {
+  tool: string;
+  path: string | null;
+  range: [number, number] | null;
+  inside: boolean | null;
+  in_scope: boolean | null;
+  ok: boolean;
+  served: boolean;
+  delivered: boolean;
+  reason: string | null;
+};
+
+// What the transport reported for one model response: the model asked for,
+// the one that answered when the provider named it, the tokens (null when
+// not reported) and the cost when the host knows it.
+export type ModelCallUsage = {
+  model: string;
+  servedModel?: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  costUsd?: number | null;
+};
+
+// One model attempt: one call of the transport, or one the budget refused
+// before it was made. `usage` is null when no response came back.
+export type ModelAttempt = {
+  callId: string;
+  purpose: string;
+  attempt: number;
+  authorized: boolean;
+  outcome: "ok" | "failed" | "refused";
+  usage: ModelCallUsage | null;
+  durationMs: number;
+};
+
+// The completion record of a review by a model reviewer: the brain built
+// every request and served every tool call itself, so its proof is the
+// brain's own log, never the reviewer's word. "complete" under the same
+// conditions as the agent record, with coverage counted from what the
+// requests that were sent carried. `second`: the second reviewer's own
+// record, when one ran.
+export type ModelCompletionRecord = {
+  contract: "openqodex-model-review-1";
+  status: "complete" | "incomplete";
+  missing: string[];
+  reviewer: { kind: "model"; model: string; servedModels: string[]; calls: number };
+  snapshot: { change_id: string; tree: string | null; before: string; after: string | null };
+  candidates: { total: number; disposed: number };
+  coverage: CompletionRecord["coverage"];
+  tool_log: ModelToolEntry[];
+  attempts: ModelAttempt[];
+  second?: ModelCompletionRecord;
+  // With a second reviewer: each candidate one reviewer raised and the
+  // other dropped, and the second reviewer's failures that leave the review
+  // complete (a budget refusal is in `missing` instead).
+  disagreements?: Disagreement[];
+  notes?: string[];
+  trace_complete: true;
+};
+
+// A scanner candidate two reviewers disposed of differently: one raised it
+// in a finding, the other dropped it. `raisedBy` and `droppedBy` name the
+// reviewers (the model's or the driver's name); `reason` is the drop's.
+export type Disagreement = { candidate: string; token: string; raisedBy: string; droppedBy: string; reason: string | null };
+
+// Either record: an agent review's or a model review's.
+export type AnyCompletionRecord = CompletionRecord | ModelCompletionRecord;
+
 export type ReportFinding = {
   origin: "agent" | "scanner";
   severity: Severity;
@@ -583,6 +661,8 @@ export type ReportFinding = {
   problem?: string;
   consequence?: string;
   fix?: string;
+  // A model review only: the reviewers that raised it, the primary first.
+  found_by?: string[];
 };
 
 // "incomplete": a review `review` ran whose completion record is incomplete.
@@ -621,13 +701,29 @@ export type Report = {
   impact: ImpactSummary | null;
   not_reviewed_paths: string[]; // Change.notReviewed
   stats: { files: number; additions: number; deletions: number };
-  // A review run by `review` itself: its completion record. Absent in a scan
-  // and in a review from the two-step protocol (a legacy review).
-  completion?: CompletionRecord;
+  // A review run by `review` itself: its completion record (a model
+  // reviewer's has its own contract). Absent in a scan and in a review from
+  // the two-step protocol (a legacy review).
+  completion?: AnyCompletionRecord;
   // A legacy review only: the line naming the coding agent as the
   // reviewer (SAME_AGENT_REVIEW). Every renderer prints it.
   reviewed_by?: string;
+  // A model review only: the candidates a second reviewer that completed
+  // dropped, as `dropped` holds the primary's; and what the review could
+  // not hold or a second reviewer's failure, one plain line each.
+  second_dropped?: { candidate: Candidate; reason: string; cited?: { file_path: string; line_number: number } }[];
+  notes?: string[];
 };
+
+// A piece of context a host gives a review with the change (reviewChange):
+// a lesson from earlier reviews, a comment on the change, a summary, a note,
+// or a finding from an earlier review. The brief quotes it as data, under one
+// heading per kind, framed as the owners' instructions are: it never grants a
+// tool and never changes a rule. `source`: where it came from, as the host
+// names it. `scopes`: the folders it is about; an item whose folders hold no
+// file of the change is left out of the brief, and the result says so.
+export type ContextKind = "lesson" | "comment" | "summary" | "note" | "prior_finding";
+export type ContextItem = { kind: ContextKind; text: string; source: string; scopes?: string[] };
 
 // manifest.json in the report folder, written by `review --agent`, read by
 // `review --finalize` so a review is bound to the change, the config and the
@@ -649,10 +745,15 @@ export type RunManifest = {
   target?: RunTarget;
   // The run folder's name, which `review --finalize --run` takes.
   run_id?: string;
+  // The context items a host gave the review, in the order given: each one's
+  // kind, source and the sha256 of the item, and `omitted`, why the brief
+  // left it out (null when the brief carries it). Absent when none was given.
+  context?: { kind: ContextKind; source: string; sha256: string; omitted: string | null }[];
 };
 
 // Where the base of a target review came from, in the order they are tried.
-export type BaseSource = "--base" | "the pull request" | "review.default_base" | "the remote's default branch";
+// "the host": the merge base a host gave reviewChange, proved in its clone.
+export type BaseSource = "--base" | "the pull request" | "review.default_base" | "the remote's default branch" | "the host";
 
 export type RunTarget = {
   spec: string; // as the developer wrote it: a branch, #<n> or a pull request URL

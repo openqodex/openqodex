@@ -71,6 +71,18 @@
 //      such candidates overflow the call stack and the scan throws.
 //  35. A settings file with many thousands of changed lines overflows the
 //      call stack while its first changed line is found.
+// Added for issue #89, candidate order:
+//  36. Candidate ids depend on the order a scanner prints its findings, so
+//      one change gets other ids on another run or machine (checkov on Linux
+//      prints its framework reports in the order they finish); or ties in
+//      severity are not ordered by scanner, file, line start, line end and
+//      rule id.
+//  37. Of two hits a scanner repeats with one rule on one span, the one kept
+//      depends on the order they were printed.
+// Added after the code review of the library branch:
+//  38. Of two hits a scanner repeats with one rule on one span, the one kept
+//      is the lower severity one because its message sorts first, so the
+//      candidate's severity drops (and with it a block).
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -84,6 +96,7 @@ import type {
   ResolveTool,
   StaticFinding,
 } from "@openqodex/core";
+import { parseCheckovJson } from "./adapters/checkov.js";
 import { runScanners, toRunDirRelative } from "./run.js";
 import type { CustomAdapter } from "./run.js";
 
@@ -256,6 +269,46 @@ describe("secrets in reasons and cut text", () => {
     const reason = scan.scanners.find((s) => s.scanner === "custom:cut")?.reason ?? "";
     expect(reason).not.toContain(secret.slice(-6));
     expect(reason).toBe(`${REDACTED} was rejected`);
+  });
+});
+
+// Kept through the unit test prune: the dedup fix for failure 38 rewrote the
+// loop that keeps one hit per rule, and this is the case that two rules of
+// one scanner on one span both stay.
+describe("dedup across scanners only", () => {
+  it("keeps two rules from one scanner on one span, merges the same class across scanners (19)", async () => {
+    const dir = repo({ "app.py": "x\n" });
+    const at = { filePath: "app.py", lineStart: 1, lineEnd: 1, severity: "high" as const };
+    const { scan } = await runScanners({
+      repoDir: dir,
+      changedPaths: ["app.py"],
+      coverage: new Map([["app.py", lines(1)]]),
+      config: config(),
+      resolveTool: notInstalled(),
+      only: ["custom:a", "custom:b"],
+      custom: [
+        custom({
+          source: "custom:a",
+          run: async () => ({
+            findings: [
+              finding({ ...at, source: "custom:a", ruleId: "sql-injection" }),
+              finding({ ...at, source: "custom:a", ruleId: "command-injection" }),
+            ],
+            error: null,
+            version: null,
+          }),
+        }),
+        custom({
+          source: "custom:b",
+          run: async () => ({
+            findings: [finding({ ...at, source: "custom:b", ruleId: "tainted-sql-string" })],
+            error: null,
+            version: null,
+          }),
+        }),
+      ],
+    });
+    expect(scan.candidates.map((c) => c.token)).toEqual(["custom:a:command-injection", "custom:a:sql-injection"]);
   });
 });
 
@@ -495,6 +548,75 @@ describe("a settings file other tools share counts when what the scanner reads f
     expect(await notes("setup.cfg", base, `${base}\n[sqlfluff]\nexclude_rules = CV05\n`, [3, 4, 5])).toEqual(["sqlfluff:settings-file"]);
     expect(await notes("setup.cfg", base, `${base}exclude_rules CV05\n`, [3])).toEqual(["sqlfluff:settings-file"]);
     expect(await notes("tox.ini", base, null, [])).toEqual(["sqlfluff:settings-file"]);
-    expect(await notes("pyproject.toml", `${PROJECT}\n[tool.ruff]\nline-length = 100\n`, `${PROJECT}\n[tool.ruff\nline-length = 100\n`, [4])).toEqual(["ruff:settings-file", "sqlfluff:settings-file"]);
+    expect(await notes("pyproject.toml", `${PROJECT}\n[tool.ruff]\nline-length = 100\n`, `${PROJECT}\n[tool.ruff\nline-length = 100\n`, [4])).toEqual(["sqlfluff:settings-file", "ruff:settings-file"]);
+  });
+});
+
+describe("candidate order", () => {
+  // Checkov's own report for test/fixtures/trivy/repo: one list of failed
+  // checks per framework (terraform, cloudformation, kubernetes).
+  const report = JSON.parse(fs.readFileSync(new URL("../test/fixtures/checkov/report.json", import.meta.url), "utf8")) as { check_type: string; results: { failed_checks: unknown[] } }[];
+  const files = { "infra/main.tf": "x\n", "cfn/stack.yaml": "x\n", "k8s/pod.yaml": "x\n" };
+  const scan = async (printed: typeof report) => {
+    const findings = parseCheckovJson(JSON.stringify(printed), "3.3.22").map((f) => ({ ...f, source: "custom:checkov" as const }));
+    const { scan: result } = await runScanners({
+      repoDir: repo(files),
+      changedPaths: Object.keys(files),
+      config: config(),
+      resolveTool: notInstalled(),
+      only: ["custom:checkov"],
+      custom: [custom({ source: "custom:checkov", run: async () => ({ findings, error: null, version: null }) })],
+    });
+    return result.candidates.map((c) => [c.id, c.ruleId, c.filePath, c.lineStart, c.lineEnd, c.message]);
+  };
+
+  it("gives the same ids whatever order the scanner printed its findings in (36)", async () => {
+    const printed = await scan(report);
+    expect(printed).toHaveLength(30);
+    // The framework reports in the order Linux's checkov may finish them.
+    expect(await scan([...report].reverse())).toEqual(printed);
+    // Every list printed backwards, and the frameworks interleaved.
+    expect(await scan(report.map((r) => ({ ...r, results: { ...r.results, failed_checks: [...r.results.failed_checks].reverse() } })).reverse())).toEqual(printed);
+    // One severity here, so the order is file, line start, line end, rule id.
+    const key = (c: (typeof printed)[number]) => [c[2], c[3], c[4], c[1]] as [string, number, number, string];
+    const sorted = [...printed].sort((a, b) => {
+      const [x, y] = [key(a), key(b)];
+      for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i]! < y[i]! ? -1 : 1;
+      return 0;
+    });
+    expect(printed.map((c) => c[0])).toEqual(printed.map((_, i) => `c${i + 1}`));
+    expect(printed).toEqual(sorted);
+  });
+
+  it("keeps the same one of two hits a scanner repeats with one rule on one span (37)", async () => {
+    const dir = repo({ "a.sh": "x\n" });
+    const twice = (messages: string[]) =>
+      runScanners({
+        repoDir: dir,
+        changedPaths: ["a.sh"],
+        config: config(),
+        resolveTool: notInstalled(),
+        only: ["custom:demo"],
+        custom: [custom({ run: async () => ({ findings: messages.map((message) => finding({ filePath: "a.sh", message })), error: null, version: null }) })],
+      }).then((r) => r.scan.candidates.map((c) => c.message));
+    expect(await twice(["second wording", "first wording"])).toEqual(["first wording"]);
+    expect(await twice(["first wording", "second wording"])).toEqual(["first wording"]);
+  });
+
+  it("keeps the higher severity of two hits a scanner repeats with one rule on one span, whatever their messages (38)", async () => {
+    const dir = repo({ "a.sh": "x\n" });
+    const twice = (hits: Partial<StaticFinding>[]) =>
+      runScanners({
+        repoDir: dir,
+        changedPaths: ["a.sh"],
+        config: config(),
+        resolveTool: notInstalled(),
+        only: ["custom:demo"],
+        custom: [custom({ run: async () => ({ findings: hits.map((h) => finding({ filePath: "a.sh", ...h })), error: null, version: null }) })],
+      }).then((r) => r.scan.candidates.map((c) => [c.severity, c.message]));
+    const high = { severity: "high" as const, message: "Z: the serious wording" };
+    const low = { severity: "low" as const, message: "A: the mild wording" };
+    expect(await twice([high, low])).toEqual([["high", "Z: the serious wording"]]);
+    expect(await twice([low, high])).toEqual([["high", "Z: the serious wording"]]);
   });
 });

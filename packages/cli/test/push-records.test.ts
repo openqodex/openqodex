@@ -39,8 +39,8 @@ import { parseFlags } from "../src/flags.js";
 import { runReview } from "../src/review-run.js";
 import { homeReceiptPath, homeRunPath, readHomeReceipt, readHomeRun } from "../src/receipts.js";
 import { runMatches } from "../src/commands/review.js";
-import { DEPTH_ENV } from "../src/reviewers/driver.js";
-import type { ReviewerDriver, ReviewerSession, Turn } from "../src/reviewers/driver.js";
+import { DEPTH_ENV } from "@openqodex/review";
+import type { ReviewerDriver, ReviewerSession, Turn } from "@openqodex/review";
 import { cli, sandbox, type Sandbox } from "./init-helpers.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 

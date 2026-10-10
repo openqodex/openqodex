@@ -40,6 +40,7 @@ import { describeFailure, execTool, runInChunks, stderrTail } from "../exec.js";
 import { safeFileArgs } from "../safe-args.js";
 import type { Adapter } from "./index.js";
 import { withOwnedConfig } from "./owned-config.js";
+import type { Scratch } from "../scratch.js";
 import { repoFileOrReason } from "./read.js";
 import { suchAs } from "./words.js";
 
@@ -82,6 +83,7 @@ export async function runSquawk(args: {
   repoDir: string;
   changedPaths: string[];
   tool: ResolvedTool | null;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const files = sqlFiles(args.changedPaths);
   if (files.length === 0) return { findings: [], error: null };
@@ -109,7 +111,7 @@ export async function runSquawk(args: {
     }
   };
   const own = await repoConfig(args.repoDir);
-  return own !== null ? run(own) : withOwnedConfig(SQUAWK_CONFIG, "", (config) => run(config));
+  return own !== null ? run(own) : withOwnedConfig(args.scratch.temp, SQUAWK_CONFIG, "", (config) => run(config));
 }
 
 async function execSquawk(tool: ResolvedTool, cliArgs: string[], cwd: string, timeoutMs: number): Promise<string> {

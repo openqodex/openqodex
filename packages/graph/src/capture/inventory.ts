@@ -143,6 +143,44 @@ export async function takeInventory(root: string, reader: RepoReader, opts: { ma
   return out;
 }
 
+// A file of a folder git does not know, named by the caller with git's id of
+// the bytes it holds now: the server review's materialised snapshot.
+export type ListedFile = { path: string; blob: string };
+
+// The inventory of `root` from the caller's list instead of git's: only the
+// listed paths exist for the graph, in the list's order; no git runs. Each
+// eligible file is looked at by identity, as an untracked file is above: a
+// link is never looked through and is left out, anything else that is not
+// a regular file is unreadable. Its content id is the caller's; a file that
+// changed since the list was made is keyed by what is read when it is
+// parsed, and the build says so.
+export function listInventory(root: string, reader: RepoReader, opts: { files: readonly ListedFile[]; maxFileBytes: number; only?: ReadonlySet<string> }): Inventory {
+  const listed = new Map<string, string>();
+  for (const f of opts.files) if (!listed.has(f.path)) listed.set(f.path, f.blob);
+  const all = [...listed.keys()].filter((p) => opts.only === undefined || opts.only.has(p));
+  const out: Inventory = { all, entries: [], tooBig: [], unreadable: [], readFromDisk: 0 };
+  for (const path of all) {
+    const lang = langOf(path);
+    if (lang === null) continue;
+    const looked = reader.entry(path);
+    if (!looked.ok) {
+      out.unreadable.push(path);
+      continue;
+    }
+    if (!looked.stat.isFile()) {
+      if (!looked.stat.isSymbolicLink()) out.unreadable.push(path);
+      continue;
+    }
+    const size = Number(looked.stat.size);
+    if (size > opts.maxFileBytes) {
+      out.tooBig.push(path);
+      continue;
+    }
+    out.entries.push({ path, lang, blob: listed.get(path) as string, bytes: size });
+  }
+  return out;
+}
+
 // sha256 over the sorted paths and their content ids plus the analysis
 // configuration: the graph input digest. Two captures with the same digest
 // give the same graph.

@@ -34,15 +34,13 @@
 // never throws on a scanner failure.
 
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { homeGuard } from "@openqodex/core";
 import type { AdapterResult, ResolvedTool, ScannerSeverity, StaticFinding } from "@openqodex/core";
-import { lstatSync } from "node:fs";
 import type { RepoFacts } from "../detect.js";
 import { describeFailure, execTool, isOffline, runInChunks, stderrTail } from "../exec.js";
 import { safeFileArgs } from "../safe-args.js";
-import { loadToolchain, openqodexHome, type SchemaPin } from "../toolchain/table.js";
+import type { Scratch } from "../scratch.js";
+import { loadToolchain, type SchemaPin } from "../toolchain/table.js";
 import type { Adapter } from "./index.js";
 import { kubernetesFiles, readManifests } from "./kube-linter.js";
 import { findDocument, kubeDocuments, pathLine, type KubeDoc } from "./kube-yaml.js";
@@ -86,25 +84,12 @@ export function kubeconformArgs(pin: SchemaPin, cacheDir: string, files: string[
   ];
 }
 
-// The schema cache, one folder per pinned commit, made through the guarded
-// writer if it is not there. kubeconform requires it to exist.
-function cacheFolder(pin: SchemaPin): string {
-  const dir = path.join(openqodexHome(), "cache", "kubeconform", pin.commit);
-  let there = false;
-  try {
-    there = lstatSync(dir).isDirectory();
-  } catch {
-    // Not there yet.
-  }
-  if (!there) {
-    try {
-      homeGuard(openqodexHome(), true).makeFolder(dir);
-    } catch (err) {
-      // Another run made it in between.
-      if (!lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw err;
-    }
-  }
-  return dir;
+// The schema cache, one folder per pinned commit under the run's scratch
+// root (the OpenQodex home on the laptop), made or checked through the
+// scratch's guarded writer (a link on the way is refused, even when the
+// folder is already there). kubeconform requires it to exist.
+function cacheFolder(scratch: Scratch, pin: SchemaPin): string {
+  return scratch.cache("kubeconform", pin.commit);
 }
 
 export async function runKubeconform(args: {
@@ -112,6 +97,7 @@ export async function runKubeconform(args: {
   changedPaths: string[];
   tool: ResolvedTool | null;
   facts: RepoFacts;
+  scratch: Scratch;
 }): Promise<AdapterResult> {
   const files = kubernetesFiles(args.changedPaths, args.facts);
   if (files.length === 0) return { findings: [], error: null };
@@ -122,7 +108,7 @@ export async function runKubeconform(args: {
   const pin = schemaPin();
   if (typeof pin === "string") return { findings: [], error: pin };
   const texts = await readManifests(args.repoDir, files);
-  const stage = await fs.mkdtemp(path.join(os.tmpdir(), "openqodex-kubeconform-"));
+  const stage = await fs.mkdtemp(path.join(args.scratch.temp, "openqodex-kubeconform-"));
   try {
     // One file per document, named by number; a file whose documents cannot
     // be told apart is handed whole.
@@ -137,7 +123,7 @@ export async function runKubeconform(args: {
         staged.set(name, { rel: path.normalize(rel), text, doc: part.doc });
       }
     }
-    const cacheDir = cacheFolder(pin);
+    const cacheDir = cacheFolder(args.scratch, pin);
     const notes: string[] = [];
     const findings = await runInChunks("kubeconform", [...staged.keys()], KUBECONFORM_TIMEOUT_MS, async (chunk, left) => {
       const run = await execTool(tool.path, kubeconformArgs(pin, cacheDir, chunk), {

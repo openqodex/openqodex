@@ -20,10 +20,10 @@
 // scanner failure: static analysis is additive context, not a gate.
 
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import type { AdapterResult, ResolvedTool, ScannerSeverity, StaticFinding } from "@openqodex/core";
 import { describeFailure, execTool } from "../exec.js";
+import type { Scratch } from "../scratch.js";
 import type { Adapter } from "./index.js";
 import { folderOf, isTerraformPath, stagedPath, withStage } from "./iac.js";
 import { suchAs } from "./words.js";
@@ -67,22 +67,30 @@ export function tflintConfig(pluginDir: string): string {
 
 // TFLint talks to its bundled ruleset over a Unix socket in TMPDIR, and a
 // socket path longer than about 100 bytes cannot be bound (macOS allows 104):
-// the ruleset then fails to start. The system's temporary folder when it is
-// short, else /tmp.
-function socketDir(): string {
-  const tmp = os.tmpdir();
-  return tmp.length <= 64 ? tmp : "/tmp";
+// the ruleset then fails to start. The folder must be absolute: TFLint runs
+// each folder of a recursive run from inside it, so a relative one moves.
+// The run's temporary folder when it is short. Else, on the laptop, /tmp;
+// a server run writes nowhere outside its scratch root, so it gets null and
+// TFLint is not started.
+const SOCKET_DIR_MAX = 64;
+function socketDir(scratch: Scratch): string | null {
+  if (scratch.temp.length <= SOCKET_DIR_MAX) return scratch.temp;
+  return scratch.laptop ? "/tmp" : null;
 }
 
-export async function runTflint(args: { repoDir: string; changedPaths: string[]; tool: ResolvedTool | null }): Promise<AdapterResult> {
+export async function runTflint(args: { repoDir: string; changedPaths: string[]; tool: ResolvedTool | null; scratch: Scratch }): Promise<AdapterResult> {
   const files = tflintFiles(args.changedPaths);
   if (files.length === 0) return { findings: [], error: null };
   if (!args.tool) return { findings: [], error: "not installed" };
   const tool = args.tool;
   const folders = [...new Set(files.map(folderOf))].sort();
+  const socket = socketDir(args.scratch);
+  if (socket === null) {
+    return { findings: [], error: `the run's temporary folder is ${args.scratch.temp.length} characters long, and TFLint's plugin socket needs one of ${SOCKET_DIR_MAX} or fewer; give a shorter scratch root` };
+  }
 
   try {
-    return await withStage(args.repoDir, folders, [], async (stage) => {
+    return await withStage(args.scratch.temp, args.repoDir, folders, [], async (stage) => {
       const pluginDir = path.join(stage.root, "plugins");
       const configPath = path.join(stage.root, "tflint.hcl");
       await fs.mkdir(pluginDir);
@@ -92,7 +100,7 @@ export async function runTflint(args: { repoDir: string; changedPaths: string[];
         cwd: stage.tree,
         timeoutMs: TFLINT_TIMEOUT_MS,
         maxBytes: TFLINT_OUTPUT_MAX_BYTES,
-        env: { PATH: "", HOME: stage.home, TMPDIR: socketDir() },
+        env: { PATH: "", HOME: stage.home, TMPDIR: socket },
       });
       const failed = describeFailure("tflint", result, TFLINT_TIMEOUT_MS);
       if (failed) throw new Error(failed);

@@ -14,7 +14,7 @@ import { getChange, loadConfig } from "@openqodex/core";
 import { parseFlags } from "../flags.js";
 import { DEFAULT_TIMEOUT_SECONDS, runReview } from "../review-run.js";
 import type { ReviewEnd, ReviewOptions } from "../review-run.js";
-import type { ReviewerDriver } from "../reviewers/driver.js";
+import type { ReviewerDriver } from "@openqodex/review";
 
 export type Choice = { kind: "all" } | { kind: "target"; target: string } | null;
 

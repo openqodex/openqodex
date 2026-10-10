@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import type { Candidate, ImpactEdge, ImpactSummary, Report, ReportFinding } from "../types.js";
 import type { Display, DisplayFile, DisplayHunk } from "./display.js";
 import { REPORT_CSS } from "./html-style.js";
-import { product } from "./review.js";
+import { modelReviewerLine, product } from "./review.js";
 
 export type HtmlInput = {
   report: Report;
@@ -239,6 +239,7 @@ function coverageSentence(scanners: Report["scanners"]): string {
 
 function reviewerSentence(report: Report): string {
   if (report.reviewed_by) return report.reviewed_by;
+  if (report.completion?.contract === "openqodex-model-review-1") return modelReviewerLine(report.completion);
   const r = report.completion?.reviewer;
   if (!r) return "not recorded in this report";
   const usage = r.usage ?? { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null };

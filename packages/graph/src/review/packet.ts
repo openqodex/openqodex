@@ -45,11 +45,14 @@ type PageCut = { omitted: number | null; note: string } | null;
 
 export async function writePacket(args: {
   root: string; // the snapshot folder the reviewer reads
-  repoRoot: string; // the repository, for the base versions of removed symbols
+  repoRoot: string; // the repository, for the base versions of removed symbols (unless readBase is given)
   graph: Graph;
   impact: ImpactSummary;
   baseSha: string | null;
   secrets: string[]; // what the scanners found in the change
+  // How a base version is read, when not from git in repoRoot (the server
+  // review's scope-checking reader over its private clone).
+  readBase?: (path: string, maxBytes: number) => Promise<Buffer | null>;
 }): Promise<{ dir: string; files: string[] }> {
   const { graph, impact, secrets } = args;
   const redact = (text: string) => redactSecrets(text, secrets);
@@ -242,8 +245,10 @@ export async function writePacket(args: {
 
   // The base version of each removed or moved symbol, as the base had it.
   if (args.baseSha) {
+    const baseSha = args.baseSha;
+    const readBase = args.readBase ?? ((path: string, maxBytes: number) => showBlob(args.repoRoot, baseSha, path, maxBytes));
     for (const s of movedOrRemoved) {
-      const bytes = await showBlob(args.repoRoot, args.baseSha, s.file, MAX_BASE_BYTES);
+      const bytes = await readBase(s.file, MAX_BASE_BYTES);
       if (bytes === null) continue;
       const lines = bytes.toString("utf8").split("\n").slice(s.startLine - 1, Math.min(s.endLine, s.startLine - 1 + MAX_BASE_LINES));
       write(`base/${symbolKey(s.id)}.txt`, `the base version of ${code(s.name)} (${escapedPath(s.file)}:${s.startLine}), from before the change`, `# base version of ${display(s.name)}, ${display(s.file)}:${s.startLine}-${s.endLine}; this is not the code under review\n${lines.join("\n")}\n`);

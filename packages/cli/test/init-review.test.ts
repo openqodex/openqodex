@@ -42,8 +42,8 @@ import { spawnSync } from "node:child_process";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gitDirs, gitPath, inWorkTree, repoRootOf } from "../src/agents/git.js";
 import { reviewAfterInit } from "../src/commands/init-review.js";
-import { DEPTH_ENV } from "../src/reviewers/driver.js";
-import type { ReviewerDriver, ReviewerSession, Turn } from "../src/reviewers/driver.js";
+import { DEPTH_ENV } from "@openqodex/review";
+import type { ReviewerDriver, ReviewerSession, Turn } from "@openqodex/review";
 import { agentFreePath, cli, inTerminal, sandbox, snapshot } from "./init-helpers.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 

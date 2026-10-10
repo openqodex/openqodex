@@ -21,8 +21,8 @@ import type { ImpactExportChange } from "@openqodex/core";
 import type { Parser } from "web-tree-sitter";
 import { captureSnapshot, captureWorkingTree } from "./capture/capture.js";
 import { showBlob } from "./capture/git.js";
-import { blobId, inventoryDigest, langOf, takeInventory } from "./capture/inventory.js";
-import type { Inventory, InventoryEntry } from "./capture/inventory.js";
+import { blobId, inventoryDigest, langOf, listInventory, takeInventory } from "./capture/inventory.js";
+import type { Inventory, InventoryEntry, ListedFile } from "./capture/inventory.js";
 import { exportChanges } from "./changes/exports.js";
 import type { ChangedFile } from "./changes/exports.js";
 import { goModule, LOCKFILE_BYTES, MANIFEST_BYTES } from "./discovery/manifests.js";
@@ -83,8 +83,17 @@ export type BuildArgs = {
   onProgress?: (line: string) => void;
   // The change's base: each changed file's base version is parsed too, so a
   // symbol the change removed is known with its surviving callers, and the
-  // export surface is compared in two worlds.
-  base?: { sha: string; files: ChangedFile[] };
+  // export surface is compared in two worlds. `read`: how a base version is
+  // read, when not from git in repoRoot (the server review's scope-checking
+  // reader over its private clone): the bytes of `path` at the base, or null
+  // when it is refused, missing or larger than `maxBytes`.
+  base?: { sha: string; files: ChangedFile[]; read?: (path: string, maxBytes: number) => Promise<Buffer | null> };
+  // In place of git's listing of repoRoot: the files to build from, each
+  // with git's id of the bytes it holds now (the server review's
+  // materialised snapshot, a folder with no .git). Only these paths exist
+  // for the graph and nothing runs git. Such a build keeps nothing: `store`
+  // and `capture` must be left out.
+  inventory?: ListedFile[];
   // Forces the mode (tests and `graph build --full`); otherwise the
   // five-second rule decides.
   mode?: Mode;
@@ -203,6 +212,18 @@ class Parsers {
   }
 }
 
+// One file's local facts from its text, parsed and extracted exactly as a
+// build does it, with the same limit on one parse. Null when the parse was
+// stopped at MAX_PARSE_MS. The parser and the tree are freed before it returns.
+export async function extractFacts(lang: Lang, content: string): Promise<FileFacts | null> {
+  const parsers = new Parsers();
+  try {
+    return await parsers.facts(lang, content, Number.POSITIVE_INFINITY);
+  } finally {
+    parsers.close();
+  }
+}
+
 const MANIFESTS = /(^|\/)(package\.json|tsconfig\.json|jsconfig\.json|pnpm-workspace\.yaml|pyproject\.toml|setup\.cfg|go\.mod|go\.work|Gemfile)$/;
 export function isManifest(path: string): boolean {
   return MANIFESTS.test(path);
@@ -232,9 +253,10 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
   const notRead: NotRead[] = [];
 
   // ---------- inventory ----------
+  if (args.inventory && (store !== null || args.capture)) throw new Error("a build from an inventory keeps nothing: pass no store and no capture");
   const reader = new RepoReader(args.repoRoot);
   const only = args.only === undefined ? undefined : new Set(args.only);
-  const inv = await takeInventory(args.repoRoot, reader, { maxFileBytes, only });
+  const inv = args.inventory ? listInventory(args.repoRoot, reader, { files: args.inventory, maxFileBytes, only }) : await takeInventory(args.repoRoot, reader, { maxFileBytes, only });
   const known = new Set(inv.entries.map((e) => e.path));
   for (const f of inv.all) if (f.endsWith("__init__.py") && langOf(f) !== null) known.add(f);
   for (const f of inv.tooBig) notRead.push({ file: f, reason: "size" });
@@ -363,11 +385,13 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     const current = new Set(inputs.map((i) => i.path));
     let removalUnchecked = 0;
     const baseManifests = new Map<string, string | null>();
+    const base = args.base;
+    const readBase = base?.read ?? ((path: string, maxBytes: number) => showBlob(args.repoRoot, base?.sha ?? "", path, maxBytes));
     for (const f of args.base?.files ?? []) {
       if (f.status === "added" || !args.base) continue;
       const basePath = f.oldPath ?? f.path;
       if (isManifest(basePath)) {
-        const bytes = await showBlob(args.repoRoot, args.base.sha, basePath, LOCKFILE_BYTES);
+        const bytes = await readBase(basePath, LOCKFILE_BYTES);
         baseManifests.set(basePath, bytes === null ? null : bytes.toString("utf8"));
       }
       const lang = langOf(basePath);
@@ -378,7 +402,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       // before the bytes are read, and the budget, the memory bound and the
       // parse cap hold.
       const admitted = !overBudget() && process.memoryUsage().heapUsed <= maxHeap;
-      const bytes = admitted ? await showBlob(args.repoRoot, args.base.sha, basePath, maxFileBytes) : null;
+      const bytes = admitted ? await readBase(basePath, maxFileBytes) : null;
       const got = bytes === null ? null : await factsFor(lang, blobId(bytes), () => bytes, !overBudget() && parsers.count < maxFiles);
       if (!got?.facts) {
         removalUnchecked++;

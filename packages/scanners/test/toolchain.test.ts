@@ -279,7 +279,7 @@ describe("toolchain", () => {
     mkdirSync(other, { recursive: true });
     writeFileSync(join(dir, ".lock"), `${process.pid} someoneelse\n`);
     const built = builtVersion(join(dir, ".staging-mine", "version"), "mine");
-    expect(publishVersion(home, "actionlint", table.tools.actionlint, built, "mytoken", "move")).toBe("lost_lock");
+    expect(publishVersion(join(home, "tools"), "actionlint", table.tools.actionlint, built, "mytoken", "move")).toBe("lost_lock");
     expect(existsSync(join(dir, actionlintVersion))).toBe(false);
     expect(existsSync(built)).toBe(false);
     expect(existsSync(other)).toBe(true);
@@ -291,7 +291,7 @@ describe("toolchain", () => {
     builtVersion(join(dir, actionlintVersion), "theirs");
     writeFileSync(join(dir, ".lock"), `${process.pid} mytoken\n`);
     const built = builtVersion(join(dir, ".staging-mine", "version"), "mine");
-    expect(publishVersion(home, "actionlint", table.tools.actionlint, built, "mytoken", "move")).toBe("already_installed");
+    expect(publishVersion(join(home, "tools"), "actionlint", table.tools.actionlint, built, "mytoken", "move")).toBe("already_installed");
     expect(readFileSync(actionlintBin(home), "utf8")).toBe("theirs");
     expect(existsSync(built)).toBe(false);
   });

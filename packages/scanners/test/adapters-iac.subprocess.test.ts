@@ -8,7 +8,12 @@
 // The tools are installed beforehand with `openqodex doctor --install` (the
 // end-to-end setup does it); these cases never install one themselves, and
 // a tool that is missing fails its case with the reason.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+//
+// Added after the code review of the library branch, one more way it could
+// fail: a server run whose temporary folder is too long for TFLint's plugin
+// socket falls back to /tmp, outside its scratch root, instead of refusing
+// to start TFLint.
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseConfig, SETTINGS_RULE, SUPPRESSION_RULE } from "@openqodex/core";
@@ -457,5 +462,26 @@ describe("tflint", () => {
     expect(result.status.status).toBe("ran");
     expect(rules(result.result, "tflint").map(([rule]) => rule)).toContain("terraform_unused_declarations");
     expect(hosts).toEqual([]);
+  }, 300_000);
+
+  it("in a server run whose temporary folder is too long for its socket, is refused before it starts, never moved to /tmp", async () => {
+    const repo = tempDir("oq-iac-tflint-long-");
+    writeFileSync(join(repo, "main.tf"), UNUSED);
+    // A scratch root deep enough that <root>/tmp is over the socket limit.
+    const scratchRoot = join(tempDir("oq-iac-tflint-scratch-"), "x".repeat(80));
+    const result = await runScanners({
+      repoDir: repo,
+      changedPaths: ["main.tf"],
+      coverage: new Map([["main.tf", new Set([1, 2, 3])]]),
+      config: parseConfig("").config,
+      resolveTool: createToolResolver({ allowInstall: false, installBudgetMs: null }),
+      only: ["tflint"],
+      scratchRoot,
+    });
+    const status = result.scan.scanners[0]!;
+    expect(status).toMatchObject({ scanner: "tflint", status: "failed" });
+    expect(status.reason).toMatch(/^the run's temporary folder is \d+ characters long, and TFLint's plugin socket needs one of 64 or fewer; give a shorter scratch root$/);
+    // Nothing was staged: TFLint never started.
+    expect(readdirSync(join(scratchRoot, "tmp"))).toEqual([]);
   }, 300_000);
 });

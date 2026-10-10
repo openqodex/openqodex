@@ -1,0 +1,12 @@
+[
+  {
+    "tool": "Read",
+    "path": "app/server.py",
+    "inside": true,
+    "range": [
+      1,
+      41
+    ],
+    "ok": true
+  }
+]

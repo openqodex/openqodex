@@ -116,6 +116,23 @@ Codex runs with `--ephemeral`: after real runs with codex-cli 0.160.0, no sessio
 
 The run folder of a review holds the brief, the scan, the reviewer's answer and the list of its tool calls: paths and line ranges for Claude Code, and the command lines Codex showed for Codex, never their output. Each file is created readable by you only, and secrets are redacted in all of them.
 
+### A model reviewer (the library)
+
+A program that imports OpenQodex as a library (`library`) reviews a change with its own model through `reviewChange`. That reviewer is not a process: OpenQodex builds every request, the program's own client sends it to the program's model, and OpenQodex runs every tool call the model asks for itself. OpenQodex sends nothing to any model by itself.
+
+What the model can read:
+
+- the review brief: the change's diff, the scanner candidates, the code graph's view of the change and the lenses, with the secrets the scanners found redacted;
+- through five tools, and nothing else: the lines of a file, a search of the files by regular expression, the list of files, the diff of one changed file, and the callers of a symbol from the code graph. They read a snapshot of the head commit made under the program's work folder, never the program's clone or any other folder. The snapshot holds only the commit's regular files, written from the clone's objects: a link or a submodule is left out, and the result says so. With folder scopes, it holds only the files inside them. Every reply is at most 32 KB and has the scanners' secrets redacted, and a search never answers on a line that holds one.
+
+What the model cannot read or do:
+
+- anything outside the snapshot: the clone's `.git` folder, another folder of the machine, the program's environment or files. A path outside is refused, and the refusal is logged with the review. With folder scopes, a path outside them is refused the same way. Either refusal leaves the review incomplete.
+- the web, or a shell: it has no tool for either, and no tool starts a program.
+- change a rule of the review: context the program adds (earlier comments, lessons) is shown as quoted data, never as an instruction, and never grants a tool.
+
+What the model says it read is never used as proof. The completion record counts only what OpenQodex carried in a request the program's client sent, and each tool result is marked as sent or not. The scanners of such a review run from the program's preinstalled install root with installs off, and write only under the review's work folder, with their `HOME` and `TMPDIR` there.
+
 ## The code graph's MCP server
 
 `openqodex mcp` serves the code graph to the agent that starts it, over that process's standard input and output only. It opens no network port and accepts no other connection: no other program, local or remote, can ask it anything.

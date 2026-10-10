@@ -7,7 +7,7 @@
 // only the diff in the brief or a correction round can show it. A reviewer
 // whose trace is not complete (Codex) reports no reads, so for it only the
 // brief and the correction rounds count.
-import type { Change, CompletionRecord, ReviewerRecord } from "./types.js";
+import type { Change, CompletionRecord, ModelAttempt, ModelCompletionRecord, ModelToolEntry, ReviewerRecord } from "./types.js";
 
 // One tool call of the reviewer. `path` is relative to the snapshot when
 // `inside`, else as the agent named it. `range` is the first and last line a
@@ -169,5 +169,114 @@ export function completionRecord(args: {
     coverage: traced ? args.coverage : { ...args.coverage, files_read: [], files_not_read: [] },
     outside_reads: outside,
     trace_complete: traced,
+  };
+}
+
+// The model record (contract "openqodex-model-review-1"): a review by a model
+// reviewer, whose every request the brain built and whose every tool call
+// the brain served. Coverage counts what a request that was sent carried:
+// the brief's diff when the request carrying the brief was sent, a
+// correction round's ranges, and the lines a read_file result carried once a
+// later request carried that result. A result served but never sent counts
+// for nothing.
+
+export const MODEL_REVIEW_CONTRACT = "openqodex-model-review-1";
+// The tool whose results count as reads.
+export const MODEL_READ_TOOL = "read_file";
+
+// The line a budget refusal leaves in `missing`, and in the conversation's
+// failure. `call` counts the reviewer's calls from 1, the refused one included.
+export function budgetRefusedLine(purpose: string, call: number): string {
+  return `budget refused before ${purpose} call ${call}`;
+}
+
+// Coverage from the brain's delivery log, by the rules of readCoverage: the
+// brief's diff counts only when `briefSent`; `delivered` holds the ranges of
+// correction requests that were sent; a read_file result counts for the
+// lines it carried, and only once `delivered`. A refused result carries
+// nothing, and neither does one for a path outside the snapshot or outside
+// the review's scopes.
+export function modelCoverage(args: {
+  change: Change;
+  briefSent: boolean;
+  briefFiles: ReadonlySet<string>;
+  toolLog: ModelToolEntry[];
+  delivered?: Hunk[];
+  lineCount?: (path: string) => number | null;
+}): Coverage {
+  const reads: TraceEntry[] = args.toolLog
+    .filter((t) => t.tool === MODEL_READ_TOOL && t.delivered && t.in_scope !== false)
+    .map((t) => ({ tool: "Read", path: t.path, inside: t.inside, range: t.range, ok: t.ok }));
+  return readCoverage({ change: args.change, briefFiles: args.briefSent ? args.briefFiles : new Set(), trace: reads, lineCount: args.lineCount, delivered: args.delivered });
+}
+
+export function modelCompletionRecord(args: {
+  changeId: string;
+  // The model the reviewer asked for (ModelReviewer.model).
+  model: string;
+  snapshot: { tree: string | null; before: string; after: string | null };
+  candidates: { total: number; disposed: number };
+  // From modelCoverage, on the same tool log.
+  coverage: Coverage;
+  // Every tool call the model asked for, in order.
+  toolLog: ModelToolEntry[];
+  // Every model attempt, in order, the refused ones included.
+  attempts: ModelAttempt[];
+  // The names of the tools the brain defined for the reviewer.
+  tools: readonly string[];
+  // The numbered rejections the last answer still had; empty when it passed.
+  submissionErrors: string[];
+  // Why the conversation ended without an answer that could be checked.
+  failure?: string | null;
+  second?: ModelCompletionRecord;
+}): ModelCompletionRecord {
+  const missing: string[] = [];
+  const add = (line: string) => {
+    if (!missing.includes(line)) missing.push(line);
+  };
+  // A refusal anywhere ends the review as incomplete; the attempts before
+  // it keep their usage.
+  args.attempts.forEach((a, i) => {
+    if (a.outcome === "refused") add(budgetRefusedLine(a.purpose, i + 1));
+  });
+  args.second?.attempts.forEach((a, i) => {
+    if (a.outcome === "refused") add(`the second reviewer: ${budgetRefusedLine(a.purpose, i + 1)}`);
+  });
+  if (args.failure) add(args.failure);
+  if (args.attempts.length === 0) add("no model call was made");
+  if (args.snapshot.after === null || args.snapshot.after !== args.snapshot.before) add("the snapshot changed while the reviewer read it");
+  const defined = (t: ModelToolEntry) => args.tools.includes(t.tool);
+  // Fails closed: a call counts whether or not the brain refused it, and a
+  // defined tool's call not shown inside the snapshot counts as outside.
+  const outside = [...new Set(args.toolLog.filter((t) => defined(t) && t.inside !== true).map((t) => t.path ?? "(no path)"))];
+  if (outside.length > 0) add(`the reviewer tried to read outside the snapshot: ${listed(outside)}`);
+  const unscoped = [...new Set(args.toolLog.filter((t) => defined(t) && t.inside === true && t.in_scope === false).map((t) => t.path ?? "(no path)"))];
+  if (unscoped.length > 0) add(`the reviewer asked for a path outside the review's scopes: ${listed(unscoped)}`);
+  const undefinedTools = [...new Set(args.toolLog.filter((t) => !defined(t)).map((t) => t.tool))];
+  if (undefinedTools.length > 0) add(`the reviewer returned a tool call the brain did not define: ${listed(undefinedTools)}`);
+  const open = args.candidates.total - args.candidates.disposed;
+  if (open > 0) add(`${open} scanner ${open === 1 ? "candidate has" : "candidates have"} no disposition`);
+  if (args.submissionErrors.length > 0) {
+    const n = args.submissionErrors.length;
+    missing.push(`the reviewer's answer still failed ${n} ${n === 1 ? "check" : "checks"} after the correction rounds`, ...args.submissionErrors.slice(0, MAX_LISTED));
+  }
+  if (args.coverage.unread.length > 0) {
+    const n = args.coverage.unread.length;
+    missing.push(`${n} changed ${n === 1 ? "range was" : "ranges were"} not sent to the reviewer: ${listed(args.coverage.unread.map(where))}`);
+  }
+  // Only the names the responses gave: a model the provider did not name is not listed.
+  const servedModels = [...new Set(args.attempts.map((a) => a.usage?.servedModel).filter((m): m is string => typeof m === "string" && m !== ""))];
+  return {
+    contract: MODEL_REVIEW_CONTRACT,
+    status: missing.length === 0 ? "complete" : "incomplete",
+    missing,
+    reviewer: { kind: "model", model: args.model, servedModels, calls: args.attempts.filter((a) => a.outcome !== "refused").length },
+    snapshot: { change_id: args.changeId, ...args.snapshot },
+    candidates: args.candidates,
+    coverage: args.coverage,
+    tool_log: args.toolLog,
+    attempts: args.attempts,
+    ...(args.second ? { second: args.second } : {}),
+    trace_complete: true,
   };
 }

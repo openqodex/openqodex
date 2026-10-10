@@ -18,6 +18,12 @@ export function safeGitEnv(): NodeJS.ProcessEnv {
   return { ...env, GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1", GIT_OPTIONAL_LOCKS: "0" };
 }
 
+// What every git call on a server review's clone adds (reviewChange): git
+// ignores replacement refs (refs/replace), so a ref in the clone can neither
+// forge the ancestry the review proves nor swap the files it reads for a
+// commit. The laptop's calls do not add it.
+export const SERVER_GIT_ENV: Readonly<Record<string, string>> = Object.freeze({ GIT_NO_REPLACE_OBJECTS: "1" });
+
 const BASE = ["core.hooksPath=/dev/null", "core.fsmonitor=false", "submodule.recurse=false", "gc.auto=0", "maintenance.auto=false"];
 
 function runGit(cwd: string, argv: string[], input?: string, env?: Record<string, string>): Promise<SafeGitResult> {

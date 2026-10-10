@@ -43,7 +43,7 @@ function withInput(cmd, args, input, env, timeoutMs) {
   });
 }
 
-// The environment the Claude Code reviewer gets (packages/cli/src/reviewers/claude.ts reviewerEnv).
+// The environment the Claude Code reviewer gets (packages/review/src/agents/claude.ts reviewerEnv).
 const ALWAYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", "TZ", "CLAUDE_CONFIG_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"];
 const ANTHROPIC = /^ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL|MODEL|SMALL_FAST_MODEL|CUSTOM_HEADERS|DEFAULT_[A-Z_]+_MODEL)$/;
 
@@ -97,7 +97,7 @@ export async function probeClaude({ env = process.env, timeoutMs = 120_000 } = {
   return { ok, blocked: !ok && BLOCKED.test(text), version, model: models.length === 1 ? models[0] : models.length === 0 ? null : models, text: text.slice(0, 500), costUsd: result.total_cost_usd ?? null };
 }
 
-// The environment the Codex reviewer gets (packages/cli/src/reviewers/codex.ts codexEnv).
+// The environment the Codex reviewer gets (packages/review/src/agents/codex.ts codexEnv).
 const CODEX_ALWAYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", "TZ", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy", "SSL_CERT_FILE"];
 
 export function codexEnv(env = process.env) {

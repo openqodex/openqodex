@@ -33,24 +33,26 @@ A review finished this way is a legacy review: the agent that ran it reviewed th
 For you, when a scanner is missing or slow to install. The skill asks you to run `doctor --install` once when the agent runs in a sandbox.
 
 ```
-openqodex doctor [--install [--all-scanners]] [--json]
+openqodex doctor [--install [--all-scanners [--require-all]]] [--json]
 ```
 
 Prints the Node and git versions, the repository, the config, the OpenQodex home folder and the state of each scanner. Inside a repository it lists, under "This repository needs", each scanner the repository's files call for with the reason, such as `brakeman: Rails app in backend/`, and names the rest. It lists custom scanners with their approval state.
 
 - `--install`: download the scanners this repository's files call for (every tracked and untracked file, less `review.paths.exclude` and `scanners.disable`), and wait for all of them. Outside a repository it downloads every scanner that fits this machine.
 - `--all-scanners`: with `--install`, download every scanner that fits this machine, whatever the repository holds.
+- `--require-all`: with `--install --all-scanners`, for an image build. After the install, every scanner must be installed at its pinned version with its runtime, and must report the finding of its check case, a tiny input run through the real tool. Each one that does not gets one stderr line, `openqodex: missing: <scanner>: <why>`, and doctor exits 2. With `--json`, the report holds the result as `required`. `library` explains the check.
 - `--json`: print the same facts as JSON: `selection` (each scanner, whether it is needed, its line), `downloads` (what `--install` downloads here, or null for every scanner) and `toolchain` (the sha256 of the pinned scanner table and its lock files).
 
 Under "Your settings" it prints each key of `~/.openqodex/config.yaml` (`update`, `reviewer`, `reviewer_web`, `skip_version`) with the value in force and where it comes from: the file, the default, or the environment variable that turns updates off. It names a key it does not know with the known key nearest to it.
 
 Under "Updates" it prints the running version and whether the launcher started it, the newest version the last check saw and when, the last check, whether updates are on (and why not), and the last update error. For a version not started through the launcher (npx, a project-scope file), it says when that pinned version is behind the newest one a check saw. Without a check on this machine, it says nothing about that.
 
-`doctor` always prints its table. It then exits 2 in three cases:
+`doctor` always prints its table. It then exits 2 in these cases:
 
 - git is missing;
 - the config does not load;
-- the `--cwd` folder does not exist.
+- the `--cwd` folder does not exist;
+- with `--require-all`, a scanner is missing or does not report its check case.
 
 ## hook
 

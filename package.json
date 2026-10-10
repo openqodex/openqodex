@@ -7,11 +7,14 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "pnpm --filter @openqodex/core run build && pnpm --filter @openqodex/scanners run build && pnpm --filter @openqodex/graph run build && pnpm --filter @openqodex/mcp run build && pnpm --filter openqodex run build && node scripts/copy-assets.mjs",
+    "build": "pnpm --filter @openqodex/core run build && pnpm --filter @openqodex/scanners run build && pnpm --filter @openqodex/graph run build && pnpm --filter @openqodex/review run build && pnpm --filter @openqodex/mcp run build && pnpm --filter openqodex run build && node scripts/copy-assets.mjs",
     "typecheck": "pnpm -r run typecheck",
     "lint": "oxlint",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "golden:record": "node tests/golden/record.mjs",
+    "golden:check": "node tests/golden/check.mjs",
+    "golden:answer": "node tests/golden/answer.mjs",
     "gate": "bash scripts/gate.sh",
     "changeset": "changeset",
     "docs:index": "node scripts/docs-index.mjs",

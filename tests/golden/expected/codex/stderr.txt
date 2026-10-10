@@ -1,0 +1,7 @@
+Reviewing the change against HEAD: 11 files, +45 -16
+Scanners: 15 ran, 5 had nothing to check, 24 candidates to check
+Redacted secrets in 1 file of the snapshot
+Code graph: 4 files in <SECONDS> s (0 parsed, 4 from cache, fresh)
+Reviewer: codex 0.160.0 started; this takes one to three minutes
+Report: <DEMO>/.openqodex/reviews/<RUN_ID>/report.html
+Markdown: <DEMO>/.openqodex/reviews/<RUN_ID>/report.md

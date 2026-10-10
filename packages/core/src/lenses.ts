@@ -22,8 +22,10 @@ export type LensTriggers = {
 // `coveredBy`: scanner rules ("<source>:<ruleId>") that check what the lens
 // asks the reviewer to look for. When a scanner ran such a rule on every
 // changed file the lens's file globs match, the lens stands down: a script
-// does the deterministic work, the model does not repeat it.
-export type Lens = SelectedLens & { triggers: LensTriggers; coveredBy?: string[] };
+// does the deterministic work, the model does not repeat it. `security`:
+// true for a lens about a security flaw (`security: true` in its
+// frontmatter); absent otherwise.
+export type Lens = SelectedLens & { triggers: LensTriggers; coveredBy?: string[]; security?: true };
 
 // Whether a scanner rule ran on a file in this run.
 export type RuleCoverage = (token: string, file: string) => boolean;
@@ -75,7 +77,7 @@ export function parseLens(text: string): Lens {
   }
   if (!body) throw new Error(`lens ${name}: body is empty`);
   const coveredBy = Array.isArray(obj.covered_by) ? obj.covered_by.filter((x): x is string => typeof x === "string") : undefined;
-  return { name, description, triggers: { files, hunkRegex }, confidenceFloor, body, ...(coveredBy ? { coveredBy } : {}) };
+  return { name, description, triggers: { files, hunkRegex }, confidenceFloor, body, ...(coveredBy ? { coveredBy } : {}), ...(obj.security === true ? { security: true as const } : {}) };
 }
 
 // The first candidate that is a directory holding at least one `.md` file.

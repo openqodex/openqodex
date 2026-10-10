@@ -5,6 +5,7 @@
 // init, doctor and the GitHub Action.
 import type { AdapterResult, BuiltinScanner, DiffCoverage, ResolvedTool } from "@openqodex/core";
 import type { RepoFacts } from "../detect.js";
+import type { Scratch } from "../scratch.js";
 import { ruffPyproject, sqlfluffIni, sqlfluffPyproject, type SettingsReader } from "../shared-settings.js";
 import { actionlint } from "./actionlint.js";
 import { bandit } from "./bandit.js";
@@ -48,13 +49,15 @@ export type Adapter = {
   skip?(): string | null;
   // `tool` is null only for the in-process sqllint. `coverage` is the
   // changed lines, for adapters that choose between places to anchor a
-  // finding.
+  // finding. `scratch`: where the run may write (scratch.ts); an adapter
+  // makes its temporary folders and caches there and nowhere else.
   run(args: {
     repoDir: string;
     changedPaths: string[];
     tool: ResolvedTool | null;
     coverage?: DiffCoverage;
     facts: RepoFacts;
+    scratch: Scratch;
   }): Promise<AdapterResult>;
 };
 

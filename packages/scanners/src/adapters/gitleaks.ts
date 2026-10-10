@@ -15,11 +15,11 @@
 // every regex / entropy hit is worth a human glance.
 
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { redactSecrets } from "@openqodex/core";
 import type { AdapterResult, ResolvedTool, StaticFinding } from "@openqodex/core";
 import { describeFailure, execTool } from "../exec.js";
+import type { Scratch } from "../scratch.js";
 import type { Adapter } from "./index.js";
 import { repoFileOrReason } from "./read.js";
 
@@ -30,6 +30,7 @@ export type GitleaksRunArgs = {
   repoDir: string;
   changedPaths: string[];
   tool: ResolvedTool | null;
+  scratch: Scratch;
 };
 
 export async function runGitleaks(args: GitleaksRunArgs): Promise<AdapterResult> {
@@ -40,7 +41,7 @@ export async function runGitleaks(args: GitleaksRunArgs): Promise<AdapterResult>
   let stagingDir: string | null = null;
   try {
     try {
-      reportDir = await fs.mkdtemp(path.join(os.tmpdir(), "openqodex-gitleaks-"));
+      reportDir = await fs.mkdtemp(path.join(args.scratch.temp, "openqodex-gitleaks-"));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { findings: [], error: `mkdtemp: ${message.slice(0, 200)}` };
@@ -53,7 +54,7 @@ export async function runGitleaks(args: GitleaksRunArgs): Promise<AdapterResult>
     // downstream anyway, so the extra reach would buy no coverage.
     let staged: StagedTree;
     try {
-      staged = await stageChangedFiles(args.repoDir, args.changedPaths);
+      staged = await stageChangedFiles(args.repoDir, args.changedPaths, args.scratch.temp);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { findings: [], error: `stage: ${message.slice(0, 200)}` };
@@ -169,8 +170,9 @@ const GITLEAKS_CONFIG_NAMES = [".gitleaks.toml", "gitleaks.toml"];
 export async function stageChangedFiles(
   repoDir: string,
   changedPaths: string[],
+  tempRoot: string,
 ): Promise<StagedTree> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openqodex-gitleaks-src-"));
+  const dir = await fs.mkdtemp(path.join(tempRoot, "openqodex-gitleaks-src-"));
   let fileCount = 0;
   for (const rel of changedPaths) {
     // Never let a changed path escape the staging root. A "../" in a

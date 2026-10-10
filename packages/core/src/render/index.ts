@@ -2,7 +2,7 @@ export { renderTerminal } from "./terminal.js";
 export { renderMarkdown } from "./markdown.js";
 export { renderJson } from "./json.js";
 export { renderSarif } from "./sarif.js";
-export { renderFindingDetails, renderReceipt, renderReview, reviewerLine } from "./review.js";
+export { modelReviewerLine, renderFindingDetails, renderReceipt, renderReview, reviewerLine } from "./review.js";
 export { renderHtml, renderUnavailableHtml } from "./html.js";
 export type { HtmlInput } from "./html.js";
 export { DISPLAY_MAX_BYTES, DISPLAY_MAX_ROWS, buildDisplay, buildExcerptDisplay, checkDisplay, displayJson, parseHunks } from "./display.js";
