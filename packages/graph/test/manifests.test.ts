@@ -19,7 +19,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildGraph } from "../src/index.js";
 import { discoverProjects } from "../src/discovery/projects.js";
-import { globMatch } from "../src/discovery/glob.js";
+import { matchesGlob } from "@openqodex/core";
 import {
   LOCKFILE_BYTES,
   MANIFEST_BYTES,
@@ -149,16 +149,16 @@ describe("tsconfig text (4)", () => {
 
 describe("globs (5)", () => {
   it("matches as before and in linear time on a hostile pattern", async () => {
-    expect(globMatch("packages/core", "packages/*")).toBe(true);
-    expect(globMatch("packages/core/x", "packages/*")).toBe(false);
-    expect(globMatch("a/b/c/d.ts", "a/**")).toBe(true);
-    expect(globMatch("a/b.ts", "a/?.ts")).toBe(true);
-    expect(globMatch("a/(b).ts", "a/(b).ts")).toBe(true);
+    expect(matchesGlob("packages/core", "packages/*")).toBe(true);
+    expect(matchesGlob("packages/core/x", "packages/*")).toBe(false);
+    expect(matchesGlob("a/b/c/d.ts", "a/**")).toBe(true);
+    expect(matchesGlob("a/b.ts", "a/?.ts")).toBe(true);
+    expect(matchesGlob("a/(b).ts", "a/(b).ts")).toBe(true);
     const path = (length: number) => "a".repeat(length);
     const glob = `${"*a".repeat(200)}b`;
-    expect(globMatch(path(4096), glob)).toBe(false);
-    expect(globMatch(path(4096), `${"**a".repeat(200)}b`)).toBe(false);
-    const both = (length: number) => () => globMatch(path(length), glob) || globMatch(path(length), `${"**a".repeat(200)}b`);
+    expect(matchesGlob(path(4096), glob)).toBe(false);
+    expect(matchesGlob(path(4096), `${"**a".repeat(200)}b`)).toBe(false);
+    const both = (length: number) => () => matchesGlob(path(length), glob) || matchesGlob(path(length), `${"**a".repeat(200)}b`);
     expectLinear("two hostile globs against paths of 1,024 and of 4,096 characters", await cpuMs(both(1024)), await cpuMs(both(4096)));
   });
 });

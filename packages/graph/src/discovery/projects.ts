@@ -17,12 +17,11 @@
 // link; a dependency declared by a `file:` or `link:` path is placed by the
 // same kind of walk.
 import { posix, resolve as resolvePath } from "node:path";
-import { FolderReader, type Id } from "@openqodex/core";
+import { FolderReader, matchesGlob, type Id } from "@openqodex/core";
 import type { Relation } from "../model/records.js";
 import type { RepoReader } from "../safe-fs.js";
 import type { UnknownSite } from "../types.js";
 import { keptText } from "../frameworks/shared/kept.js";
-import { globMatch } from "./glob.js";
 import { LOCKFILE_BYTES, MANIFEST_BYTES, gemfileGems, goModRequires, normalisePy, parseJsonc, pnpmLinks, pnpmPackages, pyprojectDeps, requirementsDeps, requirementsIncludes, setupCfgRequires, yarnLock } from "./manifests.js";
 import type { Linkage } from "./manifests.js";
 
@@ -256,7 +255,7 @@ function membersOf(globs: string[], declaredIn: string, projects: NodeProject[])
   const base = dirOf(declaredIn);
   const pos = globs.filter((g) => !g.startsWith("!")).map((g) => join(base, g.replace(/\/$/, "")));
   const neg = globs.filter((g) => g.startsWith("!")).map((g) => join(base, g.slice(1).replace(/\/$/, "")));
-  return projects.filter((p) => p.dir !== base && pos.some((g) => globMatch(p.dir, g)) && !neg.some((g) => globMatch(p.dir, g)));
+  return projects.filter((p) => p.dir !== base && pos.some((g) => matchesGlob(p.dir, g)) && !neg.some((g) => matchesGlob(p.dir, g)));
 }
 
 const TS_CHAIN = 5; // configs one tsconfig and its relative `extends` may read
@@ -370,10 +369,10 @@ function readTsconfig(reader: RepoReader, file: string, known: { has(path: strin
 // the config's folder; a folder in `include` means everything under it.
 export function tsAdmits(config: TsConfig, path: string): boolean {
   const under = (glob: string, p: string): boolean => {
-    if (globMatch(p, glob)) return true;
+    if (matchesGlob(p, glob)) return true;
     // A pattern with no wildcard in its last part names a folder (or a file).
     const last = glob.split("/").pop() ?? "";
-    if (!/[*?]/.test(last)) return glob === "" || p.startsWith(`${glob}/`) || globMatch(p, `${glob}/**`);
+    if (!/[*?]/.test(last)) return glob === "" || p.startsWith(`${glob}/`) || matchesGlob(p, `${glob}/**`);
     return false;
   };
   if (config.files?.includes(path)) return true;
