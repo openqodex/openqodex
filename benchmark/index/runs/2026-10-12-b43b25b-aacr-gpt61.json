@@ -7361,5 +7361,424 @@
   "acceptedAt": "2026-10-13T00:02:54.494Z",
   "acceptedBy": "Sid",
   "legacy": false,
-  "privateListHash": "1ac12abee253eba199197a2ba97a88666a83c18b36f0338b255279710f2cf176"
+  "privateListHash": "1ac12abee253eba199197a2ba97a88666a83c18b36f0338b255279710f2cf176",
+  "outside": {
+    "aacr": {
+      "label": "AACR-Bench's own evaluator on this run's findings: a board output and a diagnostic, never an acceptance metric. Line numbers come from its path, side and line stages; semantic numbers only from a judged evaluation the wrapper ran.",
+      "board": {
+        "repo": "alibaba/aacr-bench",
+        "commit": "68a569759289a83654a59d06db2a72910edf0a4a",
+        "source": "https://github.com/alibaba/aacr-bench/tree/68a569759289a83654a59d06db2a72910edf0a4a"
+      },
+      "reader": "ocr",
+      "lineK": 1,
+      "references": {
+        "total": 256,
+        "left": 1,
+        "share": 0.00390625
+      },
+      "withoutLine": 0,
+      "judge": {
+        "deployment": "gpt-5.2",
+        "rounds": 3
+      },
+      "folders": [
+        {
+          "config": "model-gpt-6.1-sol-graph-on",
+          "repeat": 1,
+          "tool": "openqodex-model-gpt-6.1-sol-graph-on-r1",
+          "metrics": [
+            "metrics_ocr_20261012_171834_round_1.json",
+            "metrics_ocr_20261012_171928_round_2.json",
+            "metrics_ocr_20261012_172021_round_3.json"
+          ],
+          "rounds": [
+            {
+              "file": "metrics_ocr_20261012_171834_round_1.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 60,
+              "lineMatches": 29,
+              "semanticMatches": 12
+            },
+            {
+              "file": "metrics_ocr_20261012_171928_round_2.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 60,
+              "lineMatches": 29,
+              "semanticMatches": 12
+            },
+            {
+              "file": "metrics_ocr_20261012_172021_round_3.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 60,
+              "lineMatches": 29,
+              "semanticMatches": 12
+            }
+          ],
+          "ours": {
+            "matches": 29,
+            "generated": 60,
+            "expected": 256
+          },
+          "lineEqual": true,
+          "line": {
+            "matches": 29,
+            "generated": 60,
+            "expected": 256,
+            "precision": 0.48333333333333334,
+            "recall": 0.11328125,
+            "f1": 0.18354430379746833
+          },
+          "judged": true,
+          "why": null,
+          "semantic": {
+            "matches": 12,
+            "precision": 0.20000000000000004,
+            "recall": 0.046875,
+            "f1": 0.0759493670886076,
+            "noiseRate": 0.8000000000000002
+          }
+        },
+        {
+          "config": "model-gpt-6.1-sol-graph-on",
+          "repeat": 2,
+          "tool": "openqodex-model-gpt-6.1-sol-graph-on-r2",
+          "metrics": [
+            "metrics_ocr_20261012_172112_round_1.json",
+            "metrics_ocr_20261012_172204_round_2.json",
+            "metrics_ocr_20261012_172258_round_3.json"
+          ],
+          "rounds": [
+            {
+              "file": "metrics_ocr_20261012_172112_round_1.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 58,
+              "lineMatches": 29,
+              "semanticMatches": 15
+            },
+            {
+              "file": "metrics_ocr_20261012_172204_round_2.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 58,
+              "lineMatches": 29,
+              "semanticMatches": 15
+            },
+            {
+              "file": "metrics_ocr_20261012_172258_round_3.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 58,
+              "lineMatches": 29,
+              "semanticMatches": 15
+            }
+          ],
+          "ours": {
+            "matches": 29,
+            "generated": 58,
+            "expected": 256
+          },
+          "lineEqual": true,
+          "line": {
+            "matches": 29,
+            "generated": 58,
+            "expected": 256,
+            "precision": 0.5,
+            "recall": 0.11328125,
+            "f1": 0.18471337579617833
+          },
+          "judged": true,
+          "why": null,
+          "semantic": {
+            "matches": 15,
+            "precision": 0.25862068965517243,
+            "recall": 0.05859375,
+            "f1": 0.09554140127388534,
+            "noiseRate": 0.7413793103448277
+          }
+        },
+        {
+          "config": "model-gpt-6.1-sol-graph-on",
+          "repeat": 3,
+          "tool": "openqodex-model-gpt-6.1-sol-graph-on-r3",
+          "metrics": [
+            "metrics_ocr_20261012_172346_round_1.json",
+            "metrics_ocr_20261012_172435_round_2.json",
+            "metrics_ocr_20261012_172522_round_3.json"
+          ],
+          "rounds": [
+            {
+              "file": "metrics_ocr_20261012_172346_round_1.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 58,
+              "lineMatches": 29,
+              "semanticMatches": 13
+            },
+            {
+              "file": "metrics_ocr_20261012_172435_round_2.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 58,
+              "lineMatches": 29,
+              "semanticMatches": 13
+            },
+            {
+              "file": "metrics_ocr_20261012_172522_round_3.json",
+              "evaluated": 35,
+              "missing": 0,
+              "expected": 256,
+              "generated": 58,
+              "lineMatches": 29,
+              "semanticMatches": 13
+            }
+          ],
+          "ours": {
+            "matches": 29,
+            "generated": 58,
+            "expected": 256
+          },
+          "lineEqual": true,
+          "line": {
+            "matches": 29,
+            "generated": 58,
+            "expected": 256,
+            "precision": 0.5,
+            "recall": 0.11328125,
+            "f1": 0.18471337579617833
+          },
+          "judged": true,
+          "why": null,
+          "semantic": {
+            "matches": 13,
+            "precision": 0.22413793103448276,
+            "recall": 0.05078125,
+            "f1": 0.08280254777070063,
+            "noiseRate": 0.7758620689655172
+          }
+        }
+      ],
+      "byConfig": {
+        "model-gpt-6.1-sol-graph-on": {
+          "repeats": [
+            {
+              "config": "model-gpt-6.1-sol-graph-on",
+              "repeat": 1,
+              "tool": "openqodex-model-gpt-6.1-sol-graph-on-r1",
+              "metrics": [
+                "metrics_ocr_20261012_171834_round_1.json",
+                "metrics_ocr_20261012_171928_round_2.json",
+                "metrics_ocr_20261012_172021_round_3.json"
+              ],
+              "rounds": [
+                {
+                  "file": "metrics_ocr_20261012_171834_round_1.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 60,
+                  "lineMatches": 29,
+                  "semanticMatches": 12
+                },
+                {
+                  "file": "metrics_ocr_20261012_171928_round_2.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 60,
+                  "lineMatches": 29,
+                  "semanticMatches": 12
+                },
+                {
+                  "file": "metrics_ocr_20261012_172021_round_3.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 60,
+                  "lineMatches": 29,
+                  "semanticMatches": 12
+                }
+              ],
+              "ours": {
+                "matches": 29,
+                "generated": 60,
+                "expected": 256
+              },
+              "lineEqual": true,
+              "line": {
+                "matches": 29,
+                "generated": 60,
+                "expected": 256,
+                "precision": 0.48333333333333334,
+                "recall": 0.11328125,
+                "f1": 0.18354430379746833
+              },
+              "judged": true,
+              "why": null,
+              "semantic": {
+                "matches": 12,
+                "precision": 0.20000000000000004,
+                "recall": 0.046875,
+                "f1": 0.0759493670886076,
+                "noiseRate": 0.8000000000000002
+              }
+            },
+            {
+              "config": "model-gpt-6.1-sol-graph-on",
+              "repeat": 2,
+              "tool": "openqodex-model-gpt-6.1-sol-graph-on-r2",
+              "metrics": [
+                "metrics_ocr_20261012_172112_round_1.json",
+                "metrics_ocr_20261012_172204_round_2.json",
+                "metrics_ocr_20261012_172258_round_3.json"
+              ],
+              "rounds": [
+                {
+                  "file": "metrics_ocr_20261012_172112_round_1.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 58,
+                  "lineMatches": 29,
+                  "semanticMatches": 15
+                },
+                {
+                  "file": "metrics_ocr_20261012_172204_round_2.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 58,
+                  "lineMatches": 29,
+                  "semanticMatches": 15
+                },
+                {
+                  "file": "metrics_ocr_20261012_172258_round_3.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 58,
+                  "lineMatches": 29,
+                  "semanticMatches": 15
+                }
+              ],
+              "ours": {
+                "matches": 29,
+                "generated": 58,
+                "expected": 256
+              },
+              "lineEqual": true,
+              "line": {
+                "matches": 29,
+                "generated": 58,
+                "expected": 256,
+                "precision": 0.5,
+                "recall": 0.11328125,
+                "f1": 0.18471337579617833
+              },
+              "judged": true,
+              "why": null,
+              "semantic": {
+                "matches": 15,
+                "precision": 0.25862068965517243,
+                "recall": 0.05859375,
+                "f1": 0.09554140127388534,
+                "noiseRate": 0.7413793103448277
+              }
+            },
+            {
+              "config": "model-gpt-6.1-sol-graph-on",
+              "repeat": 3,
+              "tool": "openqodex-model-gpt-6.1-sol-graph-on-r3",
+              "metrics": [
+                "metrics_ocr_20261012_172346_round_1.json",
+                "metrics_ocr_20261012_172435_round_2.json",
+                "metrics_ocr_20261012_172522_round_3.json"
+              ],
+              "rounds": [
+                {
+                  "file": "metrics_ocr_20261012_172346_round_1.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 58,
+                  "lineMatches": 29,
+                  "semanticMatches": 13
+                },
+                {
+                  "file": "metrics_ocr_20261012_172435_round_2.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 58,
+                  "lineMatches": 29,
+                  "semanticMatches": 13
+                },
+                {
+                  "file": "metrics_ocr_20261012_172522_round_3.json",
+                  "evaluated": 35,
+                  "missing": 0,
+                  "expected": 256,
+                  "generated": 58,
+                  "lineMatches": 29,
+                  "semanticMatches": 13
+                }
+              ],
+              "ours": {
+                "matches": 29,
+                "generated": 58,
+                "expected": 256
+              },
+              "lineEqual": true,
+              "line": {
+                "matches": 29,
+                "generated": 58,
+                "expected": 256,
+                "precision": 0.5,
+                "recall": 0.11328125,
+                "f1": 0.18471337579617833
+              },
+              "judged": true,
+              "why": null,
+              "semantic": {
+                "matches": 13,
+                "precision": 0.22413793103448276,
+                "recall": 0.05078125,
+                "f1": 0.08280254777070063,
+                "noiseRate": 0.7758620689655172
+              }
+            }
+          ],
+          "mean": {
+            "line": {
+              "matches": 87,
+              "generated": 176,
+              "expected": 768,
+              "precision": 0.4943181818181818,
+              "recall": 0.11328125,
+              "f1": 0.18432203389830507
+            },
+            "semantic": {
+              "precision": 0.22758620689655173,
+              "recall": 0.052083333333333336,
+              "f1": 0.08476443871106452,
+              "noiseRate": 0.7724137931034484
+            }
+          }
+        }
+      },
+      "problems": []
+    }
+  }
 }

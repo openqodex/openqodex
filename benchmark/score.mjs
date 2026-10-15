@@ -82,6 +82,8 @@
 //    block and the exit code are what they are without the flag. Their
 //    files that cannot be read leave outside.aacr null, with one line on
 //    stderr naming why, never a failed scoring.
+// 13. Adding board diagnostics replaces a reviewed score or its queue files:
+//    an existing score gets only the outside block on an in-place board refresh.
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,10 +125,10 @@ function plannedCases(manifest) {
 }
 
 // A path as a score shows it: relative to the repository when it lies in
-// it, so no machine path is published.
+// it, or relative to it for an external folder, so no machine path is published.
 const shownPath = (p) => {
   const r = relative(repoRoot, p);
-  return r !== "" && !r.startsWith("..") && !isAbsolute(r) ? r : p;
+  return r !== "" && !isAbsolute(r) ? r : basename(p);
 };
 
 export function loadRun(folder, { specsDir = null, judgeFile = null } = {}) {
@@ -703,7 +705,8 @@ function main() {
     process.exit(2);
   }
   const regs = older ? (scanOnly ? scanRegressions(olderScored.jobs, jobs) : regressions(olderScored.jobs, jobs)) : [];
-  const doc = { ...score, comparedWith: older ? { run: older.name, build: older.manifest.build, differences: differences(older, run), regressions: regs } : null };
+  const boardOnly = outside === "aacr" && against === null && specsDir === null && judgeFile === null && outDir === null && decisionsFile === decisionsPath && existsSync(join(dest, "score.json"));
+  const doc = boardOnly ? readJson(join(dest, "score.json")) : { ...score, comparedWith: older ? { run: older.name, build: older.manifest.build, differences: differences(older, run), regressions: regs } : null };
   // An outside board's own evaluator, read after the scoring and added beside it (failure 12).
   if (outside === "aacr") {
     try {
@@ -718,14 +721,20 @@ function main() {
   const suffix = specsDir === null ? "" : `-${basename(resolve(specsDir))}`;
   mkdirSync(dest, { recursive: true });
   writeFileSync(join(dest, `score${suffix}.json`), `${JSON.stringify(doc, null, 2)}\n`);
-  writeFileSync(join(dest, `outcomes${suffix}.jsonl`), outcomes.map((o) => `${JSON.stringify(o)}\n`).join(""));
-  writeFileSync(join(dest, `unresolved${suffix}.jsonl`), unresolved.map((o) => `${JSON.stringify(o)}\n`).join(""));
+  if (!boardOnly) {
+    writeFileSync(join(dest, `outcomes${suffix}.jsonl`), outcomes.map((o) => `${JSON.stringify(o)}\n`).join(""));
+    writeFileSync(join(dest, `unresolved${suffix}.jsonl`), unresolved.map((o) => `${JSON.stringify(o)}\n`).join(""));
+  }
+  const shown = (p) => (relative(repoRoot, p).startsWith("..") ? p : relative(repoRoot, p));
   if (json) console.log(JSON.stringify(doc, null, 2));
-  else {
+  else if (boardOnly) {
+    // The fresh score is not the saved one, so only the board numbers are shown.
+    if (doc.outside.aacr) console.log(renderAacrOutside(doc.outside.aacr));
+    console.log(`\nBoard numbers added to ${shown(join(dest, "score.json"))}. The rest of the score and its queue files are unchanged.`);
+  } else {
     console.log(scanOnly ? renderScan(score, run.manifest) : renderV3(score));
     if (doc.outside?.aacr) console.log(`\n${renderAacrOutside(doc.outside.aacr)}`);
     if (older) console.log(`\n${scanOnly ? renderScanCompare(older, run, regs) : renderCompare(older, run, olderScored.score, score, regs)}`);
-    const shown = (p) => (relative(repoRoot, p).startsWith("..") ? p : relative(repoRoot, p));
     console.log(`\nScore saved: ${shown(join(dest, `score${suffix}.json`))}, with ${outcomes.length} finding outcomes in ${shown(join(dest, `outcomes${suffix}.jsonl`))} and ${unresolved.length} findings for the review queue in ${shown(join(dest, `unresolved${suffix}.jsonl`))} (node benchmark/queue.mjs add ${shown(join(dest, `unresolved${suffix}.jsonl`))})`);
   }
   process.exit(regs.length > 0 ? 1 : 0);

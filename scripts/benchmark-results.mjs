@@ -32,6 +32,8 @@ const unruled = (s) => s.issueRecall.all.hit === 0 && s.precision.upper.of > 0 &
 const board = (e, g) => e.outside?.aacr?.byConfig?.[g.config]?.mean;
 // A suite with a board has no matching words in its known issues, so only a ruling credits a hit.
 // The README shows its row once the row has board numbers or a ruled hit. The full page shows every row.
+const boardCells = (numbers) => [numbers?.semantic?.precision, numbers?.semantic?.recall, numbers?.semantic?.f1, numbers?.semantic?.noiseRate, numbers?.line?.precision, numbers?.line?.recall].map(percent);
+const boardHead = ["Semantic precision", "Semantic recall", "Semantic F1", "Noise rate", "Line precision", "Line recall"];
 const readable = ({ e, g, s }) => !SUITES[e.suite]?.board || Boolean(board(e, g)) || s.issueRecall.all.hit > 0;
 const recall = (s, interval = false) => (unruled(s) ? "not yet ruled" : ratio(s.issueRecall.all, interval));
 const suiteLabel = (e) => `${suiteName(e.suite)}, ${e.split} split${e.subset ? `, ${e.subset} subset` : ""}`;
@@ -95,16 +97,23 @@ export function renderResults(index) {
       for (const { e, g } of selected) {
         const numbers = board(e, g);
         page.push(`${runLink(e)}, ${g.config}${numbers ? ":" : ": not yet board-scored."}`, "");
-        if (numbers) page.push(table(["Semantic precision", "Semantic recall", "Semantic F1", "Noise rate", "Line precision", "Line recall"], [[
-          numbers.semantic?.precision, numbers.semantic?.recall, numbers.semantic?.f1, numbers.semantic?.noiseRate, numbers.line?.precision, numbers.line?.recall,
-        ].map(percent)]), "");
+        if (numbers) page.push(table(boardHead, [boardCells(numbers)]), "");
       }
     }
   }
   page.push("[Benchmark methods](benchmark.md)", "");
-  const headline = [START, "## Benchmark", "", table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review"], rows.filter(readable).map(({ e, g, s }) => [
-    `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), recall(s), precisionRange(s), ratio(s.controls), cost(s),
-  ])), "", "[Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)", END].join("\n");
+  // Rows with board numbers get their own table, so no row carries six cells it never measured.
+  const shown = rows.filter(readable);
+  const plain = shown.filter(({ e, g }) => !board(e, g));
+  const boarded = shown.filter(({ e, g }) => board(e, g));
+  const headline = [START, "## Benchmark", "",
+    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review"], plain.map(({ e, g, s }) => [
+      `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), recall(s), precisionRange(s), ratio(s.controls), cost(s),
+    ])), ""] : []),
+    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review"], boarded.map(({ e, g, s }) => [
+      `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), recall(s), ...boardCells(board(e, g)), cost(s),
+    ])), ""] : []),
+    "[Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)", END].join("\n");
   return { page: page.join("\n"), headline };
 }
 

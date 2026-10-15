@@ -26,6 +26,12 @@
 //    or loses its accepted mark when publish-run.mjs writes it again, or an
 //    entry edited before it is accepted no longer matches its run's score
 //    and is accepted all the same.
+// 7. An entry whose board numbers differ from its run's score.json is
+//    accepted, because the run's files still match.
+// 8. A board-scored entry is accepted from a copy fetched from its asset,
+//    which carries no board numbers and so cannot check them.
+// 9. Accept leaves a board-scored entry's numbers unrecorded, so an edit
+//    after it passes the index checks.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -33,7 +39,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { extractAsset } from "../fetch-run.mjs";
-import { assetUrl, entryProblems, groupKeys, listEntries } from "../lib/index.mjs";
+import { assetUrl, boardHash, entryProblems, groupKeys, listEntries } from "../lib/index.mjs";
 import { mulberry32, seedOf } from "../lib/interval.mjs";
 import { executeRun, planJobs, runManifest, sampleRecord } from "../lib/runner.mjs";
 import { RULES_VERSION } from "../lib/score.mjs";
@@ -448,4 +454,51 @@ describe("per-review models at accept", () => {
     expect(result.status, result.stderr).toBe(2);
     expect(result.stderr.trim()).toMatch(/requested model claude-sonnet-5, but samples were served by claude-opus-5-5/);
   });
+});
+
+it("refuses acceptance of a stale board copy in one line naming the run", async () => {
+  const { root, index } = await indexWith({ before: () => true, after: () => true });
+  const scoreFile = join(root, NEWER.runId, "score.json");
+  const score = JSON.parse(readFileSync(scoreFile, "utf8"));
+  score.outside = { aacr: { fresh: true } };
+  write(scoreFile, `${JSON.stringify(score, null, 2)}\n`);
+  const entry = readEntryAt(index, NEWER.runId);
+  entry.outside = { aacr: { stale: true } };
+  putEntry(index, entry);
+  const result = trend(["--accept", NEWER.runId, "--by", "Sid", "--index", index, "--results", root]);
+  expect(result.status).toBe(2);
+  expect(result.stderr.trim()).toBe(`refused: ${NEWER.runId}'s board numbers (outside) differ from those in its score.json`);
+  expect(readEntryAt(index, NEWER.runId).accepted).toBe(false);
+});
+
+it("refuses to accept a board-scored entry from a copy fetched from its asset", async () => {
+  const { index, published } = await indexWith({ before: () => true, after: () => true });
+  const entry = readEntryAt(index, NEWER.runId);
+  entry.outside = { aacr: { byConfig: { [CONFIG]: { mean: { line: { precision: 0.4, recall: 0.5 }, semantic: null } } } } };
+  putEntry(index, entry);
+  const fetched = tempDir("oq-bench-fetched-");
+  extractAsset(published.next.asset.tarPath, entry.asset, fetched, NEWER.runId);
+  const result = trend(["--accept", NEWER.runId, "--by", "Sid", "--index", index, "--results", fetched]);
+  expect(result.status).toBe(2);
+  expect(result.stderr).toContain("is a copy of the published asset, which carries no board numbers, so it cannot check the entry's");
+  expect(readEntryAt(index, NEWER.runId).accepted).toBe(false);
+});
+
+it("records the board numbers' hash at accept, and refuses the index once they are edited", async () => {
+  const { root, index } = await indexWith({ before: () => true, after: () => true });
+  const outside = { aacr: { byConfig: { [CONFIG]: { mean: { line: { precision: 0.4, recall: 0.5 }, semantic: null } } } } };
+  const scoreFile = join(root, NEWER.runId, "score.json");
+  write(scoreFile, `${JSON.stringify({ ...JSON.parse(readFileSync(scoreFile, "utf8")), outside }, null, 2)}\n`);
+  putEntry(index, { ...readEntryAt(index, NEWER.runId), outside });
+  const accepted = trend(["--accept", NEWER.runId, "--by", "Sid", "--index", index, "--results", root]);
+  expect(accepted.status, accepted.stdout + accepted.stderr).toBe(0);
+  const entry = readEntryAt(index, NEWER.runId);
+  const pointer = JSON.parse(readFileSync(join(index, "accepted.json"), "utf8"));
+  expect(pointer.boardHash).toBe(boardHash(entry));
+  for (const a of Object.values(pointer.groups).filter((a) => a.runId === NEWER.runId)) expect(a.boardHash).toBe(boardHash(entry));
+  entry.outside.aacr.byConfig[CONFIG].mean.line.precision = 0.9;
+  putEntry(index, entry);
+  const shown = trend(["--index", index]);
+  expect(shown.status).toBe(2);
+  expect(shown.stderr).toContain(`the board numbers of ${NEWER.runId} are not the ones recorded`);
 });

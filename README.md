@@ -97,6 +97,12 @@ OpenQodex itself collects no usage data. The built-in scanners, as OpenQodex run
 | Codex (codex-graph-on) | gpt-6.1-sol | Planted bugs, dev split | 115/153 (75.2%) | 125/146 (85.6%) to 146/146 (100.0%) | 6/6 (100.0%) | not measured |
 | Scanner only (scan) | no model | Planted bugs, dev split | 32/51 (62.7%) | 35/45 (77.8%) to 40/45 (88.9%) | 1/2 (50.0%) | not measured |
 
+AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.
+
+| Reviewer | Model | Cases | Issue recall | Semantic precision | Semantic recall | Semantic F1 | Noise rate | Line precision | Line recall | Cost per review |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Library (model-gpt-6.1-sol-graph-on) | gpt-6.1-sol | AACR-Bench, dev split, dev-laptop subset | not yet ruled | 22.8% | 5.2% | 8.5% | 77.2% | 49.4% | 11.3% | $0.0839 |
+
 [Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)
 <!-- benchmark-results:end -->
 

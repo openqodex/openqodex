@@ -20,6 +20,8 @@
 //    development cases, our location numbers equal the line counts AACR's
 //    evaluator gave (recorded in fixtures/aacr-board/, and run again live
 //    when their pinned checkout is in the cache).
+// 16. Scoring with --outside saves the run or evaluator home path.
+// 17. Adding board diagnostics overwrites an existing score or queue output.
 // From the review of PR 155:
 // 9. A crash of the evaluator, whose environment holds the key and base
 //    URL, writes a core file outside the folder checked for leaks.
@@ -35,6 +37,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -471,13 +474,26 @@ describe("the diagnostics change score.json's own fields or the rules hash", () 
     const r = run(["--out", withOutside, "--outside", "aacr"]);
     expect(r.status, r.stderr).toBe(0);
     const a = readJson(join(plain, "score.json"));
-    const b = readJson(join(withOutside, "score.json"));
+    const saved = readFileSync(join(withOutside, "score.json"), "utf8");
+    expect(saved).not.toContain("/Users/");
+    expect(saved).not.toContain(homedir());
+    const b = JSON.parse(saved);
     expect(a.outside).toBeUndefined();
     expect(b.outside.aacr.board).toMatchObject({ repo: "alibaba/aacr-bench", commit: COMMIT });
     const rest = { ...b };
     delete rest.outside;
     expect(rest).toEqual(a);
     expect(b.rules).toEqual(RULES);
+    const existing = { ...a, rules: { ...a.rules, code: "the reviewed scorer" } };
+    write(join(out, "score.json"), `${JSON.stringify(existing, null, 2)}\n`);
+    write(join(out, "outcomes.jsonl"), "reviewed outcomes\n");
+    write(join(out, "unresolved.jsonl"), "reviewed queue\n");
+    expect(run(["--outside", "aacr"]).status).toBe(0);
+    const refreshed = readJson(join(out, "score.json"));
+    delete refreshed.outside;
+    expect(refreshed).toEqual(existing);
+    expect(readFileSync(join(out, "outcomes.jsonl"), "utf8")).toBe("reviewed outcomes\n");
+    expect(readFileSync(join(out, "unresolved.jsonl"), "utf8")).toBe("reviewed queue\n");
     expect(readFileSync(join(plain, "outcomes.jsonl"), "utf8")).toBe(readFileSync(join(withOutside, "outcomes.jsonl"), "utf8"));
     expect(r.stdout).toMatch(/AACR-Bench's own evaluator/);
   });

@@ -7,13 +7,15 @@
 // 6. Board metrics and A/A noise are lost or mixed with issue recall.
 // 7. A run whose findings all wait for a ruling shows 0% issue recall as if measured.
 // 8. The README shows an AACR-Bench row with no board numbers and no ruled hit, or the page drops it.
+// 9. The README admits a board-scored row but drops its six board metrics.
+// 10. An accepted entry's board numbers are edited after they were recorded, and the page shows them.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, expect, it } from "vitest";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
-import { groupKeys, scoreHash } from "../lib/index.mjs";
+import { boardHash, groupKeys, scoreHash } from "../lib/index.mjs";
 
 afterAll(removeTempDirs);
 const repo = fileURLToPath(new URL("../../", import.meta.url));
@@ -30,8 +32,20 @@ const page = (root) => readFileSync(join(root, "docs/benchmark-results.md"), "ut
 // The tests read the accepted pointer, so a newly accepted run does not break them.
 const pointer = (root) => JSON.parse(readFileSync(join(root, "benchmark/index/accepted.json"), "utf8"));
 const entryFile = (root, runId) => join(root, "benchmark/index/runs", `${runId}.json`);
-const aacrGroup = (root) => {
-  const key = Object.keys(pointer(root).groups).find((k) => k.startsWith("aacr|"));
+// Writes an edited entry and records its board numbers in the pointer, as accept or a board refresh would.
+const putRecorded = (root, entry) => {
+  writeFileSync(entryFile(root, entry.runId), JSON.stringify(entry));
+  const accepted = pointer(root);
+  for (const a of [accepted, ...Object.values(accepted.groups)]) {
+    if (a.runId !== entry.runId) continue;
+    if (entry.outside === undefined) delete a.boardHash;
+    else a.boardHash = boardHash(entry);
+  }
+  writeFileSync(join(root, "benchmark/index/accepted.json"), JSON.stringify(accepted));
+};
+const aacrGroup = (root, { boarded = false } = {}) => {
+  const accepted = pointer(root);
+  const key = Object.keys(accepted.groups).find((k) => k.startsWith("aacr|") && (!boarded || accepted.groups[k].boardHash));
   expect(key).toBeDefined();
   const { runId } = pointer(root).groups[key];
   const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
@@ -62,7 +76,7 @@ it("labels an accepted AACR row without board numbers as not yet board-scored", 
   const { runId } = aacrGroup(root);
   const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
   delete entry.outside;
-  writeFileSync(entryFile(root, runId), JSON.stringify(entry));
+  putRecorded(root, entry);
   expect(run(root).status).toBe(0);
   const line = page(root).split("\n").find((l) => l.startsWith(`[${runId}]`));
   expect(line).toContain("not yet board-scored");
@@ -112,7 +126,7 @@ it("keeps indexed board metrics and A/A issue noise separate", () => {
     semantic: { precision: 0.2, recall: 0.3, f1: 0.24, noiseRate: 0.8 },
     line: { precision: 0.4, recall: 0.5 },
   } } } } };
-  writeFileSync(path, JSON.stringify(entry));
+  putRecorded(root, entry);
   // An A/A twin of an accepted run with at least three issues found, three issues apart.
   const accepted = Object.entries(pointer(root).groups).map(([key, a]) => {
     const e = JSON.parse(readFileSync(entryFile(root, a.runId), "utf8"));
@@ -127,6 +141,9 @@ it("keeps indexed board metrics and A/A issue noise separate", () => {
   writeFileSync(entryFile(root, twin.runId), JSON.stringify(twin));
   expect(run(root).status).toBe(0);
   expect(page(root)).toContain("20.0% | 30.0% | 24.0% | 80.0% | 40.0% | 50.0%");
+  const headline = readFileSync(join(root, "README.md"), "utf8");
+  expect(headline).toContain("Semantic precision");
+  expect(headline.split("\n").find((l) => l.includes(`(${aacrConfig})`) && l.includes("AACR-Bench"))).toContain("20.0% | 30.0% | 24.0% | 80.0% | 40.0% | 50.0%");
   expect(page(root)).toContain(`The difference is 3 issues across ${parent.repeat} repeats`);
 });
 
@@ -156,14 +173,28 @@ it("keeps an AACR-Bench row with no board numbers and no ruled hit off the READM
   const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
   delete entry.outside;
   expect(entry.scores[config].issueRecall.all.hit).toBe(0);
-  writeFileSync(entryFile(root, runId), JSON.stringify(entry));
+  putRecorded(root, entry);
   expect(run(root).status).toBe(0);
   const block = (r) => readFileSync(join(r, "README.md"), "utf8").split("\n").filter((l) => l.startsWith("| "));
   expect(block(root).some((l) => l.includes(`(${config})`) && l.includes("AACR-Bench"))).toBe(false);
   expect(page(root).split("\n").some((l) => l.startsWith("| ") && l.includes(`[${runId}]`))).toBe(true);
   // The same row with board numbers is on the README.
   entry.outside = { aacr: { byConfig: { [config]: { mean: { semantic: null, line: { precision: 0.4, recall: 0.5 } } } } } };
-  writeFileSync(entryFile(root, runId), JSON.stringify(entry));
+  putRecorded(root, entry);
   expect(run(root).status).toBe(0);
   expect(block(root).some((l) => l.includes(`(${config})`) && l.includes("AACR-Bench"))).toBe(true);
+});
+
+it("rejects an accepted entry whose board numbers were edited after they were recorded", () => {
+  const root = fixture();
+  const { runId, config } = aacrGroup(root, { boarded: true });
+  const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
+  expect(pointer(root).boardHash ?? Object.values(pointer(root).groups).find((a) => a.runId === runId).boardHash).toBe(boardHash(entry));
+  entry.outside.aacr.byConfig[config].mean.semantic.precision = 0.9;
+  writeFileSync(entryFile(root, runId), JSON.stringify(entry));
+  for (const args of [[], ["--check"]]) {
+    const result = run(root, ...args);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`the board numbers of ${runId} are not the ones recorded`);
+  }
 });

@@ -15,7 +15,12 @@
 // --dry-run uploads nothing and prints the entry; --write-index writes the
 // entry even so. The package is deterministic, so an entry written by a dry
 // run names the very asset a later upload sends. Only the session uploads;
-// a builder runs --dry-run.
+// a builder runs --dry-run. For a run that already has an entry,
+// --write-index changes only the entry's board numbers (outside) and uploads
+// nothing. It refuses a run that packages to another asset than the entry names.
+// Board numbers enter an entry only when they equal what the run's board
+// output gives. For an accepted entry, the refresh also records their hash
+// (boardHash) in benchmark/index/accepted.json.
 //
 // Exit codes: 0 published (or, with --dry-run, ready); 1 refused (a hit in
 // the inspection, a folder that is not the recipe's, an asset that differs
@@ -51,18 +56,25 @@
 //    and one whose bytes alone differ is rewritten and said so.
 // 7. An asset is uploaded twice under one name: an existing asset of that
 //    name refuses the upload.
+// 8. Board numbers edited by hand in score.json reach the index: the board
+//    block is computed again from <run>/outside/aacr, and a block that
+//    differs refuses the publish.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { benchRoot, generatedValue, repoRoot } from "./lib/cases.mjs";
-import { RELEASE, REPOSITORY, assetUrl, buildEntry, byBytes, entryProblems, fileList, listHash, readEntry, runsRoot, sha256, writeEntry } from "./lib/index.mjs";
+import { RELEASE, REPOSITORY, assetUrl, boardHash, buildEntry, byBytes, entryProblems, fileList, hashReviewedFolder, listHash, readEntry, runsRoot, reviewedBytes, sha256, writeEntry } from "./lib/index.mjs";
+import { readAacrOutside } from "./lib/aacr-board.mjs";
+import { readDecisions } from "./lib/rulings.mjs";
+import { canonical } from "./lib/score.mjs";
 import { archiveDir, readRecipes, scorerFiles, scorerHash } from "./legacy/rescore.mjs";
 import { redactRowReasons } from "./lib/runner.mjs";
 import { extractAsset } from "./fetch-run.mjs";
+import { decisionsPath, loadRun, scoreRun } from "./score.mjs";
 
 // The files a run may publish, by path inside the run folder.
 export const ALLOWED = [
@@ -71,7 +83,6 @@ export const ALLOWED = [
   /^samples\/[^/]+\/[^/]+\/[^/]+\/(sample\.json|stderr\.txt|receipt\.txt|usage\.json|dispositions\.json|completion\.json|transcript\.jsonl|progress\.jsonl)$/,
   /^samples\/[^/]+\/[^/]+\/[^/]+\/report\/(report|scan|trace|submission|reviewer|manifest|rounds)\.json$/,
   /^samples\/[^/]+\/[^/]+\/[^/]+\/report\/brief\.md$/,
-  /^outside\/.+\.json$/,
 ];
 const FIXED_MTIME = 1767225600; // 2026-01-01T00:00:00Z, the time every packaged file carries
 
@@ -305,7 +316,7 @@ export async function packageRun(folder, { out, env = process.env, recipes = rea
   if (!existsSync(join(folder, "manifest.json"))) throw new Error(`${folder} has no manifest.json; it is not a benchmark run`);
   const recipe = recipes.runs[runId] ?? null;
   const local = fileList(folder);
-  const privateListHash = listHash(local.map((path) => ({ path, sha256: sha256(readFileSync(join(folder, path))) })));
+  const privateListHash = hashReviewedFolder(folder).listHash;
   if (recipe) {
     const problems = originalsProblems(folder, recipe);
     if (problems.length > 0) throw new Error(`refused: ${runId} is not the folder its recipe names:\n${problems.slice(0, 20).join("\n")}`);
@@ -315,7 +326,7 @@ export async function packageRun(folder, { out, env = process.env, recipes = rea
   const files = [];
   for (const path of local) {
     if (!ALLOWED.some((re) => re.test(path))) left.push(path);
-    else files.push({ path, bytes: readFileSync(join(folder, path)) });
+    else files.push({ path, bytes: reviewedBytes(folder, path) });
   }
   if (recipe) {
     for (const commit of new Set(recipe.scores.map((s) => s.scorer.commit))) {
@@ -365,7 +376,8 @@ export async function packageRun(folder, { out, env = process.env, recipes = rea
     for (const [from, to] of reasons) text = text.split(from).join(to);
     file.bytes = Buffer.from(text);
   }
-  const { hits, looked } = await inspect(folder, files, { cases, env, manifest: readJson(join(folder, "manifest.json")) });
+  const inspected = files.map((f) => f.path === "score.json" ? { path: f.path, bytes: readFileSync(join(folder, f.path)) } : f);
+  const { hits, looked } = await inspect(folder, inspected, { cases, env, manifest: readJson(join(folder, "manifest.json")) });
   if (hits.length > 0) throw new Error(`refused: ${hits.length} hit${hits.length === 1 ? "" : "s"} in the files to publish:\n${hits.slice(0, 40).join("\n")}`);
   const tar = tarGz(files.map((f) => ({ path: `${runId}/${f.path}`, bytes: f.bytes })));
   mkdirSync(out, { recursive: true });
@@ -390,6 +402,39 @@ export async function packageRun(folder, { out, env = process.env, recipes = rea
 function citedScore(folder, recipe) {
   const file = recipe ? recipe.headline : "score.json";
   return readJson(join(folder, file));
+}
+
+// Why the board numbers a score carries are not the ones the run's board
+// output gives, as score.mjs --outside aacr computes them (failure 8); null when they are.
+function boardRefusal(folder, runId, outside) {
+  if (outside === undefined) return null;
+  const d = readDecisions(decisionsPath);
+  const run = loadRun(folder);
+  const { jobs } = scoreRun(run, { decisionsHash: d.hash, decisions: d.lines, people: d.people });
+  let aacr = null;
+  try {
+    aacr = readAacrOutside(folder, jobs, run.specs);
+  } catch {
+    // score.mjs saves a board block it cannot read as null.
+  }
+  return canonical(outside) === canonical({ aacr }) ? null : `refused: ${runId}'s board numbers in score.json are not the ones its board output gives; run node benchmark/score.mjs ${folder} --outside aacr again`;
+}
+
+// Records an accepted entry's board numbers in the accepted pointer, in
+// the order trend.mjs --accept writes them; the path when it changed.
+function recordBoard(entry, runs) {
+  const path = join(dirname(runs), "accepted.json");
+  if (!existsSync(path)) return null;
+  const before = readFileSync(path, "utf8");
+  const pointer = JSON.parse(before);
+  const board = boardHash(entry);
+  const mark = (a) => (a?.runId !== entry.runId ? a : { runId: a.runId, commit: a.commit, scoreHash: a.scoreHash, ...(board === null ? {} : { boardHash: board }), acceptedAt: a.acceptedAt, acceptedBy: a.acceptedBy });
+  const { version, groups, ...top } = pointer;
+  const next = { version, ...mark(top), groups: Object.fromEntries(Object.entries(groups ?? {}).map(([k, a]) => [k, mark(a)])) };
+  const after = `${JSON.stringify(next, null, 2)}\n`;
+  if (after === before) return null;
+  writeFileSync(path, after);
+  return path;
 }
 
 const gh = (args) => spawnSync("gh", [...args, "--repo", REPOSITORY], { cwd: repoRoot, encoding: "utf8" });
@@ -429,7 +474,7 @@ export async function publishRun(folder, { dryRun = false, writeIndex = false, o
   }
   const manifest = readJson(join(folder, "manifest.json"));
   const resumes = existsSync(join(folder, "resumes.jsonl")) ? readFileSync(join(folder, "resumes.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
-  const entry = buildEntry({
+  let entry = buildEntry({
     runId,
     manifest,
     resumes,
@@ -444,16 +489,27 @@ export async function publishRun(folder, { dryRun = false, writeIndex = false, o
   // same files packaged by another zlib build may differ in their bytes; the
   // entry then gets the new sha256, and that change must be committed.
   const committed = readEntry(runId, runs);
+  const boardOnly = committed !== null && writeIndex;
+  if (boardOnly && committed.asset.sha256 !== entry.asset.sha256) throw new Error(`refused: ${runId} packages to sha256 ${entry.asset.sha256}, not the ${committed.asset.sha256} its entry names, so --write-index cannot refresh its board numbers`);
   if (committed && (committed.asset.listHash !== entry.asset.listHash || committed.privateListHash !== entry.privateListHash)) {
     throw new Error(`refused: the committed entry for ${runId} names other files (list hash ${committed.asset.listHash}, private ${committed.privateListHash}) than this folder packages (list hash ${entry.asset.listHash}, private ${entry.privateListHash})`);
   }
   const rebytes = committed !== null && committed.asset.sha256 !== entry.asset.sha256;
+  const refusal = recipe ? null : boardRefusal(folder, runId, entry.outside);
+  if (refusal) throw new Error(refusal);
   // An accepted run stays accepted: benchmark/index/accepted.json names it,
   // and only trend.mjs --accept sets the mark.
   if (committed?.accepted === true) Object.assign(entry, { accepted: true, acceptedAt: committed.acceptedAt, acceptedBy: committed.acceptedBy });
-  if (!dryRun) upload(asset.tarPath, runId);
+  if (boardOnly) {
+    const outside = entry.outside;
+    entry = { ...committed };
+    if (outside !== undefined) entry.outside = outside;
+    else delete entry.outside;
+  }
+  if (!dryRun && !boardOnly) upload(asset.tarPath, runId);
   const written = !dryRun || writeIndex ? writeEntry(entry, runs) : null;
-  return { asset, entry, written, rebytes };
+  const pointer = written && entry.accepted === true ? recordBoard(entry, runs) : null;
+  return { asset, entry, written, rebytes, boardOnly, pointer };
 }
 
 async function main() {
@@ -479,17 +535,18 @@ async function main() {
     console.error(error.message);
     process.exit(error.message.startsWith("refused") ? 1 : 2);
   }
-  const { asset, entry, written, rebytes } = r;
+  const { asset, entry, written, rebytes, boardOnly, pointer } = r;
   console.log(`${asset.runId}: ${asset.files} files in ${asset.tarPath} (${asset.bytes} bytes, sha256 ${asset.sha256}, list hash ${asset.listHash})`);
   console.log(`${asset.reasonsRedacted} reasons redacted`);
   if (rebytes) console.log(`The committed entry names the same files packaged to other bytes; ${written ? "the entry now names this asset's sha256, and the change must be committed" : "a publish rewrites its sha256"}.`);
   if (asset.left.length > 0) console.log(`Left out (not on the allowlist): ${asset.left.length} files, such as ${asset.left.slice(0, 3).join(", ")}`);
   const l = asset.looked;
   console.log(`Inspected every packaged file for: ${l.secrets} generated secrets, this machine's and any platform's home folder paths, ${l.modelValues} model settings values, ${l.patterns} public and ${l.privatePatterns} private scrub patterns. No hit.`);
-  console.log(dryRun ? `Dry run: nothing uploaded. The asset unpacks to the same file list.` : `Uploaded to ${entry.asset.url}`);
+  console.log(dryRun ? `Dry run: nothing uploaded. The asset unpacks to the same file list.` : boardOnly ? "Board numbers refreshed in the index entry. The asset is unchanged, and nothing was uploaded." : `Uploaded to ${entry.asset.url}`);
   if (written) {
     console.log(`Index entry written: ${written}`);
-    console.log(`Commit it in a pull request: git add benchmark/index/runs/${asset.runId}.json`);
+    if (pointer) console.log(`The accepted pointer now records these board numbers: ${pointer}`);
+    console.log(`Commit it in a pull request: git add benchmark/index/runs/${asset.runId}.json${pointer ? " benchmark/index/accepted.json" : ""}`);
   } else console.log(JSON.stringify(entry, null, 2));
 }
 
