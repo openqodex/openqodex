@@ -325,13 +325,35 @@ describe("generations", () => {
       if (waiting === "") await sleep(5);
     }
     expect(waiting).not.toBe("");
+    // Release the hold, then collect while the publisher is still in flight.
+    // Whichever process takes the freed lock first, the assertions below
+    // hold: a collection that runs before the manifest exists must keep the
+    // fresh folder, and one that runs after the publish must keep the fresh
+    // build. A collection that loses the race waits out the publish instead
+    // of failing on a busy lock, which is what flaked under full-suite load
+    // when the publish held the lock past the 10 second wait.
     rmSync(lock);
-    expect((await store.collect()).removedGenerations).toEqual([]);
+    const releasedAt = Date.now();
+    let removed: string[] | undefined;
+    try {
+      removed = (await store.collect()).removedGenerations;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("held the graph folder's lock")) throw error;
+      const raced = await run.done;
+      expect((raced.out?.results as PublishResult[] | undefined)?.[0], raced.stderr).toMatchObject({ ok: true, id: waiting });
+      removed = (await store.collect()).removedGenerations;
+    }
+    expect(removed).toEqual([]);
     const done = await run.done;
     const result = (done.out?.results as PublishResult[] | undefined)?.[0];
     expect(result, done.stderr).toMatchObject({ ok: true, id: waiting });
     expect(store.open("current")?.manifest.id).toBe(waiting);
-  }, 60_000);
+    // The waiter finished after the hold was released, never before, and
+    // well inside a generous ceiling: it waited out the lock, it did not
+    // slip through early or stall on a busy timeout.
+    expect(done.exitedAt).toBeGreaterThanOrEqual(releasedAt);
+    expect(done.exitedAt - releasedAt).toBeLessThan(60_000);
+  }, 120_000);
 
   it("13. three publishes of identical input get three ids in order, and complete/<tree> names the newest complete build", async () => {
     const root = repo();
