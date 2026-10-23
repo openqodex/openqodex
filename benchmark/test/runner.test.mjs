@@ -4,19 +4,23 @@
 // is a scored failure, a resume refuses changed settings, the bundle must be
 // the one built from the tree the run names, and the Codex model comes from
 // Codex's own output. The run folder rules (one plan per folder, one runner
-// at a time, a crashed attempt kept) are checked on executeRun, the code
-// run.mjs runs, with the review step, which would call a model, replaced.
-import { spawnSync } from "node:child_process";
+// at a time, a crashed attempt kept, a dead holder's lock taken over by
+// exactly one of several processes racing on it, never two) are checked on
+// executeRun, the code run.mjs runs, with the review step, which would call
+// a model, replaced.
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { git } from "../lib/cases.mjs";
-import { redactRowReasons, saveSampleRow, attemptDir, codexModelFrom, executeRun, failureOf, lockRun, planJobs, provenanceProblems, resumeProblems, runManifest, sampleRecord, claudeModels, claudeRunModels, takeOverStale, treeState } from "../lib/runner.mjs";
+import { redactRowReasons, saveSampleRow, attemptDir, codexModelFrom, executeRun, failureOf, lockRun, LOCK_FILE, planJobs, provenanceProblems, resumeProblems, runManifest, sampleRecord, claudeModels, claudeRunModels, takeOverStale, treeState } from "../lib/runner.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
+
+const runnerModule = new URL("../lib/runner.mjs", import.meta.url).href;
 
 const job = { case: "c", config: "claude-graph-on", reviewer: "claude", graph: true, repeat: 2 };
 
@@ -274,14 +278,60 @@ describe("two runners share one run folder, or a restart replaces a crashed run'
     writeFileSync(lock, `${process.pid}\n`);
     expect(takeOverStale(lock, dead)).toBe(false);
     expect(readFileSync(lock, "utf8")).toBe(`${process.pid}\n`);
-    // Still the dead holder's: it is taken away, and the folder can be locked.
+    // Still the dead holder's: taken over in one step, this process's own
+    // pid replacing it directly, so the path never sits empty in between.
     writeFileSync(lock, `${dead}\n`);
     expect(takeOverStale(lock, dead)).toBe(true);
-    expect(existsSync(lock)).toBe(false);
-    const release = lockRun(out);
     expect(readFileSync(lock, "utf8")).toBe(`${process.pid}\n`);
-    release();
-    expect(readdirSync(out)).toEqual([]);
+  });
+
+  it("lets exactly one of several processes racing on a dead lock take over the run folder, never two", async () => {
+    // The same race lib/budget.mjs's ledger lock had before PR 125: a lock
+    // left by a process that has ended, read by several processes at once.
+    // The old takeOverStale moved the lock aside before checking it, so a
+    // second process could rename away a first process's fresh, live lock
+    // and (finding it not stale) put it back with a gap in between where a
+    // third process saw no lock at all and claimed the folder itself - two
+    // processes then held one run folder. This runs that race for real, six
+    // processes at once, several trials, and counts how many ever hold the
+    // lock while another of the six is still live and racing: always one.
+    // Each holder keeps it for a while, as a real run would: a holder that
+    // exited the instant it won would make its own lock stale again right
+    // away, letting a slow straggler take over next, a real second winner
+    // but not the double hold this test means to catch.
+    for (let trial = 0; trial < 6; trial++) {
+      const out = tempDir("oq-bench-run-stale-");
+      const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+      mkdirSync(out, { recursive: true });
+      writeFileSync(join(out, LOCK_FILE), `${dead}\n`);
+      const go = join(out, "go");
+      const child = () =>
+        new Promise((finished) => {
+          const code = `
+            import { existsSync, writeFileSync } from "node:fs";
+            import { lockRun } from ${JSON.stringify(runnerModule)};
+            while (!existsSync(${JSON.stringify(go)})) await new Promise((r) => setTimeout(r, 1));
+            try {
+              const release = lockRun(${JSON.stringify(out)});
+              writeFileSync(${JSON.stringify(out)} + "/claimed-" + process.pid, "");
+              const until = Date.now() + 500;
+              while (Date.now() < until) {}
+              release();
+            } catch (error) {
+              if (!/in use by another run/.test(error.message)) throw error;
+            }
+          `;
+          const p = spawn(process.execPath, ["--input-type=module", "-e", code], { stdio: ["ignore", "ignore", "pipe"] });
+          let stderr = "";
+          p.stderr.on("data", (d) => (stderr += d));
+          p.on("close", () => finished(stderr));
+        });
+      const runs = Array.from({ length: 6 }, child);
+      await new Promise((wake) => setTimeout(wake, 300));
+      writeFileSync(go, "");
+      for (const stderr of await Promise.all(runs)) expect(stderr).toBe("");
+      expect(readdirSync(out).filter((f) => f.startsWith("claimed-"))).toHaveLength(1);
+    }
   });
 });
 
