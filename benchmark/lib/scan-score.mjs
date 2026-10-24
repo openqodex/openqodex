@@ -57,7 +57,11 @@ import { AACR_LINE_K, LOCATION_LABEL, NEAR_LINES, lineMatches, names, normPath, 
 
 // Scan rules version 2 (W8-2): Greptile suite scoring through its board judge, denominator fixed at 50.
 // Merged PR 229: scanner outside advisories are information; legacy untagged findings still count.
-export const SCAN_RULES_VERSION = 2;
+// Scan rules version 3: lib/score.mjs's lineMatches, which scanRuleSources()
+// reaches, now reads a finding with no line number as the whole file the
+// same way whether it is null or undefined (score.mjs rules version 12,
+// issue 153), moving this file's own hash even though nothing here changed.
+export const SCAN_RULES_VERSION = 3;
 // The one configuration of a scanner-only run.
 export const SCAN_CONFIG = "scan";
 // Finders a spec names that are the reviewer, never a candidate.
