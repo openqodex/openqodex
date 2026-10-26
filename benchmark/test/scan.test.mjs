@@ -115,6 +115,8 @@ describe("the scan rules are versioned", () => {
     // W8-2: Greptile suite scoring through its board judge, denominator fixed at 50.
     // PR 229: scanner outside advisories are information; legacy untagged findings still count.
     2: "3260fdcec7129a5bcdc427285e210475fbb7c83ee16de25e2c9e7888bfad5d86",
+    // lineMatches now reads a finding with no line number as the whole file either way (issue 153).
+    3: "e0f94164cc2f6a717fcf6f4e9d2f599bf994f083c178b1cd593e45c9903f6e07",
   };
 
   it("pins the hash of the scan rules block, its matching code included, to its version", () => {

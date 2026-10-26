@@ -594,7 +594,16 @@ export function regressions(oldSamples, newSamples) {
 //     each marked tier "observation", so every score, board file and judge
 //     export sees it like a finding. A report without the field, or with an
 //     empty list, scores exactly as under version 9.
-export const RULES_VERSION = 11;
+// Rules version 12 reads a finding with no line number the same way
+// whichever of null or undefined it is written as. Failure list, written
+// before the code:
+// 45. A finding's missing line number is read as line 0 when it is null, so
+//     it matches only a truth item starting at line 1, but as any line when
+//     it is undefined, so it matches any truth item in its file: lineMatches
+//     (AACR's line rule) now reads either as "no line", matching any truth
+//     location in the finding's file, the same way AACR-Bench's own
+//     evaluator reads a comment with no line.
+export const RULES_VERSION = 12;
 export const AACR_LINE_K = 1;
 // The order classify() tries the rules in; the first that holds decides.
 export const OUTCOME_ORDER = ["test-gap", "accepted", "hit", "wrong-kind", "near", "false"];
@@ -712,11 +721,14 @@ export function asksOf(f) {
 
 // AACR's line rule (L1), as a location diagnostic: a finding matches a truth
 // item on the same side of the same file when their lines overlap or lie at
-// most `k` lines apart. Greedy in truth order, then finding order; each takes
-// at most one of the other. knownNoise counts the findings that match only
-// rejected truth (valid: false).
+// most `k` lines apart. A finding with no line number (`null` or `undefined`)
+// reads as the whole file, as AACR-Bench's own evaluator does, so it matches
+// any location in that file. Greedy in truth order, then finding order; each
+// takes at most one of the other. knownNoise counts the findings that match
+// only rejected truth (valid: false).
 export function lineMatches(findings, truth, k = AACR_LINE_K) {
-  const near = (f, t) => (f.side ?? "right") === (t.side ?? "right") && locations(t).some((l) => l.file === f.file && gap(f.line, Math.max(f.end ?? f.line, f.line), l.lines) <= k);
+  const hasLine = (f) => f.line !== null && f.line !== undefined;
+  const near = (f, t) => (f.side ?? "right") === (t.side ?? "right") && locations(t).some((l) => l.file === f.file && (!hasLine(f) || gap(f.line, Math.max(f.end ?? f.line, f.line), l.lines) <= k));
   const positive = truth.filter((t) => t.valid !== false);
   const rejected = truth.filter((t) => t.valid === false);
   const used = new Set();
