@@ -738,12 +738,23 @@ export function homeGuard(home: string, strict = false): Guard {
 // The `wider` of a write that holds review content, a receipt or config:
 // a folder other users could read is closed to `folderMode` through the
 // guard, and each file or folder is named once in this process, on
-// stderr, by its path from `root`.
+// stderr, by its path from `root`. `path` always comes from a `Walk`, so
+// its links are already followed; `root` is resolved the same way here, or
+// a repository reached through a linked folder (/tmp on macOS, linked to
+// /private/tmp) would print a notice path climbing out with `../` instead
+// of one relative to the repository.
 const reported = new Set<string>();
 export function closeWider(guard: Guard, root: string, folderMode = 0o700): Wider {
+  const resolvedRoot = (() => {
+    try {
+      return walk(root, true, () => undefined, true).dir;
+    } catch {
+      return root;
+    }
+  })();
   return (path, mode, kind) => {
     const octal = (m: number): string => `0${m.toString(8)}`;
-    const shown = relative(root, path) || path;
+    const shown = relative(resolvedRoot, path) || path;
     if (kind === "folder") {
       try {
         if (guard.narrowFolder(path, folderMode) === null) return;
