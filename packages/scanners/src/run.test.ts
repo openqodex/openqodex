@@ -87,6 +87,10 @@
 //  39. A custom adapter written for wants() alone, with no paths(), makes
 //      runScanners throw or skips the scanner, now that the scan record
 //      asks each custom scanner for its file list.
+//  40. A scanner that quotes an absolute path inside its message text (not
+//      just filePath), such as rubocop's Lint/DuplicateMethods naming both
+//      definitions by the path it was given, carries the developer's
+//      checkout root into a saved finding (toRunDirRelative).
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -519,6 +523,27 @@ describe("toRunDirRelative", () => {
     fs.symlinkSync(real, link);
     const printed = path.join(fs.realpathSync(real), "app", "main.py");
     expect(toRunDirRelative([ruffFinding(printed)], link)[0].filePath).toBe("app/main.py");
+  });
+
+  it("strips the run dir out of the message text too, not only filePath (40)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openqodex-rebase-msg-"));
+    roots.push(dir);
+    const defA = path.join(dir, "app", "models", "optimized_image.rb:145");
+    const defB = path.join(dir, "app", "models", "optimized_image.rb:149");
+    const rubocopFinding = finding({
+      source: "rubocop",
+      ruleId: "Lint/DuplicateMethods",
+      filePath: "app/models/optimized_image.rb",
+      lineStart: 145,
+      lineEnd: 145,
+      severity: "medium",
+      message: `Lint/DuplicateMethods: Method \`OptimizedImage.downsize\` is defined at both ${defA} and ${defB}.`,
+    });
+    const out = toRunDirRelative([rubocopFinding], dir)[0].message;
+    expect(out).not.toContain(dir);
+    expect(out).toBe(
+      "Lint/DuplicateMethods: Method `OptimizedImage.downsize` is defined at both app/models/optimized_image.rb:145 and app/models/optimized_image.rb:149.",
+    );
   });
 });
 

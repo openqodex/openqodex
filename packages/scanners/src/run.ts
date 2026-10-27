@@ -783,8 +783,31 @@ export function toRunDirRelative(
   };
   return findings.map((f) => {
     const filePath = rebaseFindingPath(f.filePath, runDir, realRunDirOnce);
-    return filePath === f.filePath ? f : { ...f, filePath };
+    const message = redactRunDirFromMessage(f.message, runDir, realRunDirOnce);
+    return filePath === f.filePath && message === f.message
+      ? f
+      : { ...f, filePath, message };
   });
+}
+
+// A scanner can quote an absolute path inside its message text, not only in
+// filePath (rubocop's Lint/DuplicateMethods names both definitions by the
+// path it was given). Both the given run dir and its resolved symlink are
+// stripped the same way rebaseFindingPath strips filePath, so the developer's
+// checkout root never reaches a saved finding through its message either.
+function redactRunDirFromMessage(
+  message: string,
+  runDir: string,
+  realRunDirOnce: () => string,
+): string {
+  if (!message) return message;
+  let out = message;
+  for (const root of new Set([runDir, realRunDirOnce()])) {
+    if (!root || !path.isAbsolute(root)) continue;
+    const withSep = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+    out = out.split(withSep).join("");
+  }
+  return out;
 }
 
 function rebaseFindingPath(
