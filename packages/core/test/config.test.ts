@@ -29,7 +29,8 @@
 // 19. A glob longer than the matcher takes (MAX_GLOB) is accepted and then
 //     matches nothing: an exclude stops excluding, a disabled rule comes
 //     back on, and a custom scanner's paths select no file, so the scanner
-//     never runs. The error must name the file, the key and the limit.
+//     never runs. The error must name the file, the key, the limit and the
+//     pattern itself, so a long glob can be found in the config and fixed.
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -372,9 +373,9 @@ scanners:
     );
   });
 
-  it("refuses a glob longer than the matcher takes, naming the file, the key and the limit", () => {
+  it("refuses a glob longer than the matcher takes, naming the file, the key, the limit and the pattern", () => {
     const long = JSON.stringify(`${"x".repeat(MAX_GLOB)}*`);
-    const limit = `longer than ${MAX_GLOB} characters, the most a glob can have; shorten it`;
+    const limit = `longer than ${MAX_GLOB} characters, the most a glob can have: ${long}; shorten it`;
     expect(error(`review:\n  paths:\n    exclude: ["vendor/**", ${long}]\n`)).toBe(`.openqodex/config.yaml: review.paths.exclude[1]: ${limit}`);
     expect(error(`review:\n  disabled_rules: [${long}]\n`)).toBe(`.openqodex/config.yaml: review.disabled_rules[0]: ${limit}`);
     expect(error(`scanners:\n  custom:\n    - { source: https://github.com/a/b, run: t, paths: ["**/*.tf", ${long}] }\n`)).toBe(
