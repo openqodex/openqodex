@@ -59,6 +59,7 @@ export function instructionSection(): string {
 // without rendering any agent files or needing the templates beside them.
 export function previousInstructionSections(): string[] {
   return [
+    template("previous", "instructions-0.2.0.md").trimEnd(),
     template("previous", "instructions-0.5.0.md").trimEnd(),
     template("previous", "instructions-0.8.2.md").trimEnd(),
   ];
