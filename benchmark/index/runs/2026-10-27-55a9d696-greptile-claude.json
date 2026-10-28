@@ -1,0 +1,1571 @@
+{
+  "version": 1,
+  "runId": "2026-10-27-55a9d696-greptile-claude",
+  "date": "2026-10-27",
+  "startedAt": "2026-10-27T21:46:27.468Z",
+  "draft": false,
+  "suite": "greptile",
+  "split": "dev",
+  "splitHash": "8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64",
+  "mode": "review",
+  "path": "laptop",
+  "build": {
+    "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+    "short": "95fd51d",
+    "cliVersion": "0.15.0",
+    "dirty": false,
+    "bundleHash": "7b1034f473ad6ea7117bc780e653a8ee698445e0266adab0aa990187296ac8c5"
+  },
+  "reviewers": {
+    "claude": {
+      "version": "2.1.312",
+      "model": "claude-opus-5-5"
+    }
+  },
+  "configs": [
+    "claude-graph-on"
+  ],
+  "repeat": 1,
+  "web": "off",
+  "caseSetHash": "1f3781c98acd002b86d9c169eb23e8b137a15c4cc12a231cf118cd01f724695d",
+  "caseIds": [
+    "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f",
+    "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71",
+    "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee",
+    "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8",
+    "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03",
+    "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e",
+    "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6",
+    "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c",
+    "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0",
+    "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b",
+    "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1",
+    "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b",
+    "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd",
+    "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208",
+    "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6",
+    "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f",
+    "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8",
+    "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12",
+    "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f",
+    "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a",
+    "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b",
+    "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273",
+    "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd",
+    "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c",
+    "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d",
+    "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0",
+    "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664",
+    "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c",
+    "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca",
+    "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279"
+  ],
+  "rulesVersion": 12,
+  "rulesHash": "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
+  "decisionsHash": null,
+  "scannersComplete": true,
+  "external": null,
+  "ended": {
+    "how": "finished",
+    "why": null
+  },
+  "release": null,
+  "scores": {
+    "claude-graph-on": {
+      "population": {
+        "planned": 49,
+        "complete": 48,
+        "incomplete": 1,
+        "failed": 0,
+        "unstarted": 0,
+        "retries": 0,
+        "retryCostUsd": 0
+      },
+      "issueRecall": {
+        "all": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        }
+      },
+      "precision": {
+        "lower": {
+          "hit": 0,
+          "of": 292,
+          "ci": null
+        },
+        "upper": {
+          "hit": 292,
+          "of": 292,
+          "ci": null
+        }
+      },
+      "uniqueIssuePrecision": {
+        "lower": {
+          "hit": 0,
+          "of": 292,
+          "ci": null
+        },
+        "upper": {
+          "hit": 292,
+          "of": 292,
+          "ci": null
+        }
+      },
+      "redundancy": {
+        "hit": 0,
+        "of": 292
+      },
+      "f1": 0,
+      "controls": {
+        "hit": 0,
+        "of": 0
+      },
+      "cleanFindingsPerCase": {
+        "findings": 0,
+        "cases": 0
+      },
+      "location": {
+        "precision": {
+          "hit": 0,
+          "of": 292
+        },
+        "recall": {
+          "hit": 0,
+          "of": 0
+        },
+        "knownNoise": 0
+      },
+      "plantedLegacy": null,
+      "severity": {
+        "exact": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "withinOne": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "oneOff": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "off": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "over": 0,
+        "under": 0,
+        "unknown": 0
+      },
+      "finder": {
+        "match": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "byExpected": {},
+        "byFinder": {
+          "scanner": 0,
+          "reviewer": 0
+        },
+        "scannerExpectedReviewerFound": 0,
+        "unjudged": 0,
+        "droppedCandidates": 0
+      },
+      "wallMsMean": 136162.91836734695,
+      "costUsdMean": 2.5270632979591845,
+      "costUsdTotal": 123.82610160000003
+    }
+  },
+  "perCase": {
+    "claude-graph-on": {
+      "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 10
+          },
+          "upper": {
+            "hit": 10,
+            "of": 10
+          }
+        },
+        "findings": 10,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 8
+          },
+          "upper": {
+            "hit": 8,
+            "of": 8
+          }
+        },
+        "findings": 8,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 15
+          },
+          "upper": {
+            "hit": 15,
+            "of": 15
+          }
+        },
+        "findings": 15,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 8
+          },
+          "upper": {
+            "hit": 8,
+            "of": 8
+          }
+        },
+        "findings": 8,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 19
+          },
+          "upper": {
+            "hit": 19,
+            "of": 19
+          }
+        },
+        "findings": 19,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 11
+          },
+          "upper": {
+            "hit": 11,
+            "of": 11
+          }
+        },
+        "findings": 11,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 13
+          },
+          "upper": {
+            "hit": 13,
+            "of": 13
+          }
+        },
+        "findings": 13,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 9
+          },
+          "upper": {
+            "hit": 9,
+            "of": 9
+          }
+        },
+        "findings": 9,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 12
+          },
+          "upper": {
+            "hit": 12,
+            "of": 12
+          }
+        },
+        "findings": 12,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 11
+          },
+          "upper": {
+            "hit": 11,
+            "of": 11
+          }
+        },
+        "findings": 11,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 17
+          },
+          "upper": {
+            "hit": 17,
+            "of": 17
+          }
+        },
+        "findings": 17,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 8
+          },
+          "upper": {
+            "hit": 8,
+            "of": 8
+          }
+        },
+        "findings": 8,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 14
+          },
+          "upper": {
+            "hit": 14,
+            "of": 14
+          }
+        },
+        "findings": 14,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      }
+    }
+  },
+  "perBug": {
+    "claude-graph-on": {
+      "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279": {}
+    }
+  },
+  "intervals": {
+    "method": "Percentile bootstrap over clusters drawn with replacement; each metric is a ratio of sums recomputed on every resample, and a cluster keeps all its truth items, findings and repeats together. A cluster with nothing to count for a metric is left out of it. The interval describes this run and decides nothing: the trend's alarm and the acceptance rule compare two runs with a paired sign-flip test. With fewer than minClusters clusters it is null, listed under tooFewClusters.",
+    "cluster": "repoGroup",
+    "groups": {
+      "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279": "getsentry/sentry"
+    },
+    "resamples": 10000,
+    "level": 0.95,
+    "minClusters": 8,
+    "seed": "mulberry32 seeded with the first 32 bits of sha256 over the run id, the configuration and the metric name, joined by NUL",
+    "runId": "2026-10-27-55a9d696-greptile-claude",
+    "tooFewClusters": {
+      "claude-graph-on": {
+        "issueRecall.all": 0,
+        "issueRecall.criticalMajor": 0,
+        "precision.lower": 5,
+        "precision.upper": 5
+      }
+    }
+  },
+  "asset": {
+    "url": "https://github.com/openqodex/openqodex/releases/download/benchmark-data/2026-10-27-55a9d696-greptile-claude.tar.gz",
+    "sha256": "bbb6d2b317b9d98b5bbe97ddcbb79a542d2528e9b7350524c6af89a3b35c5793",
+    "bytes": 7316674,
+    "files": 597,
+    "listHash": "26fd2a155c5e8b9320dab3482480c5c39219f9393ea774581ef9dba1a5f9ee25"
+  },
+  "accepted": false,
+  "acceptedAt": null,
+  "acceptedBy": null,
+  "legacy": false,
+  "privateListHash": "a9f09563038bb34c41e7c19e1f98b299d6294efef21f3fdf282cc26515e375f1"
+}
