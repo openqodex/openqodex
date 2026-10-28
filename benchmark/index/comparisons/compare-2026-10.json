@@ -486,6 +486,14 @@
       "casesNotRun": [
         "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
       ]
+    },
+    {
+      "runId": "2026-10-28-55a9d696-martian-control",
+      "sha256": "b167e234a3257d45ffd4bfc9dc0bbbee360ef802324cf9e0a71d62807a862bb7",
+      "reviewer": "control",
+      "casesNotRun": [
+        "martian/ai-code-review-evaluation__sentry-greptile-3@e43c2b26"
+      ]
     }
   ],
   "acceptance": {
