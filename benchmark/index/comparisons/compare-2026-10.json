@@ -470,10 +470,27 @@
     }
   ],
   "capUsd": 10,
-  "runs": [],
+  "runs": [
+    {
+      "runId": "2026-10-27-55a9d696-greptile-claude",
+      "sha256": "5454e099bc12dde5f6f9f20bfbd2e2cac02f1e9c0330f0c96c896c68e66a8cbf",
+      "reviewer": "cli-claude",
+      "casesNotRun": [
+        "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
+      ]
+    },
+    {
+      "runId": "2026-10-27-2221ffc6-greptile-control",
+      "sha256": "c5fe189f55b0d224b0e8031010340195e4131326e12a786cccae7f9768e92b00",
+      "reviewer": "control",
+      "casesNotRun": [
+        "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
+      ]
+    }
+  ],
   "acceptance": {
-    "person": "Sid",
-    "date": "2026-10-27",
-    "hash": "83ea0ff899d1ced327f853acc4b84f9dd1c47e866de83e20cbabcc644f94aaa0"
+    "person": "",
+    "date": "",
+    "hash": ""
   }
 }
