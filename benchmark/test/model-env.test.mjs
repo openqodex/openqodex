@@ -43,6 +43,21 @@ const refusal = (fn) => {
 const boards = () => JSON.parse(readFileSync(new URL("../outside/boards.json", import.meta.url), "utf8"));
 
 describe("the model settings loader", () => {
+  it("reads the MiniMax endpoint with bearer authentication", () => {
+    const path = settingsFile(`MINIMAX_API_KEY="${KEY}"\nMINIMAX_BASE_URL=https://api.minimax.io/v1\n`);
+    const settings = loadModelEnv({ env: { OPENQODEX_BENCH_MODEL_ENV: path } });
+    expect(settings.baseUrl).toBe("https://api.minimax.io/v1");
+    expect(settings.apiKey).toBe(KEY);
+    expect(settings.authHeader).toBe("bearer");
+  });
+
+  it("refuses an incomplete MiniMax endpoint configuration", () => {
+    const path = settingsFile(`MINIMAX_API_KEY=${KEY}\n`);
+    const message = refusal(() => loadModelEnv({ env: { OPENQODEX_BENCH_MODEL_ENV: path } }));
+    expect(message).toMatch(/^refused: .*has no MINIMAX_BASE_URL/);
+    expect(message).not.toContain(KEY);
+  });
+
   it("reads the base URL and key from the file OPENQODEX_BENCH_MODEL_ENV names, with the api-key header style", () => {
     const path = settingsFile(`# the benchmark's Azure resource\nexport AZURE_OPENAI_KEY="${KEY}"\nAZURE_OPENAI_BASE_URL=${BASE} # v1\n`);
     const settings = loadModelEnv({ env: { OPENQODEX_BENCH_MODEL_ENV: path } });
