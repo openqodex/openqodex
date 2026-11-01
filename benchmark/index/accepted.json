@@ -1,9 +1,10 @@
 {
   "version": 1,
-  "runId": "2026-10-27-1dd1f708-aacr-claude-w9",
-  "commit": "1dd1f708d48b421af95727ecd1338e8edb418487",
-  "scoreHash": "d32f54e5bdd5390e15e9dafd5e0d3cd69e24120701332ae58840f480edc3c9fa",
-  "acceptedAt": "2026-10-27T17:15:32.737Z",
+  "runId": "2026-10-28-55a9d696-martian-control",
+  "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+  "scoreHash": "72ce6abd366aa2808f56f686723057f1c2e30141c0797eaf029fac1baba216f3",
+  "boardHash": "00660e7fa6efbcac794b7b64cf848e3a0df0123ca47dd6daebe62bc1ac210260",
+  "acceptedAt": "2026-11-01T07:08:45.383Z",
   "acceptedBy": "Sid",
   "groups": {
     "aacr|dev|edf0f4863eb81a3004d9319cb4fa8cea7085466c5774b6ad51567aff642585f4|review|laptop|claude|claude-opus-5-5|claude-graph-on|11|dev-laptop": {
@@ -47,6 +48,30 @@
       "commit": "eee3d152b64b96787aa26a06997c0d72164c4c44",
       "scoreHash": "8da4022328f74e6ee9739aa7d33c17814b10df62e74deef56fd16e7cdceb1895",
       "acceptedAt": "2026-10-12T01:37:36.097Z",
+      "acceptedBy": "Sid"
+    },
+    "greptile|dev|8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64|review|laptop|claude|claude-opus-5-5|claude-graph-on|12": {
+      "runId": "2026-10-27-55a9d696-greptile-claude",
+      "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+      "scoreHash": "71fb92265174321c39a1d073b98dce03ff6acf244400f3bf051428db6163a018",
+      "boardHash": "b4efa8c5a3ff7d759b3fd94e816608566d0488cbbc4c9bc6f0f640de56a773f8",
+      "acceptedAt": "2026-11-01T07:08:41.610Z",
+      "acceptedBy": "Sid"
+    },
+    "greptile|dev|8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64|review|laptop|control|claude-opus-5-5|control-graph-off|12": {
+      "runId": "2026-10-27-2221ffc6-greptile-control",
+      "commit": "2221ffc6d61c16bedeb29df9d488cb6a51699385",
+      "scoreHash": "0ffa7477e0596f61c48e746baf218f6ae366019a403e8634ad9969769825015c",
+      "boardHash": "8b8ca47b1181ae2a0c91330592323ed8ad62a666990c95c8060abe9eba7519a6",
+      "acceptedAt": "2026-11-01T07:08:45.102Z",
+      "acceptedBy": "Sid"
+    },
+    "martian|test|3e75f963b36f268fc0c412edb24283d3f4a79aee2b4988397944fb524046bb5f|review|laptop|control|claude-opus-5-5|control-graph-off|12": {
+      "runId": "2026-10-28-55a9d696-martian-control",
+      "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+      "scoreHash": "72ce6abd366aa2808f56f686723057f1c2e30141c0797eaf029fac1baba216f3",
+      "boardHash": "00660e7fa6efbcac794b7b64cf848e3a0df0123ca47dd6daebe62bc1ac210260",
+      "acceptedAt": "2026-11-01T07:08:45.383Z",
       "acceptedBy": "Sid"
     },
     "planted|dev|none|review|laptop|claude|claude-opus-5-5|claude-graph-on|11": {
