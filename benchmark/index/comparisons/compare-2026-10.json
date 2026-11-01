@@ -473,7 +473,7 @@
   "runs": [
     {
       "runId": "2026-10-27-55a9d696-greptile-claude",
-      "sha256": "5454e099bc12dde5f6f9f20bfbd2e2cac02f1e9c0330f0c96c896c68e66a8cbf",
+      "sha256": "8c7266fb93b0d563fd6ae42197c2dd40c07846c3ac0241bcd34ef8681d3b04e2",
       "reviewer": "cli-claude",
       "casesNotRun": [
         "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
@@ -481,7 +481,7 @@
     },
     {
       "runId": "2026-10-27-2221ffc6-greptile-control",
-      "sha256": "c5fe189f55b0d224b0e8031010340195e4131326e12a786cccae7f9768e92b00",
+      "sha256": "2924166293f0641c770d3e66e2dff04723d2a7473c40d1ab89191965fd6ff2df",
       "reviewer": "control",
       "casesNotRun": [
         "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
@@ -489,7 +489,7 @@
     },
     {
       "runId": "2026-10-28-55a9d696-martian-control",
-      "sha256": "b167e234a3257d45ffd4bfc9dc0bbbee360ef802324cf9e0a71d62807a862bb7",
+      "sha256": "438ef3af16170297e577868db9e203870e7bc0fcde884f3e57439b8546c51737",
       "reviewer": "control",
       "casesNotRun": [
         "martian/ai-code-review-evaluation__sentry-greptile-3@e43c2b26"
@@ -497,8 +497,8 @@
     }
   ],
   "acceptance": {
-    "person": "Sid",
-    "date": "2026-11-01",
-    "hash": "47f1912ff7d67c562ab60d41ac56bd79aa44e2b12d212e7cb8c1d9b12f6441e1"
+    "person": "",
+    "date": "",
+    "hash": ""
   }
 }
