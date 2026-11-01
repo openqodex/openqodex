@@ -382,10 +382,10 @@
     }
   },
   "build": {
-    "commit": "7578af42903ca9e40022f2a74acecb008e52b1e1",
-    "tree": "e924127145426f07de772634b7d2efc717a430f0",
-    "bundleHash": "9df434488643323e61fecd63392ec4ac29860f3de12b853c6620312f19696c56",
-    "version": "0.14.0"
+    "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+    "tree": "bcdf821fe25183f9be8f2d41c5717d3283516df2",
+    "bundleHash": "7b1034f473ad6ea7117bc780e653a8ee698445e0266adab0aa990187296ac8c5",
+    "version": "0.15.0"
   },
   "reviewers": {
     "library": {
@@ -401,7 +401,7 @@
       "path": "laptop",
       "reviewer": "claude",
       "model": "claude-opus-5-5",
-      "version": "2.1.310",
+      "version": "2.1.312",
       "graph": "on",
       "web": "off",
       "effort": null,
@@ -425,18 +425,18 @@
       "web": "off",
       "effort": null,
       "maxOutputTokens": null,
-      "version": "2.1.310"
+      "version": "2.1.312"
     }
   },
   "calibrations": [
     {
-      "file": "index/calibration/greptile-2026-10-23.json",
-      "sha256": "963b6a979aa75752433cdeae1d5ba59ea36ca4f8170b3a856eff9048fd9be477",
+      "file": "index/calibration/greptile-2026-10-27.json",
+      "sha256": "e94459eb7f247d623ed4c2756f5266137c965c2f0cfb88134be1025cef5c4a27",
       "build": {
-        "commit": "7578af42903ca9e40022f2a74acecb008e52b1e1",
-        "tree": "e924127145426f07de772634b7d2efc717a430f0",
-        "bundleHash": "9df434488643323e61fecd63392ec4ac29860f3de12b853c6620312f19696c56",
-        "version": "0.14.0"
+        "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+        "tree": "bcdf821fe25183f9be8f2d41c5717d3283516df2",
+        "bundleHash": "7b1034f473ad6ea7117bc780e653a8ee698445e0266adab0aa990187296ac8c5",
+        "version": "0.15.0"
       },
       "agreement": {
         "caught": 0.8536585365853658,
@@ -444,17 +444,17 @@
       }
     },
     {
-      "file": "index/calibration/martian-2026-10-23.json",
-      "sha256": "ecc002fa2feacb88f6ea2c4279185cd67f1524ac66d133ef1e3f26e3c1203404",
+      "file": "index/calibration/martian-2026-10-27.json",
+      "sha256": "ed36514f897cddcb969fcdeabf687c5fc83667baafab44421051c70fe2266358",
       "build": {
-        "commit": "7578af42903ca9e40022f2a74acecb008e52b1e1",
-        "tree": "e924127145426f07de772634b7d2efc717a430f0",
-        "bundleHash": "9df434488643323e61fecd63392ec4ac29860f3de12b853c6620312f19696c56",
-        "version": "0.14.0"
+        "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+        "tree": "bcdf821fe25183f9be8f2d41c5717d3283516df2",
+        "bundleHash": "7b1034f473ad6ea7117bc780e653a8ee698445e0266adab0aa990187296ac8c5",
+        "version": "0.15.0"
       },
       "agreement": {
-        "positive": 0.9074074074074074,
-        "negative": 0.9538461538461539
+        "positive": 0.9259259259259259,
+        "negative": 0.9692307692307692
       }
     }
   ],
@@ -469,47 +469,27 @@
       }
     }
   ],
-  "capUsd": 135,
+  "capUsd": 10,
   "runs": [
     {
-      "runId": "2026-10-24-25e37262-greptile-claude",
-      "sha256": "8cbc4f5e9c581eab3fae21170d2a2be2154e20f99e1d023c8d01acec8450269c",
+      "runId": "2026-10-27-55a9d696-greptile-claude",
+      "sha256": "5454e099bc12dde5f6f9f20bfbd2e2cac02f1e9c0330f0c96c896c68e66a8cbf",
       "reviewer": "cli-claude",
       "casesNotRun": [
         "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
       ]
     },
     {
-      "runId": "2026-10-24-25e37262-greptile-control-49",
-      "sha256": "5ed4d807cb4400c5f5a96fdaac85cf92162bc4e9eee755cec45d8153333877e5",
+      "runId": "2026-10-27-2221ffc6-greptile-control",
+      "sha256": "c5fe189f55b0d224b0e8031010340195e4131326e12a786cccae7f9768e92b00",
       "reviewer": "control",
       "casesNotRun": [
         "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
       ]
     },
     {
-      "runId": "2026-10-24-25e37262-greptile-library",
-      "sha256": "5b7092819e36cc4f7a387fdb04e4dde79c4f80469855b8b0806067059ee38ea7",
-      "reviewer": "library",
-      "casesNotRun": []
-    },
-    {
-      "runId": "2026-10-24-25e37262-martian-claude",
-      "sha256": "c0c1fdccd8f24414369d148cba60097f201e4fea7c22f7c5220090511dfe1faf",
-      "reviewer": "cli-claude",
-      "casesNotRun": [
-        "martian/ai-code-review-evaluation__sentry-greptile-3@e43c2b26"
-      ]
-    },
-    {
-      "runId": "2026-10-24-25e37262-martian-library",
-      "sha256": "0bd66b92ad71fbfc543a031c97e2b1990e151071adac1f060d638011f3ec6e94",
-      "reviewer": "library",
-      "casesNotRun": []
-    },
-    {
-      "runId": "2026-10-24-25e37262-martian-control-49",
-      "sha256": "62fd99b44326dd8b63af2144b3667fcb0da7ae1c6891b461644d65e5541f4dc9",
+      "runId": "2026-10-28-55a9d696-martian-control",
+      "sha256": "b167e234a3257d45ffd4bfc9dc0bbbee360ef802324cf9e0a71d62807a862bb7",
       "reviewer": "control",
       "casesNotRun": [
         "martian/ai-code-review-evaluation__sentry-greptile-3@e43c2b26"
@@ -517,8 +497,8 @@
     }
   ],
   "acceptance": {
-    "person": "",
-    "date": "",
-    "hash": ""
+    "person": "Sid",
+    "date": "2026-11-01",
+    "hash": "47f1912ff7d67c562ab60d41ac56bd79aa44e2b12d212e7cb8c1d9b12f6441e1"
   }
 }
