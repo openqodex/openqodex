@@ -15,6 +15,7 @@ import type { FileHandle } from "node:fs/promises";
 import { constants, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { endInput } from "./child-input.js";
 import { createCoverageParser, unquoteDiffPath } from "./diff.js";
 import { matchesGlob } from "./glob.js";
 import { STATE_DIR } from "./report-files.js";
@@ -89,7 +90,7 @@ function git(cwd: string, args: string[], opts: GitOptions = {}): Promise<GitRes
     child.on("close", (code) =>
       done({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") }),
     );
-    if (opts.input !== undefined) child.stdin?.end(opts.input);
+    if (opts.input !== undefined) endInput(child.stdin, opts.input);
   });
 }
 
@@ -682,7 +683,7 @@ function batchLineCounts(repoRoot: string, specs: string[], env: NodeJS.ProcessE
       if (code !== 0 || counts.length !== specs.length) fail(failure(["cat-file"], code ?? 1, Buffer.concat(err).toString("utf8")));
       else done(counts);
     });
-    child.stdin.end(`${specs.join("\n")}\n`);
+    endInput(child.stdin, `${specs.join("\n")}\n`);
   });
 }
 
