@@ -12,6 +12,7 @@ coverage/
 
 # Private charter and local Claude settings
 CLAUDE.md
+AGENTS.md
 WORKFLOW.md
 .claude/
 
