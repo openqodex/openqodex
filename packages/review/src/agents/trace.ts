@@ -7,11 +7,13 @@
 // permission rules are the boundary; this check is the alarm that fails the
 // run when the trace shows the boundary was not where it should be. One
 // place outside is the agent's own: the output it saved for this session
-// (OwnFiles), which holds no repository file.
-import { existsSync, lstatSync, realpathSync } from "node:fs";
+// (OwnFiles), which holds no repository file. A refused attempt on the
+// snapshot's own checkout folder is kept as a warning (checkoutParent).
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { TraceEntry } from "@openqodex/core";
+import { CHECKOUT_MARKER, checkoutsDir } from "../checkouts.js";
 
 // What a driver saw for one tool call: its name, its input as the agent sent
 // it, whether it succeeded, and for a read what was delivered.
@@ -325,6 +327,29 @@ function savedOutput(own: OwnFiles | null, snapshot: string, raw: string): boole
   });
 }
 
+// The folder around the snapshot when it is one of our checkouts,
+// <home>/checkouts/<one folder>/tree, and holds nothing but the tree and the
+// marker file; otherwise null.
+function checkoutParent(snapshot: string): string | null {
+  const parent = dirname(snapshot);
+  if (basename(snapshot) !== "tree" || realDeep(dirname(parent)) !== realDeep(checkoutsDir())) return null;
+  try {
+    const names = readdirSync(parent).sort();
+    return names.length === 2 && names[0] === CHECKOUT_MARKER && names[1] === "tree" && lstatSync(join(parent, CHECKOUT_MARKER)).isFile() ? parent : null;
+  } catch {
+    return null;
+  }
+}
+
+// A path in the snapshot's checkout folder, in every reading of it.
+function inCheckoutParent(parent: string | null, snapshot: string, raw: string, fold: boolean): boolean {
+  if (parent === null || !named(snapshot, expanded(raw))) return false;
+  return pathReadings(raw).every((r) => {
+    const real = place(snapshot, r);
+    return real !== null && within(parent, real, fold);
+  });
+}
+
 // `own`: where the agent saves its own output for this session, or null.
 export function classify(snapshotDir: string, call: ToolCall, own: OwnFiles | null = null): TraceEntry {
   let snapshot = snapshotDir;
@@ -335,6 +360,8 @@ export function classify(snapshotDir: string, call: ToolCall, own: OwnFiles | nu
   }
   const fold = foldsCase(snapshot);
   const inside = (path: string | null) => path !== null && within(snapshot, path, fold);
+  // Only a refused attempt qualifies: a call that succeeded is never excused.
+  const parent = call.ok ? null : checkoutParent(snapshot);
   const range: [number, number] | null = call.read && call.read.lines > 0 ? [call.read.start, call.read.start + call.read.lines - 1] : null;
   const input = call.input;
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
@@ -346,6 +373,8 @@ export function classify(snapshotDir: string, call: ToolCall, own: OwnFiles | nu
   const roots: string[] = [];
   // A pattern rooted outside only in this session's saved output.
   let ownPattern: string | null = null;
+  // A refused pattern rooted outside only in the checkout folder.
+  let parentPattern: string | null = null;
   for (const k of PATH_FIELDS) {
     if (fields[k] === undefined || fields[k] === null) continue;
     if (typeof fields[k] !== "string") return { tool: call.tool, path: `(a ${k} that is not text)`, inside: false, range: null, ok: true };
@@ -363,9 +392,10 @@ export function classify(snapshotDir: string, call: ToolCall, own: OwnFiles | nu
     }
     // Named by the pattern itself in the trace, so the record says what was asked.
     const out = found.flatMap((root) => rootReadings(root)).filter((r) => !inside(place(snapshot, r)));
-    if (out.length > 0 && !out.every((r) => savedOutput(own, snapshot, r))) return { tool: call.tool, path: fields[k] as string, inside: false, range: null, ok: call.ok };
-    if (out.length > 0) ownPattern ??= fields[k] as string;
-    else roots.push(...found);
+    if (out.length === 0) roots.push(...found);
+    else if (out.every((r) => savedOutput(own, snapshot, r))) ownPattern ??= fields[k] as string;
+    else if (out.every((r) => inCheckoutParent(parent, snapshot, r, fold))) parentPattern ??= fields[k] as string;
+    else return { tool: call.tool, path: fields[k] as string, inside: false, range: null, ok: call.ok };
   }
   if (call.read) paths.push(call.read.path);
   if (call.tool === "Read" && typeof fields.file_path !== "string") {
@@ -373,10 +403,14 @@ export function classify(snapshotDir: string, call: ToolCall, own: OwnFiles | nu
   }
   const outside = paths.filter((raw) => pathReadings(raw).some((r) => !inside(place(snapshot, r))) || !named(snapshot, expanded(raw)));
   if (outside.length > 0) {
-    const saved = outside.every((raw) => savedOutput(own, snapshot, raw));
-    return { tool: call.tool, path: outside[0]!, inside: false, range, ok: call.ok, ...(saved ? { own: true as const } : {}) };
+    // One exception per call: a call that mixes the two stays outside.
+    const saved = parentPattern === null && outside.every((raw) => savedOutput(own, snapshot, raw));
+    const beside = ownPattern === null && outside.every((raw) => inCheckoutParent(parent, snapshot, raw, fold));
+    return { tool: call.tool, path: outside[0]!, inside: false, range, ok: call.ok, ...(saved ? { own: true as const } : beside ? { checkoutParent: true as const } : {}) };
   }
+  if (ownPattern !== null && parentPattern !== null) return { tool: call.tool, path: parentPattern, inside: false, range, ok: call.ok };
   if (ownPattern !== null) return { tool: call.tool, path: ownPattern, inside: false, range, ok: call.ok, own: true };
+  if (parentPattern !== null) return { tool: call.tool, path: parentPattern, inside: false, range, ok: call.ok, checkoutParent: true };
   const first = paths[0] ?? roots[0] ?? null;
   const real = first === null ? null : place(snapshot, call.read?.path ?? first);
   const rel = real === null ? null : (fold ? relative(snapshot.toLowerCase(), real.toLowerCase()) : relative(snapshot, real)) === "" ? "." : real.slice(snapshot.length + 1);

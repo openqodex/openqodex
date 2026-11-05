@@ -66,6 +66,9 @@
 //     the bound let the run complete.
 // 31. Two dots inside a name (`[...slug]`) or a wildcard segment
 //     (`locales/??`) end the review; or a `..` step completes.
+// 33. A refused attempt in the snapshot's own checkout folder ends the review;
+//     or one that succeeded, one that also names another place, one in a
+//     sibling checkout, or one when the folder holds anything else completes.
 // 32. A read of a file named with `$` or `%` that exists in the snapshot
 //     ends the review; or such a path that names no file there completes.
 // 33. A reading of ours is looser than Claude Code's or ripgrep's: a Grep
@@ -375,6 +378,59 @@ describe("13. the trace check fails closed", () => {
   it("a Grep search expression that looks like a path is not a path and keeps the run complete", async () => {
     const answer: Answer = (text) => ({ finalText: submission(text), calls: [{ tool: "Grep", input: { pattern: "/api/../v1", path: "db" }, ok: true, read: null }] });
     expect(await review(repo(), fake([answer]))).toBe(0);
+  });
+});
+
+describe("33. a refused attempt beside the snapshot", () => {
+  const refused = (tool: string, input: Record<string, unknown>): ToolCall => ({ tool, input, ok: false, read: null });
+  const runWith = async (call: (snapshotDir: string) => ToolCall) => {
+    const answer: Answer = (text, snapshotDir) => ({ finalText: submission(text), calls: [call(snapshotDir)] });
+    const code = await review(repo(), fake([answer]));
+    return { code, completion: (JSON.parse(out) as Report).completion };
+  };
+  it.each<[string, (s: string) => ToolCall]>([
+    ["a Read that dropped tree/", (s) => refused("Read", { file_path: join(dirname(s), "db/x.sql") })],
+    ["a relative Read", () => refused("Read", { file_path: "../db/x.sql" })],
+    ["a Read of the marker file", (s) => refused("Read", { file_path: join(dirname(s), "openqodex-checkout.json") })],
+    ["a Grep on the folder", (s) => refused("Grep", { pattern: "x", path: dirname(s) })],
+    ["a Glob rooted in the folder", (s) => refused("Glob", { pattern: `${dirname(s)}/**/*.sql` })],
+  ])("%s keeps the run complete and is listed as a warning", async (_name, call) => {
+    const { code, completion } = await runWith(call);
+    expect(completion?.missing).toEqual([]);
+    expect(code).toBe(0);
+    expect(completion?.outside_reads).toEqual([]);
+    expect((completion as { refused_checkout_reads?: string[] }).refused_checkout_reads).toHaveLength(1);
+  });
+  it.each<[string, (s: string) => ToolCall]>([
+    ["the same Read when it succeeded", (s) => ({ tool: "Read", input: { file_path: join(dirname(s), "db/x.sql") }, ok: true, read: null })],
+    ["a sibling checkout", (s) => refused("Read", { file_path: join(dirname(dirname(s)), "work-other", "x") })],
+    ["the checkouts folder itself", (s) => refused("Grep", { pattern: "x", path: dirname(dirname(s)) })],
+    ["a climb past the folder", () => refused("Read", { file_path: "../../x" })],
+    ["a parent Glob that also names another place", (s) => refused("Glob", { pattern: `{${dirname(s)}/*,/etc/*}` })],
+    ["a parent pattern on a call with a path elsewhere", (s) => refused("Grep", { pattern: "x", glob: `${dirname(s)}/*`, path: "/etc" })],
+    ["a parent path on a call with a pattern elsewhere", (s) => refused("Grep", { pattern: "x", glob: "/etc/*", path: dirname(s) })],
+    ["a parent path with a variable in it", (s) => refused("Read", { file_path: join(dirname(s), "$HOME") })],
+    ["an input that cannot be read", () => ({ tool: "Read", input: "x", ok: false, read: null })],
+  ])("%s makes the run incomplete", async (_name, call) => {
+    const { code, completion } = await runWith(call);
+    expect(code).toBe(2);
+    expect(completion?.outside_reads).toHaveLength(1);
+    expect((completion as { refused_checkout_reads?: string[] }).refused_checkout_reads).toBeUndefined();
+  });
+  it("a refused attempt counts as outside when the folder holds anything else", async () => {
+    const answer: Answer = (text, snapshotDir) => {
+      writeFileSync(join(dirname(snapshotDir), "stray"), "x");
+      return { finalText: submission(text), calls: [refused("Read", { file_path: join(dirname(snapshotDir), "db/x.sql") })] };
+    };
+    expect(await review(repo(), fake([answer]))).toBe(2);
+  });
+  it("a refused attempt counts as outside when the snapshot is not one of our checkouts", () => {
+    const snapshot = join(tempDir("oq-not-checkout-"), "tree");
+    mkdirSync(snapshot);
+    writeFileSync(join(dirname(snapshot), "openqodex-checkout.json"), "{}");
+    const entry = classify(snapshot, refused("Read", { file_path: join(dirname(snapshot), "x") }));
+    expect(entry).toMatchObject({ inside: false });
+    expect(entry.checkoutParent).toBeUndefined();
   });
 });
 

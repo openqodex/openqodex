@@ -197,6 +197,7 @@ function lines(report: Report): Line[] {
       out.push({ kind: "field", label: notOpenedLabel(c.coverage), text: c.coverage.files_not_read.length > 0 ? c.coverage.files_not_read.join(", ") : "none" });
     }
     out.push({ kind: "field", label: "Changed ranges given to the reviewer", text: `${c.coverage.covered} of ${c.coverage.hunks}` });
+    if (c.contract === "openqodex-review-2" && c.refused_checkout_reads) out.push({ kind: "field", label: "Warning: refused reads beside the snapshot, which read nothing", text: c.refused_checkout_reads.join(", ") });
   }
   if (report.not_reviewed_paths.length > 0) out.push({ kind: "field", label: "Left out, change too large", text: report.not_reviewed_paths.join(", ") });
   out.push({ kind: "text", text: `Scanners: ${coverageLine(report.scanners)}` });
