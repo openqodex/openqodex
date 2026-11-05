@@ -729,6 +729,9 @@ export type CompletionRecord = {
     files_not_read: string[];
   };
   outside_reads: string[];
+  // Refused attempts on the folder around the snapshot, which holds only the
+  // checkout's marker file: shown as a warning, they leave the review complete.
+  refused_checkout_reads?: string[];
   // Whether the reviewer's event stream shows every tool call (Claude Code).
   // When false (Codex), files_read and outside_reads are not measured, and
   // coverage counts only the changed ranges put in front of the reviewer.
