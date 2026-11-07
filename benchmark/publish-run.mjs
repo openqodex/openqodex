@@ -170,17 +170,15 @@ function caseRecords(folder, paths) {
 
 // Privacy patterns from both lists. Quoted upstream punctuation is part
 // of the saved review, so the public typography pattern does not apply.
-// The private list beside the main checkout is shared by its worktrees.
+// The private list, when OPENQODEX_PRIVATE_SCRUB_LIST names one, joins them.
 function scrubPatterns() {
   const lists = [{ file: join(repoRoot, "scripts", "scrub-patterns.txt"), private: false }];
-  const common = (() => {
-    try {
-      return resolve(repoRoot, git(["rev-parse", "--git-common-dir"]).toString("utf8").trim(), "..");
-    } catch {
-      return repoRoot;
-    }
-  })();
-  for (const root of new Set([repoRoot, common])) lists.push({ file: join(root, ".private", "scrub-patterns.txt"), private: true });
+  // The private list stays out of the repo; OPENQODEX_PRIVATE_SCRUB_LIST names its path.
+  const privateList = process.env.OPENQODEX_PRIVATE_SCRUB_LIST;
+  if (privateList) {
+    if (!existsSync(privateList)) throw new Error(`refused: OPENQODEX_PRIVATE_SCRUB_LIST names ${privateList}, which does not exist`);
+    lists.push({ file: privateList, private: true });
+  }
   const out = [];
   const seen = new Set();
   for (const l of lists.filter((x) => existsSync(x.file))) {
