@@ -56,7 +56,7 @@
 //    starts, and records the addition in the manifest and resumes.jsonl.
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, cpSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { REVIEWER_FAILED } from "./reviewers.mjs";
@@ -139,31 +139,59 @@ const alive = (pid) => {
   }
 };
 
-// Takes away a lock whose holder `stalePid` has ended, and only that lock:
-// the file is moved aside in one step, and when what was moved is not the
-// stale holder's (another runner put its own lock there after the stale one
-// was read) it is put back. True when the stale lock is gone.
-export function takeOverStale(path, stalePid) {
-  const aside = `${path}.${process.pid}.${randomBytes(6).toString("hex")}`;
+// The lock file as one open file: its device and inode, which ties a stale
+// lock to the one guard that may replace it, and its text; null when there
+// is none. Reading by an open fd, not by path, so what is checked below is
+// exactly the file whose dev/ino were read, never a different file a rename
+// put at the same path afterward.
+function readLock(path) {
+  let fd;
   try {
-    renameSync(path, aside);
+    fd = openSync(path, "r");
   } catch (error) {
-    if (error.code === "ENOENT") return true;
+    if (error.code === "ENOENT") return null;
     throw error;
   }
-  if (readFileSync(aside, "utf8").trim() === String(stalePid)) {
-    rmSync(aside, { force: true });
-    return true;
-  }
-  // Another runner's lock: back in place, never over a lock made since.
   try {
-    linkSync(aside, path);
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
+    const { dev, ino } = fstatSync(fd);
+    return { dev, ino, text: readFileSync(fd, "utf8").trim() };
   } finally {
-    rmSync(aside, { force: true });
+    closeSync(fd);
   }
-  return false;
+}
+
+// Replaces a lock whose holder `stalePid` has ended with this process's own,
+// and only in one process: lib/budget.mjs's ledger lock took the same race
+// (fixed in PR 125) and uses the same guard. The taker first makes the
+// takeover guard for that very file (its device and inode) by an exclusive
+// create, so one process at a time may act on it; a process taking the lock
+// the usual way never touches this file, so while the guard is there only
+// its holder changes the lock. The holder re-reads the lock and only goes on
+// when it is still that very file (dev and ino, not just a path that could
+// hold a different file by then), with the same text, and still no live
+// process: it then writes its own pid into a fresh file and renames that
+// over the lock in one step, so the path is never briefly empty for a third
+// process to claim. True when this process now holds the lock.
+export function takeOverStale(path, stalePid) {
+  const seen = readLock(path);
+  if (seen === null || seen.text !== String(stalePid) || alive(Number(seen.text))) return false;
+  const guard = `${path}.takeover-${seen.dev}-${seen.ino}`;
+  try {
+    writeFileSync(guard, `${process.pid}\n`, { flag: "wx" });
+  } catch (error) {
+    if (error.code === "EEXIST") return false;
+    throw error;
+  }
+  try {
+    const now = readLock(path);
+    if (now === null || now.dev !== seen.dev || now.ino !== seen.ino || now.text !== seen.text || alive(Number(now.text))) return false;
+    const mine = `${path}.${process.pid}.${randomBytes(6).toString("hex")}`;
+    writeFileSync(mine, `${process.pid}\n`);
+    renameSync(mine, path);
+    return true;
+  } finally {
+    rmSync(guard, { force: true });
+  }
 }
 
 // Takes a run folder for this process, or throws when another live process
@@ -174,19 +202,22 @@ export function takeOverStale(path, stalePid) {
 export function lockRun(out, { file = LOCK_FILE, who = "another run", advice = "wait for it to end, or use another --out" } = {}) {
   mkdirSync(out, { recursive: true });
   const path = join(out, file);
+  const held = () => () => {
+    if (existsSync(path) && readFileSync(path, "utf8").trim() === String(process.pid)) rmSync(path, { force: true });
+  };
   for (let tries = 0; tries < 2; tries++) {
     try {
       writeFileSync(path, `${process.pid}\n`, { flag: "wx" });
-      return () => {
-        if (existsSync(path) && readFileSync(path, "utf8").trim() === String(process.pid)) rmSync(path, { force: true });
-      };
+      return held();
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
       const text = existsSync(path) ? readFileSync(path, "utf8").trim() : "";
       const pid = Number(text);
       if (!/^\d+$/.test(text) || alive(pid)) break;
-      // A lock left by a runner that died: take it over, unless another runner got there first.
-      if (!takeOverStale(path, pid)) break;
+      // A lock left by a runner that died: take it over (this process's own
+      // pid is already written by takeOverStale on success), unless another
+      // runner got there first.
+      if (takeOverStale(path, pid)) return held();
     }
   }
   const holder = existsSync(path) ? readFileSync(path, "utf8").trim() : "unknown";
