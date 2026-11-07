@@ -170,7 +170,7 @@ function caseRecords(folder, paths) {
 
 // Privacy patterns from both lists. Quoted upstream punctuation is part
 // of the saved review, so the public typography pattern does not apply.
-// The private list beside the main checkout is shared by its worktrees.
+// The private list, when OPENQODEX_PRIVATE_SCRUB_LIST names one, joins them.
 function scrubPatterns() {
   const lists = [{ file: join(repoRoot, "scripts", "scrub-patterns.txt"), private: false }];
   // The private list stays out of the repo; OPENQODEX_PRIVATE_SCRUB_LIST names its path.
