@@ -16,7 +16,11 @@
 //     is (keepMode), loses its own mode.
 //  6. A Windows drive or UNC share becomes a folder name, or mixed slashes
 //     leave two folder names joined together.
-import { chmodSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+//  7. The notice of a wider mode prints a relative path climbing out with
+//     `../` when the repository is reached through a linked folder, since
+//     the guard's own path has its links followed but the root it is shown
+//     relative to does not (issue 59).
+import { chmodSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -72,6 +76,18 @@ describe("files that can hold review content, receipts or config", () => {
     writeRepoFile(root, ".openqodex/latest.json", "{}\n");
     expect(mode(join(root, ".openqodex"))).toBe(0o700);
     expect(err.lines()).toMatch(/\.openqodex could be read by other users \(mode 0755\); it is now 0700/);
+  });
+
+  it("a repository reached through a linked folder reports a notice path relative to the repository, not climbing out with .. (failure 7)", () => {
+    const target = realpathSync(tempDir("oq-modes-target-"));
+    const link = join(tempDir("oq-modes-link-"), "repo");
+    symlinkSync(target, link);
+    mkdirSync(join(link, ".openqodex"));
+    chmodSync(join(link, ".openqodex"), 0o755);
+    const err = stderr();
+    writeRepoFile(link, ".openqodex/latest.json", "{}\n");
+    expect(err.lines()).toMatch(/^openqodex: \.openqodex could be read by other users/m);
+    expect(err.lines()).not.toContain("..");
   });
 
   it("the guard gives a file its mode only when it creates it, never by a chmod after (failure 3)", () => {
