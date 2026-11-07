@@ -14,7 +14,7 @@ OpenQodex is open source AI code review for Claude Code and Codex. It runs befor
 
 - `pnpm build`: builds `@openqodex/core`, `@openqodex/scanners`, `@openqodex/graph`, `@openqodex/review` and `@openqodex/mcp`, then the `openqodex` CLI, then copies the shipped assets beside the bundle.
 - `pnpm typecheck`, `pnpm lint`, `pnpm test` (unit), `pnpm test:e2e` (runs the built CLI as a real subprocess).
-- `pnpm gate`: every check in order, stopping at the first failure. It must be green before any push. CI (`.github/workflows/ci.yml`) runs the same steps: on Linux for a pull request, and on Linux and macOS in the merge queue and on main.
+- `pnpm gate`: every check in order, stopping at the first failure. It must be green before any push. CI (`.github/workflows/ci.yml`) runs the same steps. A pull request and its merge queue run get the fast gate on Linux; the full gate runs on Linux and macOS on main and for the version pull request (see below).
 - `pnpm changeset`: add a changeset to any pull request with a change a user can see.
 - `pnpm docs:index`: regenerates `docs/llms.txt`. The gate checks it with `--check`, and checks the README's facts with `scripts/docs-facts.mjs`.
 
