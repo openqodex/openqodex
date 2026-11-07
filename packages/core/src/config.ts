@@ -241,7 +241,9 @@ const strings = z.array(z.string());
 // The matcher matches nothing with a longer glob, which would quietly undo
 // the key: an exclude would keep its files, a disabled rule would come back
 // on, a custom scanner's paths would select no file. So the file is refused.
-const globs = z.array(z.string().max(MAX_GLOB, `longer than ${MAX_GLOB} characters, the most a glob can have; shorten it`));
+const globs = z.array(
+  z.string().max(MAX_GLOB, { error: (issue) => `longer than ${MAX_GLOB} characters, the most a glob can have: ${JSON.stringify(issue.input)}; shorten it` }),
+);
 // YAML reads `version: 1.2` as a number; a version is always text here.
 const text = z.union([z.string(), z.number()]).transform(String);
 const scannerSeverity = z.enum(["critical", "high", "medium", "low", "info"]);
