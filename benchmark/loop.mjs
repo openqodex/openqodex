@@ -8,7 +8,7 @@
 //        [--candidate <run> ...] [--checkout <dir>] [--parent-checkout <dir>]
 //        [--results <dir>] [--ledger <file>] [--decisions <file>]
 //        [--model-script <file>] [--install-root <dir>/tools]
-//        [--allow-missing-scanners] [--max-minutes 600]
+//        [--allow-missing-scanners] [--max-minutes 600] [--wave <id>]
 //   node benchmark/loop.mjs status [--ledger <file>]
 //
 // propose is the lever door (loop/propose.mjs), refused while the
@@ -29,7 +29,10 @@
 // less what the ledger's lines record today) and what is left of the
 // change's own cap. lib/budget.mjs holds every model call to it before the
 // call is sent. A laptop run is held by --max-reviews to what is left of the
-// change's laptop reviews.
+// change's laptop reviews. A step that runs a reviewer other than the
+// scripted model names its wave with --wave, which each run.mjs it starts
+// gets: each run reserves its forecast in the wave journal (lib/wave.mjs)
+// and settles it, one run at a time under the wave's lock.
 //
 // Exit codes: 0 a line is written; 1 refused (nothing run, nothing
 // written); 2 the step failed.
@@ -79,7 +82,7 @@ import { DAILY_SERVER_USD, changeSpend, dailyRoom, folderSpend, signalRefusal, s
 import { LEDGER, propose, readLedger } from "./loop/propose.mjs";
 import { PARENT_MAX_AGE_DAYS, STAGES, changeState, inDecision, repeatsFor, screen, scriptedReviewers, stageOutcome } from "./loop/stages.mjs";
 
-const USAGE = "usage: node benchmark/loop.mjs propose <record.json> [--repo <dir>] [--ledger <file>]\n       node benchmark/loop.mjs step --change <RC-id> --parent <run> [--parent <run> ...] [--candidate <run> ...] [--checkout <dir>] [--parent-checkout <dir>] [--results <dir>] [--ledger <file>] [--decisions <file>] [--model-script <file>] [--install-root <dir>/tools] [--allow-missing-scanners] [--max-minutes 600]\n       node benchmark/loop.mjs status [--ledger <file>]";
+const USAGE = "usage: node benchmark/loop.mjs propose <record.json> [--repo <dir>] [--ledger <file>]\n       node benchmark/loop.mjs step --change <RC-id> --parent <run> [--parent <run> ...] [--candidate <run> ...] [--checkout <dir>] [--parent-checkout <dir>] [--results <dir>] [--ledger <file>] [--decisions <file>] [--model-script <file>] [--install-root <dir>/tools] [--allow-missing-scanners] [--max-minutes 600] [--wave <id>]\n       node benchmark/loop.mjs status [--ledger <file>]";
 
 // A laptop run's --max-usd is a forecast stop on account usage, not money:
 // this many dollars per review it may start (P1's table puts a real pull
@@ -88,7 +91,7 @@ const LAPTOP_USD_PER_REVIEW = 2;
 const DAY_MS = 86_400_000;
 
 function parseArgs(argv) {
-  const o = { command: argv[0] ?? null, positional: [], change: null, parents: [], candidates: [], checkout: repoRoot, parentCheckout: null, results: resultsRoot, ledger: LEDGER, decisions: decisionsPath, modelScript: null, installRoot: null, allowMissingScanners: false, maxMinutes: 600, repo: repoRoot };
+  const o = { command: argv[0] ?? null, positional: [], change: null, parents: [], candidates: [], checkout: repoRoot, parentCheckout: null, results: resultsRoot, ledger: LEDGER, decisions: decisionsPath, modelScript: null, installRoot: null, allowMissingScanners: false, maxMinutes: 600, repo: repoRoot, wave: null };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -107,6 +110,7 @@ function parseArgs(argv) {
     else if (a === "--model-script") o.modelScript = resolve(value());
     else if (a === "--install-root") o.installRoot = resolve(value());
     else if (a === "--repo") o.repo = resolve(value());
+    else if (a === "--wave") o.wave = value();
     else if (a === "--allow-missing-scanners") o.allowMissingScanners = true;
     else if (a === "--max-minutes") {
       o.maxMinutes = Number(value());
@@ -261,7 +265,7 @@ function workFor(run, repeats, parent) {
 // run says it ended.
 function invokeRun({ checkout, flags, folder, started }) {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [join(checkout, "benchmark", "run.mjs"), ...flags, "--out", folder], { cwd: checkout, stdio: ["ignore", 1, 1], detached: true });
+    const child = spawn(process.execPath, [join(checkout, "benchmark", "run.mjs"), ...flags, "--out", folder], { cwd: checkout, env: { ...process.env, OPENQODEX_WAVE_PATH: "loop" }, stdio: ["ignore", 1, 1], detached: true });
     const pass = (signal) => {
       try {
         process.kill(-child.pid, signal);
@@ -365,6 +369,10 @@ async function step(o) {
       const checks = [...new Set(work.map((w) => w.checkout))].flatMap((dir) => checkoutProblems(dir, dir === o.checkout ? record.commit : record.parent, dir === o.checkout ? "change's commit" : "change's parent"));
       if (checks.length > 0) throw new Refusal(`refused, nothing run:\n${checks.map((c) => `- ${c}`).join("\n")}`);
       for (const w of work) w.flags = runFlags(w.parent, o, w.checkout);
+      // A reviewer other than the scripted model pays a model, so its runs need the wave.
+      const paid = work.filter((w) => w.parent.reviewers.some((r) => r !== "model:scripted"));
+      if (paid.length > 0 && o.wave === null) throw new Refusal(`refused, nothing run: ${paid.map((w) => w.run.runId).join(", ")} would pay a model; name the wave with --wave <id> (node benchmark/lib/wave.mjs --wave-new <id> starts one)`);
+      if (o.wave !== null) for (const w of work) w.flags.push("--wave", o.wave);
       lock = takeRunLock(o.ledger, { change: id, stage, runs });
       if (lock.stale) settleAbandoned(o.ledger, lock.stale);
       ran = await runWork({ o, id, stage, record, work, runs, lock });

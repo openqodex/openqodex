@@ -14,6 +14,7 @@ import { hash } from "../lib/calibration.mjs";
 import { attemptDir, planJobs, runManifest, sampleRecord } from "../lib/runner.mjs";
 import { rawPath, readCase, readSuite, specCopy, truthOf } from "../lib/suites.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
+import { newWave } from "../lib/wave.mjs";
 import { convertOpts, finding, fixturePlan, savedRun as martianRun, suite as martianSuite } from "./martian-board-fixture.mjs";
 import { main as judgeMartian } from "../outside/boards/martian-judge.mjs";
 import { convertRun } from "../outside/convert/martian.mjs";
@@ -103,15 +104,17 @@ function recordFixture() {
   record.acceptance = { person: read(join(root, "review-queue/people.json")).people[0], date: "2026-10-24", hash: "" };
   record.acceptance.hash = comparisonHash(record);
   write(join(root, "index/comparisons", `${record.release}.json`), record);
+  // A priced run names its wave (lib/wave.mjs); the fixture has one of its own.
+  newWave("fixture-wave", { root });
   return { root, record, calibration };
 }
 
 async function cli(folder, args = [], model = null, { root = null, record = null, release = "compare-2026-10" } = {}) {
   return new Promise((resolve, reject) => {
     const script = join(benchRoot, "outside/boards/greptile-run.mjs");
-    const argv = [folder, ...(release === null ? [] : ["--release", release]), ...args];
+    const argv = [folder, ...(release === null ? [] : ["--release", release]), ...args, ...(root && !args.includes("--dry-run") ? ["--wave", "fixture-wave"] : [])];
     const module = JSON.stringify(pathToFileURL(script).href);
-    const call = record ? `judgeRun(${JSON.stringify({ folder, dryRun: false, force: false, maxUsd: 1 })}, ${JSON.stringify(record)}, { root: ${JSON.stringify(root)} })` : `main(${JSON.stringify(argv)}, { root: ${JSON.stringify(root)} })`;
+    const call = record ? `judgeRun(${JSON.stringify({ folder, dryRun: false, force: false, maxUsd: 1, wave: "fixture-wave" })}, ${JSON.stringify(record)}, { root: ${JSON.stringify(root)} })` : `main(${JSON.stringify(argv)}, { root: ${JSON.stringify(root)} })`;
     const invocation = record || root ? ["--input-type=module", "--eval", `import { ${record ? "judgeRun" : "main"} } from ${module}; ${call}.catch((e) => { console.error(e.message.replaceAll("\\n", " ")); process.exitCode = 2; });`] : [script, ...argv];
     const child = spawn(process.execPath, invocation, { env: { ...process.env, ...(model ? { OPENQODEX_BENCH_MODEL_ENV: model.envFile } : { OPENQODEX_BENCH_MODEL_ENV: join(folder, "must-not-read-model.env") }) } });
     let stdout = ""; let stderr = "";

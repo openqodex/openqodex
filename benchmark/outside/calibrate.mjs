@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Failure cases: benchmark/test/calibration-failures.md, before this code.
 // This command judges saved public vendor reviews. It never runs a product.
+// It pays a model, so it names its wave (--wave, lib/wave.mjs): it reserves
+// the cost of the newest earlier calibration of the same board and form,
+// and settles with its own cost (reported usage at the pinned prices).
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,6 +16,7 @@ import { boardFingerprint, buildFingerprint } from "../lib/comparison.mjs";
 import { cacheRoot } from "../lib/licence.mjs";
 import { MARTIAN_CITED } from "../lib/martian-board.mjs";
 import { bundleHash } from "../lib/runner.mjs";
+import { openWave, outstanding, reserve, settle } from "../lib/wave.mjs";
 import { GREPTILE_PROMPT, GREPTILE_PROMPT_HASH, judgeGreptile } from "./boards/greptile-judge.mjs";
 import { martianJudge, runPipeline } from "./boards/martian-judge.mjs";
 
@@ -68,18 +72,40 @@ function pythonForPipeline() {
   throw new Error("Martian requires an existing Python with openai and tqdm; set OPENQODEX_BENCH_PYTHON");
 }
 
+// The cost of the newest earlier calibration of `name` in `form`, the forecast of the next.
+export function calibrationForecast(name, form, { root = benchRoot } = {}) {
+  const dir = join(root, "index/calibration");
+  const shape = new RegExp(`^${name}-\\d{4}-\\d{2}-\\d{2}${form ? `-${form}` : ""}\\.json$`);
+  const newest = (existsSync(dir) ? readdirSync(dir) : []).filter((f) => shape.test(f)).sort().reverse().map((f) => read(join(dir, f))).find((c) => c.costUsd > 0);
+  if (!newest) throw new Error(`refused: no earlier ${name}${form ? ` ${form}` : ""} calibration in ${dir} to forecast this one from`);
+  return newest.costUsd;
+}
+
 export async function main(argv = process.argv.slice(2)) {
-  const usage = "usage: node benchmark/outside/calibrate.mjs --board greptile|martian [--form flat|joined]";
+  const usage = "usage: node benchmark/outside/calibrate.mjs --board greptile|martian [--form flat|joined] --wave <id>";
+  const at = argv.indexOf("--wave");
+  const waveId = at >= 0 ? argv[at + 1] : undefined;
+  if (at >= 0) argv = [...argv.slice(0, at), ...argv.slice(at + 2)];
   if (![2, 4].includes(argv.length) || argv[0] !== "--board" || !["greptile", "martian"].includes(argv[1]) || (argv.length === 4 && (argv[2] !== "--form" || !["flat", "joined"].includes(argv[3])))) throw new Error(usage);
   const name = argv[1]; const form = argv[3]; const startedAt = new Date().toISOString();
   if (form && name !== "greptile") throw new Error("--form is only supported for --board greptile");
+  if (!waveId || waveId.startsWith("--")) throw new Error(`--wave <id> is required: a calibration pays a model, so its forecast is reserved in the wave's journal first\n${usage}`);
+  const wave = openWave(waveId);
   const { date, output, run } = calibrationPaths(name, startedAt, { form });
   const board = boardFingerprint(name); const build = installedBuild();
   mkdirSync(run, { recursive: true });
   const inputs = name === "greptile" ? await greptileInputs() : await martianInputs();
   if ((name === "greptile" ? GREPTILE_PROMPT_HASH : inputs.promptHash) !== board.promptHash) throw new Error("calibration prompts differ from the board pin");
   const python = name === "martian" ? pythonForPipeline() : null;
+  const waveRun = `calibration-${name}${form ? `-${form}` : ""}-${startedAt}`;
+  reserve(wave, { id: waveRun, path: "calibrate", forecastUsd: calibrationForecast(name, form) });
   let relay;
+  // Settled with what the relay reports; left standing when it cannot say.
+  const settleWith = (counters) => {
+    let spent = null;
+    try { spent = relay ? costOfUsage(counters.usage, relay.model) : 0; } catch { spent = null; }
+    if (spent !== null) settle(wave, waveRun, spent);
+  };
   try {
     // Request hashes include the model, prompts and review text; the folder
     // also separates board and source pins before a restart can replay them.
@@ -115,6 +141,7 @@ export async function main(argv = process.argv.slice(2)) {
     const record = { version: 1, board, vendor: name === "greptile" ? "Greptile" : "Augment", labelUnit: name === "greptile" ? "case against original Greptile truth" : "golden comment caught or missed across all categories", build, startedAt, endedAt: new Date().toISOString(), promptHash: board.promptHash, judgeModel: relay.model, counts, agreement: agreementOf(counts), costUsd: costOfUsage(counters.usage, relay.model), costBasis: "Reported token usage at the pinned public rates in outside/prices.json, not an invoice.", pricesHash: hash(readFileSync(join(benchRoot, "outside/prices.json"))), relay: counters, sources: inputs.sources, score, labels: verdicts.map((r) => ({ ...r, published: published.find((p) => p.id === r.id).label })) };
     if (judgeFailures) record.judgeFailures = judgeFailures;
     const exitCode = finalizeCalibration(record);
+    settleWith(counters);
     if (JSON.stringify(installedBuild()) !== JSON.stringify(build)) throw new Error("product build changed during calibration");
     writeCalibration(output, record, form);
     for (const [name, c] of Object.entries(counts.byClass)) console.log(`${name}: ${c.agree}/${c.total} agree (${(100 * c.agree / c.total).toFixed(2)} percent), ${c.disagree} disagree`);
@@ -125,6 +152,7 @@ export async function main(argv = process.argv.slice(2)) {
     return exitCode;
   } catch (error) {
     const counters = relay ? await relay.counts().catch(() => null) : null;
+    if (outstanding(wave).some((r) => r.id === waveRun)) settleWith(counters);
     writeCalibration(join(run, "failure.json"), { board: name, startedAt, build, error: error.message, relay: counters }, form);
     throw error;
   } finally { if (relay) await relay.close(); }

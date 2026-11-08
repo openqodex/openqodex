@@ -58,6 +58,7 @@ import { endpointSecrets } from "../lib/model-env.mjs";
 import { findingId, martianFindings, martianGolden, readMartianEvaluation } from "../lib/score.mjs";
 import { readCase, truthOf } from "../lib/suites.mjs";
 import { convertRun } from "../outside/convert/martian.mjs";
+import { newWave, openWave } from "../lib/wave.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 import { CLAUDE, COMMIT, convertOpts, fakeProvider, finding, FIXTURES, fixturePlan, fixtureReport, GOLDEN, MODEL, PACKAGE, readJson, RELEASE, REPORTS, report, savedRun, suite, write } from "./martian-board-fixture.mjs";
 
@@ -584,9 +585,12 @@ describe("Martian's own pipeline judges the converted fixture", () => {
     const home = tempDir("oq-martian-board-judged-");
     writeFileSync(join(home, "azure.env"), `AZURE_OPENAI_BASE_URL=${provider.base}\nAZURE_OPENAI_KEY=${key}\n`);
     chmodSync(join(home, "azure.env"), 0o600);
-    const env = { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), OPENQODEX_BENCH_ACCESS_LOG: opts.accessLog, TMPDIR: home, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+    // The judging pays a model, so it names a wave: one of this test's own.
+    const waveRoot = tempDir("oq-martian-board-wave-");
+    newWave("fixture-wave", { root: waveRoot });
+    const env = { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), OPENQODEX_BENCH_ACCESS_LOG: opts.accessLog, OPENQODEX_BENCH_WAVES: join(waveRoot, "index/waves"), TMPDIR: home, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
     const r = await new Promise((done) => {
-      const child = spawn(process.execPath, [JUDGE, out, "--checkout", OFFLINE, "--python", PYTHON], { env });
+      const child = spawn(process.execPath, [JUDGE, out, "--checkout", OFFLINE, "--python", PYTHON, "--wave", "fixture-wave"], { env });
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (c) => (stdout += c));
@@ -595,6 +599,10 @@ describe("Martian's own pipeline judges the converted fixture", () => {
     });
     await provider.close();
     expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+    // Their pipeline reports no cost: the reservation is settled at the forecast, marked estimated.
+    const journal = readFileSync(openWave("fixture-wave", { root: waveRoot }).file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(journal.slice(1).map((l) => [l.kind, l.path ?? null, l.estimated ?? false])).toEqual([["reserve", "judge-martian", false], ["settle", null, true]]);
+    expect(journal[2].actualUsd).toBe(journal[1].forecastUsd);
     const board = join(out, "outside", "martian");
     const record = readJson(join(board, "eval.json"));
     expect(record).toMatchObject({ commit: COMMIT, checkout: { commit: COMMIT, tree: expect.stringMatching(/^[0-9a-f]{40}$/) }, judge: { deployment: "gpt-5.2" }, problems: [] });

@@ -6,7 +6,13 @@
 // readMartianEvaluation reads.
 //
 //   node benchmark/outside/boards/martian-judge.mjs <run> --checkout <their offline folder>
-//        --python <their venv python> [--dry-run]
+//        --python <their venv python> (--wave <id> | --dry-run)
+//
+// The judging pays a model, so it names its wave (lib/wave.mjs) and
+// reserves a forecast before the pipeline starts: the newest complete
+// Martian calibration's cost per review it judged, times the reviews sent
+// here. Their pipeline calls the judge itself and reports no cost, so the
+// reservation is settled at the forecast, marked estimated.
 //
 // In <run>/outside/martian/work/, a folder of its own, it writes
 // results/benchmark_data.json (the converter's entries) and runs, with that
@@ -66,7 +72,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { boardFolder, checkoutState, leaksIn, outsideRepo, redactor } from "../../lib/board-files.mjs";
@@ -77,6 +83,7 @@ import { validateComparison, validateRunManifest } from "../../lib/comparison.mj
 import { canonicalJson } from "../../lib/suites.mjs";
 import { accessLogPath } from "../convert/martian.mjs";
 import { withoutCore } from "./aacr-judge.mjs";
+import { openWave, reserve, settle } from "../../lib/wave.mjs";
 
 const BOARDS = JSON.parse(readFileSync(new URL("../boards.json", import.meta.url), "utf8"));
 const shown = (p) => (p.startsWith(`${homedir()}/`) ? `~${p.slice(homedir().length)}` : p);
@@ -159,14 +166,16 @@ export async function main(argv = process.argv.slice(2), { root = benchRoot } = 
   let dry = false;
   let checkout = null;
   let python = null;
+  let waveId = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--dry-run") dry = true;
+    else if (argv[i] === "--wave") waveId = argv[++i];
     else if (argv[i] === "--checkout") checkout = argv[++i];
     else if (argv[i] === "--python") python = argv[++i];
     else if (folder === null && !argv[i].startsWith("--")) folder = resolve(argv[i]);
     else throw new Error(`unknown argument ${argv[i]}`);
   }
-  if (folder === null || checkout === null || python === null) throw new Error("usage: martian-judge.mjs <run> --checkout <their offline folder> --python <path> [--dry-run]");
+  if (folder === null || checkout === null || python === null) throw new Error("usage: martian-judge.mjs <run> --checkout <their offline folder> --python <path> (--wave <id> | --dry-run)");
   checkout = resolve(checkout);
   const out = boardFolder(folder, "martian");
   if (!existsSync(join(out, "convert.json"))) throw new Error(`${out} holds no convert.json; martian.sh converts the run first`);
@@ -193,6 +202,9 @@ export async function main(argv = process.argv.slice(2), { root = benchRoot } = 
   if (!convert.access || !logged.some(same)) throw new Error(`refused: the held-out access the conversion recorded is not in ${accessLog}; a conversion is judged only when its access is logged`);
   outsideRepo(checkout, "Martian's checkout");
   outsideRepo(dirname(dirname(resolve(python))), "the venv of Martian's pipeline");
+  // The wave, before the judge's settings are read.
+  if (!dry && !waveId) throw new Error("--wave <id> is required: the judging pays a model, so its forecast is reserved in the wave's journal first (node benchmark/lib/wave.mjs --wave-new <id> starts one)");
+  const wave = dry ? null : openWave(waveId, { root });
   const judge = martianJudge();
   // Refuses, naming the file or the field and never a value, when the settings are missing.
   const settings = loadModelEnv();
@@ -217,7 +229,31 @@ export async function main(argv = process.argv.slice(2), { root = benchRoot } = 
   const state = checkoutState(dirname(checkout));
   if (state.commit !== MARTIAN_BOARD.commit) throw new Error(`their checkout is at ${state.commit || "no commit"}, not the commit boards.json pins (${MARTIAN_BOARD.commit})`);
   if (state.problems.length > 0) throw new Error(`their checkout ${shown(dirname(checkout))} is not the pinned commit as it stands: ${state.problems.join("; ")}. Their code is never patched: move the checkout to the Trash and run martian.sh --prepare`);
-  return runPipeline({ out, convert, checkout, python, state, judge, settings });
+  const forecastUsd = martianForecast(join(out, "benchmark_data.json"), sent, { root });
+  const id = `${manifest.runId ?? basename(folder)}:judge-martian`;
+  reserve(wave, { id, path: "judge-martian", forecastUsd });
+  // Their pipeline reports no cost: settled at the forecast, estimated. A kill leaves it standing.
+  try {
+    return await runPipeline({ out, convert, checkout, python, state, judge, settings });
+  } finally {
+    settle(wave, id, forecastUsd, { estimated: true });
+  }
+}
+
+/**
+ * The forecast of judging the reviews of `sent` tool names in a converted
+ * benchmark_data.json: the newest complete Martian calibration's cost per
+ * review it judged (its labels name each review's URL), times those reviews.
+ */
+export function martianForecast(dataFile, sent, { root = benchRoot } = {}) {
+  const dir = join(root, "index/calibration");
+  const newest = (existsSync(dir) ? readdirSync(dir) : []).filter((f) => /^martian-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort().reverse()
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8"))).find((c) => c.status === "complete" && c.costUsd > 0);
+  if (!newest) throw new Error(`refused: no complete Martian calibration in ${dir} to forecast the judging from`);
+  const calibrated = new Set(newest.labels.map((l) => l.id.slice(0, l.id.lastIndexOf("#g")))).size;
+  const data = existsSync(dataFile) ? JSON.parse(readFileSync(dataFile, "utf8")) : {};
+  const reviews = Object.values(data).flatMap((e) => e.reviews ?? []).filter((r) => sent.some((t) => t.tool === r.tool)).length;
+  return (newest.costUsd / calibrated) * reviews;
 }
 
 /**

@@ -41,6 +41,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { manifestBudget, openLedger, readLedger } from "../lib/budget.mjs";
 import { buildEntry, scoreHash } from "../lib/index.mjs";
 import { attemptDir, executeRun, planJobs, runManifest, sampleRecord } from "../lib/runner.mjs";
+import { newWave } from "../lib/wave.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
@@ -163,11 +164,16 @@ async function savedRun({ maxUsd = 1, report: REPORT = BASE_REPORT } = {}) {
 // The judge as a command, in its own process. Async, so the stand-in in
 // this process can answer while it runs. `fileLimitKb` starts it under a
 // shell's file size limit, so a write past that size fails part way, as a
-// full disk would make it.
+// full disk would make it. Each pass gets a wave of its own in a temporary
+// journal folder (lib/wave.mjs), so no pass is refused by another's spend.
+const waveRoot = tempDir("oq-judge-waves-");
+let waves = 0;
 function judge(out, { env = {}, args = [], fileLimitKb = null } = {}) {
+  const wave = newWave(`judge-${++waves}`, { root: waveRoot }).id;
+  args = [...args, "--wave", wave];
   return new Promise((done) => {
     const command = fileLimitKb === null ? [process.execPath, JUDGE, out, ...args] : ["/bin/bash", "-c", `ulimit -f ${fileLimitKb} && exec "$0" "$@"`, process.execPath, JUDGE, out, ...args];
-    const child = spawn(command[0], command.slice(1), { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command[0], command.slice(1), { env: { ...process.env, OPENQODEX_BENCH_WAVES: join(waveRoot, "index/waves"), ...env }, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));

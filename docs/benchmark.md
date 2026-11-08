@@ -116,7 +116,7 @@ From a clone, with Node 22, Claude Code installed and logged in:
 pnpm install
 node benchmark/build-cli.mjs           # pnpm build, and a record of the commit and tree it built from
 node benchmark/run.mjs --max-usd 25 --max-minutes 150 --dry-run   # print the plan and its estimate, run nothing
-node benchmark/run.mjs --max-usd 25 --max-minutes 150             # 21 cases, graph off and on, 3 repeats: 126 reviews
+node benchmark/run.mjs --max-usd 25 --max-minutes 150 --wave <wave> # 21 cases, graph off and on, 3 repeats: 126 reviews
 node benchmark/score.mjs benchmark/results/<date>-<commit>
 ```
 
@@ -133,7 +133,7 @@ Other flags of `run.mjs`: `--cases a,b`, `--graph off|on|off,on`, `--repeat N` (
 Claude Code and Codex also review AACR-Bench's development pull requests, with the flags of the model reviewers below (`--suite`, `--subset`, `--cases`):
 
 ```
-node benchmark/run.mjs --suite aacr --subset dev-smoke --graph on --repeat 1 --max-usd 10 --max-minutes 60
+node benchmark/run.mjs --suite aacr --subset dev-smoke --graph on --repeat 1 --max-usd 10 --max-minutes 60 --wave <wave>
 ```
 
 Each review gets the merge base as a commit and the pull request's change uncommitted, as for a planted case. The run scores it against the same saved truth as a model review. `--graph` and `--web` work as for planted cases. With `--web on`, the reviewer can read the pull request's review comments, which are the truth. A pull request case's checkout can be large, so it is removed when its review ends.
@@ -144,7 +144,7 @@ Each review gets the merge base as a commit and the pull request's change uncomm
 
 ```
 node benchmark/run.mjs --reviewers model:scripted --cases flask-path-traversal --repeat 1 --max-usd 1 --max-minutes 10 --review-max-usd 0.5
-node benchmark/run.mjs --reviewers model:gpt-6.1-sol --cases aacr/laravel__framework-56591 --repeat 1 --max-usd 2 --max-minutes 30 --review-max-usd 0.5
+node benchmark/run.mjs --reviewers model:gpt-6.1-sol --cases aacr/laravel__framework-56591 --repeat 1 --max-usd 2 --max-minutes 30 --review-max-usd 0.5 --wave <wave>
 ```
 
 - `<id>` is `scripted`, a deployment that `benchmark/outside/boards.json` records as probed (`gpt-6.1-sol` today), or a name in its `aliases` map that points at one. Anything else is refused before anything runs. The manifest records the model asked for (`requestedModel`), the alias that named it, the settings, and the endpoint as an HMAC-SHA256 of its base URL keyed with the endpoint's key, never the URL or the key; a resume on another base URL or another key is refused. The manifest's `model` is the model the provider named as serving the run's first answered review, and a later review served by another model stops the run.
@@ -203,6 +203,37 @@ A run writes one folder, `benchmark/results/<date>-<commit>/`:
 `benchmark/results/` is not committed; each run folder stays on the machine that ran it until it is published.
 
 Every attempt is saved as a sample before anything stops. A review that failed, timed out, was stopped or never started is a failure in the table, never a missing row. A reviewer failure gets one more attempt, in its own folder; the score reports that retry apart and keeps the failed first attempt. The run stops at once when the reviewer hits a usage limit, a rate limit or a login wall, and when the same review fails twice with the same cause. It probes the reviewer before the first review and after any review whose reviewer failed. A folder that already holds a run (a manifest or samples) is refused without `--resume`, and one folder takes one runner at a time. `--resume` runs the reviews that have no saved attempt; a review whose first attempt started and never saved keeps that folder, which the score counts as its first attempt, and runs again in its next attempt folder. A resume is refused when the bundle, the machine, a reviewer's version or model, web access, the timeout, the concurrency, the cases, the configurations, the repeats, the scanners found missing or the change differ from the run's; its budget may differ, which is how a run stopped by its budget is finished.
+
+## The wave cap
+
+A wave is one round of paid benchmark work: the review runs, the control, the calibrations and the judging of one comparison. A wave may spend 10 USD. Its journal is `benchmark/index/waves/<wave>.jsonl`, committed like `heldout-access.jsonl`: one JSON line per event, only ever appended.
+
+```
+node benchmark/lib/wave.mjs --wave-new <wave>                   # the first line, with cap 10
+node benchmark/lib/wave.mjs --status <wave>                     # settled (metered), reported but not metered, reserved, room left, the lock
+node benchmark/lib/wave.mjs --settle <wave> <run id> <usd>      # a person settles a dead run's reservation
+```
+
+Every path that pays a model names its wave with `--wave <wave>` and refuses to start without one. A dry run, a scanner-only run and `--materialise-only` spend nothing and need none. `--release` is not the wave; it admits held-out cases.
+
+| Path | Needs `--wave` | Reserves | Settles with |
+|---|---|---|---|
+| `run.mjs` review run | any reviewer but `model:scripted` | the run's estimate; its `--max-usd` room when some review has no measured cost | what its `budget.jsonl` says it spent; the larger of that and the forecast, marked estimated, when a reviewer reported no cost |
+| `loop.mjs step` | a parent reviewed by anything but the scripted model | each `run.mjs` it starts, as above | as above |
+| `release-check.mjs --reviewers` | any reviewer but `model:scripted` | each `run.mjs` it starts, as above | as above |
+| `greptile-run.mjs`, priced | always | its forecast (the calibration's cost per case, times the cases judged) | the relay's reported usage at the pinned prices |
+| `martian.sh`, `martian-judge.mjs` | always | the newest complete Martian calibration's cost per review, times the reviews sent | the forecast, marked estimated: their pipeline reports no cost |
+| `aacr.sh`, `aacr-judge.mjs` | always but a dry run | the newest calibration of any board's cost per review (a tie of dates takes the dearer board: Martian on 2026-10-27, $1.838 for 50 reviews), times the reviews and the rounds, estimated (never the run's `--max-usd`, which is its review budget) | the relay's reported usage at the pinned prices; the forecast, marked estimated, when the relay could not count every answer |
+| `judge.mjs` (the wording pass) | always | the smaller of every planned call's worst case and the room the run's `--max-usd` leaves | what the run's `budget.jsonl` says the pass spent |
+| `calibrate.mjs` | always | the cost of the newest earlier calibration of the same board and form | the relay's reported usage at the pinned prices |
+
+Before it spends, a path appends a reservation line with its forecast. The reservation is refused when what the wave has settled, plus every reservation not settled yet, plus this forecast, would pass the cap. No flag passes it: `--allow-over` still starts a run past its own `--max-usd` estimate, and the wave check runs after that and wins. At its end the path appends a settlement line. A path that is killed leaves its reservation standing, and it keeps counting against the cap. To free it, read what the run spent (its `budget.jsonl`, or the provider's bill) and settle it by hand with `--settle`.
+
+The cap counts money billed, and a review on a subscription bills nothing per call: Claude Code with no `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`) in its environment, and Codex on a ChatGPT login, reserve 0 and settle the dollars they report with `"metered": false`, which `--status` shows apart and the cap never counts. Model reviewers, the relay and every judge use an API key, so they are metered, and a run with any metered reviewer counts as metered.
+
+One spender at a time. A reservation takes `<wave>.lock` in the journal folder, which holds the process id and the time, and the settlement gives it back. A second spender is refused, and the refusal names the process that holds the lock. A lock whose process is dead is stale; the next spender clears it. `--settle` is refused while a live process holds the lock.
+
+The cap is never above 10 USD unless the wave's first line says why and names a comparison record Sid signed whose `capUsd` allows it. `--wave-new` refuses a higher cap without both, and every path refuses a journal that lacks them.
 
 ## Where the runs are kept
 
@@ -330,7 +361,7 @@ Every Monday, `.github/workflows/bench-weekly.yml` scans AACR-Bench's `dev-smoke
 node benchmark/build-cli.mjs
 node benchmark/release-check.mjs                                      # the published package against this checkout, scanners only
 node benchmark/release-check.mjs --base npm:0.12.0 --candidate file:openqodex-0.13.0.tgz
-node benchmark/release-check.mjs --reviewers claude --max-usd 15 --max-minutes 120
+node benchmark/release-check.mjs --reviewers claude --max-usd 15 --max-minutes 120 --wave <wave>
 ```
 
 Before every release, `release-check.mjs` compares the published package with the build about to be released, on the same cases: the planted cases and AACR-Bench's development subset `dev-laptop`. The base is the version npm's latest tag names, read from https://registry.npmjs.org itself; the candidate is this checkout's build. `--base` and `--candidate` take any `--package` value of `run.mjs`, so a release candidate packed with `npm pack` is `file:<path.tgz>`. `--suites planted` checks the planted cases alone, `--subset` names another AACR subset, and `--cases` names cases of one suite.
@@ -350,7 +381,7 @@ The release workflow runs the check on the planted cases before every publish: i
 ## The wording pass
 
 ```
-node benchmark/judge.mjs benchmark/results/<run> [--configs a,b] [--limit N] [--resume] [--specs <folder>]
+node benchmark/judge.mjs benchmark/results/<run> --wave <wave> [--configs a,b] [--limit N] [--resume] [--specs <folder>]
 ```
 
 A model reads each finding that the script matched to a planted bug, with the bug's planted truth, and says whether its problem, consequence and fix sentences are plain and correct. It judges wording only, never whether the bug was found. It writes `judge.json`, with each review's verdicts, its cost and the model that answered, and prints a table. `score.mjs` copies the totals into each configuration's `wording` in `score.json`. No rule reads them, so the verdict never changes a hit, a count, an exit code or an accept.
@@ -362,7 +393,7 @@ The judge is the deployment `benchmark/outside/boards.json` gives the wording ro
 ```
 benchmark/outside/boards/aacr.sh --prepare                        # their pinned checkout and its venv, once
 benchmark/outside/boards/aacr.sh benchmark/results/<run> --dry-run
-benchmark/outside/boards/aacr.sh benchmark/results/<run> [--rounds 3]
+benchmark/outside/boards/aacr.sh benchmark/results/<run> --wave <wave> [--rounds 3]
 node benchmark/score.mjs benchmark/results/<run> --outside aacr
 ```
 
@@ -452,7 +483,7 @@ A ruling acts only on a finding no frozen spec decides: a planted hit, a listed 
 
 ## Submitting to a board
 
-Before any paid product review, calibrate the board judge on public vendor reviews with `node benchmark/outside/calibrate.mjs --board greptile` and `node benchmark/outside/calibrate.mjs --board martian`. This runs no product. Greptile judges all 50 public Greptile review forks linked by the suite's recorded page asset, against its original truth, before reading the published caught/missed labels. Its adapter also accepts Augment's corrected truth separately: `node benchmark/outside/boards/greptile-judge.mjs <blind-input.json> --truth-set augment <verdicts.json>`, where the input holds 50 cases with `id`, `comments` and `truthSets.<name>.items[].text`. Corrected truth is not calibrated by the original board's labels. Martian runs the complete pinned extraction, deduplication, matching and scoring pipeline on Augment's 50 published reviews. Its label unit is a golden comment: positive when found, negative when missed, across all 173 comments. These verdicts are compared with the published Opus 4.5 `evaluations.json`, rather than inventing pairwise negatives from winner-only matches. The cited Martian row is Core F1 with the Opus 4.5 judge. The pinned `methodology/full.md` describes the pipeline and category profiles; `score_profiles` defaults to Core F2, while calibration explicitly selects Core and beta 1 for F1. The three prompt source files and methodology are pinned in `suites/martian/calibration-sources.json`. An existing cached Python environment with `openai` and `tqdm` is reused, or selected with `OPENQODEX_BENCH_PYTHON`; no dependency is installed.
+Before any paid product review, calibrate the board judge on public vendor reviews with `node benchmark/outside/calibrate.mjs --board greptile --wave <wave>` and `node benchmark/outside/calibrate.mjs --board martian --wave <wave>`. This runs no product. Greptile judges all 50 public Greptile review forks linked by the suite's recorded page asset, against its original truth, before reading the published caught/missed labels. Its adapter also accepts Augment's corrected truth separately: `node benchmark/outside/boards/greptile-judge.mjs <blind-input.json> --truth-set augment <verdicts.json>`, where the input holds 50 cases with `id`, `comments` and `truthSets.<name>.items[].text`. Corrected truth is not calibrated by the original board's labels. Martian runs the complete pinned extraction, deduplication, matching and scoring pipeline on Augment's 50 published reviews. Its label unit is a golden comment: positive when found, negative when missed, across all 173 comments. These verdicts are compared with the published Opus 4.5 `evaluations.json`, rather than inventing pairwise negatives from winner-only matches. The cited Martian row is Core F1 with the Opus 4.5 judge. The pinned `methodology/full.md` describes the pipeline and category profiles; `score_profiles` defaults to Core F2, while calibration explicitly selects Core and beta 1 for F1. The three prompt source files and methodology are pinned in `suites/martian/calibration-sources.json`. An existing cached Python environment with `openai` and `tqdm` is reused, or selected with `OPENQODEX_BENCH_PYTHON`; no dependency is installed.
 
 Calibration writes `benchmark/index/calibration/<board>-<date>.json`: vendor, label units, every verdict, agreement and disagreement counts by published class, prompt hashes, GPT-5.2 judge, token usage, estimated cost at the pinned public rates, source pins and product build. Greptile also accepts `--form flat` and `--form joined`. `--form flat` flattens each comment to one paragraph. It replaces each run of three or more backticks with one backtick. `--form joined` joins each case's comments into one body. Two newlines separate the joined comments. Each form saves a separate `greptile-<date>-<form>.json` record. The record has a `form` field. A comparison refuses a record with a `form` field. The results folder ends in the form name. Pipeline work and failure records stay under `benchmark/results/`. A relay child alone reads model settings; the runner and Martian receive only loopback credentials. A judge item that exhausts invalid-answer retries is recorded in `judgeFailures`; its affected reviews and published labels are excluded from agreement. `excluded.count` counts those judge items, and `excluded.reason` explains the exclusion. Agreement computed over both remaining classes gives status `complete` and exit 0, including below-bar agreement. Missing agreement or a missing class gives status `failed` and exit 1. A missing case label outside the recorded exclusions is a refusal. `benchmark/lib/comparison.mjs` separately requires at least 90 percent agreement on each class or a matching human ruling, together with matching board, prompts, judge and complete build identity. An execution failure exits 2 and never creates an accepted calibration. Only a failed Martian daily record can be overwritten. A prebuilt worktree without provenance records HEAD and its tree only when package sources are unchanged, together with the installed bundle hash; a prepared `benchmark/build-cli.mjs` provenance record takes precedence.
 
@@ -482,7 +513,7 @@ Greptile is scored by `benchmark/outside/boards/greptile-run.mjs`: caught or mis
 
 `node benchmark/outside/boards/greptile-run.mjs <run> --release <name> --dry-run` writes `<run>/outside/greptile/input.json`.
 It prints each tool's case counts and spend forecast without calling a model.
-`node benchmark/outside/boards/greptile-run.mjs <run> --release <name> --max-usd <n>` judges reviews with comments through the uncached relay.
+`node benchmark/outside/boards/greptile-run.mjs <run> --release <name> --max-usd <n> --wave <wave>` judges reviews with comments through the uncached relay.
 The release names the comparison record.
 The unit cost is the pinned Greptile calibration's cost divided by its number of cases.
 The forecast is that unit cost times the number of judged cases.
@@ -530,7 +561,7 @@ node benchmark/ingest/martian.mjs --verify-published [--offline]
 
 ```
 benchmark/outside/boards/martian.sh --prepare
-benchmark/outside/boards/martian.sh <run> [--dry-run]
+benchmark/outside/boards/martian.sh <run> (--wave <wave> | --dry-run)
 ```
 
 The Martian reader refuses a `benchmark_data.json` whose reviews differ from a fresh conversion.
@@ -648,7 +679,7 @@ The simulation also says how many cases a decision needs. With about 50 cases an
 
 ```
 node benchmark/loop.mjs propose <record.json>
-node benchmark/loop.mjs step --change <RC-id> --parent <run> [--parent <run> ...] [--candidate <run>] [--checkout <dir>] [--parent-checkout <dir>]
+node benchmark/loop.mjs step --change <RC-id> --parent <run> [--parent <run> ...] [--candidate <run>] [--checkout <dir>] [--parent-checkout <dir>] [--wave <wave>]
 node benchmark/loop.mjs status
 ```
 
@@ -885,7 +916,7 @@ node benchmark/run.mjs --suite conventions --materialise-only --reviewers model:
 Run one repeat with the model endpoint already configured:
 
 ```sh
-node benchmark/run.mjs --suite conventions --reviewers model:gpt-6.1-sol --repeat 1 --max-usd 5 --review-max-usd 1 --max-minutes 15
+node benchmark/run.mjs --suite conventions --reviewers model:gpt-6.1-sol --repeat 1 --max-usd 5 --review-max-usd 1 --max-minutes 15 --wave <wave>
 ```
 
 Score the saved run with `node benchmark/score.mjs <run-folder>`. A violation finding must name `CONTRIBUTING.md`. The exception and control must have no findings. The scorer checks those expectations from the saved case specs.

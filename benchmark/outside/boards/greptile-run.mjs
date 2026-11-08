@@ -2,6 +2,9 @@
 // Judge a saved run, with the frozen suite as its denominator. Empty
 // reviews miss by script. Only a scripted model provider stands in for the
 // judge in test/greptile-run.test.mjs, whose failure list precedes this code.
+// A priced run names its wave (--wave): the forecast is reserved in the
+// wave journal (lib/wave.mjs) after --max-usd passes it, and settled with
+// the relay's reported usage at the pinned prices.
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,8 +12,10 @@ import { boardFolder } from "../../lib/board-files.mjs";
 import { greptileInput, readBoardReviews } from "../../lib/board-reviews.mjs";
 import { benchRoot } from "../../lib/cases.mjs";
 import { relayClient } from "../../lib/calibration-relay.mjs";
+import { costOfUsage } from "../../lib/calibration.mjs";
 import { validateComparison, validateRunManifest } from "../../lib/comparison.mjs";
 import { value } from "../../lib/score.mjs";
+import { openWave, reserve, settle } from "../../lib/wave.mjs";
 import { GREPTILE_PROMPT, GREPTILE_PROMPT_HASH, judgeGreptile } from "./greptile-judge.mjs";
 
 const read = (file) => JSON.parse(readFileSync(file, "utf8"));
@@ -18,8 +23,8 @@ const write = (file, data) => { mkdirSync(join(file, ".."), { recursive: true })
 
 function options(argv) {
   const [folder, ...args] = argv;
-  const opts = { folder, release: null, dryRun: false, force: false, maxUsd: null };
-  if (!folder || folder.startsWith("--")) throw new Error("usage: greptile-run.mjs <run> --release <name> [--dry-run (refuses a folder holding eval.json)] [--max-usd <n>] [--force (priced runs only; after judging succeeds, moves old outside/greptile/ to outside/greptile.superseded-<UTC timestamp>/; nothing is deleted)]");
+  const opts = { folder, release: null, dryRun: false, force: false, maxUsd: null, wave: null };
+  if (!folder || folder.startsWith("--")) throw new Error("usage: greptile-run.mjs <run> --release <name> [--dry-run (refuses a folder holding eval.json)] [--max-usd <n> --wave <id>] [--force (priced runs only; after judging succeeds, moves old outside/greptile/ to outside/greptile.superseded-<UTC timestamp>/; nothing is deleted)]");
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === "--dry-run") opts.dryRun = true;
@@ -27,13 +32,15 @@ function options(argv) {
     else if (flag === "--release" && args[i + 1]) {
       opts.release = args[++i];
       if (!/^[a-z0-9][a-z0-9.-]*$/.test(opts.release)) throw new Error("--release must name a comparison record");
-    } else if (flag === "--max-usd" && args[i + 1]) {
+    } else if (flag === "--wave" && args[i + 1]) opts.wave = args[++i];
+    else if (flag === "--max-usd" && args[i + 1]) {
       opts.maxUsd = Number(args[++i]);
       if (!Number.isFinite(opts.maxUsd) || opts.maxUsd < 0) throw new Error("--max-usd must be a nonnegative dollar amount");
     } else throw new Error(`unknown or incomplete option ${flag}`);
   }
   if (opts.release === null) throw new Error("--release <name> is required");
   if (opts.force && opts.dryRun) throw new Error("--force is accepted only on a priced run");
+  if (!opts.dryRun && opts.wave === null) throw new Error("--wave <id> is required for a priced run: its forecast is reserved in the wave's journal before any judge call (node benchmark/lib/wave.mjs --wave-new <id> starts one)");
   return opts;
 }
 
@@ -88,12 +95,17 @@ export async function judgeRun(opts, record, { root = benchRoot } = {}) {
   if (opts.dryRun) { write(join(out, "input.json"), input); return 0; }
   if (opts.maxUsd === null) throw new Error("--max-usd is required for a priced run");
   if (forecast > opts.maxUsd) throw new Error(`forecast USD ${forecast.toFixed(6)} exceeds --max-usd ${opts.maxUsd}`);
+  if (!opts.wave) throw new Error("--wave <id> is required for a priced run");
   const stamp = new Date().toISOString().replaceAll(":", "-");
   const pending = boardFolder(folder, `greptile.pending-${stamp}`);
   const superseded = boardFolder(folder, `greptile.superseded-${stamp}`);
   if (existsSync(pending) || existsSync(superseded)) throw new Error("the pending or superseded folder exists already; the old evaluation stays in place");
   write(join(pending, "input.json"), input);
 
+  // The wave cap, after --max-usd and above it.
+  const wave = openWave(opts.wave, { root });
+  const waveId = `${run.manifest.runId ?? folder}:judge-greptile`;
+  reserve(wave, { id: waveId, path: "judge-greptile", forecastUsd: forecast });
   let relay;
   try {
     if (judgedCases > 0) relay = await relayClient({});
@@ -125,7 +137,17 @@ export async function judgeRun(opts, record, { root = benchRoot } = {}) {
       truthSet, judgeModel: relay?.model ?? null, promptHash: GREPTILE_PROMPT_HASH,
       manifestSha256: run.manifestSha256, splitHash: run.manifest.splitHash, relay: counts, perTool,
     });
-  } finally { if (relay) await relay.close(); }
+  } finally {
+    // Settled with the relay's usage; left standing when the relay cannot say.
+    if (!relay) settle(wave, waveId, 0);
+    else {
+      const usage = await relay.counts().then((c) => c.usage, () => null);
+      let spent = null;
+      try { spent = costOfUsage(usage, relay.model); } catch { spent = null; }
+      if (spent !== null) settle(wave, waveId, spent);
+      await relay.close();
+    }
+  }
   if (existsSync(out)) renameSync(out, superseded);
   renameSync(pending, out);
   return 0;

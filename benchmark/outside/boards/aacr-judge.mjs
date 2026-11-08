@@ -8,7 +8,15 @@
 // AACR's judge (boards.aacr.judge.deployment), which must be probed.
 //
 //   node benchmark/outside/boards/aacr-judge.mjs <run> --evaluation <their evaluation dir>
-//        --python <their venv python> [--rounds N] [--dry-run]
+//        --python <their venv python> [--rounds N] (--wave <id> | --dry-run)
+//
+// The judging is held to the wave cap (lib/wave.mjs): before the relay
+// starts it reserves its forecast, and at its end it settles with the cost
+// of the token usage the relay counted, or with the forecast, marked
+// estimated, when the relay could not count it. The forecast is the cost
+// per review of the newest calibration of any board (aacrForecast), times
+// the reviews and the rounds, marked estimated. The run's --max-usd is its
+// review budget, not a judging forecast, so it is never used.
 //
 // Failure list, written before the code:
 // 1. The key or base URL is echoed: they live in this process and in the
@@ -44,10 +52,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createWriteStream, existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AACR_BOARD, AACR_K, AACR_READER, boardFolder } from "../../lib/aacr-board.mjs";
 import { checkoutState, leaksIn, redactor } from "../../lib/board-files.mjs";
+import { costOfUsage } from "../../lib/calibration.mjs";
+import { benchRoot } from "../../lib/cases.mjs";
+import { openWave, reserve, settle } from "../../lib/wave.mjs";
 export { checkoutState, redactor };
 import { checkRelay, startRelay } from "../../lib/aacr-relay.mjs";
 export { startRelay };
@@ -94,22 +105,47 @@ export function run(command, args, { cwd, env, log, secrets }) {
   });
 }
 
-export async function main(argv = process.argv.slice(2)) {
+/**
+ * The forecast of judging `reviews` reviews `rounds` times: the newest
+ * calibration of any board's cost per review it judged (a tie of dates
+ * takes the dearer board; on 2026-10-27 that is Martian, $1.838 for 50
+ * reviews) times the reviews and the rounds, estimated.
+ */
+export function aacrForecast({ reviews, rounds, root = benchRoot }) {
+  const dir = join(root, "index/calibration");
+  const shape = /^([a-z]+)-(\d{4}-\d{2}-\d{2})(?:-[a-z]+)?\.json$/;
+  const newest = (existsSync(dir) ? readdirSync(dir) : [])
+    .filter((f) => shape.test(f))
+    .map((f) => {
+      const c = JSON.parse(readFileSync(join(dir, f), "utf8"));
+      const judged = new Set((c.labels ?? []).map((l) => (l.id.includes("#g") ? l.id.slice(0, l.id.lastIndexOf("#g")) : l.id))).size;
+      return { file: f, date: shape.exec(f)[2], usd: c.costUsd > 0 && judged > 0 ? c.costUsd / judged : null };
+    })
+    .filter((c) => c.usd !== null)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.usd - a.usd)[0];
+  if (!newest) throw new Error(`refused: ${dir} holds no calibration to forecast the judging from`);
+  return { usd: newest.usd * reviews * rounds, estimated: true, basis: `${newest.file}, $${newest.usd.toFixed(4)} a review, times ${reviews} reviews and ${rounds} rounds, estimated` };
+}
+
+export async function main(argv = process.argv.slice(2), { root = benchRoot } = {}) {
   let folder = null;
   let rounds = 3;
   let dry = false;
   let evaluation = null;
   let python = null;
+  let waveId = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--rounds") rounds = Number(argv[++i]);
     else if (argv[i] === "--dry-run") dry = true;
+    else if (argv[i] === "--wave") waveId = argv[++i] ?? null;
     else if (argv[i] === "--evaluation") evaluation = argv[++i];
     else if (argv[i] === "--python") python = argv[++i];
     else if (folder === null && !argv[i].startsWith("--")) folder = resolve(argv[i]);
     else throw new Error(`unknown argument ${argv[i]}`);
   }
-  if (folder === null || evaluation === null || python === null) throw new Error("usage: aacr-judge.mjs <run> --evaluation <dir> --python <path> [--rounds N] [--dry-run]");
+  if (folder === null || evaluation === null || python === null) throw new Error("usage: aacr-judge.mjs <run> --evaluation <dir> --python <path> [--rounds N] (--wave <id> | --dry-run)");
   if (!Number.isInteger(rounds) || rounds < 1) throw new Error("--rounds takes a whole number of at least 1");
+  if (!dry && waveId === null) throw new Error("--wave <id> is required: the judging pays a model, so its forecast is reserved in the wave's journal first (node benchmark/lib/wave.mjs --wave-new <id> starts one)");
   if (process.env.JUDGE_USE_MOCK !== undefined) throw new Error("refused: JUDGE_USE_MOCK is set; the wrapper never runs AACR's mock judge, which scores a run as if a model judged it. Unset it.");
   const out = boardFolder(folder);
   if (!existsSync(join(out, "convert.json"))) throw new Error(`${out} holds no convert.json; aacr.sh converts the run first`);
@@ -145,10 +181,34 @@ export async function main(argv = process.argv.slice(2)) {
   if (!existsSync(dataset)) throw new Error(`${dataset} is missing; aacr.sh writes it from their dataset converter`);
   if (!existsSync(join(evaluation, "evaluate.py")) || !existsSync(python)) throw new Error(`their evaluator or its python is not in ${shown(evaluation)}; run benchmark/outside/boards/aacr.sh --prepare`);
 
-  // The child's environment: ours without any judge or OpenAI setting, plus the three their judge reads.
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(JUDGE_|OPENAI_|AZURE_OPENAI_)/.test(k)));
-  const relay = await startRelay(settings);
+  // The wave's reservation, before anything is sent.
+  const wave = openWave(waveId, { root });
+  const manifest = JSON.parse(readFileSync(join(folder, "manifest.json"), "utf8"));
+  const reviews = readFileSync(dataset, "utf8").split("\n").filter((l) => l.trim() !== "").length * convert.folders.length;
+  const forecast = aacrForecast({ reviews, rounds, root });
+  const waveRun = `${manifest.runId ?? basename(folder)}:judge-aacr`;
+  reserve(wave, { id: waveRun, path: "judge-aacr", forecastUsd: forecast.usd });
+  let relay = null;
   try {
+    relay = await startRelay(settings, { trackUsage: true });
+    return await evaluate(relay);
+  } finally {
+    // The relay's token usage at the pinned prices when it counted every
+    // answer; nothing sent costs nothing; otherwise the forecast, estimated.
+    const counts = relay?.counts();
+    let spent = null;
+    try {
+      spent = counts && counts.requests > 0 ? costOfUsage(counts.usage, judge.id) : 0;
+    } catch {
+      spent = null;
+    }
+    settle(wave, waveRun, spent ?? forecast.usd, { estimated: spent === null });
+    await relay?.close();
+  }
+
+  async function evaluate(relay) {
+    // The child's environment: ours without any judge or OpenAI setting, plus the three their judge reads.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(JUDGE_|OPENAI_|AZURE_OPENAI_)/.test(k)));
     try {
       await checkRelay(relay, judge.id);
     } catch (error) {
@@ -190,8 +250,6 @@ export async function main(argv = process.argv.slice(2)) {
       return 1;
     }
     return 0;
-  } finally {
-    await relay.close();
   }
 }
 
