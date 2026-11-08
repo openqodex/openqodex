@@ -10,7 +10,7 @@ import {
 
 describe("parseGolangciJson", () => {
   it("empty output or null Issues from a clean run yields no findings instead of a parse error", () => {
-    const empty = { findings: [], typecheckErrors: [] };
+    const empty = { findings: [], typecheckErrors: [], notDownloaded: [] };
     expect(parseGolangciJson("")).toEqual(empty);
     expect(parseGolangciJson(JSON.stringify({ Issues: null }))).toEqual(empty);
     expect(parseGolangciJson(JSON.stringify({ Issues: "nope" }))).toEqual(empty);

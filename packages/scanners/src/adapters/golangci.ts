@@ -27,6 +27,12 @@
 // outside the repo (a Go newer than the one golangci-lint was built with
 // fails inside the standard library). Those issues become the module's
 // error, so a broken Go setup reads as a failed scan, never a clean one.
+//
+// Two states of the developer's machine are not failures: a changed Go file
+// with no go.mod above it, and a module whose dependencies are not in the Go
+// module cache (scanner runs keep Go offline, GOPROXY=off, so Go cannot fetch
+// them). Each is a skip with its reason and the command that fixes it. A run
+// where only some modules are skipped still ran, and the skip is its note.
 // All errors are captured into the result; the runner never throws on a
 // scanner failure: static analysis is additive context, not a gate.
 
@@ -42,7 +48,7 @@ import type {
 import { ARG_BUDGET_BYTES, describeFailure, execTool, splitArgs, stderrTail } from "../exec.js";
 import type { Scratch } from "../scratch.js";
 import type { Adapter } from "./index.js";
-import { suchAs } from "./words.js";
+import { folderList, folderName, suchAs } from "./words.js";
 
 // golangci-lint loads + type-checks each package, so give it more
 // headroom than the file-scoped linters. Shared across every module
@@ -162,17 +168,16 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
 
   const { groups, orphans } = groupGoPackagesByModule(args.repoDir, goFiles);
   const notes: string[] = [];
+  // States of the developer's machine, not failures: see the header.
+  const skips: string[] = [];
   if (orphans.length > 0) {
-    // Not the same failure as a linter error, and worth naming precisely:
-    // Go's own message for this ("no go files to analyze: running `go mod
-    // tidy` may solve the problem") sends the reader after a dependency
-    // problem that does not exist.
-    notes.push(
-      `no go.mod found for ${orphans.length} changed dir(s): ${orphans.slice(0, 3).join(", ")}`,
-    );
+    // Worth naming precisely: Go's own message for this ("no go files to
+    // analyze: running `go mod tidy` may solve the problem") sends the
+    // reader after a dependency problem that does not exist.
+    skips.push(orphanSkip(orphans));
   }
   if (groups.length === 0) {
-    return { findings: [], error: notes.join("; ") || null };
+    return { findings: [], error: null, skipped: skips.join("; ").slice(0, 300) };
   }
   const running = groups.slice(0, GOLANGCI_MAX_MODULES);
   if (groups.length > running.length) {
@@ -183,6 +188,8 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
   // clock ceiling as one.
   const deadline = started + GOLANGCI_TIMEOUT_MS;
   const findings: StaticFinding[] = [];
+  // Modules with at least one run whose packages all loaded.
+  let loaded = 0;
   // A module with more packages than one process may take as arguments runs
   // once per chunk of packages, under the same deadline.
   const runs = running.flatMap((group) => splitArgs(group.packages, ARG_BUDGET_BYTES).map((packages) => ({ group, packages })));
@@ -231,16 +238,40 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
       findings.push(...reanchorToRunDir(report.findings, group.moduleRoot));
       const first = report.typecheckErrors[0];
       if (first) notes.push(`${group.moduleRoot}: could not type-check: ${first.slice(0, 200)}`);
+      if (report.notDownloaded.length > 0) skips.push(notDownloadedSkip(group.moduleRoot, report.notDownloaded));
+      else if (!first) loaded++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       notes.push(`${group.moduleRoot}: parse: ${message.slice(0, 150)}`);
     }
   }
 
-  return {
-    findings,
-    error: notes.length > 0 ? notes.join("; ").slice(0, 300) : null,
-  };
+  if (notes.length > 0) {
+    return { findings, error: [...notes, ...skips].join("; ").slice(0, 300) };
+  }
+  if (skips.length === 0) return { findings, error: null };
+  const reason = skips.join("; ").slice(0, 300);
+  // Nothing was linted: a skip. Something was: a run with a note.
+  return findings.length > 0 || loaded > 0
+    ? { findings, error: null, note: reason }
+    : { findings, error: null, skipped: reason };
+}
+
+// Folders are relative to the repository root; "." is the root itself.
+function asFolder(dir: string): string {
+  return dir === "." ? "" : dir;
+}
+
+function orphanSkip(orphans: string[]): string {
+  const shown = orphans.slice(0, 3).map(asFolder);
+  const more = orphans.length > shown.length ? ` and ${orphans.length - shown.length} more` : "";
+  return `not run on ${folderList(shown)}${more}: no go.mod at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in their folder`;
+}
+
+function notDownloadedSkip(moduleRoot: string, packages: string[]): string {
+  const root = asFolder(moduleRoot);
+  const command = root === "" ? "go mod download" : `cd ${root} && go mod download`;
+  return `not run on the Go module at ${folderName(root)}: its dependencies are not in the Go module cache, ${suchAs(packages)}. To fix, run ${command}`;
 }
 
 export const golangci: Adapter = {
@@ -331,18 +362,38 @@ export type GolangciReport = {
   // "file:line: text" for each issue from the typecheck pseudo-linter: the
   // package it names was not analyzed by any linter.
   typecheckErrors: string[];
+  // Import paths that could not load because their module is not in the Go
+  // module cache and the offline scan may not download it. A state of the
+  // machine, kept apart from the type-check errors the change can cause.
+  notDownloaded: string[];
 };
 
+// Go's text when an import needs a module that is required but not in the
+// module cache, and GOPROXY=off forbids the download. An import that no
+// required module provides says "import lookup disabled by -mod=readonly"
+// instead: that is a defect of the change and stays a type-check error.
+const NOT_DOWNLOADED = /^could not import (\S+) \(.*module lookup disabled by GOPROXY=off/;
+
 export function parseGolangciJson(json: string): GolangciReport {
-  const report: GolangciReport = { findings: [], typecheckErrors: [] };
+  const report: GolangciReport = { findings: [], typecheckErrors: [], notDownloaded: [] };
   const body = extractJsonObject(json);
   if (!body) return report;
   const parsed = JSON.parse(body) as { Issues?: unknown };
   // golangci emits Issues: null (not []) when there are no findings.
   if (!parsed || !Array.isArray(parsed.Issues)) return report;
   const out = report.findings;
-  for (const raw of parsed.Issues as GolangciIssue[]) {
-    if (!raw || typeof raw !== "object") continue;
+  const issues = (parsed.Issues as GolangciIssue[]).filter((raw) => raw && typeof raw === "object");
+  // A package with an import that is not downloaded is type-checked without
+  // it, so its other type-check errors ("undefined: chi" when the import path
+  // ends in /v5) follow from the missing module, not from the change. Go
+  // keeps one package per folder.
+  const unloaded = new Set<string>();
+  for (const raw of issues) {
+    if (raw.FromLinter === "typecheck" && typeof raw.Text === "string" && NOT_DOWNLOADED.test(raw.Text)) {
+      unloaded.add(path.dirname(typeof raw.Pos?.Filename === "string" ? raw.Pos.Filename : ""));
+    }
+  }
+  for (const raw of issues) {
     const filePath = typeof raw.Pos?.Filename === "string" ? raw.Pos.Filename : "";
     const line = numberOrZero(raw.Pos?.Line);
     // FromLinter is the analyzer that produced the issue (e.g. "gosec",
@@ -350,6 +401,12 @@ export function parseGolangciJson(json: string): GolangciReport {
     const linter = typeof raw.FromLinter === "string" && raw.FromLinter ? raw.FromLinter : "golangci";
     const message = typeof raw.Text === "string" ? raw.Text : "";
     if (linter === "typecheck") {
+      const missing = NOT_DOWNLOADED.exec(message);
+      if (missing) {
+        if (!report.notDownloaded.includes(missing[1]!)) report.notDownloaded.push(missing[1]!);
+        continue;
+      }
+      if (unloaded.has(path.dirname(filePath))) continue;
       report.typecheckErrors.push(trimMessage(`${filePath || "?"}:${line}: ${message}`));
       continue;
     }

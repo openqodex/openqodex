@@ -103,6 +103,56 @@ describe("builtin scanner subprocesses", () => {
     expect(result.scan.candidates).toEqual([]);
   }, 300_000);
 
+  // Issues 289 and 290: two states of the developer's machine read as a
+  // golangci failure, "failed for a reason not listed". A Go file with no
+  // go.mod above it, and a module whose dependencies are not in the Go module
+  // cache (the scan keeps Go offline), are skips with the fixing command.
+  it("golangci skips a changed Go file outside any module with the reason, and does not fail", async () => {
+    const result = await scan({
+      scanner: "golangci",
+      rule: "",
+      files: { "tools/gen.go": "package main\nfunc main() {}\n" },
+      anchor: "tools/gen.go",
+    });
+    if (result.scan.scanners[0]!.status === "not_installed") { process.stdout.write(`golangci: ${result.scan.scanners[0]!.reason}\n`); return; }
+    expect(result.scan.scanners[0]!.status).toBe("disabled");
+    expect(result.scan.scanners[0]!.reason).toBe("not run on tools/: no go.mod at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in their folder");
+  }, 300_000);
+
+  it("golangci skips a module whose dependencies are not downloaded, names go mod download, and does not fail", async () => {
+    const result = await scan({
+      scanner: "golangci",
+      rule: "",
+      files: {
+        "go.mod": "module example.com/needsdeps\n\ngo 1.22\n\nrequire github.com/openqodex-test/not-downloaded v1.2.3\n",
+        // A real project has its go.sum; only the module cache is empty.
+        "go.sum": "github.com/openqodex-test/not-downloaded v1.2.3 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\ngithub.com/openqodex-test/not-downloaded v1.2.3/go.mod h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n",
+        "main.go": "package main\n\nimport \"github.com/openqodex-test/not-downloaded\"\n\nfunc main() { notdownloaded.Do() }\n",
+      },
+      anchor: "main.go",
+    });
+    if (result.scan.scanners[0]!.status === "not_installed") { process.stdout.write(`golangci: ${result.scan.scanners[0]!.reason}\n`); return; }
+    expect(result.scan.scanners[0]!.status).toBe("disabled");
+    expect(result.scan.scanners[0]!.reason).toBe("not run on the Go module at the repository root: its dependencies are not in the Go module cache, such as github.com/openqodex-test/not-downloaded. To fix, run go mod download");
+  }, 300_000);
+
+  // The other side of the line above: an import that no required module
+  // provides is a defect of the change, so it stays a failure.
+  it("golangci still fails on a changed import that no required module provides", async () => {
+    const result = await scan({
+      scanner: "golangci",
+      rule: "",
+      files: {
+        "go.mod": "module example.com/noreq\n\ngo 1.22\n",
+        "main.go": "package main\n\nimport \"github.com/openqodex-test/not-required\"\n\nfunc main() { notrequired.Do() }\n",
+      },
+      anchor: "main.go",
+    });
+    if (result.scan.scanners[0]!.status === "not_installed") { process.stdout.write(`golangci: ${result.scan.scanners[0]!.reason}\n`); return; }
+    expect(result.scan.scanners[0]!.status).toBe("failed");
+    expect(result.scan.scanners[0]!.reason).toContain("could not type-check");
+  }, 300_000);
+
   it("oxlint's React rules stay off for a file outside a React project, and the run says which files had them", async () => {
     const spec: Case = {
       scanner: "oxlint",
