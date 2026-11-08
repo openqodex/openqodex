@@ -10,7 +10,7 @@ Nothing. OpenQodex collects no usage data, no crash reports and no identifiers. 
 
 By default, the review runs in a reviewer process OpenQodex starts on your machine: Claude Code or Codex, on your own login. That process sends the brief and what the reviewer reads to the model your login uses. OpenQodex adds no other model and needs no other key. By default the reviewer can also search the web, and Claude Code can open web pages; `reviewer_web: off` in `~/.openqodex/config.yaml` removes that.
 
-When neither Claude Code nor Codex can be the reviewer, `review` names a fallback, `review --agent`. In that fallback, the coding agent you are in reviews the change itself, on the model that agent already uses. So the agent that wrote the code also reviews it. The report says which agent reviewed.
+When neither Claude Code nor Codex can be the reviewer, `review` names a fallback, `review --agent`. In that fallback, the coding agent you are in reviews the change itself, on the model that agent already uses. So the session that wrote the code also reviews it. The report says which agent reviewed.
 
 In the GitHub Action's review mode, which runs only when the workflow sets `ANTHROPIC_API_KEY` on the step or asks for `review: required`, the reviewer is Claude Code on the runner. It sends the pull request's change, as the brief and the files it reads, to Anthropic's API under the repository's own key. The reviewer's web tools are off there.
 
@@ -20,7 +20,7 @@ OpenQodex and the built-in scanners send no code anywhere. They use the network 
 
 - Scanner downloads on first use, into `~/.openqodex/tools/`. GitHub release files are checked against sha256 sums pinned in the package. semgrep, bandit, SQLFluff and Checkov come from PyPI through uv, with a Python 3.11 that uv downloads. brakeman and rubocop come from RubyGems. These package installs are pinned by version.
 - Semgrep rule packs. semgrep fetches `p/default`, `p/security-audit` and `p/secrets` from the Semgrep registry on each run.
-- The dependency check. When the change holds a lockfile, osv-scanner sends the names and versions of the dependencies in it to osv.dev. It never sends code.
+- The dependency check. At every review and scan of a change, osv-scanner reads every supported lockfile in the repository. It sends the names and versions of the dependencies in them to osv.dev. It never sends code.
 - Kubernetes schemas. When the change holds a Kubernetes manifest, kubeconform downloads the JSON schema of each kind it meets from raw.githubusercontent.com, at one commit pinned in the package, so the requests name the kinds you use. It never sends a manifest. Each schema is cached and fetched once.
 - The RustSec advisory database. When the change holds a `Cargo.lock`, cargo-deny fetches the database from github.com with git into `~/.openqodex/cache/cargo-deny/`. Nothing about your code or your crates is sent. Cargo itself runs offline.
 - Custom scanners. `openqodex trust` reads the scanner's release from the GitHub API and downloads the asset.
