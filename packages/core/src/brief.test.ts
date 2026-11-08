@@ -31,6 +31,10 @@
 // 15. The reviewer omits shown defects or weakens impact and scope rules.
 // 16. The judgement rule substitutes the default for a configured confidence
 //     floor, including zero, while the other brief rules use that floor.
+// 17. A whole-repo review (`review --all`) states the default 0.7 floor in
+//     its brief while checkSubmission applies the host's confidenceFloor
+//     (issue 277): the whole-repo branch of buildReviewerBrief dropped the
+//     floor it was given instead of passing it on to answerBlock.
 import { describe, expect, it } from "vitest";
 import { buildBrief, buildReviewerBrief, buildWholeRepoBrief } from "./brief.js";
 import { selectLenses } from "./lenses.js";
@@ -226,6 +230,13 @@ describe("10. the reviewer brief's diff section", () => {
     expect(text).toContain("Raise findings with evidence you can point at, with confidence set honestly. Anchor each on an added or modified line or a deletion anchor.");
     expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
     expect(text).toContain("`severity` reflects impact on users or the system, not your confidence");
+  });
+
+  it("states the host's confidence floor in a whole-repo brief, not the 0.7 default (issue 277)", () => {
+    const { text } = buildReviewerBrief({ change: makeChange(), scan: makeScan(), lenses: [], config: makeConfig(), secrets: [], confidenceFloor: 0.8, whole: { hot: [], graphNote: null, inventory: [] } });
+    expect(text).toContain("Findings at 0.8 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
+    expect(text).toContain("Raise every defect you can show from the code with confidence 0.5 or higher. Set confidence honestly. Findings under 0.8 are shown as possible issues and never counted.");
+    expect(text).not.toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict.");
   });
 
   it("names the files to open with their changed lines and deletions, and says the rest is already shown", () => {
