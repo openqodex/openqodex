@@ -114,6 +114,9 @@ it("the trend reads the judge disagreement of the calibration the run's record p
   expect(judgeDisagreement(index, { release: "rel-a" }, "martian")).toBeNull();
   expect(judgeDisagreement(index, { release: null }, "greptile")).toBeNull();
   expect(judgeDisagreement(index, { release: "rel-missing" }, "greptile")).toBeNull();
+  // A suite with no board, whose record pins a calibration file that is gone, reads no disagreement and does not throw.
+  write(join(index, "comparisons/rel-gone.json"), { calibrations: [{ file: "index/calibration/gone.json" }] });
+  expect(judgeDisagreement(index, { release: "rel-gone" }, undefined)).toBeNull();
 });
 
 describe("judging the sample twice", () => {

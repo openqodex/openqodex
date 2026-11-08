@@ -168,7 +168,11 @@ export async function main(argv = process.argv.slice(2)) {
     if (judgeFailures) record.judgeFailures = judgeFailures;
     const exitCode = finalizeCalibration(record);
     settleWith(counters);
+    if (JSON.stringify(installedBuild()) !== JSON.stringify(build)) throw new Error("product build changed during calibration");
     if (twice && exitCode === 0) {
+      // The paid calibration is saved before the judge-twice passes.
+      // A failed pass then leaves it on disk without judgeVariability.
+      writeCalibration(output, record, form);
       // The pass forecast: the calibration's own cost per review, times the sample.
       const units = name === "greptile" ? inputs.cases.length : Object.keys(inputs.data).length;
       const sample = sampleOf(name, inputs);
@@ -176,7 +180,6 @@ export async function main(argv = process.argv.slice(2)) {
       record.judgeVariability = await judgeTwice({ sample, classes, forecastUsd, wave, waveRun, pass: (k) => twicePass(name, k, { inputs, form, run, startedAt, python }) });
       console.log(`judge twice: ${record.judgeVariability.disagree} of ${record.judgeVariability.labels} labels differ between the two passes (${(100 * record.judgeVariability.rate).toFixed(2)} percent)`);
     }
-    if (JSON.stringify(installedBuild()) !== JSON.stringify(build)) throw new Error("product build changed during calibration");
     writeCalibration(output, record, form);
     for (const [name, c] of Object.entries(counts.byClass)) console.log(`${name}: ${c.agree}/${c.total} agree (${(100 * c.agree / c.total).toFixed(2)} percent), ${c.disagree} disagree`);
     console.log(`total: ${counts.agree} agree, ${counts.disagree} disagree; cost USD ${record.costUsd.toFixed(6)}`);

@@ -200,7 +200,7 @@ export function unhealthyReviews(folder) {
 // Attaching refuses a run with an unhealthy review unless the record's
 // exceptions block names each one, so none is counted as a miss silently.
 export function attachRefusal(record, runId, folder) {
-  const excused = new Set((record.exceptions ?? []).filter((x) => x.runId === runId).map((x) => x.jobId));
+  const excused = new Set((Array.isArray(record.exceptions) ? record.exceptions : []).filter((x) => object(x) && x.runId === runId).map((x) => x.jobId));
   const left = unhealthyReviews(folder).filter((u) => !excused.has(u.jobId));
   if (left.length === 0) return null;
   return `run ${runId} has ${left.length} unhealthy review${left.length === 1 ? "" : "s"}; name each in the record's exceptions block as { runId, jobId, why } to attach it as a miss:\n${left.map((u) => `${u.jobId}: ${u.reason}`).join("\n")}`;
@@ -292,6 +292,8 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     boards[name].judgeAgreement = judgeAgreement;
   }
   for (const name of rulings.keys()) need(calibrationBoards.has(name), `calibration ruling ${name} has no calibration record`);
+  // The exceptions shape is checked before the run loop, which reads it.
+  need(record.exceptions === undefined || (Array.isArray(record.exceptions) && record.exceptions.every((x) => object(x) && text(x.runId) && text(x.jobId) && text(x.why))), "comparison exceptions must each name runId, jobId and why");
   need(Array.isArray(record.runs), "comparison runs must be an array");
   const runs = new Set();
   for (const r of record.runs) {
@@ -339,7 +341,6 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     const excused = (record.exceptions ?? []).some((x) => object(x) && x.runId === r.runId && x.jobId === "*" && text(x.why));
     need(repeats === null || excused, `${repeats}; or name the run in the record's exceptions block as { runId, jobId: "*", why }`);
   }
-  need(record.exceptions === undefined || (Array.isArray(record.exceptions) && record.exceptions.every((x) => object(x) && text(x.runId) && text(x.jobId) && text(x.why))), "comparison exceptions must each name runId, jobId and why");
   const a = record.acceptance;
   need(object(a) && ["person", "date", "hash"].every((f) => typeof a[f] === "string"), "comparison acceptance must give person, date and hash");
   const unsigned = a.person === "" && a.date === "" && a.hash === "";

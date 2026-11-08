@@ -235,7 +235,8 @@ function leaves(v, at = "", out = new Map()) {
 // The judge's disagreement with itself for a run's board: the judgeVariability
 // rate of the calibration its comparison record pins, or null.
 export function judgeDisagreement(index, entry, board) {
-  if (!entry.release) return null;
+  // A suite with no board has no disagreement to read.
+  if (!entry.release || !board) return null;
   const file = join(index, "comparisons", `${entry.release}.json`);
   if (!existsSync(file)) return null;
   for (const ref of JSON.parse(readFileSync(file, "utf8")).calibrations ?? []) {

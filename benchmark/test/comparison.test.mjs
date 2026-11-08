@@ -350,7 +350,9 @@ describe("frozen comparisons", () => {
     const attached = attach(f, run.entry.runId);
     expect(attached.status, attached.stderr).toBe(0);
     expect(read(join(f.root, "comparison.json")).runs.map((r) => r.runId)).toEqual([run.entry.runId]);
-    for (const exceptions of [{}, [{ runId: run.entry.runId, jobId: job.jobId }]]) expect(() => validateComparison({ ...f.record, exceptions }, f.options)).toThrow(/exceptions must each name runId, jobId and why/);
+    // A malformed exceptions block gets the shape message, not a TypeError, while the record holds a run.
+    const held = read(join(f.root, "comparison.json"));
+    for (const exceptions of [{}, [null], [{ runId: run.entry.runId, jobId: job.jobId }]]) expect(() => validateComparison({ ...held, exceptions }, f.options)).toThrow(/exceptions must each name runId, jobId and why/);
   });
   it("a run with a null board block does not attach", () => {
     const f = fixture("greptile", true); const run = runFixture(f);

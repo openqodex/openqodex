@@ -198,7 +198,7 @@ export async function main(argv = process.argv.slice(2), { root = benchRoot } = 
     const counts = relay?.counts();
     let spent = null;
     try {
-      spent = counts && counts.requests > 0 ? costOfUsage(counts.usage, judge.id) : 0;
+      spent = counts?.requests > 0 ? costOfUsage(counts.usage, judge.id) : 0;
     } catch {
       spent = null;
     }
