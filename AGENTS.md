@@ -21,7 +21,7 @@ OpenQodex is open source AI code review for Claude Code and Codex. It runs befor
 ## The three tiers
 
 - The fast tier, `pnpm gate:fast` (`scripts/gate-fast.sh`): the shipped instruction templates, build, typecheck, lint, the unit tests of the changed packages and every package that depends on them, the skill and plugin manifests, the config docs, the docs index, the docs facts, the benchmark results and the private material scrub. A change outside `packages/`, or no `origin/main` to compare with, runs every unit test; `--all` does too. It must be green on your machine before every push.
-- The real-programs tier, `pnpm gate` (`scripts/gate.sh`): the fast tier's checks with every unit test, plus the end-to-end tests and the golden run (the review of the demo's planted change, compared file by file with `tests/golden/expected`). It runs real scanners and real git, and no model: the model cases skip and print why.
+- The real-programs tier, `pnpm gate` (`scripts/gate.sh`): the fast tier's checks with every unit test, plus a check that the required scanners are installed (so a scanner case cannot skip), the speed-ratio tests (`OPENQODEX_GROWTH_TESTS=1`), the end-to-end tests and the golden run (the review of the demo's planted change, compared file by file with `tests/golden/expected`). It runs real scanners and real git, and no model: the model cases skip and print why.
 - The real-model tier, `pnpm gate:model`: sets `OPENQODEX_MODEL_TESTS=1` and runs the model cases of the end-to-end tests, then the planted scan sample. It refuses to run when `CI` is set, fails when a reviewer login is missing, and fails unless the model cases ran and passed. A maintainer runs it once per release, before the version pull request merges.
 - In CI, an ordinary pull request and its merge queue run get the fast tier, on Linux only. CI's fast tier runs every unit test, not only the changed packages', and leaves out the end-to-end tests and the golden run.
 - CI runs the real-programs tier in four cases: a push to `main`; a merge queue run whose merge commit message names `/changeset-release/main`; a pull request from the branch `changeset-release/main` of this repository; a pull request with the label `full-ci`. In CI it runs on Linux and macOS, with the scanner-only benchmark.
@@ -66,6 +66,7 @@ OpenQodex is open source AI code review for Claude Code and Codex. It runs befor
 - `.github/actions/gate/action.yml` runs the steps of `scripts/gate.sh` one for one; change both together. `scripts/docs-facts.mjs` fails when they differ.
 - The scanner-only benchmark runs in CI only. It installs every scanner, which needs Ruby 3.3 and Go 1.26, so `pnpm gate` does not run it.
 - The first end-to-end run downloads the pinned scanners. In CI the end-to-end tests fail when any scanner is missing.
+- The speed-ratio tests compare CPU time on two input sizes against a bound of 8. On a loaded runner a ratio can pass 8 with no code change (issues 215, 275, 296), so they run only on the real-programs tier. A red main run from one of them blocks the release until a maintainer reruns the job; two reds in a row on one file is a bug, not noise.
 
 ## Writing
 

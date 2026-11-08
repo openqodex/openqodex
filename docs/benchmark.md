@@ -571,6 +571,7 @@ A group moves to `tune` only while `score` keeps at least 20 cases without it.
 Today the four clean Discourse cases are in `tune`, and every other clean case is in `score`.
 The floor of 20 is a feasibility floor: the most clean cases the split can hold.
 It is not a claim that 20 cases are enough to measure a small change.
+`score` means no instruction was tuned on the case. It does not mean its truth was never seen: the wave 9 judge wrote a reason beside every golden comment, score cases included, and those reasons are committed in the wave 9 entries. A reader of the repository can see them; the reviewer under test cannot.
 `exposureSplitProblems` in `benchmark/lib/suites.mjs` recomputes the placement and the counts, and the ingest refuses a split that differs.
 
 Every run of a suite whose split has exposure on record names its purpose with `--purpose tune|score|diagnostic`. Today that is Greptile and Martian.

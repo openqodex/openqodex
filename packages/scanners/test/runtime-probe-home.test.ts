@@ -24,8 +24,9 @@
 //    settings.toml there before it fails.
 // 7. An unreadable Go environment file makes the whole check reject.
 // 8. The strict check alone (issue 224), as `openqodex doctor --require-all`
-//    and the publish check run it, probes the runtimes under the OpenQodex
-//    home (cache/runtime-probe) and leaves that folder there.
+//    and the publish check run it, probed the runtimes under the OpenQodex
+//    home (cache/runtime-probe) and left that folder there. It now probes in
+//    a folder of its own and leaves the home empty.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -213,7 +214,7 @@ describe("an unreadable Go environment file makes the whole check reject", () =>
   }, 120_000);
 });
 
-describe("the strict check alone leaves its runtime probe folder in the OpenQodex home", () => {
+describe("the strict check alone writes nothing into the OpenQodex home", () => {
   it("leaves an empty OpenQodex home empty after checkScanners on an empty install root", () => {
     const home = tempDir("oq-check-home-");
     const root = join(tempDir("oq-check-root-"), "tools");
