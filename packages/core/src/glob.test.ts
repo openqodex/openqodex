@@ -10,7 +10,8 @@
 //    against a long path and holds the review for minutes or hours.
 // 8. A pattern too long to match in bounded time is matched anyway.
 // 9. The heaviest config the config's byte cap admits, 1,000 globs at the
-//    length cap, does not finish against a change of 100 files.
+//    length cap, does not finish against a change of 100 files and one long
+//    path that the star globs match up to its suffix.
 import { describe, expect, it } from "vitest";
 import { CONFIG_MAX_BYTES, parseConfig } from "./config.js";
 import { MAX_GLOB, matchesGlob } from "./glob.js";
@@ -86,12 +87,13 @@ describe("matchesGlob", () => {
 
   // The shape the Action accepts at its largest: a config of 1,000 globs at
   // the length cap, about all that fits under the config's byte cap, against
-  // a change of 100 files. Every glob runs against every path, since none
-  // matches. It sets no time limit of its own; it shows the work finishes.
-  // The long timeout only ends a run that hangs. One more path has 600
-  // characters the star globs match and a suffix they do not, so the old
-  // backtracking matcher hangs on it; the ordinary paths fail it fast.
-  it("finishes 1,000 globs at the length cap against 100 paths", () => {
+  // a change of 101 files: 100 ordinary paths and one long one. The long one
+  // has 600 characters the star globs match and a suffix they do not, so the
+  // old backtracking matcher hangs on it; the ordinary paths fail it fast.
+  // Every glob runs against every path, since none matches. It sets no time
+  // limit of its own; it shows the work finishes. The long timeout only ends
+  // a run that hangs.
+  it("finishes 1,000 globs at the length cap against 100 paths and one long one", () => {
     const shapes = ["*a".repeat(MAX_GLOB / 2), `${"**a".repeat(341)}a`, "?".repeat(MAX_GLOB), `${"a/".repeat(MAX_GLOB / 2 - 1)}**`];
     const lines = Array.from({ length: 1000 }, (_, i) => `      - "${shapes[i % shapes.length]}"\n`);
     const source = `review:\n  paths:\n    exclude:\n${lines.join("")}`;
