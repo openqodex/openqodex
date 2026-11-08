@@ -1,6 +1,6 @@
 # Scanners
 
-OpenQodex has twenty-two built-in scanners. Most scanners run when the change holds a file they read. Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. OpenQodex pins each downloaded scanner to one version. OpenQodex does not use a copy of a built-in scanner from your `PATH`.
+OpenQodex has twenty-two built-in scanners. Most scanners run when the change holds a file they read. Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. It skips the paths you exclude. OpenQodex pins each downloaded scanner to one version. OpenQodex does not use a copy of a built-in scanner from your `PATH`.
 
 ## Terms
 
@@ -48,7 +48,7 @@ OpenQodex keeps the scanner findings on changed lines. Then it drops findings in
 | Security problems in code | semgrep | 1.94.0 | any file | Python 3.11, downloaded through uv; the Semgrep registry |
 | Security problems in code | bandit | 1.9.4 | a `.py` or `.pyi` file | the same Python as semgrep |
 | Security problems in code | brakeman | 6.2.1 | a Ruby or Rails file in a Rails app | Ruby 3.0 or newer |
-| Dependencies with known vulnerabilities | osv-scanner | 2.6.0 | every supported lockfile in the repository at every review and scan of a change | osv.dev |
+| Dependencies with known vulnerabilities | osv-scanner | 2.6.0 | every supported lockfile in the repository at every review and scan of a change, less excluded paths | osv.dev |
 | Dependencies with known vulnerabilities | cargo-deny | 0.20.2 | `Cargo.lock` | Cargo; github.com for the RustSec database |
 | Lint | ruff | 0.8.4 | a `.py` or `.pyi` file | nothing |
 | Lint | oxlint | 1.86.0 | a JavaScript or TypeScript file | nothing |

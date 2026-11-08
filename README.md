@@ -30,7 +30,7 @@ AI agents: read the [agent guide](https://github.com/openqodex/openqodex/blob/ma
 
 OpenQodex reviews your code change before you push it. Your change is the commits you have not pushed plus everything uncommitted. OpenQodex runs on your machine, from your coding agent or your terminal.
 
-First, OpenQodex runs the scanners that fit the files you changed. A scanner is a program that checks code without a model, such as gitleaks or semgrep. A finding is one problem at one place in the code, with a severity. OpenQodex keeps the scanner findings on the lines you changed. It drops findings in test fixtures and in rules you switched off. Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. Advisories outside the changed lines are shown, never counted, and kept out of the reviewer's brief. Each advisory names its fixed versions, or says no fixed version is published.
+First, OpenQodex runs the scanners that fit the files you changed. A scanner is a program that checks code without a model, such as gitleaks or semgrep. A finding is one problem at one place in the code, with a severity. OpenQodex keeps the scanner findings on the lines you changed. It drops findings in test fixtures and in rules you switched off. Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. It skips the paths you exclude. Advisories outside the changed lines are shown, never counted, and kept out of the reviewer's brief. Each advisory names its fixed versions, or says no fixed version is published.
 
 Then OpenQodex starts reviewers: separate Claude Code or Codex processes on your own login. By default, a reviewer is a fresh process of the agent you work in, with no memory of your session. When that agent cannot review, or you run `review` in a terminal, OpenQodex starts the first agent that can. Finder sessions read each part of the change, with the code that calls it, and propose candidates with a quoted line as evidence. A script checks every quote against the code. Verifier sessions then judge each candidate and each scanner finding against the code, and must confirm or refute every one with a reason. Scripts check that every scanner finding was answered and that every changed line was given to a reviewer. Style and naming notes are shown as observations and do not block. Then you choose which findings your agent fixes.
 
@@ -95,7 +95,7 @@ OpenQodex itself collects no usage data. The built-in scanners, as OpenQodex run
 - Inside the Codex sandbox, a second Codex process does not start. So Codex cannot be the reviewer there. OpenQodex tested this with codex-cli 0.160.0 on macOS.
 - No review on your own API key, except in the GitHub Action.
 - No Homebrew formula, no install script and no Docker image in this version. Install through npm.
-- No offline copy of the vulnerability databases. osv-scanner checks every lockfile at every review and scan of a change, through osv.dev. cargo-deny downloads the RustSec advisory database.
+- No offline copy of the vulnerability databases. osv-scanner checks every lockfile at every review and scan of a change, through osv.dev. It skips the paths you exclude. cargo-deny downloads the RustSec advisory database.
 - No review finds every problem. The report names each stage that did not run.
 
 <!-- benchmark-results:start -->
@@ -121,7 +121,7 @@ AACR-Bench is a set of real pull requests. Its own evaluator gives the board num
 
 ## Built-in scanners
 
-OpenQodex has 22 built-in scanners. Most scanners run when your change holds a file they read. osv-scanner checks every supported lockfile in the repository at every review and scan of a change. Some scanners also read the project or folder around a changed file. Each scanner that needs a download gets it on first use. OpenQodex pins each download to one version.
+OpenQodex has 22 built-in scanners. Most scanners run when your change holds a file they read. osv-scanner checks every supported lockfile in the repository at every review and scan of a change. It skips the paths you exclude. Some scanners also read the project or folder around a changed file. Each scanner that needs a download gets it on first use. OpenQodex pins each download to one version.
 
 | What it checks | Built-in scanners |
 |---|---|
