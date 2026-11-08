@@ -264,6 +264,48 @@ export function martianEvaluations({ data, candidates, dedup, evaluations, total
   return { tools, problems: typeof totals?.beta === "number" ? [] : ["score_profiles gave no beta"] };
 }
 
+// The golden categories Martian's Core profile counts (score_profiles.py
+// 19-25), as lib/score.mjs readMartianEvaluation checks the official core.
+const MARTIAN_CORE = new Set(["bug", "security", "concurrency", "data", "api", "perf", "test_gap", "doc_defect"]);
+
+/**
+ * The Core totals of one evaluation (martianEvaluations) recomputed over the
+ * cases `keep` names (case names), with the official rules: TP and FN over
+ * the core golden comments of those cases, FP the distinct (pull request,
+ * candidate text) official false positives of those cases. `data` is
+ * benchmark_data.json. On every case it equals the official Core totals.
+ */
+export function martianCoreOn(evaluation, data, keep) {
+  const names = new Set(keep);
+  const kept = new Set(Object.entries(data).filter(([, e]) => names.has(e.openqodex?.case)).map(([url]) => url));
+  const golden = Object.entries(data).filter(([url]) => kept.has(url)).flatMap(([, e]) => martianGolden(e.openqodex.caseId, martianTruth({ comments: e.golden_comments ?? [] })));
+  const found = new Set(evaluation.matches.filter((m) => m.verdict === "match").map((m) => m.goldenId));
+  const core = golden.filter((g) => MARTIAN_CORE.has(g.rawCategory));
+  const tp = core.filter((g) => found.has(g.goldenId)).length;
+  const fn = core.length - tp;
+  const fp = new Set(evaluation.candidates.filter((c) => c.officialFp && kept.has(c.prUrl)).map((c) => JSON.stringify([c.prUrl, c.extractedText]))).size;
+  const precision = tp + fp === 0 ? 0 : tp / (tp + fp);
+  const recall = tp + fn === 0 ? 0 : tp / (tp + fn);
+  const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+  return { cases: kept.size, tp, fp, fn, precision, recall, f1 };
+}
+
+/** The Martian cases the split's exposure block marks unexposed ("none"), by name. */
+export const unexposedCases = (split) => Object.entries(split?.exposure?.cases ?? {}).filter(([, e]) => e.reasons.length === 1 && e.reasons[0] === "none").map(([name]) => name).sort();
+
+/** One line per tool: the Core score on all cases and on the unexposed cases, side by side. */
+export function martianSideBySide(tools, data, split) {
+  const unexposed = unexposedCases(split);
+  const all = Object.values(data).map((e) => e.openqodex?.case);
+  const show = (c) => `precision ${c.precision.toFixed(3)}, recall ${c.recall.toFixed(3)}, F1 ${c.f1.toFixed(3)} on ${c.cases} cases`;
+  return tools.map((t) => {
+    if (!t.evaluation) return { tool: t.tool, all: null, unexposed: null, line: `  ${t.tool}: not scored` };
+    const a = martianCoreOn(t.evaluation, data, all);
+    const u = martianCoreOn(t.evaluation, data, unexposed);
+    return { tool: t.tool, all: a, unexposed: u, line: `  ${t.tool}: all ${show(a)}; unexposed ${show(u)}` };
+  });
+}
+
 /** Check saved reviews and frozen truth hashes; never read pinned truth or work/. */
 export function readMartianOutside(folder, jobs, specs, options = {}) {
   const out = join(folder, "outside", "martian");

@@ -265,6 +265,7 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     need(sha256(bytes) === r.sha256, `run ${r.runId} no longer matches its hash`);
     const e = JSON.parse(bytes.toString("utf8"));
     need(e.runId === r.runId && entryProblems(e).length === 0, `run ${r.runId} has an invalid index entry`);
+    need(e.purpose !== "diagnostic", `run ${r.runId} is a diagnostic run, which never counts in a comparison`);
     const suite = record.suites[e.suite];
     need(suite && e.splitHash === suite.splitHash && Array.isArray(e.caseIds) && e.caseIds.length > 0 && e.caseIds.every((id) => Object.entries(suite.caseHashes).some(([name, h]) => id === `${e.suite}/${name}@${h.slice(0, 8)}`)), `run ${r.runId} differs from the comparison suite`);
     const ids = suiteCaseIds(e.suite, suite);
@@ -376,6 +377,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       // A stopped run lists the cases it planned, not the ones it reviewed, so
       // its unreviewed cases would count as misses under a full case list.
       need(entry.ended?.how === "finished", `run ${runId} ended ${entry.ended?.how ?? "unknown"}; only a finished run attaches`);
+      need(entry.purpose !== "diagnostic", `run ${runId} is a diagnostic run, which never attaches`);
       need(record.suites?.[entry.suite], `run ${runId} differs from the comparison suite`);
       const unhealthy = attachRefusal(record, runId, reference(benchRoot, `results/${runId}`, "run folder"));
       need(unhealthy === null, unhealthy);

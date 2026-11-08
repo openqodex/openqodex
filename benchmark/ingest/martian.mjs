@@ -386,7 +386,11 @@ export async function ingestMartian({ boards, cache = cacheRoot(), offline = fal
 // a new file.
 export function writeMartianIngest(result, { root = benchRoot } = {}) {
   const splitPath = join(root, SUITES.martian.split);
-  const problems = existsSync(splitPath) ? splitRewriteProblems(JSON.parse(readFileSync(splitPath, "utf8")), JSON.parse(result.files[SUITES.martian.split])) : [];
+  const old = existsSync(splitPath) ? JSON.parse(readFileSync(splitPath, "utf8")) : null;
+  const problems = old ? splitRewriteProblems(old, JSON.parse(result.files[SUITES.martian.split])) : [];
+  // The exposure on record comes from saved reading notes, not the golden
+  // files, so a re-ingest keeps it as the file holds it.
+  if (old?.exposure) result.files[SUITES.martian.split] = `${JSON.stringify({ ...JSON.parse(result.files[SUITES.martian.split]), exposure: old.exposure }, null, 2)}\n`;
   if (problems.length > 0) {
     throw new Error(`${splitPath} exists, and a new split is a new file: write it as ${SPLIT_NAME.replace(/\d+$/, (n) => String(Number(n) + 1))}, or move the old file to the Trash if no run has used it. The new split would change it:\n  ${problems.join("\n  ")}`);
   }

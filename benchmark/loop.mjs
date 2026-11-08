@@ -144,7 +144,7 @@ function runOf(folder, role) {
 }
 
 // Why a run is held out of the loop (failure 2): the test split, a suite
-// the loop never reads, or not a review run.
+// the loop never reads, not a review run, or a purpose other than tune.
 function heldOut(run) {
   const m = run.manifest;
   const out = [];
@@ -152,6 +152,8 @@ function heldOut(run) {
   const origin = originOf(run.suite);
   if (origin === null || origin === "injected") out.push(`${run.runId} is a run of the ${run.suite} suite, which is held out of the loop`);
   if ((m.mode ?? "review") !== "review") out.push(`${run.runId} is a ${m.mode} run; the reviewer loop compares review runs`);
+  // A loop change is tuning: a run that named another purpose is not read.
+  if (m.purpose !== undefined && m.purpose !== "tune") out.push(`${run.runId} is a ${m.purpose} run; the reviewer loop tunes, and reads tune runs only`);
   return out;
 }
 

@@ -76,11 +76,11 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { boardFolder, checkoutState, leaksIn, outsideRepo, redactor } from "../../lib/board-files.mjs";
-import { MARTIAN_BETA, MARTIAN_BOARD, MARTIAN_CITED, MARTIAN_PROFILES, MARTIAN_STEPS, martianEvaluations, releaseGate } from "../../lib/martian-board.mjs";
+import { MARTIAN_BETA, MARTIAN_BOARD, MARTIAN_CITED, MARTIAN_PROFILES, MARTIAN_STEPS, martianEvaluations, martianSideBySide, releaseGate } from "../../lib/martian-board.mjs";
 import { endpointSecrets, loadModelEnv, modelEnvPath, probedDeployment } from "../../lib/model-env.mjs";
 import { benchRoot } from "../../lib/cases.mjs";
 import { validateComparison, validateRunManifest } from "../../lib/comparison.mjs";
-import { canonicalJson } from "../../lib/suites.mjs";
+import { canonicalJson, readSuite } from "../../lib/suites.mjs";
 import { accessLogPath } from "../convert/martian.mjs";
 import { withoutCore } from "./aacr-judge.mjs";
 import { openWave, reserve, settle } from "../../lib/wave.mjs";
@@ -234,7 +234,7 @@ export async function main(argv = process.argv.slice(2), { root = benchRoot } = 
   reserve(wave, { id, path: "judge-martian", forecastUsd });
   // Their pipeline reports no cost: settled at the forecast, estimated. A kill leaves it standing.
   try {
-    return await runPipeline({ out, convert, checkout, python, state, judge, settings });
+    return await runPipeline({ out, convert, checkout, python, state, judge, settings, split: readSuite("martian", { root }).split });
   } finally {
     settle(wave, id, forecastUsd, { estimated: true });
   }
@@ -265,7 +265,7 @@ export function martianForecast(dataFile, sent, { root = benchRoot } = {}) {
  * returns 0, or 1 with the problems printed. main() verifies the checkout
  * first.
  */
-export async function runPipeline({ out, convert, checkout, python, state, judge, settings, calibration = false, signal, beforeStep }) {
+export async function runPipeline({ out, convert, checkout, python, state, judge, settings, calibration = false, signal, beforeStep, split = null }) {
   const secrets = endpointSecrets(settings.baseUrl, settings.apiKey);
   const plan = calibration ? calibrationSteps(judge.id) : steps(judge.id);
   const work = join(out, "work");
@@ -335,6 +335,13 @@ export async function runPipeline({ out, convert, checkout, python, state, judge
     }
     tools.push({ tool: t.tool, evaluation: ok ? relative(out, path) : null, problems: t.problems, core: t.evaluation?.totals?.core ?? null });
   }
+  // The Core score on the cases no reader saw, beside the one on all cases
+  // (the exposure block of the Martian split).
+  const sideBySide = split?.exposure && Object.values(data).some((e) => split.exposure.cases[e.openqodex?.case]) ? martianSideBySide(read.tools, data, split) : [];
+  for (const row of tools) {
+    const side = sideBySide.find((r) => r.tool === row.tool);
+    if (side) row.unexposed = side.unexposed;
+  }
   for (const t of held) tools.push({ tool: t.tool, evaluation: null, problems: [`held by the converter: ${t.why}`], core: null });
   const leaks = filesUnder(out).filter((p) => leaksIn(readFileSync(p, "latin1"), secrets));
   problems.push(...read.tools.flatMap((t) => t.problems), ...leaks.map((p) => `${relative(out, p)} holds the judge's key or base URL; move outside/martian to the Trash`));
@@ -360,6 +367,10 @@ export async function runPipeline({ out, convert, checkout, python, state, judge
   writeFileSync(join(out, "eval.json"), `${JSON.stringify(record, null, 2)}\n`);
   console.log(`\nMartian's ${MARTIAN_PROFILES.join(", ")} totals are in each tool name's evaluation.json; the Core profile:`);
   for (const t of tools) console.log(`  ${t.tool}: ${t.core ? `precision ${t.core.precision.toFixed(3)}, recall ${t.core.recall.toFixed(3)}, F1 ${t.core.f1.toFixed(3)}` : "not scored"}`);
+  if (sideBySide.length > 0) {
+    console.log("The Core profile on all cases and on the cases no reader saw (unexposed), side by side:");
+    for (const r of sideBySide) console.log(r.line);
+  }
   console.log(`eval.json written: ${join(out, "eval.json")}.`);
   if (problems.length > 0) {
     console.error([...new Set(problems)].join("\n"));

@@ -9,6 +9,7 @@
 // 8. The README shows an AACR-Bench row with no board numbers and no ruled hit, or the page drops it.
 // 9. The README admits a board-scored row but drops its six board metrics.
 // 10. An accepted entry's board numbers are edited after they were recorded, and the page shows them.
+// 11. A number tuned on its own cases (tunedOn) is shown as if it were a score.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -202,4 +203,14 @@ it("rejects an accepted entry whose board numbers were edited after they were re
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`the board numbers of ${runId} are not the ones recorded`);
   }
+});
+
+it("labels the number of an entry tuned on its own cases", () => {
+  const root = fixture();
+  const { runId } = aacrGroup(root);
+  const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
+  putRecorded(root, { ...entry, tunedOn: true });
+  const r = run(root);
+  expect(r.status, r.stderr).toBe(0);
+  expect(page(root), "a tuned number is shown without its label").toMatch("(tuned on these cases)");
 });

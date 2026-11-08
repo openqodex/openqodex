@@ -72,6 +72,7 @@ import { heldOutAccessPath } from "../../lib/index.mjs";
 import { martianConversion, readBoardReviews } from "../../lib/board-reviews.mjs";
 import * as licence from "../../lib/licence.mjs";
 import { MARTIAN_BOARD, npmRegistryAnswer, REGISTRY, releaseGate } from "../../lib/martian-board.mjs";
+import { PURPOSES, needsPurpose, readSuite } from "../../lib/suites.mjs";
 
 const firstLine = (error) => String(error?.message ?? error).split("\n")[0];
 
@@ -95,6 +96,11 @@ export async function convertRun(folder, { root = benchRoot, cache = licence.cac
   if (suite === "greptile") throw new Error("Greptile uses benchmark/outside/boards/greptile-run.mjs, with caught or missed per case against the chosen truth set");
   if (suite !== "martian") throw new Error(`${folder}: the run is of suite ${suite}, not martian; only a run on Martian's cases is converted for its board`);
   if (manifest.mode === "scan") throw new Error(`${folder}: a scanner-only run shows the developer no finding, so it has nothing to convert for the board`);
+  // A tune run never reaches the board, which reads the truth of every suite
+  // case; a run on a split with exposure on record names its purpose.
+  if (manifest.purpose === "tune") throw new Error(`${folder}: a tune run is not converted for Martian's board, which reads the truth of every suite case`);
+  const suiteNow = readSuite("martian", { root });
+  if (needsPurpose(suiteNow.split) && manifest.splitHash === suiteNow.splitHash && !PURPOSES.includes(manifest.purpose)) throw new Error(`${folder}: the run names no purpose, and ${suiteNow.split.name} has exposure on record: convert a score or diagnostic run`);
   const gate = await releaseGate(manifest, { registry, root });
   const out = boardFolder(folder, "martian");
   if (existsSync(out)) throw new Error(`${out} exists already: the run was converted before (and maybe judged). Move that folder to the Trash to convert it again.`);

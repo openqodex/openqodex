@@ -517,6 +517,7 @@ export function resumeProblems(earlier, now) {
   same("split file hash", earlier.splitHash ?? null, now.splitHash ?? null);
   same("comparison release", earlier.release, now.release);
   same("subset", earlier.subset ?? null, now.subset ?? null);
+  same("purpose", earlier.purpose ?? null, now.purpose ?? null);
   if (earlier.cases !== undefined || now.cases !== undefined) same("cases", earlier.cases, now.cases);
   if (earlier.configs !== undefined || now.configs !== undefined) same("configurations", earlier.configs, now.configs);
   if (earlier.repeat !== undefined || now.repeat !== undefined) same("repeats", earlier.repeat, now.repeat);

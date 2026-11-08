@@ -12,7 +12,7 @@ import { cacheRoot } from "../lib/licence.mjs";
 import { comparisonHash } from "../lib/comparison.mjs";
 import { hash } from "../lib/calibration.mjs";
 import { attemptDir, planJobs, runManifest, sampleRecord } from "../lib/runner.mjs";
-import { rawPath, readCase, readSuite, specCopy, truthOf } from "../lib/suites.mjs";
+import { SUITES, rawPath, readCase, readSuite, specCopy, truthOf } from "../lib/suites.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 import { newWave } from "../lib/wave.mjs";
 import { convertOpts, finding, fixturePlan, savedRun as martianRun, suite as martianSuite } from "./martian-board-fixture.mjs";
@@ -41,7 +41,7 @@ function savedRun({ planned = cases.slice(0, 2), reviewers = ["model:scripted"],
   const folder = tempDir("oq-greptile-board-");
   const { jobs, configs } = planJobs({ cases: planned.map((c) => c.name), caseIds: Object.fromEntries(planned.map((c) => [c.name, c.id])), reviewers, graph: native === null ? ["on"] : ["off"], repeat: 1 });
   const pins = Object.values(fixtureReviewers).filter((r) => reviewers.includes(r.reviewer));
-  const settings = { path: pins[0].path, web: pins[0].web, build: { ...fixtureBuild, cliVersion: fixtureBuild.version }, reviewers: Object.fromEntries(pins.map((r) => [r.reviewer, { model: r.model, version: r.version, settings: { effort: r.effort, maxOutputTokens: r.maxOutputTokens } }])), runId: "greptile-board-test", mode: "review", suite: "greptile", split: "dev", splitHash: suite.splitHash, cases: planned.map((c) => c.name), caseIds: planned.map((c) => c.id), caseHashes: Object.fromEntries(planned.map((c) => [c.name, c.hash])), configs, repeat: 1 };
+  const settings = { path: pins[0].path, web: pins[0].web, build: { ...fixtureBuild, cliVersion: fixtureBuild.version }, reviewers: Object.fromEntries(pins.map((r) => [r.reviewer, { model: r.model, version: r.version, settings: { effort: r.effort, maxOutputTokens: r.maxOutputTokens } }])), runId: "greptile-board-test", mode: "review", suite: "greptile", split: "test", purpose: "score", splitHash: suite.splitHash, cases: planned.map((c) => c.name), caseIds: planned.map((c) => c.id), caseHashes: Object.fromEntries(planned.map((c) => [c.name, c.hash])), configs, repeat: 1 };
   write(join(folder, "manifest.json"), runManifest({ startedAt: "2026-10-24T00:00:00Z", settings, jobs }));
   for (const c of planned) write(join(folder, "cases", `${c.name}.json`), specCopy(c, truthOf(c, { cache })));
   for (const job of jobs) {
@@ -82,7 +82,7 @@ async function provider({ fail = false } = {}) {
 
 function recordFixture() {
   const root = tempDir("oq-greptile-record-");
-  for (const file of ["outside/boards.json", "suites/greptile/cases.json", "splits/greptile-v1.json", "review-queue/people.json"]) {
+  for (const file of ["outside/boards.json", "suites/greptile/cases.json", SUITES.greptile.split, "review-queue/people.json"]) {
     mkdirSync(dirname(join(root, file)), { recursive: true });
     cpSync(join(benchRoot, file), join(root, file));
   }
@@ -92,6 +92,8 @@ function recordFixture() {
   record.runs = [];
   record.boards = { greptile: record.boards.greptile };
   record.suites = { greptile: record.suites.greptile };
+  // The fixture's own copy pins the split the suite reads now (O12 re-freezes the live record).
+  record.suites.greptile.splitHash = suite.splitHash;
   record.calibrationRulings = record.calibrationRulings.filter((r) => r.board === "greptile");
   const ref = record.calibrations.find((c) => read(join(benchRoot, c.file)).board.name === "greptile");
   const calibration = read(join(benchRoot, ref.file));

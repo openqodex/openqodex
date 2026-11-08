@@ -506,10 +506,10 @@ The `greptile` suite contains the 50 defect-bearing pull requests linked by [Gre
 
 ```
 node benchmark/ingest/greptile.mjs [--offline] [--data-only]
-node benchmark/run.mjs --materialise-only --suite greptile --split dev --reviewers model:scripted
+node benchmark/run.mjs --materialise-only --suite greptile --split dev --purpose tune --reviewers model:scripted
 ```
 
-The ingest writes `benchmark/suites/greptile/cases.json`, its ingest report and `benchmark/splits/greptile-v1.json`. The selected fork metadata and real GitHub licence answers are retained in `sources.json`, with the full response hashes recorded. Repository and licence records come only from those validated answers, never a mutable repository cache. A missing case or unavailable repository refuses ingestion and names the case; the denominator stays 50. All 50 cases are on the development side for reproduction. They overlap Martian's held-out repository groups, so this split permits no independent held-out claim or tuning. `--materialise-only` checks the reconstructed head over the merge base against the upstream trees, with no model calls. Sentry case 3 introduces a gitlink at `sentry-repo`, which the laptop shape cannot preserve; the command above selects the server shape with two commits and still runs no model. `--data-only` fills the pinned raw cache without rewriting the suite.
+The ingest writes `benchmark/suites/greptile/cases.json` and its ingest report, and checks the committed split `benchmark/splits/greptile-v2.json` against the suite. The selected fork metadata and real GitHub licence answers are retained in `sources.json`, with the full response hashes recorded. Repository and licence records come only from those validated answers, never a mutable repository cache. A missing case or unavailable repository refuses ingestion and names the case; the denominator stays 50. The split puts 30 cases in `tune` and 20 in `score`, as the next section says. `--materialise-only` checks the reconstructed head over the merge base against the upstream trees, with no model calls. Sentry case 3 introduces a gitlink at `sentry-repo`, which the laptop shape cannot preserve; the command above selects the server shape with two commits and still runs no model. `--data-only` fills the pinned raw cache without rewriting the suite.
 
 Greptile is scored by `benchmark/outside/boards/greptile-run.mjs`: caught or missed per case against the accepted comparison record's `boards.greptile.profile`. The denominator is every case in the frozen suite. `truthOf` supplies empty line truth and keeps both prose sets apart. Each run saves both sets in its case specs under `truthSets`, keyed by name, with their items, frozen hashes and pinned source identities for the judge. `score.mjs` accepts the run with no line truth items; its line recall does not measure Greptile's caught or missed result. Both the AACR and Martian converters refuse Greptile with one line naming `greptile-run.mjs`. No truth sets are pooled.
 
@@ -542,6 +542,36 @@ The publisher excludes pending and superseded folders.
 Held tool names remain in `input.json` and `eval.json` with the missing sentences and null totals.
 When no model is called, `judgeModel` and `relay` are null.
 
+### Tune and score
+
+The Greptile split has two halves. `tune` is its development side, with 30 cases. `score` is its test side, with 20 cases.
+Exposure is recorded per case in the split file's `exposure` block, from saved files only.
+A case is exposed when someone read its truth while tuning the reviewer. The reasons are:
+
+- `dossier`: a miss dossier was written for the case while tuning (9 cases).
+- `shares-pr-with-read-martian`: the case is the same pull request as a Martian case whose golden comments were read (17 cases).
+- `shares-commits-with-read-martian`: the case has the same base and head commits as such a Martian case (5 cases).
+- `unknown`: the files cannot settle it. No case has this reason today.
+
+A case with no reason is `none`. Every exposed case is in `tune`.
+The 24 clean cases are grouped by repository group.
+The groups are ordered by sha256 of the salt `openqodex-greptile-split-v2` and the group name.
+A group moves to `tune` only while `score` keeps at least 20 cases without it.
+Today the four clean Discourse cases are in `tune`, and every other clean case is in `score`.
+The floor of 20 is a feasibility floor: the most clean cases the split can hold.
+It is not a claim that 20 cases are enough to measure a small change.
+`exposureSplitProblems` in `benchmark/lib/suites.mjs` recomputes the placement and the counts, and the ingest refuses a split that differs.
+
+Every run of a suite whose split has exposure on record names its purpose with `--purpose tune|score|diagnostic`. Today that is Greptile and Martian.
+
+- `tune` reads the `tune` cases only. `selectCases` refuses a score case before any case is read. That holds when the case is named by id, by `--split test`, by `--subset score` or under `--change`. A `--change` run is tuning, so any other purpose with it is refused.
+- `score` reads the `score` cases only. They are the held-out side, so a score run needs `--release` and the release check above. Its access is logged in `benchmark/index/heldout-access.jsonl`.
+- `diagnostic` may read either side under the same gates. A diagnostic run never attaches to a comparison, and `validateComparison` refuses one.
+
+The manifest and the index entry record the purpose. A resume must name the same purpose. The loop reads tune runs only.
+The Greptile judge and the Martian converter refuse a tune run, because they read the truth of every suite case. On a split with exposure on record they also refuse a run that names no purpose.
+An index entry with `tunedOn: true` scored a reviewer that was tuned on the same cases. Wave 9's Greptile run is one. `scripts/benchmark-results.mjs` prints "(tuned on these cases)" beside its number.
+
 ## Martian's offline set
 
 Martian's Code Review Bench (https://github.com/withmartian/code-review-benchmark, MIT) publishes 50 pull requests from cal.com, Discourse, Grafana, Keycloak and Sentry, some of them copies with bugs injected, and 173 golden comments: prose with a severity and a category, and no file or line. In this benchmark they are the `martian` suite, origin `injected`.
@@ -573,6 +603,7 @@ For a local-build run, the Martian judge checks the run against the record befor
 - The converter (`benchmark/outside/convert/martian.mjs`) runs first. It converts only a release run. A release run's manifest names its `release`, and it reviewed either the published package of that release (`run.mjs --package npm:<release>`) or the clean local build an accepted frozen comparison pins, as described above. For an npm release, the converter asks the npm registry, at its fixed address, for that version's integrity again, and refuses a mismatch. Every Martian case is held out. Each conversion appends a line to `benchmark/index/heldout-access.jsonl` before it reads any golden comment. `convert.json` records that line and the sha256 of the manifest it converted. The converter refuses a smoke run, a case with an excluded licence class, an OpenQodex configuration with the graph off, and two configurations that would share a tool name. Unverified-licence cases convert for local judging, and `convert.json` preserves each case's licence class; board submissions still refuse them. The native control goes by `claude-code-control-r<repeat>` and carries no OpenQodex graph setting.
 - It writes `<run>/outside/martian/benchmark_data.json` in Martian's own input shape. Each pull request is keyed by its golden URL and holds the pinned golden comments. It holds one review per tool name, `openqodex-<config>-r<repeat>`: library for a model reviewer, cli-claude for Claude Code, cli-codex for Codex. Each finding shown to the developer is one comment, whose body is one paragraph: `{title}. {problem} {consequence} Fix: {fix}`. A review that failed or never started is sent with no comment, so its pull request stays in Martian's counts. A finding that lacks a title, problem, consequence or fix is held, not dropped: `convert.json` names it and what it lacks. No review of that tool name is sent.
 - Before it judges, the wrapper checks three things. The run's manifest must hash to the sha256 `convert.json` recorded. The access line `convert.json` recorded must be in the access log. The release gate, the registry question included, runs again. It then runs Martian's steps 2, 2.5 and 3 and `score_profiles` on those entries, in `<run>/outside/martian/work`. Their code is never patched. Every working file of the checkout must hash to the blob the pinned commit's tree holds, and no other file may be there. That check reads the files themselves, not git's index. The judge is the deployment `boards.json` names for Martian (GPT-5.2). The base URL and key come from `lib/model-env.mjs` and go only into the environment of the three steps that call the judge. Each output stream passes through a filter of its own, which holds back a possible start of a secret until the next chunk and also replaces URL-encoded forms. `pipeline.log` is written only through it. Afterwards the wrapper checks every file it wrote for the key and URL, also with line breaks taken out. Core files are off. `--dry-run` prints the commands with the values hidden and starts nothing. Martian's client sends the key as a bearer token (`Authorization: Bearer`), not in an `api-key` header; the first judged run checks that the endpoint takes it.
+- The Martian split's `exposure` block marks each case. A case is `golden-read` when its golden comments were read while tuning (22 cases). It is `shares-pr-with-greptile-dossier` when it is the same pull request as an exposed Greptile dossier case (4 more cases). That leaves 24 unexposed cases. After the pipeline, the judge prints each tool name's Core precision, recall and F1 on all cases and on the unexposed cases, side by side. `eval.json` keeps the unexposed numbers in each tool row as `unexposed`. They come from `martianCoreOn` in `benchmark/lib/martian-board.mjs`, with the same rules as the official Core totals.
 - It writes `<run>/outside/martian/<tool>/evaluation.json` per tool name, in the shape `readMartianEvaluation` reads, and `eval.json` with the checkout's commit and tree, each step's exit code, the candidates per finding, and the problems. A tool name gets no evaluation when one of its reviews was judged on something other than its extracted candidates, has no dedup groups, was never judged, or has a failed judge call. The same holds for every tool name when the dedup step fell back to no grouping.
 - A script, not a model, links each candidate Martian extracted to the finding it came from: the finding whose text holds the longest run of the candidate's words. That link feeds only our own counts beside the official ones.
 - `benchmark/outside/fixtures/martian/` holds three saved reviews of pull requests that a golden file written for the tests describes. It holds no Martian pull request. It also holds the entries the converter writes for them, and what Martian's pipeline wrote for them with a stand-in judge.

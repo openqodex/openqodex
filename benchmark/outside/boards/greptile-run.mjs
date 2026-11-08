@@ -15,6 +15,7 @@ import { relayClient } from "../../lib/calibration-relay.mjs";
 import { costOfUsage } from "../../lib/calibration.mjs";
 import { validateComparison, validateRunManifest } from "../../lib/comparison.mjs";
 import { value } from "../../lib/score.mjs";
+import { PURPOSES, needsPurpose, readSuite } from "../../lib/suites.mjs";
 import { openWave, reserve, settle } from "../../lib/wave.mjs";
 import { GREPTILE_PROMPT, GREPTILE_PROMPT_HASH, judgeGreptile } from "./greptile-judge.mjs";
 
@@ -75,6 +76,12 @@ export async function judgeRun(opts, record, { root = benchRoot } = {}) {
   const manifest = read(join(folder, "manifest.json"));
   if (manifest.suite !== "greptile") throw new Error(`the run is of suite ${manifest.suite}, not greptile`);
   if (manifest.mode === "scan") throw new Error("a scanner-only run shows no review for the board to judge");
+  // The judge reads the truth of every suite case, the score cases too, so a
+  // tune run is never judged here; a run on a split with exposure on record
+  // names its purpose (lib/suites.mjs purposeProblems).
+  if (manifest.purpose === "tune") throw new Error("a tune run is not judged on Greptile's board: the judge reads the truth of every suite case, the score cases included");
+  const suite = readSuite("greptile", { root });
+  if (needsPurpose(suite.split) && manifest.splitHash === suite.splitHash && !PURPOSES.includes(manifest.purpose)) throw new Error(`the run names no purpose, and ${suite.split.name} has exposure on record: judge a score or diagnostic run`);
   const run = readBoardReviews(folder, { root, heading: `${folder} is not converted for Greptile's board:` });
   if (run.manifest.splitHash !== record.suites.greptile.splitHash) throw new Error("the run's split hash differs from the accepted Greptile suite");
   validateRunManifest(manifest, record);

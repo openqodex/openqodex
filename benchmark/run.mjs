@@ -294,6 +294,12 @@
 //    suite's held-out cases first, reads no truth and runs no review.
 // 35. A board's run names no board revision: the manifest's `board` names
 //    the board, its repository and the commit boards.json pins.
+// 36. A number tuned on its cases is read as a score: a suite whose split
+//    has exposure on record (greptile, martian) takes --purpose tune, score
+//    or diagnostic. selectCases refuses a tune run on any score case, a
+//    score run on any tune case, and --change under any purpose but tune,
+//    before any case is read; the manifest records the purpose, and a
+//    release run's held-out access is logged in the index's access log.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -325,7 +331,7 @@ const AUTHORED_SUITES = {
   conventions: { root: join(benchRoot, "suites/conventions"), lock: null, conventions: true },
 };
 
-const USAGE = "usage: node benchmark/run.mjs --max-usd <n> --max-minutes <n> [--max-tokens <n>] [--max-reviews <n>] [--allow-over] [--repeat 3] [--cases a,b] [--graph off,on] [--reviewers claude[,codex]] [--concurrency 1] [--timeout 900] [--out <folder>] [--resume] [--add-repeats <n>] [--change <RC-id>] [--model <id>] [--web off|on] [--dry-run] [--draft] [--allow-retired] [--allow-missing-scanners]\n       node benchmark/run.mjs --reviewers model:<deployment>|model:scripted --max-usd <n> --max-minutes <n> --review-max-usd <n> [--cases a,b | <suite>/<name>,...] [--model-effort <level>] [--max-output-tokens <n>] [--model-script <file>] [--install-root <dir>/tools] [--concurrency 2] [--timeout <s>] [--repeat 3] [--out <folder>] [--resume] [--dry-run] [--allow-missing-scanners]\n       node benchmark/run.mjs --mode scan [--cases a,b] [--repeat 1] [--check-identical] [--scanner-config <file>] [--allow-missing-scanners] [--timeout 120] [--out <folder>] [--dry-run] [--draft] [--allow-retired]\n       either mode: [--suite planted|conventions|aacr|clean] [--split dev] [--subset <name>|all] [--cases <suite>/<name>,...] [--package local|npm:<version>|file:<path.tgz>]; a review run: [--smoke]\n       node benchmark/run.mjs --materialise-only [--suite <suite>] [--split dev|test] [--subset <name>] [--cases a,b] [--reviewers <names> | --mode scan] [--out <folder>]\n       a review run that pays a model (any reviewer but model:scripted) names its wave: --wave <id> (node benchmark/lib/wave.mjs --wave-new <id>)";
+const USAGE = "usage: node benchmark/run.mjs --max-usd <n> --max-minutes <n> [--max-tokens <n>] [--max-reviews <n>] [--allow-over] [--repeat 3] [--cases a,b] [--graph off,on] [--reviewers claude[,codex]] [--concurrency 1] [--timeout 900] [--out <folder>] [--resume] [--add-repeats <n>] [--change <RC-id>] [--model <id>] [--web off|on] [--dry-run] [--draft] [--allow-retired] [--allow-missing-scanners]\n       node benchmark/run.mjs --reviewers model:<deployment>|model:scripted --max-usd <n> --max-minutes <n> --review-max-usd <n> [--cases a,b | <suite>/<name>,...] [--model-effort <level>] [--max-output-tokens <n>] [--model-script <file>] [--install-root <dir>/tools] [--concurrency 2] [--timeout <s>] [--repeat 3] [--out <folder>] [--resume] [--dry-run] [--allow-missing-scanners]\n       node benchmark/run.mjs --mode scan [--cases a,b] [--repeat 1] [--check-identical] [--scanner-config <file>] [--allow-missing-scanners] [--timeout 120] [--out <folder>] [--dry-run] [--draft] [--allow-retired]\n       either mode: [--suite planted|conventions|aacr|clean] [--split dev] [--subset <name>|all] [--cases <suite>/<name>,...] [--purpose tune|score|diagnostic] [--package local|npm:<version>|file:<path.tgz>]; a review run: [--smoke]\n       node benchmark/run.mjs --materialise-only [--suite <suite>] [--split dev|test] [--subset <name>] [--cases a,b] [--purpose tune|score|diagnostic] [--reviewers <names> | --mode scan] [--out <folder>]\n       a review run that pays a model (any reviewer but model:scripted) names its wave: --wave <id> (node benchmark/lib/wave.mjs --wave-new <id>)";
 
 // Flags only a review run reads, flags only a scanner-only run reads, and
 // flags only a model reviewer reads.
@@ -333,7 +339,7 @@ const REVIEW_ONLY = ["--reviewers", "--graph", "--web", "--model", "--resume", "
 const SCAN_ONLY = ["--scanner-config", "--check-identical"];
 const MODEL_ONLY = ["--model-effort", "--max-output-tokens", "--model-script", "--install-root"];
 // The flags --materialise-only reads: which cases, in which shape, and where the proof goes.
-const MATERIALISE_FLAGS = ["--materialise-only", "--mode", "--suite", "--split", "--subset", "--cases", "--reviewers", "--out", "--draft", "--allow-retired", "--cli"];
+const MATERIALISE_FLAGS = ["--materialise-only", "--mode", "--suite", "--split", "--subset", "--cases", "--reviewers", "--out", "--draft", "--allow-retired", "--cli", "--purpose"];
 // The most reviews a smoke run makes per configuration (P4-10's smoke: 5 pull requests per configuration).
 const SMOKE_MAX_REVIEWS = 5;
 
@@ -348,7 +354,7 @@ const positive = (flag, value, whole = false) => {
 };
 
 function parseArgs(argv) {
-  const o = { mode: "review", suite: null, split: null, subset: null, repeat: null, repeatGiven: false, cases: null, graph: null, reviewers: ["claude"], concurrency: null, timeout: null, out: null, resume: false, addRepeats: null, change: null, model: null, web: "off", dryRun: false, allowMore: false, draft: false, allowRetired: false, allowMissingScanners: false, allowOver: false, maxUsd: null, maxMinutes: null, maxTokens: null, maxReviews: null, reviewMaxUsd: null, scannerConfig: null, checkIdentical: false, modelEffort: undefined, maxOutputTokens: 32000, modelScript: DEFAULT_SCRIPT, installRoot: null, package: "local", smoke: false, materialiseOnly: false, cli: join(repoRoot, "packages/cli/dist/bin.js") };
+  const o = { mode: "review", suite: null, split: null, subset: null, purpose: null, repeat: null, repeatGiven: false, cases: null, graph: null, reviewers: ["claude"], concurrency: null, timeout: null, out: null, resume: false, addRepeats: null, change: null, model: null, web: "off", dryRun: false, allowMore: false, draft: false, allowRetired: false, allowMissingScanners: false, allowOver: false, maxUsd: null, maxMinutes: null, maxTokens: null, maxReviews: null, reviewMaxUsd: null, scannerConfig: null, checkIdentical: false, modelEffort: undefined, maxOutputTokens: 32000, modelScript: DEFAULT_SCRIPT, installRoot: null, package: "local", smoke: false, materialiseOnly: false, cli: join(repoRoot, "packages/cli/dist/bin.js") };
   const given = new Set();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -364,6 +370,7 @@ function parseArgs(argv) {
     else if (a === "--suite") o.suite = next();
     else if (a === "--split") o.split = next();
     else if (a === "--subset") o.subset = next();
+    else if (a === "--purpose") o.purpose = next();
     else if (a === "--scanner-config") o.scannerConfig = resolve(next());
     else if (a === "--check-identical") o.checkIdentical = true;
     else if (a === "--repeat") {
@@ -535,7 +542,7 @@ function realCases(o, { build, packageRecord, out } = {}) {
   };
   let picked = [];
   try {
-    picked = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, release: o.release ?? null, build, packageRecord, runId: out ? basename(out) : null, by: gitUserName() });
+    picked = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, release: o.release ?? null, build, packageRecord, runId: out ? basename(out) : null, by: gitUserName(), purpose: o.purpose, change: o.change, ...(o.purpose !== null ? { accessLog: heldOutAccessPath() } : {}) });
   } catch (error) {
     refuse(error.message.split("\n"));
   }
@@ -918,6 +925,8 @@ async function scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, 
     split: o.split,
     splitHash: real?.splitHash ?? null,
     subset: o.subset,
+    // Why the run reads its cases: tune, score or diagnostic (failure 36).
+    ...(o.purpose !== null ? { purpose: o.purpose } : {}),
     board,
     package: packageRecord,
     build,
@@ -1087,7 +1096,7 @@ function materialiseMain(o) {
   let casesDir;
   if (o.real) {
     try {
-      cases = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, heldOut: true });
+      cases = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, heldOut: true, purpose: o.purpose });
     } catch (error) {
       refuse(error.message.split("\n"));
     }
@@ -1110,7 +1119,7 @@ function materialiseMain(o) {
   clean();
   const { version, purpose, ...rest } = doc;
   mkdirSync(out, { recursive: true });
-  writeFileSync(join(out, "proof.json"), `${JSON.stringify({ version, purpose, suite: o.suite, split: o.split, subset: o.subset, ...rest }, null, 2)}\n`);
+  writeFileSync(join(out, "proof.json"), `${JSON.stringify({ version, purpose, ...(o.purpose !== null ? { runPurpose: o.purpose } : {}), suite: o.suite, split: o.split, subset: o.subset, ...rest }, null, 2)}\n`);
   console.log(`${doc.proved} of ${doc.cases.length} cases proved${doc.heldOut > 0 ? `; ${doc.heldOut} held-out cases logged in ${relative(repoRoot, heldOutAccessPath())} first` : ""}. Proof: ${join(out, "proof.json")}`);
   process.exit(doc.failed === 0 ? 0 : 1);
 }
@@ -1342,6 +1351,8 @@ async function main() {
     split: o.split,
     splitHash: real?.splitHash ?? null,
     subset: o.subset,
+    // Why the run reads its cases: tune, score or diagnostic (failure 36).
+    ...(o.purpose !== null ? { purpose: o.purpose } : {}),
     path: o.path,
     // A smoke run checks the runner and is never indexed (failure 33).
     smoke: o.smoke,
