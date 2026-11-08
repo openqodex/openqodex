@@ -135,14 +135,14 @@ jobs:
   ci-passed:
     name: CI passed on this commit
     # A red main run blocks the version pull request and the publish: this
-    # job finds the CI workflow's push run for this commit, waits up to 60
+    # job finds the CI workflow's push run for this commit, waits up to 90
     # minutes while it is queued or running, and fails unless it ended with
     # success; a run that does not show up within 3 minutes fails it too. A
     # job of its own, not a step of the release job, so the App token there
     # (valid for one hour) is made only after the wait.
     if: github.repository == 'openqodex/openqodex'
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 100
     permissions:
       actions: read
       contents: read

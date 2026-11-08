@@ -74,10 +74,17 @@ describe("the release's wait for its commit's CI run", () => {
     expect((await check([[], [], [run("completed", "success")]])).code).toBe(0);
   });
 
-  it("gives up on a run still running after 60 minutes (failure 4)", async () => {
+  it("gives up on a run still running after 90 minutes (failure 4)", async () => {
     const result = await check([[run("in_progress")]]);
     expect(result.code).toBe(1);
-    expect(result.minutes).toBe(60);
+    expect(result.minutes).toBe(90);
+  });
+
+  it("waits through a 70 minute run, longer than main's slowest recent run of 50 (failure 4)", async () => {
+    // One poll each 30 seconds: 140 polls in progress is 70 minutes.
+    const result = await check([...Array.from({ length: 140 }, () => [run("in_progress")]), [run("completed", "success")]]);
+    expect(result.code).toBe(0);
+    expect(result.minutes).toBe(70);
   });
 
   it("ignores a run of another commit (failure 5)", async () => {

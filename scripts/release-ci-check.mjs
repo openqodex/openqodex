@@ -24,7 +24,8 @@ export async function waitForCi({
   log = (line) => console.log(line),
   pollMs = 30_000,
   graceMs = 3 * MINUTE,
-  timeoutMs = 60 * MINUTE,
+  // Main CI runs took 24 to 50 minutes in November 2026.
+  timeoutMs = 90 * MINUTE,
 }) {
   if (!/^[0-9a-f]{40}$/.test(sha ?? "")) {
     log(`not a full commit sha: ${sha}`);
