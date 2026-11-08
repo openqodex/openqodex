@@ -10,6 +10,8 @@ import { entryProblems, hashFolder, hashReviewedFolder, sha256 } from "./index.m
 import { toolName } from "./aacr-board.mjs";
 import { boardConfigOf, boardToolName } from "./martian-board.mjs";
 import { boardRefusal } from "./board-readback.mjs";
+import { readAttempts } from "./board-reviews.mjs";
+import { reviewPopulation } from "./score.mjs";
 import { bundleHash } from "./runner.mjs";
 import { isPersonName, readPeople } from "./rulings.mjs";
 import { canonicalJson, entryHash, readSuite, SUITES } from "./suites.mjs";
@@ -163,6 +165,22 @@ function validateRunBoard(entry, folder, ids, casesNotRun, pin, options) {
   need(refusal === null, refusal);
 }
 
+// The saved reviews of a run folder whose health result is not ok (issue
+// 284), each by its job id and why. A job that never started has no review.
+export function unhealthyReviews(folder) {
+  const pop = reviewPopulation(json(join(folder, "manifest.json")), readAttempts(folder));
+  return pop.jobs.filter((j) => j.first !== null && !j.health.ok).map((j) => ({ jobId: j.jobId, reason: j.health.reason }));
+}
+
+// Attaching refuses a run with an unhealthy review unless the record's
+// exceptions block names each one, so none is counted as a miss silently.
+export function attachRefusal(record, runId, folder) {
+  const excused = new Set((record.exceptions ?? []).filter((x) => x.runId === runId).map((x) => x.jobId));
+  const left = unhealthyReviews(folder).filter((u) => !excused.has(u.jobId));
+  if (left.length === 0) return null;
+  return `run ${runId} has ${left.length} unhealthy review${left.length === 1 ? "" : "s"}; name each in the record's exceptions block as { runId, jobId, why } to attach it as a miss:\n${left.map((u) => `${u.jobId}: ${u.reason}`).join("\n")}`;
+}
+
 // Both judges check compatibility before forecasting or contacting a provider.
 export function validateRunManifest(manifest, record) {
   const need = (ok, why) => { if (!ok) throw new Error(`the run's ${why}`); };
@@ -269,6 +287,7 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     need((settings?.effort ?? null) === reviewer.effort && (settings?.maxOutputTokens ?? null) === reviewer.maxOutputTokens, `run ${r.runId} differs from its reviewer settings`);
     validateRunBoard(e, folder, ids, r.casesNotRun, record.boards[SUITES[e.suite]?.board], { root });
   }
+  need(record.exceptions === undefined || (Array.isArray(record.exceptions) && record.exceptions.every((x) => object(x) && text(x.runId) && text(x.jobId) && text(x.why))), "comparison exceptions must each name runId, jobId and why");
   const a = record.acceptance;
   need(object(a) && ["person", "date", "hash"].every((f) => typeof a[f] === "string"), "comparison acceptance must give person, date and hash");
   const unsigned = a.person === "" && a.date === "" && a.hash === "";
@@ -358,6 +377,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       // its unreviewed cases would count as misses under a full case list.
       need(entry.ended?.how === "finished", `run ${runId} ended ${entry.ended?.how ?? "unknown"}; only a finished run attaches`);
       need(record.suites?.[entry.suite], `run ${runId} differs from the comparison suite`);
+      const unhealthy = attachRefusal(record, runId, reference(benchRoot, `results/${runId}`, "run folder"));
+      need(unhealthy === null, unhealthy);
       const casesNotRun = suiteCaseIds(entry.suite, record.suites[entry.suite]).filter((id) => !entry.caseIds?.includes(id));
       record.acceptance = { person: "", date: "", hash: "" };
       record.runs.push({ runId, sha256: sha256(bytes), reviewer, casesNotRun });

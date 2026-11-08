@@ -246,6 +246,30 @@ describe("frozen comparisons", () => {
     expect(duplicate.status).toBe(1); expect(duplicate.stderr).toContain(`duplicate run ${run.entry.runId}`);
     expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
   });
+  it("a run with an unhealthy review is refused, naming it, and attaches once the record's exceptions block names it (issue 284)", () => {
+    const f = fixture("greptile", true); const run = runFixture(f);
+    const job = run.manifest.jobs[0];
+    const name = job.caseId.slice(job.caseId.indexOf("/") + 1, job.caseId.indexOf("@"));
+    // A model review no model answered: the record names no served model.
+    write(join(run.folder, "samples", name, job.config, "1", "sample.json"), { jobId: job.jobId, caseId: job.caseId, case: name, config: job.config, reviewer: "model:gpt-6.1-sol", path: "server", repeat: 1, attempt: 1, status: "failed", stopped: null, failure: "the review threw", servedModels: [], usage: null });
+    run.save();
+    commitEntry(f, run);
+    f.record.runs = []; write(join(f.root, "comparison.json"), sign(f.record));
+    const before = readFileSync(join(f.root, "comparison.json"), "utf8");
+    const refused = attach(f, run.entry.runId);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain(`run ${run.entry.runId} has 1 unhealthy review`);
+    expect(refused.stderr).toContain(`${job.jobId}: its record names no model`);
+    expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
+    // An exception for another job does not excuse this one.
+    f.record.exceptions = [{ runId: run.entry.runId, jobId: `${job.jobId}x`, why: "another review" }]; write(join(f.root, "comparison.json"), sign(f.record));
+    expect(attach(f, run.entry.runId).status).toBe(1);
+    f.record.exceptions = [{ runId: run.entry.runId, jobId: job.jobId, why: "the provider refused every call; counted as a miss" }]; write(join(f.root, "comparison.json"), sign(f.record));
+    const attached = attach(f, run.entry.runId);
+    expect(attached.status, attached.stderr).toBe(0);
+    expect(read(join(f.root, "comparison.json")).runs.map((r) => r.runId)).toEqual([run.entry.runId]);
+    for (const exceptions of [{}, [{ runId: run.entry.runId, jobId: job.jobId }]]) expect(() => validateComparison({ ...f.record, exceptions }, f.options)).toThrow(/exceptions must each name runId, jobId and why/);
+  });
   it("a run with a null board block does not attach", () => {
     const f = fixture("greptile", true); const run = runFixture(f);
     run.entry.outside.greptile = null; run.saveEntry();

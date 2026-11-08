@@ -72,7 +72,7 @@ import { benchRoot } from "./cases.mjs";
 import { comparisonRelease } from "./comparison.mjs";
 import { boardReview, martianReviewConversion, readAttempts, readBoardReviews } from "./board-reviews.mjs";
 import { hashFolder, sha256 } from "./index.mjs";
-import { canonical, martianFindings, martianGolden, population, readMartianEvaluation } from "./score.mjs";
+import { canonical, martianFindings, martianGolden, readMartianEvaluation, reviewPopulation } from "./score.mjs";
 import { martianTruth, truthHashOf } from "./suites.mjs";
 
 const BOARDS = JSON.parse(readFileSync(new URL("../outside/boards.json", import.meta.url), "utf8"));
@@ -295,7 +295,7 @@ export function readMartianOutside(folder, jobs, specs, options = {}) {
     need(Array.isArray(data[url].golden_comments) && truthHashOf(martianTruth({ comments: data[url].golden_comments }).items) === c.truthHash, `${c.id}: golden comments differ from the frozen truth hash`);
   }
   const golden = entries.flatMap((e) => martianGolden(e.openqodex.caseId, martianTruth({ comments: e.golden_comments })));
-  const planned = population(manifest, readAttempts(folder));
+  const planned = reviewPopulation(manifest, readAttempts(folder));
   need(planned.problems.length === 0, planned.problems.join("; "));
   const reviews = planned.jobs.map(boardReview);
   const expected = [...new Set(jobs.map((j) => boardToolName(j.config, j.repeat)))].sort();

@@ -137,7 +137,7 @@ export async function savedRun(ctx, { plan, configs = [MODEL], repeat = 1, setti
       const result = { code: 0, signal: null, wallMs: 90_000 };
       const attempt = (n, rep) => {
         const dir = attemptDir(out, job, n);
-        write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: n, result, report: rep, who: null, startedAt: "2026-10-11T10:00:00.000Z", failure: rep ? null : { cause: "no report.json" }, stopped: null })));
+        write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: n, result, report: rep, who: null, startedAt: "2026-10-11T10:00:00.000Z", failure: rep ? null : { cause: "no report.json" }, stopped: null })));
         if (rep) write(join(dir, "report", "report.json"), JSON.stringify(rep));
       };
       if (saved === "failed") attempt(1, null);

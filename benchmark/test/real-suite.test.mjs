@@ -75,7 +75,7 @@ async function savedRun({ settings, cases, specs, jobs, attempts }) {
       for (const a of attempts.filter((x) => x.case === job.case && x.repeat === job.repeat)) {
         const dir = attemptDir(out, job, 1);
         const result = { code: 0, signal: null, wallMs: 1000 };
-        const rec = a.scan ? scanSampleRecord({ job, attempt: 1, result, scan: a.scan, report: null, startedAt: "t", failure: null, stopped: null }) : sampleRecord({ job, attempt: 1, result, report: a.report, who: null, startedAt: "t", failure: null, stopped: null });
+        const rec = a.scan ? scanSampleRecord({ job, attempt: 1, result, scan: a.scan, report: null, startedAt: "t", failure: null, stopped: null }) : sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result, report: a.report, who: null, startedAt: "t", failure: null, stopped: null });
         write(join(dir, "sample.json"), JSON.stringify(rec));
         if (a.report) write(join(dir, "report", "report.json"), JSON.stringify(a.report));
         if (a.scan) write(join(dir, "report", "scan.json"), JSON.stringify(a.scan));
@@ -280,8 +280,8 @@ describe("fixing issue 141 changes the score of a planted sample", () => {
     if (process.env.OQ_RECORD_PLANTED_SCORE === "1") write(GOLDEN, `${JSON.stringify(now, null, 2)}\n`);
     expect(existsSync(GOLDEN), `${GOLDEN} is missing; it is recorded with rules version 5 only`).toBe(true);
     const golden = JSON.parse(readFileSync(GOLDEN, "utf8"));
-    // Old samples have no per-review usage, so their model is now unknown.
-    golden.score.reviewers.claude.model = null;
+    // The samples name their served model: a review whose record names none is unhealthy (issue 284).
+    golden.score.reviewers.claude.model = "claude-opus-5-5";
     expect({ ...now, unresolved: withoutQueueFields8(now.unresolved) }).toEqual(golden);
     for (const item of now.unresolved) for (const k of QUEUE_FIELDS_8) expect(item, k).toHaveProperty(k);
   });
@@ -310,7 +310,7 @@ describe("keying rulings on the spec version changes the score of a planted samp
   // The near miss's finding id, from the golden's outcomes.
   const golden = () => {
     const saved = JSON.parse(readFileSync(GOLDEN, "utf8"));
-    saved.score.reviewers.claude.model = null;
+    saved.score.reviewers.claude.model = "claude-opus-5-5";
     return saved;
   };
   const nearId = () => golden().outcomes.find((o) => o.outcome === "near").findingId;

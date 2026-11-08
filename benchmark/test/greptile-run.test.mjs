@@ -49,7 +49,7 @@ function savedRun({ planned = cases.slice(0, 2), reviewers = ["model:scripted"],
     const rep = reports[index];
     if (rep === "unstarted") continue;
     const dir = attemptDir(folder, job, 1);
-    const row = sampleRecord({ job, attempt: 1, result: { code: rep === null ? 1 : 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" });
+    const row = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: rep === null ? 1 : 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" });
     write(join(dir, "sample.json"), native === null ? row : { ...row, reviewer: "control", status: "complete", nativeBody: native });
     if (native === null && rep !== null) write(join(dir, "report/report.json"), rep);
   }

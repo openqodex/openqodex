@@ -75,7 +75,7 @@ function greptileRun({ held = false, comments = true, caseCount = 50 } = {}) {
   write(join(folder, "cases", `${first.name}.json`), specCopy(c, truthOf(c, ctx)));
   const rep = report({ findings: comments ? [finding(held ? { fix: " " } : {})] : [] });
   const dir = attemptDir(folder, jobs[0], 1);
-  write(join(dir, "sample.json"), sampleRecord({ job: jobs[0], attempt: 1, result: { code: 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" }));
+  write(join(dir, "sample.json"), sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job: jobs[0], attempt: 1, result: { code: 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" }));
   write(join(dir, "report/report.json"), rep);
   write(join(folder, "manifest.json"), manifest);
   const manifestSha256 = sha256(readFileSync(join(folder, "manifest.json")));
@@ -297,7 +297,7 @@ it("Greptile reads back the saved input when one tool plans both cases and anoth
   const rep = report({ findings: [finding()] });
   for (const job of jobs) {
     const dir = attemptDir(folder, job, 1);
-    write(join(dir, "sample.json"), sampleRecord({ job, attempt: 1, result: { code: 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" }));
+    write(join(dir, "sample.json"), sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" }));
     write(join(dir, "report/report.json"), rep);
   }
   const input = greptileInput(folder, "greptile", ctx);

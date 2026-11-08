@@ -41,6 +41,7 @@ The benchmark scores the review, not the dependency list. Outside entries count 
 From the saved reports it counts (score format 3):
 
 - The population: every review the run planned, scored by its first attempt. A review that failed or never started misses every bug of its case and adds no finding. A retry is reported apart, with its cost, and never replaces the first attempt.
+- Health: each first attempt gets a health result from its saved sample, once, and every scorer and board converter reads it. A review is unhealthy when its body starts with "API Error", when the run stopped before it completed, when its record names no model or more than one (only for reviewers that record the model), or when a model review's usage has zero tokens; a scanner-only sample has no model or tokens to check. An unhealthy review counts as failed: it credits no finding, sends no comment to a judge, and misses every bug of its case. The control runner applies the same rule when it saves a sample, and attaching a run to a frozen comparison is refused while it holds an unhealthy review, unless the record's `exceptions` block names it as `{ runId, jobId, why }`.
 - Issue recall: planted bugs found, over planted bugs, overall and for critical and major bugs. A bug found by two findings counts once.
 - Precision, as a lower and an upper bound over every finding the developer is shown, observations and possible issues included, except a request for a test on a planted case. A hit, a second hit on a bug already found and a side issue the case lists as real are correct; a finding on a clean case is false. Any other finding (one the case does not list, a near miss, a wrong kind) is unresolved until a person rules on it: the lower bound counts it as wrong, the upper as right.
 - Unique-issue precision counts each issue once, and redundancy is the share of findings beyond one per issue.
@@ -66,7 +67,7 @@ The checks run in this order, and the first that holds decides:
 
 Each finding counts for one bug at most. A review that wrote no report misses every bug. A review the product marked incomplete is scored on the findings it holds and counted as incomplete.
 
-Every score carries its rules block: the rules version (12), every constant and list above, and a hash over them and the code that applies them.
+Every score carries its rules block: the rules version (13), every constant and list above, and a hash over them and the code that applies them.
 
 - Version 6 reads pull request truth, whose comments have no kind and no severity: they are matched on the categories they name, and left out of the per-severity tally.
 - Version 7 credits a custom scanner's rule to that custom scanner, whatever its id, and reads a model review's cost and tokens from its sample record.
@@ -75,6 +76,7 @@ Every score carries its rules block: the rules version (12), every constant and 
 - Version 10 existed independently on both branches: wave8 added Greptile scoring with a fixed denominator of 50; main scored staged observations like findings, each marked with its tier.
 - Version 11 (2026-10-22) merges the two version-10 rule sets.
 - Version 12 includes possible issues after observations with tier `possible`. Reports without this field score as under version 11.
+- Version 13 (issue 284) scores an unhealthy review as failed, by the health rule above.
 
 A test fails when a rule changes and the version does not, and two scores whose rules differ are not compared until both are scored again with one scorer.
 

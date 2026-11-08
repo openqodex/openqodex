@@ -155,7 +155,7 @@ async function savedRun({ maxUsd = 1, report: REPORT = BASE_REPORT } = {}) {
   await executeRun({ out, manifest, jobs, copies: [[join(root, "hand.json"), "cases/hand.json"]], runJob: async (job) => {
     const dir = attemptDir(out, job, 1);
     mkdirSync(join(dir, "report"), { recursive: true });
-    writeFileSync(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: 1, result: { code: 0, signal: null, wallMs: 30_000 }, report: REPORT, who: null, startedAt: "t", failure: null, stopped: null })));
+    writeFileSync(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, signal: null, wallMs: 30_000 }, report: REPORT, who: null, startedAt: "t", failure: null, stopped: null })));
     writeFileSync(join(dir, "report", "report.json"), JSON.stringify(REPORT));
   } });
   return out;

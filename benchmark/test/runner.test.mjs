@@ -38,7 +38,7 @@ describe("attempts", () => {
   });
 
   it("records a failed attempt as a sample with its cause, so it is scored and never a missing row", () => {
-    const rec = sampleRecord({ job, attempt: 1, result: { code: 2, signal: null, wallMs: 900_000 }, report: null, who: null, startedAt: "t", failure: { cause: "the reviewer timed out and was stopped" }, stopped: null });
+    const rec = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 2, signal: null, wallMs: 900_000 }, report: null, who: null, startedAt: "t", failure: { cause: "the reviewer timed out and was stopped" }, stopped: null });
     expect(rec).toMatchObject({ case: "c", repeat: 2, attempt: 1, status: "failed", failure: "the reviewer timed out and was stopped", findings: null });
   });
 
@@ -146,7 +146,7 @@ function runInputs(repeat = 1) {
 function saveAttempt(out, job, attempt, report) {
   const dir = attemptDir(out, job, attempt);
   mkdirSync(join(dir, "report"), { recursive: true });
-  writeFileSync(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt, result: { code: report ? 0 : 2, signal: null, wallMs: 1000 }, report, who: null, startedAt: "t", failure: null, stopped: null })));
+  writeFileSync(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt, result: { code: report ? 0 : 2, signal: null, wallMs: 1000 }, report, who: null, startedAt: "t", failure: null, stopped: null })));
   if (report) writeFileSync(join(dir, "report", "report.json"), JSON.stringify(report));
 }
 

@@ -173,7 +173,7 @@ async function savedSet({ runId, commit = head, changeId = null, found, repeat =
       const shown = job.case.startsWith("clean") ? (cleanFalse ? [flaw] : []) : found(c, job.repeat) ? [flaw] : [];
       const report = { findings: shown, outside_change: [], dropped: [], completion: { status: "complete", missing: [] } };
       const dir = join(out, "samples", job.case, job.config, String(job.repeat));
-      writeJson(join(dir, "sample.json"), sampleRecord({ job, attempt: 1, result: { code: 0, signal: null, wallMs: 20_000 }, report, who: null, startedAt: "t", failure: null, stopped: null }));
+      writeJson(join(dir, "sample.json"), sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, signal: null, wallMs: 20_000 }, report, who: null, startedAt: "t", failure: null, stopped: null }));
       writeJson(join(dir, "report", "report.json"), report);
       budget.noteLaunch(job.jobId);
       budget.spend(cost, job.jobId);

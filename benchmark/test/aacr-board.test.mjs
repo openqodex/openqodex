@@ -215,7 +215,7 @@ async function savedRun({ names = SMOKE, plan = PLAN, specs = {}, suite = "aacr"
       const result = { code: 0, signal: null, wallMs: 90_000 };
       const attempt = (n, rep) => {
         const dir = attemptDir(out, job, n);
-        write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: n, result, report: rep, who: null, startedAt: "t", failure: rep ? null : { cause: "no report.json" }, stopped: null })));
+        write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: n, result, report: rep, who: null, startedAt: "t", failure: rep ? null : { cause: "no report.json" }, stopped: null })));
         if (rep) write(join(dir, "report", "report.json"), JSON.stringify(rep));
       };
       if (saved === "failed") attempt(1, null);

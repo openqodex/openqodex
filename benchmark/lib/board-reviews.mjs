@@ -8,7 +8,7 @@ import { cacheRoot } from "./licence.mjs";
 import { benchRoot } from "./cases.mjs";
 import { nativeReviewBody } from "./claude-control.mjs";
 import { boardConfigOf, boardToolName, martianBody } from "./martian-board.mjs";
-import { attemptOf, findingId, judgeFieldsMissing, nativeFindingId, normPath, population, shownFindings } from "./score.mjs";
+import { attemptOf, findingId, judgeFieldsMissing, nativeFindingId, normPath, reviewHealth, reviewPopulation, shownFindings } from "./score.mjs";
 import { readCase, readPinned, readSuite, realCaseId, realSpecProblems, truthHashOf, truthOf } from "./suites.mjs";
 
 export { boardToolName, martianBody, martianToolName } from "./martian-board.mjs";
@@ -34,8 +34,8 @@ export function readAttempts(folder) {
   return out;
 }
 
-/** What happened to a planned review's first attempt. */
-export const statusOf = (first) => first === null ? "unstarted" : nativeReviewBody(first.row) !== null ? first.row.status : first.report === null ? "failed" : first.report.completion?.status === "complete" ? "complete" : "incomplete";
+/** What happened to a planned review's first attempt; an unhealthy one failed. */
+export const statusOf = (first, health = first === null ? null : reviewHealth(first.row, first.report)) => first === null ? "unstarted" : !health.ok ? "failed" : nativeReviewBody(first.row) !== null ? first.row.status : first.report === null ? "failed" : first.report.completion?.status === "complete" ? "complete" : "incomplete";
 
 /** A finding lacking any judge sentence holds every review of its tool. */
 export function heldFindings(review) {
@@ -45,15 +45,18 @@ export function heldFindings(review) {
   });
 }
 
-/** One first attempt as comments, with stable finding or native source ids. */
+/** One first attempt as comments, with stable finding or native source ids. An unhealthy one gives no comment, so its text never reaches a judge. */
 export function boardReview(job) {
   const first = job.first;
-  const status = job.notRun ? "not-run" : statusOf(first);
-  const native = nativeReviewBody(first?.row);
-  const shown = shownFindings(first?.report ?? null);
+  const health = first ? job.health ?? reviewHealth(first.row, first.report) : null;
+  const usable = health === null || health.ok;
+  const status = job.notRun ? "not-run" : statusOf(first, health);
+  const saved = nativeReviewBody(first?.row);
+  const native = saved !== null && !usable ? "" : saved;
+  const shown = usable ? shownFindings(first?.report ?? null) : [];
   const findingIds = native !== null ? native.trim() ? [nativeFindingId(job.caseId, job.config, job.repeat, native)] : [] : shown.map((f) => findingId(job.caseId, f));
   const comments = native !== null ? native.trim() ? [{ path: null, line: null, body: native, created_at: first.row.started_at ?? null }] : [] : shown.map((f) => ({ path: normPath(f.file_path) || null, line: Number.isInteger(f.line_number) ? f.line_number : null, body: martianBody(f), created_at: first?.row?.started_at ?? null, tier: f.tier ?? "finding" }));
-  return { ...job, status, shown, native, findingIds, comments };
+  return { ...job, health, status, shown, native, findingIds, comments };
 }
 
 /**
@@ -67,7 +70,7 @@ export function readBoardReviews(folder, { root = benchRoot, heading = `${folder
   const cases = suite.file.cases.map((e) => readCase(realCaseId(manifest.suite, e.name, e.hash), { root }));
   const byId = new Map(cases.map((c) => [c.id, c]));
   const attempts = readAttempts(folder);
-  const pop = population(manifest, attempts);
+  const pop = reviewPopulation(manifest, attempts);
   const problems = [...pop.problems];
   if (pop.jobs.length === 0) problems.push("the run plans no review");
   for (const j of pop.jobs) {
@@ -168,7 +171,7 @@ export function martianReviewConversion(run) {
   const heldTools = new Set(held.map((h) => h.tool));
   for (const job of jobs) {
     const url = cases.get(job.caseId).source.prUrl;
-    if (job.native !== null && job.status === "failed") failures.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, failure: job.first.row.failure ?? null });
+    if (job.native !== null && job.status === "failed") failures.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, failure: job.first.row.failure ?? job.health?.reason ?? null });
     if (!heldTools.has(job.tool)) data[url].reviews.push({ tool: job.tool, repo_name: null, pr_url: url, review_comments: job.comments, openqodex: { caseId: job.caseId, case: job.case, config: job.config, repeat: job.repeat, attempt: 1, status: job.status, findingIds: job.findingIds } });
   }
 

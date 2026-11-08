@@ -207,7 +207,7 @@ describe("an incomplete server review is scored as complete", () => {
     expect(score.population).toMatchObject({ planned: 1, complete: 0, incomplete: 1, failed: 0, unstarted: 0 });
   });
 
-  it("saves a review the budget refused as incomplete, and the score counts it so", { timeout: 180_000 }, async () => {
+  it("saves a review the budget refused as incomplete, and the score counts it failed: no model answered it (issue 284)", { timeout: 180_000 }, async () => {
     const root = tempDir("oq-server-refused-");
     // Each call may cost more than the review's whole cap, so the first is refused.
     const pricey = { input: 1_000_000, cachedInput: 1_000_000, output: 1_000_000 };
@@ -215,7 +215,7 @@ describe("an incomplete server review is scored as complete", () => {
     expect(sample.record.status).toBe("incomplete");
     expect(sample.record.failure).toMatch(/budget|refused/i);
     const { score } = scoreRun(loadRun(out));
-    expect(score.population).toMatchObject({ planned: 1, complete: 0, incomplete: 1 });
+    expect(score.population).toMatchObject({ planned: 1, complete: 0, incomplete: 0, failed: 1 });
   });
 
   it("saves a complete review as complete, and the score counts it so", { timeout: 180_000 }, async () => {
