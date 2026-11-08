@@ -103,18 +103,18 @@ OpenQodex itself collects no usage data. The built-in scanners, as OpenQodex run
 
 | Reviewer | Model | Cases | Issue recall | Precision | Clean rate | Cost per review |
 | --- | --- | --- | --- | --- | --- | --- |
-| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split | 150/153 (98.0%) | 249/295 (84.4%) to 295/295 (100.0%) | 6/6 (100.0%) | $0.4371 |
-| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split | 150/153 (98.0%) | 254/302 (84.1%) to 301/302 (99.7%) | 5/6 (83.3%) | $0.4248 |
-| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split | 129/153 (84.3%) | 142/146 (97.3%) to 146/146 (100.0%) | 6/6 (100.0%) | $0.0870 |
-| Codex (codex-graph-on) | gpt-6.1-sol | Planted bugs, dev split | 115/153 (75.2%) | 125/146 (85.6%) to 146/146 (100.0%) | 6/6 (100.0%) | not measured |
-| Scanner only (scan) | no model | Planted bugs, dev split | 32/51 (62.7%) | 35/45 (77.8%) to 40/45 (88.9%) | 1/2 (50.0%) | not measured |
-| Scanner only (scan) | no model | Planted bugs, dev split | 32/51 (62.7%) | 35/40 (87.5%) to 40/40 (100.0%) | 2/2 (100.0%) | not measured |
+| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split, scoring rules 11 | 150/153 (98.0%) | 249/295 (84.4%) to 295/295 (100.0%) | 6/6 (100.0%) | $0.4371 |
+| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split, scoring rules 12 | 150/153 (98.0%) | 254/302 (84.1%) to 301/302 (99.7%) | 5/6 (83.3%) | $0.4248 |
+| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split, scoring rules 7 | 129/153 (84.3%) | 142/146 (97.3%) to 146/146 (100.0%) | 6/6 (100.0%) | $0.0870 |
+| Codex (codex-graph-on) | gpt-6.1-sol | Planted bugs, dev split, scoring rules 7 | 115/153 (75.2%) | 125/146 (85.6%) to 146/146 (100.0%) | 6/6 (100.0%) | not measured |
+| Scanner only (scan) | no model | Planted bugs, dev split, scoring rules 1 | 32/51 (62.7%) | 35/45 (77.8%) to 40/45 (88.9%) | 1/2 (50.0%) | not measured |
+| Scanner only (scan) | no model | Planted bugs, dev split, scoring rules 2 | 32/51 (62.7%) | 35/40 (87.5%) to 40/40 (100.0%) | 2/2 (100.0%) | not measured |
 
 AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.
 
 | Reviewer | Model | Cases | Issue recall | Semantic precision | Semantic recall | Semantic F1 | Noise rate | Line precision | Line recall | Cost per review |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Library (model-gpt-6.1-sol-graph-on) | gpt-6.1-sol | AACR-Bench, dev split, dev-laptop subset | not yet ruled | 22.8% | 5.2% | 8.5% | 77.2% | 49.4% | 11.3% | $0.0839 |
+| Library (model-gpt-6.1-sol-graph-on) | gpt-6.1-sol | AACR-Bench, dev split, dev-laptop subset, scoring rules 7 | not yet ruled | 22.8% | 5.2% | 8.5% | 77.2% | 49.4% | 11.3% | $0.0839 |
 
 [Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)
 <!-- benchmark-results:end -->
