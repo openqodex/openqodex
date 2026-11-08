@@ -68,14 +68,16 @@ export function readBoardReviews(folder, { root = benchRoot, heading = `${folder
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const suite = readSuite(manifest.suite, { root });
   const every = suite.file.cases.map((e) => readCase(realCaseId(manifest.suite, e.name, e.hash), { root }));
+  const attempts = readAttempts(folder);
+  const pop = reviewPopulation(manifest, attempts);
   // The half the run's purpose reads (lib/suites.mjs purposeHalf): a tune
-  // run's denominator is the tune cases, and no score case is read.
-  const half = purposeHalf(manifest.purpose ?? null, every);
+  // run's denominator is the tune cases, and no score case is read. A
+  // diagnostic run's half is every case, so its denominator is the cases it
+  // planned: it is never judged over cases it never meant to run.
+  const half = purposeHalf(manifest.purpose ?? null, every, new Set(pop.jobs.map((j) => j.caseId)));
   const cases = half.cases;
   const byId = new Map(cases.map((c) => [c.id, c]));
   const outside = new Set(every.filter((c) => !byId.has(c.id)).map((c) => c.id));
-  const attempts = readAttempts(folder);
-  const pop = reviewPopulation(manifest, attempts);
   const problems = [...pop.problems];
   if (pop.jobs.length === 0) problems.push("the run plans no review");
   if (cases.length === 0) problems.push(`a ${manifest.purpose} run reads the ${half.subset} cases, and the ${manifest.suite} split holds none`);

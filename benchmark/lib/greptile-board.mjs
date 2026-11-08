@@ -31,7 +31,7 @@ export function readGreptileOutside(folder, jobs, _specs, options = {}) {
   need(["greptile", "augment"].includes(input.truthSet) && input.truthSet === evaluation.truthSet, "truth set differs from the saved input");
   const suite = readSuite("greptile", options);
   // The half the run's purpose reads is the denominator (lib/suites.mjs purposeHalf).
-  const ids = purposeHalf(manifest.purpose ?? null, suite.file.cases.map((e) => readCase(e.id, options))).cases.map((c) => c.id);
+  const ids = purposeHalf(manifest.purpose ?? null, suite.file.cases.map((e) => readCase(e.id, options)), new Set((manifest.jobs ?? []).map((j) => j.caseId))).cases.map((c) => c.id);
   need(input.suite?.name === "greptile" && canonical(input.suite.cases) === canonical(ids), "input does not cover the frozen suite's half the run's purpose reads");
   need(Array.isArray(input.tools) && input.tools.length > 0 && Array.isArray(input.cases), "input needs tools and cases");
   const names = input.tools.map((t) => t.tool);

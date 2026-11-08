@@ -129,21 +129,24 @@ async function cli(folder, args = [], model = null, { root = null, record = null
   });
 }
 
-test("a case the run never reviewed is counted missed, not dropped", async () => {
-  const folder = savedRun();
+// A diagnostic run's denominator is the cases it planned, never the whole
+// suite: a run of 5 cases is judged over 5, not 50. A planned case the run
+// never reviewed is still counted missed, not dropped.
+test("a diagnostic run of 5 cases is judged over its 5 planned cases, and a planned case it never reviewed is counted missed", async () => {
+  const planned = cases.slice(0, 5);
+  const folder = savedRun({ planned, reports: [report([finding()]), report(), report(), report(), "unstarted"] });
   const fixture = recordFixture();
   const model = await provider();
   try {
     const result = await cli(folder, ["--max-usd", "1"], model, { root: fixture.root, release: fixture.record.release });
     expect(result.code, result.stderr).toBe(0);
     const input = read(boardPath(folder, "input.json"));
-    expect(input.suite).toEqual({ name: "greptile", purpose: "diagnostic", subset: "all", size: 50, cases: cases.map((c) => c.id) });
-    expect(input.cases).toHaveLength(cases.length);
-    expect(input.cases[2]).toMatchObject({ caseId: cases[2].id, comments: [], status: "not-run", truthSets: truthOf(cases[2], { cache }).sets });
-    expect(read(boardPath(folder, "eval.json")).perTool[tool]).toMatchObject({ caught: 1, missed: cases.length - 1, of: cases.length, planned: 2, notRun: cases.length - 2, rate: 1 / cases.length });
+    expect(input.suite, "a diagnostic run was judged over cases it never planned").toEqual({ name: "greptile", purpose: "diagnostic", subset: "planned", size: 5, cases: planned.map((c) => c.id) });
+    expect(input.cases).toHaveLength(5);
+    expect(read(boardPath(folder, "eval.json")).perTool[tool]).toMatchObject({ caught: 1, missed: 4, of: 5, planned: 5, notRun: 0, rate: 1 / 5 });
     const verdicts = read(boardPath(folder, `${tool}/verdicts.json`));
-    expect(verdicts.map((v) => v.id)).toEqual(cases.map((c) => c.id));
-    expect(verdicts[2]).toEqual({ id: cases[2].id, label: "missed", reason: "not-run" });
+    expect(verdicts.map((v) => v.id)).toEqual(planned.map((c) => c.id));
+    expect(verdicts[4]).toEqual({ id: planned[4].id, label: "missed", reason: "unstarted" });
   } finally { await model.close(); }
 
   const ctx = await martianSuite();
@@ -166,7 +169,7 @@ test("three repeats get a caught range of min, mean and max beside perTool, neve
   } finally { await model.close(); }
   const evaluation = read(boardPath(folder, "eval.json"));
   expect(Object.values(evaluation.perTool).map((t) => t.caught)).toEqual([2, 1, 2]);
-  expect(evaluation.range).toEqual({ library: { metric: "caught", of: cases.length, repeats: 3, min: 1, mean: 5 / 3, max: 2 } });
+  expect(evaluation.range).toEqual({ library: { metric: "caught", of: 2, repeats: 3, min: 1, mean: 5 / 3, max: 2 } });
   const jobs = read(join(folder, "manifest.json")).jobs;
   expect(BOARDS.greptile(folder, jobs, {}, { root: fixture.root }).range).toEqual(evaluation.range);
   write(boardPath(folder, "eval.json"), { ...evaluation, range: { library: { ...evaluation.range.library, mean: 2 } } });
@@ -208,7 +211,7 @@ test("a control review becomes one comment and a finding without a fix sentence 
     expect(result.stdout).toContain(`Held, not sent: ${tool}`);
     expect(model.seen).toHaveLength(0);
     const evaluation = read(boardPath(folder, "eval.json"));
-    expect(evaluation.perTool[tool]).toEqual({ config: "model-scripted-graph-on", boardConfig: "library", held: [{ case: cases[0].name, index: 0, lacking: ["fix"] }], caught: null, missed: null, of: cases.length, planned: 2, notRun: cases.length - 2, rate: null });
+    expect(evaluation.perTool[tool]).toEqual({ config: "model-scripted-graph-on", boardConfig: "library", held: [{ case: cases[0].name, index: 0, lacking: ["fix"] }], caught: null, missed: null, of: 2, planned: 2, notRun: 0, rate: null });
     expect(evaluation).toMatchObject({ judgeModel: null, relay: null });
     expect(read(boardPath(folder, "input.json")).tools).toContainEqual({ tool, config: "model-scripted-graph-on", boardConfig: "library", held: [{ case: cases[0].name, index: 0, lacking: ["fix"] }] });
     expect(existsSync(boardPath(folder, `${tool}/verdicts.json`))).toBe(false);
@@ -429,7 +432,7 @@ test("an entirely empty run records no served model or relay counts", async () =
   const fixture = recordFixture();
   const result = await cli(folder, ["--max-usd", "0"], null, { root: fixture.root, release: fixture.record.release });
   expect(result.code, result.stderr).toBe(0);
-  expect(read(boardPath(folder, "eval.json"))).toMatchObject({ judgeModel: null, relay: null, perTool: { [tool]: { caught: 0, missed: cases.length } } });
+  expect(read(boardPath(folder, "eval.json"))).toMatchObject({ judgeModel: null, relay: null, perTool: { [tool]: { caught: 0, missed: 2 } } });
 });
 
 test("a finding without a path sends only its body even when it has a line", async () => {

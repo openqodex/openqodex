@@ -348,7 +348,10 @@ export function purposeProblems({ suite, splitFile, purpose, split = null, subse
  * score the test side, diagnostic or no purpose every case. `cases` are
  * real cases (their `split` is their side). Returns { subset, cases }.
  */
-export function purposeHalf(purpose, cases) {
+// A diagnostic run's half is the cases it planned (`planned`, their ids),
+// so it is never judged over cases it never meant to run.
+export function purposeHalf(purpose, cases, planned = null) {
+  if (purpose === "diagnostic" && planned !== null) return { subset: "planned", cases: cases.filter((c) => planned.has(c.id)) };
   const side = purpose === "tune" ? "dev" : purpose === "score" ? "test" : null;
   return { subset: side === "dev" ? "tune" : side === "test" ? "score" : "all", cases: side === null ? cases : cases.filter((c) => c.split === side) };
 }
