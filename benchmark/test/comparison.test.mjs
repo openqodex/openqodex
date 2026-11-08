@@ -35,6 +35,7 @@
 // 34. A diagnostic run attaches to a comparison.
 // 35. A board run with fewer repeats than the record pins attaches (step 2, O9).
 // 36. A record keeps a board run with fewer repeats than it pins, unnamed in its exceptions.
+// 37. A run reference names a split hash that is no split file's, nor an accepted group's.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -246,14 +247,33 @@ describe("frozen comparisons", () => {
   // stays in the record only when its run reference names that split hash.
   it("a run made on an earlier split is refused unless its run reference names that split hash", () => {
     const f = fixture("aacr"); const run = runFixture(f);
-    const earlier = "a".repeat(64);
+    // An earlier split file of the suite, committed beside the current one.
+    write(join(f.root, "splits/aacr-v0.json"), { version: 0, cases: { dev: [], test: [] } });
+    const earlier = sha256(readFileSync(join(f.root, "splits/aacr-v0.json")));
     run.entry.splitHash = earlier; run.save();
     expect(() => validateComparison(f.record, f.options), "a run on an unnamed split hash was kept").toThrow(/differs from the comparison suite/);
-    f.record.runs[0].splitHash = "b".repeat(64);
+    f.record.runs[0].splitHash = sha256(readFileSync(join(f.root, "splits/aacr-v1.json")));
     expect(() => validateComparison(f.record, f.options), "a run named under another split hash was kept").toThrow(/differs from the comparison suite/);
     f.record.runs[0].splitHash = "not a hash";
     expect(() => validateComparison(f.record, f.options)).toThrow(/splitHash must be a sha256/);
     f.record.runs[0].splitHash = earlier;
+    expect(validateComparison(f.record, f.options).accepted).toBe(false);
+  });
+  it("a run reference naming a split hash of no split file is refused, and a committed split file's hash is accepted (failure 37)", () => {
+    const f = fixture("aacr"); const run = runFixture(f);
+    const name = (splitHash) => { run.entry.splitHash = splitHash; run.save(); f.record.runs[0].splitHash = splitHash; };
+    for (const [splitHash, why] of [[sha256("a split nobody committed"), "a random sha256"], [sha256(readFileSync(join(benchRoot, "splits/greptile-v1.json"))), "another suite's split"]]) {
+      name(splitHash);
+      expect(() => validateComparison(f.record, f.options), `${why} was kept`).toThrow(`splitHash ${splitHash} is not the hash of a aacr split file under splits/, nor a aacr group's split hash in index/accepted.json`);
+    }
+    // greptile-v1, committed as an earlier split file of this suite.
+    cpSync(join(benchRoot, "splits/greptile-v1.json"), join(f.root, "splits/aacr-v0.json"));
+    name(sha256(readFileSync(join(benchRoot, "splits/greptile-v1.json"))));
+    expect(validateComparison(f.record, f.options).accepted).toBe(false);
+    // A split hash an accepted group was made on is known too, with no file left.
+    const gone = sha256("an edited split file");
+    write(join(f.root, "index/accepted.json"), { version: 1, groups: { [`aacr|test|${gone}|review|server|model:gpt-6.1-sol|gpt-6.1-sol|model-gpt-6.1-sol-graph-on|12`]: {} } });
+    name(gone);
     expect(validateComparison(f.record, f.options).accepted).toBe(false);
   });
   it("a judged run (with outside/) attaches", () => {

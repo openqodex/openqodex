@@ -2,7 +2,7 @@
 // Failure cases are listed in test/comparison.test.mjs before this code.
 // This module reads local fingerprints only. It never runs a reviewer or
 // accepts a comparison on someone's behalf.
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { benchRoot, caseHash, git, readLock } from "./cases.mjs";
@@ -114,6 +114,21 @@ function committedRunEntry(root, runId) {
   } catch { throw new Error(message); }
   need(bytes.equals(Buffer.from(committed, "utf8")), message);
   return bytes;
+}
+// The split hashes a run of `suite` may name as the split it was made on:
+// the sha256 of each of the suite's split files under splits/ (as readSuite
+// hashes them), and the split hash of each of the suite's groups in
+// index/accepted.json (Martian's split before its file was edited).
+function knownSplitHashes(root, suite) {
+  const known = new Set();
+  const dir = join(root, "splits");
+  if (existsSync(dir)) for (const f of readdirSync(dir)) if (f.startsWith(`${suite}-`) && f.endsWith(".json")) known.add(sha256(readFileSync(join(dir, f))));
+  const accepted = join(root, "index/accepted.json");
+  if (existsSync(accepted)) for (const key of Object.keys(json(accepted).groups ?? {})) {
+    const [s, , h] = key.split("|");
+    if (s === suite && HEX64.test(h ?? "")) known.add(h);
+  }
+  return known;
 }
 const buildProblems = (b) => object(b) && HEX40.test(b.commit ?? "") && HEX40.test(b.tree ?? "") && HEX64.test(b.bundleHash ?? "") && text(b.version);
 const suiteCaseIds = (name, suite) => Object.entries(suite.caseHashes).map(([c, h]) => `${name}/${c}@${h.slice(0, 8)}`);
@@ -286,6 +301,7 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     // it was made on; the run reference names that hash, or the run must
     // match the split the record pins.
     need(r.splitHash === undefined || HEX64.test(r.splitHash), `run ${r.runId} splitHash must be a sha256 when given`);
+    need(r.splitHash === undefined || knownSplitHashes(root, e.suite).has(r.splitHash), `run ${r.runId} splitHash ${r.splitHash} is not the hash of a ${e.suite} split file under splits/, nor a ${e.suite} group's split hash in index/accepted.json`);
     need(suite && e.splitHash === (r.splitHash ?? suite.splitHash) && Array.isArray(e.caseIds) && e.caseIds.length > 0 && e.caseIds.every((id) => Object.entries(suite.caseHashes).some(([name, h]) => id === `${e.suite}/${name}@${h.slice(0, 8)}`)), `run ${r.runId} differs from the comparison suite`);
     const ids = suiteCaseIds(e.suite, suite);
     need(Array.isArray(r.casesNotRun) && sameIds([...e.caseIds, ...r.casesNotRun], ids), `run ${r.runId} caseIds and casesNotRun must account for every frozen suite case exactly once`);
