@@ -307,7 +307,9 @@ describe("a worker that outlives the version that started it", () => {
 
 describe("a release's own package.json", () => {
   it("is compared with the contract the registry claimed before any of its code runs (failure 26)", () => {
-    const s = installed();
+    // The shared home: the unpack refuses before it writes, so the home is
+    // left as it was found.
+    const s = commandHome();
     // The real package, as a tarball, declaring another contract than the
     // registry claims and printing another version than it is unpacked as:
     // whichever check comes first names itself.
