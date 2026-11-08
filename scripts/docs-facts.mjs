@@ -7,7 +7,9 @@
 //  1. every "<number> built-in scanners" in the pages equals the adapter list;
 //  2. the table in docs/scanners.md names each built-in scanner once, with
 //     its version from packages/scanners/toolchain.json, and the README's
-//     category counts equal that table's;
+//     category counts equal that table's; every other version on that page
+//     (each scanner's section, the other tables, prose) is a pin of its tool
+//     in toolchain.json (scripts/scanner-page-versions.mjs);
 //  3. every sentence that says what `--offline` skips names exactly the
 //     scanners whose adapters skip themselves when offline;
 //  4. every command in a code example is one the CLI's own help knows, and
@@ -28,6 +30,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pinsOf, scannerPageVersionProblems } from "./scanner-page-versions.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (rel) => readFileSync(join(root, rel), "utf8");
@@ -118,6 +121,7 @@ else {
   }
   for (const source of sources) if (!seen.has(source)) fail(SCANNERS_PAGE, `the table leaves out ${display(source)}`);
 }
+for (const problem of scannerPageVersionProblems(read(SCANNERS_PAGE), pinsOf(toolchain, DISPLAY))) fail(SCANNERS_PAGE, problem);
 const readmeText = read(README);
 const section = readmeText.slice(readmeText.indexOf("## Built-in scanners"));
 const readmeRows = tableRows(section, "What it checks", "\n\n");
