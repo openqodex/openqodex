@@ -19,5 +19,18 @@ export default defineConfig({
     // there, and so does a file's last step, which removes every home and
     // runtime copy its tests made (a minute and more on a busy machine).
     hookTimeout: 300_000,
+    // Off unless the run passes --coverage (pnpm test:coverage). The scope is
+    // production sources only: package sources and the benchmark's own code,
+    // without the two test helpers that live in src. A test that imports
+    // another package runs its dist build; dist stays in scope so its source
+    // maps credit the src lines. The CLI bundle has no source maps and its
+    // tests run it as a child process, which is not measured.
+    coverage: {
+      provider: "v8",
+      include: ["packages/*/src/**", "packages/*/dist/**/*.js", "benchmark/lib/**", "benchmark/*.mjs"],
+      exclude: ["**/*.test.ts", "**/*.test.mjs", "**/test/**", "**/test-support/**", "packages/cli/dist/**", "packages/core/src/test-fixtures.ts", "packages/graph/src/test-timing.ts"],
+      reporter: ["text-summary", "json-summary"],
+      reportsDirectory: "coverage",
+    },
   },
 });
