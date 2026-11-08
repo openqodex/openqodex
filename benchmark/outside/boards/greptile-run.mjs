@@ -14,6 +14,7 @@ import { benchRoot } from "../../lib/cases.mjs";
 import { relayClient } from "../../lib/calibration-relay.mjs";
 import { costOfUsage } from "../../lib/calibration.mjs";
 import { validateComparison, validateRunManifest } from "../../lib/comparison.mjs";
+import { repeatRange } from "../../lib/noise.mjs";
 import { value } from "../../lib/score.mjs";
 import { PURPOSES, needsPurpose, readSuite } from "../../lib/suites.mjs";
 import { openWave, reserve, settle } from "../../lib/wave.mjs";
@@ -144,6 +145,8 @@ export async function judgeRun(opts, record, { root = benchRoot } = {}) {
       version: 1, board: { name: pin.name, repository: pin.repository, commit: pin.commit, judgeModel: pin.judgeModel, promptHash: pin.promptHash },
       truthSet, judgeModel: relay?.model ?? null, promptHash: GREPTILE_PROMPT_HASH,
       manifestSha256: run.manifestSha256, splitHash: run.manifest.splitHash, ...(run.suite.subset ? { half: { purpose: run.suite.purpose, subset: run.suite.subset, cases: run.suite.size } } : {}), relay: counts, perTool,
+      // Caught across the repeats, per configuration: descriptive, not the cluster interval.
+      range: repeatRange("greptile", perTool),
     });
   } finally {
     // Settled with the relay's usage; left standing when the relay cannot say.

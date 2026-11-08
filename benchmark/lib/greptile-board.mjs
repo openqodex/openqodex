@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { greptileInput } from "./board-reviews.mjs";
 import { hashFolder, sha256 } from "./index.mjs";
 import { boardConfigOf, boardToolName } from "./martian-board.mjs";
+import { repeatRange } from "./noise.mjs";
 import { canonical, value } from "./score.mjs";
 import { purposeHalf, readCase, readSuite } from "./suites.mjs";
 
@@ -70,5 +71,8 @@ export function readGreptileOutside(folder, jobs, _specs, options = {}) {
   }
   // A run that names a purpose says which half its numbers are over, and its size.
   const half = input.suite.subset ? { half: { purpose: input.suite.purpose, subset: input.suite.subset, cases: input.suite.size } } : {};
-  return { board, truthSet: evaluation.truthSet, judgeModel: evaluation.judgeModel, promptHash: evaluation.promptHash, ...half, perTool, evidenceHash: hashFolder(folder, paths).listHash };
+  // The range comes from the checked summaries; an eval.json written before it existed has none.
+  const range = repeatRange("greptile", perTool);
+  need(evaluation.range === undefined || canonical(evaluation.range) === canonical(range), "eval.json range differs from its verdicts");
+  return { board, truthSet: evaluation.truthSet, judgeModel: evaluation.judgeModel, promptHash: evaluation.promptHash, ...half, perTool, range, evidenceHash: hashFolder(folder, paths).listHash };
 }

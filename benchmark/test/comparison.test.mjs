@@ -33,6 +33,7 @@
 // 32. Attachment pins entry bytes that are not committed at HEAD.
 // 33. A later checkout's build prevents attaching the record's own build.
 // 34. A diagnostic run attaches to a comparison.
+// 35. A board run with fewer repeats than the record pins attaches (step 2, O9).
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -93,7 +94,8 @@ function fixture(suite = "aacr", cli = false) {
   if (cli) git(join(root, ".."), "init", "-q");
   const truth = suite === "aacr" ? {} : boardSuiteFixture(suite, root);
   const options = { root, build };
-  const record = freezeComparison({ release: "compare-2026-10", suites: [suite], boards: [suite], reviewers: structuredClone(reviewers), capUsd: 100 }, options);
+  // The fixture runs have one repeat, so the fixture record pins one.
+  const record = freezeComparison({ release: "compare-2026-10", suites: [suite], boards: [suite], reviewers: structuredClone(reviewers), capUsd: 100, repeats: 1 }, options);
   return { root, build, options, record, cache: truth.cache };
 }
 const sign = (record) => { record.acceptance = { person: "Sid", date: "2026-10-14", hash: "" }; record.acceptance.hash = comparisonHash(record); return record; };
@@ -256,6 +258,24 @@ describe("frozen comparisons", () => {
     const duplicate = attach(f, run.entry.runId);
     expect(duplicate.status).toBe(1); expect(duplicate.stderr).toContain(`duplicate run ${run.entry.runId}`);
     expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
+  });
+  it("a board run with one repeat does not attach to a record that pins three, and a record without the pin holds three (O9)", () => {
+    const f = fixture("greptile", true); const run = runFixture(f);
+    commitEntry(f, run);
+    for (const pin of [3, undefined]) {
+      f.record.runs = [];
+      if (pin === undefined) delete f.record.repeats; else f.record.repeats = pin;
+      write(join(f.root, "comparison.json"), sign(f.record));
+      const before = readFileSync(join(f.root, "comparison.json"), "utf8");
+      const refused = attach(f, run.entry.runId);
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain(`run ${run.entry.runId} has 1 repeat, and the record pins 3 for a board run`);
+      expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
+    }
+    f.record.repeats = 1; f.record.runs = []; write(join(f.root, "comparison.json"), sign(f.record));
+    const attached = attach(f, run.entry.runId);
+    expect(attached.status, attached.stderr).toBe(0);
+    for (const repeats of [0, 1.5, "3"]) expect(() => validateComparison({ ...f.record, repeats }, f.options)).toThrow(/repeats must be a whole number/);
   });
   it("a run with an unhealthy review is refused, naming it, and attaches once the record's exceptions block names it (issue 284)", () => {
     const f = fixture("greptile", true); const run = runFixture(f);

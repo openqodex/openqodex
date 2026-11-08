@@ -449,6 +449,11 @@ it("a control evaluation reads through the native source without four sentences"
   expect(readBlock(folder, "martian").perTool["claude-code-control-r1"].ours.findings).toEqual({ sent: 3, matched: 3 });
 });
 
+it("a Martian block carries the core F1 range of its repeats beside perTool, not only each repeat's tool (O9)", async () => {
+  const { folder } = await martianRun({ native: "", empty: true });
+  expect(readBlock(folder, "martian").range).toEqual({ control: { metric: "f1", profile: "core", repeats: 1, min: 0, mean: 0, max: 0 } });
+});
+
 it("Martian keeps the reasons every unreviewed case was sent empty", async () => {
   const { folder } = await martianRun({ native: "", empty: true });
   const t = readBlock(folder, "martian").perTool["claude-code-control-r1"];

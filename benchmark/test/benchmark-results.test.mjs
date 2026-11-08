@@ -10,6 +10,7 @@
 // 9. The README admits a board-scored row but drops its six board metrics.
 // 10. An accepted entry's board numbers are edited after they were recorded, and the page shows them.
 // 11. A number tuned on its own cases (tunedOn) is shown as if it were a score.
+// 12. A Greptile or Martian row shows its best repeat, or its range as a confidence interval (O9).
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import { afterAll, expect, it } from "vitest";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 import { aacrOutside } from "./outside-fixture.mjs";
 import { boardHash, groupKeys, scoreHash } from "../lib/index.mjs";
+import { rangeLine } from "../../scripts/benchmark-results.mjs";
 
 afterAll(removeTempDirs);
 const repo = fileURLToPath(new URL("../../", import.meta.url));
@@ -213,4 +215,13 @@ it("labels the number of an entry tuned on its own cases", () => {
   const r = run(root);
   expect(r.status, r.stderr).toBe(0);
   expect(page(root), "a tuned number is shown without its label").toMatch("(tuned on these cases)");
+});
+
+it("a Greptile or Martian row prints the mean of its repeats with the lowest and highest, and says the range is not a confidence interval", () => {
+  const asset = { url: "https://example.invalid/run.tar.gz" };
+  const greptile = { runId: "r-greptile", asset, suite: "greptile", outside: { greptile: { range: { library: { metric: "caught", of: 50, repeats: 3, min: 28, mean: 30, max: 33 } } } } };
+  expect(rangeLine(greptile, { config: "model-gpt-6.1-sol-graph-on" })).toBe("[r-greptile](https://example.invalid/run.tar.gz), model-gpt-6.1-sol-graph-on: caught 30.0 of 50 cases on average (60.0%), from 28 to 33 across 3 repeats. The range is the lowest and highest repeat, not a confidence interval.");
+  const martian = { runId: "r-martian", asset, suite: "martian", outside: { martian: { range: { "cli-claude": { metric: "f1", profile: "core", repeats: 3, min: 0.25, mean: 0.375, max: 0.5 } } } } };
+  expect(rangeLine(martian, { config: "claude-graph-on" })).toContain("F1 37.5% on average, from 25.0% to 50.0% across 3 repeats");
+  expect(rangeLine({ ...martian, outside: undefined }, { config: "claude-graph-on" })).toBeNull();
 });

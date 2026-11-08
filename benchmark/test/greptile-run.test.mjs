@@ -1,6 +1,6 @@
 // Failures guarded: suite cases dropped from the denominator, incomplete
 // findings lost, native bodies split, held tools partly judged, truth pins
-// ignored, empty reviews sent to the model, and an unbounded priced run.
+// ignored, empty reviews sent to the model, an unbounded priced run, and a repeat range that is the best repeat.
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,6 +15,7 @@ import { attemptDir, planJobs, runManifest, sampleRecord } from "../lib/runner.m
 import { SUITES, rawPath, readCase, readSuite, specCopy, truthOf } from "../lib/suites.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 import { newWave } from "../lib/wave.mjs";
+import { BOARDS } from "../lib/outside-boards.mjs";
 import { convertOpts, finding, fixturePlan, savedRun as martianRun, suite as martianSuite } from "./martian-board-fixture.mjs";
 import { main as judgeMartian } from "../outside/boards/martian-judge.mjs";
 import { convertRun } from "../outside/convert/martian.mjs";
@@ -37,16 +38,17 @@ const fixtureReviewers = {
 const boardPath = (folder, file) => join(folder, "outside/greptile", file);
 const report = (findings = [], status = "complete", extra = {}) => ({ completion: { status }, findings, outside_change: [], ...extra });
 
-function savedRun({ planned = cases.slice(0, 2), reviewers = ["model:scripted"], reports = [report([finding()]), report()], native = null, purpose = "diagnostic" } = {}) {
+// reportOf(job), when given, picks each job's report, so repeats can differ.
+function savedRun({ planned = cases.slice(0, 2), reviewers = ["model:scripted"], reports = [report([finding()]), report()], native = null, purpose = "diagnostic", repeat = 1, reportOf = null } = {}) {
   const folder = tempDir("oq-greptile-board-");
-  const { jobs, configs } = planJobs({ cases: planned.map((c) => c.name), caseIds: Object.fromEntries(planned.map((c) => [c.name, c.id])), reviewers, graph: native === null ? ["on"] : ["off"], repeat: 1 });
+  const { jobs, configs } = planJobs({ cases: planned.map((c) => c.name), caseIds: Object.fromEntries(planned.map((c) => [c.name, c.id])), reviewers, graph: native === null ? ["on"] : ["off"], repeat });
   const pins = Object.values(fixtureReviewers).filter((r) => reviewers.includes(r.reviewer));
-  const settings = { path: pins[0].path, web: pins[0].web, build: { ...fixtureBuild, cliVersion: fixtureBuild.version }, reviewers: Object.fromEntries(pins.map((r) => [r.reviewer, { model: r.model, version: r.version, settings: { effort: r.effort, maxOutputTokens: r.maxOutputTokens } }])), runId: "greptile-board-test", mode: "review", suite: "greptile", split: purpose === "tune" ? "dev" : "test", purpose, splitHash: suite.splitHash, cases: planned.map((c) => c.name), caseIds: planned.map((c) => c.id), caseHashes: Object.fromEntries(planned.map((c) => [c.name, c.hash])), configs, repeat: 1 };
+  const settings = { path: pins[0].path, web: pins[0].web, build: { ...fixtureBuild, cliVersion: fixtureBuild.version }, reviewers: Object.fromEntries(pins.map((r) => [r.reviewer, { model: r.model, version: r.version, settings: { effort: r.effort, maxOutputTokens: r.maxOutputTokens } }])), runId: "greptile-board-test", mode: "review", suite: "greptile", split: purpose === "tune" ? "dev" : "test", purpose, splitHash: suite.splitHash, cases: planned.map((c) => c.name), caseIds: planned.map((c) => c.id), caseHashes: Object.fromEntries(planned.map((c) => [c.name, c.hash])), configs, repeat };
   write(join(folder, "manifest.json"), runManifest({ startedAt: "2026-10-24T00:00:00Z", settings, jobs }));
   for (const c of planned) write(join(folder, "cases", `${c.name}.json`), specCopy(c, truthOf(c, { cache })));
   for (const job of jobs) {
     const index = planned.findIndex((c) => c.id === job.caseId);
-    const rep = reports[index];
+    const rep = reportOf ? reportOf(job, index) : reports[index];
     if (rep === "unstarted") continue;
     const dir = attemptDir(folder, job, 1);
     const row = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: rep === null ? 1 : 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" });
@@ -151,6 +153,24 @@ test("a case the run never reviewed is counted missed, not dropped", async () =>
   expect(record.notRun).toEqual([{ tool, caseId: [...ctx.ids.values()][2] }]);
   const missing = Object.values(data).find((entry) => entry.openqodex.caseId === [...ctx.ids.values()][2]);
   expect(missing.reviews[0]).toMatchObject({ review_comments: [], openqodex: { status: "not-run" } });
+});
+
+test("three repeats get a caught range of min, mean and max beside perTool, never the best repeat, and the reader refuses an edited one (O9)", async () => {
+  // Case 0 has a finding in repeats 1 and 3 and none in repeat 2; case 1 has one in every repeat; the judge matches every comment.
+  const folder = savedRun({ repeat: 3, reportOf: (job, index) => (index === 0 && job.repeat === 2 ? report() : report([finding()])) });
+  const fixture = recordFixture();
+  const model = await provider();
+  try {
+    const result = await cli(folder, ["--max-usd", "1"], model, { root: fixture.root, release: fixture.record.release });
+    expect(result.code, result.stderr).toBe(0);
+  } finally { await model.close(); }
+  const evaluation = read(boardPath(folder, "eval.json"));
+  expect(Object.values(evaluation.perTool).map((t) => t.caught)).toEqual([2, 1, 2]);
+  expect(evaluation.range).toEqual({ library: { metric: "caught", of: cases.length, repeats: 3, min: 1, mean: 5 / 3, max: 2 } });
+  const jobs = read(join(folder, "manifest.json")).jobs;
+  expect(BOARDS.greptile(folder, jobs, {}, { root: fixture.root }).range).toEqual(evaluation.range);
+  write(boardPath(folder, "eval.json"), { ...evaluation, range: { library: { ...evaluation.range.library, mean: 2 } } });
+  expect(() => BOARDS.greptile(folder, jobs, {}, { root: fixture.root })).toThrow(/range differs from its verdicts/);
 });
 
 test("an incomplete review sends what the developer was shown, as Martian does", async () => {

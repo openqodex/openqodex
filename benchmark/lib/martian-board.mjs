@@ -72,6 +72,7 @@ import { benchRoot } from "./cases.mjs";
 import { comparisonRelease } from "./comparison.mjs";
 import { boardReview, martianReviewConversion, readAttempts, readBoardReviews } from "./board-reviews.mjs";
 import { hashFolder, sha256 } from "./index.mjs";
+import { repeatRange } from "./noise.mjs";
 import { canonical, martianFindings, martianGolden, readMartianEvaluation, reviewPopulation } from "./score.mjs";
 import { martianTruth, truthHashOf } from "./suites.mjs";
 
@@ -377,5 +378,6 @@ export function readMartianOutside(folder, jobs, specs, options = {}) {
     const candidates = result.candidates.map((c) => (typeof c.extractedText === "string" ? { ...c, extractedText: c.extractedText.replace(/\s*\u2014\s*/g, ", ") } : c));
     perTool[t.tool] = { config: t.config, boardConfig: t.boardConfig, repeat: t.repeat, official: result.official, ours: result.ours, candidates, matches: result.matches, empty };
   }
-  return { board: { repo: pin.repo, commit: pin.commit }, judge: evaluated.judge, profile: "core", perTool, evidenceHash: hashFolder(folder, paths).listHash };
+  // Core F1 across the repeats, per configuration: descriptive, not the cluster interval.
+  return { board: { repo: pin.repo, commit: pin.commit }, judge: evaluated.judge, profile: "core", perTool, range: repeatRange("martian", perTool), evidenceHash: hashFolder(folder, paths).listHash };
 }

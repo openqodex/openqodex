@@ -51,6 +51,8 @@ export function outsideProblems(outside) {
       } else need(Array.isArray(t?.rounds) && object(t?.ours) && typeof t?.judged === "boolean", "each tool needs rounds, ours and judged");
     }
     if (name === "aacr") need(object(block.byConfig), "byConfig is missing");
+    // An entry indexed before the range existed has none. The readers compute it; publish-run.mjs compares their block.
+    else if (block.range !== undefined) need(object(block.range) && Object.values(block.range).every((r) => object(r) && typeof r.metric === "string" && Number.isInteger(r.repeats) && r.repeats >= 1 && [r.min, r.mean, r.max].every(Number.isFinite) && r.min <= r.mean && r.mean <= r.max), "range must give each configuration's repeats, min, mean and max");
   }
   return problems;
 }

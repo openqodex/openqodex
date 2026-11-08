@@ -16,6 +16,7 @@ import { bundleHash } from "./runner.mjs";
 import { isPersonName, readPeople } from "./rulings.mjs";
 import { canonicalJson, entryHash, readSuite, SUITES } from "./suites.mjs";
 import { agreementPercentages, validateCalibration } from "./calibration.mjs";
+import { BOARD_REPEATS } from "./noise.mjs";
 
 const HEX40 = /^[a-f0-9]{40}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -80,12 +81,14 @@ export function suiteFingerprint(suite, { root = benchRoot } = {}) {
 }
 
 // Freeze the repository's current pins, never an inferred signer or run.
-export function freezeComparison({ release, boards, suites, reviewers, capUsd }, { root = benchRoot, build = buildFingerprint({ root }) } = {}) {
+// The record pins the repeats a board run attaches with (BOARD_REPEATS
+// unless told otherwise); O10 adds the purpose pin beside it.
+export function freezeComparison({ release, boards, suites, reviewers, capUsd, repeats = BOARD_REPEATS }, { root = benchRoot, build = buildFingerprint({ root }) } = {}) {
   const record = {
     version: 1, release,
     boards: Object.fromEntries(boards.map((name) => [name, boardFingerprint(name, { root })])),
     suites: Object.fromEntries(suites.map((name) => [name, suiteFingerprint(name, { root })])),
-    build, reviewers, calibrations: [], calibrationRulings: [], capUsd, runs: [],
+    build, reviewers, calibrations: [], calibrationRulings: [], capUsd, repeats, runs: [],
     acceptance: { person: "", date: "", hash: "" },
   };
   validateComparison(record, { root, build });
@@ -181,6 +184,17 @@ export function attachRefusal(record, runId, folder) {
   return `run ${runId} has ${left.length} unhealthy review${left.length === 1 ? "" : "s"}; name each in the record's exceptions block as { runId, jobId, why } to attach it as a miss:\n${left.map((u) => `${u.jobId}: ${u.reason}`).join("\n")}`;
 }
 
+// Attaching refuses a board review run with fewer repeats than the record pins: a
+// record frozen before the pin existed holds BOARD_REPEATS. The check runs
+// at attach time only, so the runs a record already holds are not judged
+// again by it.
+export function repeatRefusal(record, entry) {
+  if (!SUITES[entry.suite]?.board || entry.mode === "scan") return null;
+  const pin = record.repeats ?? BOARD_REPEATS;
+  if (entry.repeat >= pin) return null;
+  return `run ${entry.runId} has ${entry.repeat} repeat${entry.repeat === 1 ? "" : "s"}, and the record pins ${pin} for a board run: run the board suite again with --repeat ${pin}`;
+}
+
 // Both judges check compatibility before forecasting or contacting a provider.
 export function validateRunManifest(manifest, record) {
   const need = (ok, why) => { if (!ok) throw new Error(`the run's ${why}`); };
@@ -220,6 +234,7 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
   }
   for (const [name, r] of Object.entries(record.reviewers)) need(object(r) && ["server", "laptop"].includes(r.path) && text(r.reviewer) && text(r.model) && ["on", "off"].includes(r.graph) && ["on", "off"].includes(r.web) && (r.effort === null || text(r.effort)) && ((r.path === "laptop" && r.maxOutputTokens === null) || (Number.isInteger(r.maxOutputTokens) && r.maxOutputTokens > 0)), `comparison reviewers.${name} must pin path, reviewer, model, graph, web, effort and maxOutputTokens`);
   need(Number.isFinite(record.capUsd) && record.capUsd > 0, "comparison capUsd must be positive dollars");
+  need(record.repeats === undefined || (Number.isInteger(record.repeats) && record.repeats >= 1), "comparison repeats must be a whole number of at least 1");
   need(Array.isArray(record.calibrations), "comparison calibrations must be an array");
   need(record.calibrationRulings === undefined || Array.isArray(record.calibrationRulings), "comparison calibrationRulings must be an array");
   const rulings = new Map();
@@ -379,6 +394,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       need(entry.ended?.how === "finished", `run ${runId} ended ${entry.ended?.how ?? "unknown"}; only a finished run attaches`);
       need(entry.purpose !== "diagnostic", `run ${runId} is a diagnostic run, which never attaches`);
       need(record.suites?.[entry.suite], `run ${runId} differs from the comparison suite`);
+      const repeats = repeatRefusal(record, entry);
+      need(repeats === null, repeats);
       const unhealthy = attachRefusal(record, runId, reference(benchRoot, `results/${runId}`, "run folder"));
       need(unhealthy === null, unhealthy);
       const casesNotRun = suiteCaseIds(entry.suite, record.suites[entry.suite]).filter((id) => !entry.caseIds?.includes(id));

@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { acceptedProblems, entryProblems, groupKeys, listEntries } from "../benchmark/lib/index.mjs";
 import { SUITES } from "../benchmark/lib/suites.mjs";
+import { boardConfigOf } from "../benchmark/lib/martian-board.mjs";
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const START = "<!-- benchmark-results:start -->";
@@ -40,6 +41,16 @@ const recall = (s, interval = false) => (unruled(s) ? "not yet ruled" : ratio(s.
 const tuned = (e, text) => (e.tunedOn === true ? `${text} (tuned on these cases)` : text);
 const suiteLabel = (e) => `${suiteName(e.suite)}, ${e.split} split${e.subset ? `, ${e.subset} subset` : ""}`;
 const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, `rules ${e.rulesVersion}`, ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : [])].join(", ");
+// A Greptile or Martian row's repeat range: the mean, never the best repeat, with the lowest and highest.
+const repeatRange = (e, g) => e.outside?.[SUITES[e.suite]?.board]?.range?.[boardConfigOf(g.config)];
+export function rangeLine(e, g) {
+  const r = repeatRange(e, g);
+  if (!r) return null;
+  const text = r.metric === "caught"
+    ? `caught ${r.mean.toFixed(1)} of ${r.of} cases on average (${percent(r.mean / r.of)}), from ${r.min} to ${r.max}`
+    : `F1 ${percent(r.mean)} on average, from ${percent(r.min)} to ${percent(r.max)}`;
+  return `${runLink(e)}, ${g.config}: ${text} across ${r.repeats} repeats. The range is the lowest and highest repeat, not a confidence interval.`;
+}
 const precisionRange = (s) => (s.precision.lower.of === 0 ? "not measured" : `${ratio(s.precision.lower)} to ${ratio(s.precision.upper)}`);
 
 export function renderResults(index) {
@@ -94,6 +105,8 @@ export function renderResults(index) {
           `The difference is ${noise} issues across ${e.repeat} repeats, or ${(noise / e.repeat).toFixed(2)} per repeat.`, "");
       }
     }
+    const ranged = selected.map(({ e, g }) => rangeLine(e, g)).filter(Boolean);
+    if (ranged.length > 0) page.push("### Board scores", "", ...ranged.flatMap((line) => [line, ""]));
     if (suite === "aacr") {
       page.push("### Board scores", "");
       for (const { e, g } of selected) {

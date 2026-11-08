@@ -4,6 +4,11 @@
 // It pays a model, so it names its wave (--wave, lib/wave.mjs): it reserves
 // the cost of the newest earlier calibration of the same board and form,
 // and settles with its own cost (reported usage at the pinned prices).
+// With --judge-twice it also judges a fixed sample of the saved vendor
+// reviews (lib/noise.mjs judgeSample) twice more, each pass reserved in the
+// wave before it runs, and writes how often the two passes disagree into
+// the calibration file as judgeVariability. Their cost stays out of the
+// calibration's costUsd, which forecasts the board's judging per case.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,6 +20,7 @@ import { martianItems, relayClient } from "../lib/calibration-relay.mjs";
 import { boardFingerprint, buildFingerprint } from "../lib/comparison.mjs";
 import { cacheRoot } from "../lib/licence.mjs";
 import { MARTIAN_CITED } from "../lib/martian-board.mjs";
+import { disagreementOf, judgeSample } from "../lib/noise.mjs";
 import { bundleHash } from "../lib/runner.mjs";
 import { openWave, outstanding, reserve, settle } from "../lib/wave.mjs";
 import { GREPTILE_PROMPT, GREPTILE_PROMPT_HASH, judgeGreptile } from "./boards/greptile-judge.mjs";
@@ -81,8 +87,28 @@ export function calibrationForecast(name, form, { root = benchRoot } = {}) {
   return newest.costUsd;
 }
 
+/**
+ * Judges `sample` twice through `pass(k)`, which returns { labels, costUsd,
+ * estimated }, reserving `forecastUsd` in `wave` before each pass and
+ * settling it with the pass's cost. A pass that throws leaves its
+ * reservation standing. Returns the judgeVariability block.
+ */
+export async function judgeTwice({ sample, classes, forecastUsd, wave, waveRun, pass }) {
+  const passes = [];
+  for (const k of [1, 2]) {
+    const id = `${waveRun}:judge-twice-${k}`;
+    reserve(wave, { id, path: "calibrate", forecastUsd });
+    const result = await pass(k);
+    settle(wave, id, result.costUsd, { estimated: Boolean(result.estimated) });
+    passes.push({ costUsd: result.costUsd, ...(result.estimated ? { estimated: true } : {}), labels: result.labels });
+  }
+  return { sample, ...disagreementOf(passes[0].labels, passes[1].labels, classes), passes };
+}
+
 export async function main(argv = process.argv.slice(2)) {
-  const usage = "usage: node benchmark/outside/calibrate.mjs --board greptile|martian [--form flat|joined] --wave <id>";
+  const usage = "usage: node benchmark/outside/calibrate.mjs --board greptile|martian [--form flat|joined] [--judge-twice] --wave <id>";
+  const twice = argv.includes("--judge-twice");
+  argv = argv.filter((a) => a !== "--judge-twice");
   const at = argv.indexOf("--wave");
   const waveId = at >= 0 ? argv[at + 1] : undefined;
   if (at >= 0) argv = [...argv.slice(0, at), ...argv.slice(at + 2)];
@@ -142,6 +168,14 @@ export async function main(argv = process.argv.slice(2)) {
     if (judgeFailures) record.judgeFailures = judgeFailures;
     const exitCode = finalizeCalibration(record);
     settleWith(counters);
+    if (twice && exitCode === 0) {
+      // The pass forecast: the calibration's own cost per review, times the sample.
+      const units = name === "greptile" ? inputs.cases.length : Object.keys(inputs.data).length;
+      const sample = sampleOf(name, inputs);
+      const forecastUsd = (record.costUsd / units) * sample.length;
+      record.judgeVariability = await judgeTwice({ sample, classes, forecastUsd, wave, waveRun, pass: (k) => twicePass(name, k, { inputs, form, run, startedAt, python }) });
+      console.log(`judge twice: ${record.judgeVariability.disagree} of ${record.judgeVariability.labels} labels differ between the two passes (${(100 * record.judgeVariability.rate).toFixed(2)} percent)`);
+    }
     if (JSON.stringify(installedBuild()) !== JSON.stringify(build)) throw new Error("product build changed during calibration");
     writeCalibration(output, record, form);
     for (const [name, c] of Object.entries(counts.byClass)) console.log(`${name}: ${c.agree}/${c.total} agree (${(100 * c.agree / c.total).toFixed(2)} percent), ${c.disagree} disagree`);
@@ -157,4 +191,35 @@ export async function main(argv = process.argv.slice(2)) {
     throw error;
   } finally { if (relay) await relay.close(); }
 }
+// The fixed sample: saved reviews with comments, since an empty review is a miss by script.
+function sampleOf(name, inputs) {
+  if (name === "greptile") return judgeSample(inputs.cases.filter((c) => c.comments.length > 0).map((c) => c.id), name);
+  return judgeSample(Object.entries(inputs.data).filter(([, e]) => e.reviews.some((r) => r.review_comments.length > 0)).map(([url]) => url), name);
+}
+
+// One judge pass over the sample, through a fresh uncached relay, so the
+// second pass is never a replay of the first.
+async function twicePass(name, k, { inputs, form, run, startedAt, python }) {
+  const sample = new Set(sampleOf(name, inputs));
+  const relay = await relayClient({});
+  try {
+    let labels;
+    if (name === "greptile") {
+      const verdicts = await judgeGreptile(casesInForm(inputs, form).filter((c) => sample.has(c.id)), { truthSet: "greptile", complete: (request) => relay.complete(GREPTILE_PROMPT, request) });
+      labels = verdicts.map((v) => ({ id: v.id, label: v.label }));
+    } else {
+      const data = Object.fromEntries(Object.entries(inputs.data).filter(([url]) => sample.has(url)));
+      const out = join(run, `${startedAt.replace(/[:.]/g, "-")}-twice-${k}`, "outside/martian");
+      write(join(out, "benchmark_data.json"), data);
+      const code = await runPipeline({ out, convert: { tools: [{ tool: "augment", held: false }] }, checkout: inputs.checkout, python, state: inputs.state, judge: martianJudge(), settings: relay.settings, calibration: true, signal: relay.signal });
+      relay.signal.throwIfAborted();
+      if (code !== 0) throw new Error(`judge twice: Martian's pipeline exited ${code} on pass ${k}`);
+      labels = martianLabels(data, read(join(out, "work/results", relay.model, "evaluations.json")), "augment");
+    }
+    const counters = await relay.counts();
+    write(join(run, `judge-twice-${k}.json`), labels);
+    return { labels, costUsd: costOfUsage(counters.usage, relay.model) };
+  } finally { await relay.close(); }
+}
+
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main().then((code) => { process.exitCode = code; }, (error) => { console.error(error.message); process.exitCode = 2; });
