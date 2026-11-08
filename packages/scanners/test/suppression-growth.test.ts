@@ -8,12 +8,11 @@
 // and 296: 8.01 and 8.27 against the bound of 8).
 // They live here and not beside the readers because a test under src is
 // compiled with the package and cannot import another package's source.
-// Many openers left open in Python, Ruby, Go and HCL are checked beside the
-// readers instead (src/suppression.test.ts, failure 16), by the characters
-// the searches for their closers cover: a count no load moves, where this
-// ratio failed on a loaded runner (issue 296). Shell and JavaScript stay
-// here: their readers stay linear on that input by how they read, not by
-// that rule, so the count cannot see a change there.
+// Many openers left open are also checked beside the readers, on the fast
+// tier (src/suppression.test.ts, failure 16), by the characters the
+// searches for their closers cover: a count no load moves (issue 296). The
+// count sees only searches made through the reader's once-per-kind rule, so
+// the ratio here stays as the check of everything else the reader does.
 import { it } from "vitest";
 import type { BuiltinScanner } from "@openqodex/core";
 import { findMarkers } from "../src/suppression.js";
@@ -63,6 +62,7 @@ growthTests("linear time on generated input, per reader family (16)", () => {
   };
   const cases: [BuiltinScanner, string, (fill: Fill) => string][] = [
     ["semgrep", "one very long line", (fill) => fill("x nose ")],
+    ["bandit", "many unclosed openers of each kind", (fill) => fill((k) => [`a = '''${k}\n`, `b = """${k}\n`, `c = f'''{${k}\n`, `d = f"{e:${k}\n`, `g = '${k}\n`][k % 5] as string)],
     ["bandit", "one very long line", (fill) => `x = ${fill("'a' + f\"{b}\" + ")}1  # nosec\n`],
     ["bandit", "deep nesting", (fill) => `x = f"${fill("{a:")}"\n`],
     ["shellcheck", "many unclosed openers of each kind", (fill) => fill((k) => [`echo '${k}\n`, `echo "${k}\n`, `echo $'${k}\n`, `x=$(echo ${k}\n`, `y=\`echo ${k}\n`][k % 5] as string)],
@@ -77,14 +77,17 @@ growthTests("linear time on generated input, per reader family (16)", () => {
     ["hadolint", "many distinct heredoc words", (fill) => `FROM a\n${fill((k) => `RUN <<E${k}\n`)}`],
     ["hadolint", "one very long line", (fill) => `FROM a\nRUN ${fill("<<a ")}\n`],
     ["hadolint", "deep nesting", (fill) => `FROM a\n${fill("RUN a \\\n")}`],
+    ["rubocop", "many unclosed openers of each kind", (fill) => fill((k) => [`a = "${k}\n`, `b = '${k}\n`, `c = %q(${k}\n`, `=begin ${k}\n`, `d = "#{${k}\n`][k % 5] as string)],
     ["rubocop", "many distinct heredoc words", (fill) => fill((k) => `x = <<~E${k}\n`)],
     ["rubocop", "one very long line", (fill) => `x = ${fill('"a" + ')}1 # rubocop:disable Lint/Foo\n`],
     ["rubocop", "deep nesting", (fill) => `x = ${fill('"#{')}\n`],
     ["oxlint", "many unclosed openers of each kind", (fill) => fill((k) => [`a = \`${k}\n`, `/* ${k}\n`, `b = "${k}\n`, `c = /${k}\n`, `d = \`\${${k}\n`][k % 5] as string)],
     ["oxlint", "one very long line", (fill) => `x = ${fill("a / b / ")}1; // eslint-disable-line\n`],
     ["oxlint", "deep nesting", (fill) => `x = ${fill("`${")}\n`],
+    ["golangci", "many unclosed openers of each kind", (fill) => fill((k) => [`a := \`${k}\n`, `/* ${k}\n`, `b := "${k}\n`][k % 3] as string)],
     ["golangci", "one very long line", (fill) => `x := ${fill('"a" + ')}1 //nolint\n`],
     ["golangci", "deep nesting and package lines in comments", (fill) => fill("/*\npackage x\n*/\n")],
+    ["tflint", "many unclosed openers of each kind (24)", (fill) => fill((k) => [`a = "${k}\n`, `/* ${k}\n`, `b = "\${${k}\n`, `c = <<E${k}\n`, `d = "%{${k}\n`][k % 5] as string)],
     ["tflint", "many distinct heredoc words (24)", (fill) => fill((k) => `x = <<E${k}\n`)],
     ["tflint", "one very long line (24)", (fill) => `x = ${fill('"a" + ')}1 # tflint-ignore: all\n`],
     ["tflint", "deep nesting (24)", (fill) => `x = ${fill('"${')}\n`],

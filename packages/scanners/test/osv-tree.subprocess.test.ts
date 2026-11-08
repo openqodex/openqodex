@@ -11,8 +11,7 @@
 // a two-line script before the binary adds the one flag after `scan source`.
 // That nothing but osv.dev is opened in the adapter's own mode stays with
 // adapters.subprocess.test.ts.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { crc32 } from "node:zlib";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -23,10 +22,12 @@ import { makeChange } from "../../core/src/test-fixtures.js";
 import { runOsvScanner } from "../src/adapters/osv-scanner.js";
 import { runScanners } from "../src/run.js";
 import { ARG_BUDGET_BYTES } from "../src/exec.js";
+import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
-const dirs: string[] = [];
-const tempDir = (prefix: string) => { const dir = mkdtempSync(join(tmpdir(), prefix)); dirs.push(dir); return dir; };
-afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
+afterAll(removeTempDirs);
+
+// The osv-scanner version the toolchain table pins, as the scan row reports it.
+const PINNED = (JSON.parse(readFileSync(new URL("../toolchain.json", import.meta.url), "utf8")) as { tools: { "osv-scanner": { version: string } } }).tools["osv-scanner"].version;
 
 // The two advisories of the fixed database, both on lodash 4.17.15.
 const ADVISORIES = ["GHSA-35jh-r3h4-6jhm", "GHSA-p6mc-m468-83gw"];
@@ -80,7 +81,10 @@ beforeAll(() => {
   const bin = tempDir("oq-osv-bin-");
   offlineTool = (tool) => {
     const script = join(bin, "osv-scanner");
-    writeFileSync(script, `#!/bin/sh\nfirst="$1"; second="$2"; shift 2\nexec ${JSON.stringify(tool.path)} "$first" "$second" --offline-vulnerabilities "$@"\n`);
+    // The flag goes after `scan source`, the only command line the adapter
+    // writes; any other line fails loudly (97) instead of going online.
+    if (tool.path.includes("'")) throw new Error(`the osv-scanner path holds a single quote: ${tool.path}`);
+    writeFileSync(script, `#!/bin/sh\n[ "$1" = scan ] && [ "$2" = source ] || exit 97\nshift 2\nexec '${tool.path}' scan source --offline-vulnerabilities "$@"\n`);
     chmodSync(script, 0o755);
     return { ...tool, path: script, env: { ...tool.env, OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY: db } };
   };
@@ -127,7 +131,7 @@ it("keeps the pre-change scan without inventory when coverage misses advisories"
   expect(scan.trail).toEqual(ADVISORIES.map((id) => ({ token: `osv-scanner:${id}`, file: "package-lock.json", lineStart: 8, lineEnd: 9, severity: "high", stage: "changed-lines" })));
   expect(scan).not.toHaveProperty("outside");
   const { durationMs: _duration, resolveMs: _resolve, ...row } = scan.scanners[0]!;
-  expect(row).toEqual({ scanner: "osv-scanner", status: "ran", version: "2.6.0", rawCount: 2, keptCount: 0, files: 1, reason: null, stages: { changedLines: 2, fixtures: 0, rules: 0, merged: 0 } });
+  expect(row).toEqual({ scanner: "osv-scanner", status: "ran", version: PINNED, rawCount: 2, keptCount: 0, files: 1, reason: null, stages: { changedLines: 2, fixtures: 0, rules: 0, merged: 0 } });
   expect(scan.candidates).toEqual([]);
 });
 

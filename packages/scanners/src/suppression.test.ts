@@ -50,7 +50,7 @@
 //      100,000 quote pairs, many unclosed openers of each kind, one very
 //      long line, deep nesting. Many openers left open are checked here by
 //      the characters the searches for their closers cover, which no load
-//      changes (issue 296); the rest by the ratio of two sizes in
+//      changes (issue 296); every case also by the ratio of two sizes in
 //      test/suppression-growth.test.ts on the full tier.
 //  17. A construct read wrongly hides a later real comment: an f-string
 //      field whose format spec is never closed; in Ruby, `x /y` read as a
@@ -1063,13 +1063,15 @@ describe("linear time on hostile SQL (S7)", () => {
 // A search for a closer that reaches the end of the file is not made again
 // from a later opener of its kind (comments.ts, the second rule). Without
 // that rule each opener left open searches the rest of the file, and the
-// characters searched grow with the square of the file: at 64 KB these
-// inputs then cover 150 to 1,200 times the file, and at 256 KB 2,100 to
-// 4,600 times. With it they cover 1 to 2.4 times the file at any size. The
-// count is of characters, not time, so a busy machine cannot move it
-// (issue 296: the timing ratio failed on a loaded runner). Each input leaves
-// open, many times over, the openers of its language that have no closer
-// after them; a quote opened again only closes the one before.
+// characters searched grow with the square of the file: at 64 KB the Python,
+// Ruby, Go and HCL inputs then cover 150 to 1,200 times the file, and at
+// 256 KB 2,100 to 4,600 times. With it every input covers 0.4 to 2.4 times
+// the file at any size. The count is of characters, not time, so a busy
+// machine cannot move it (issue 296: the timing ratio failed on a loaded
+// runner). It sees only searches made through that rule; the ratio in
+// test/suppression-growth.test.ts still checks the rest on the full tier.
+// Each input leaves open, many times over, the openers of its language that
+// have no closer after them; a quote opened again only closes the one before.
 describe("many openers left open: each kind is searched to the end of the file once (16)", () => {
   const SIZE = 64 * 1024;
   const fill = (unit: (k: number) => string): string => {
@@ -1085,6 +1087,8 @@ describe("many openers left open: each kind is searched to the end of the file o
   const cases: [BuiltinScanner, (k: number) => string][] = [
     ["bandit", (k) => [`a = '''${k}\n`, `b = """${k}\n`, `c = f'''{${k}\n`, `d = f"{e:${k}\n`, `g = '${k}\n`][k % 5] as string],
     ["rubocop", (k) => [`c = %q(${k}\n`, `=begin ${k}\n`, `a = "${k}\n`, `b = '${k}\n`, `d = "#{${k}\n`][k % 5] as string],
+    ["shellcheck", (k) => [`echo '${k}\n`, `echo "${k}\n`, `echo $'${k}\n`, `x=$(echo ${k}\n`, `y=\`echo ${k}\n`][k % 5] as string],
+    ["oxlint", (k) => [`a = \`${k}\n`, `/* ${k}\n`, `b = "${k}\n`, `c = /${k}\n`, `d = \`\${${k}\n`][k % 5] as string],
     ["golangci", (k) => [`a := \`${k}\n`, `/* ${k}\n`, `b := "${k}\n`][k % 3] as string],
     ["tflint", (k) => [`a = "${k}\n`, `/* ${k}\n`, `b = "\${${k}\n`, `c = <<E${k}\n`, `d = "%{${k}\n`][k % 5] as string],
   ];
