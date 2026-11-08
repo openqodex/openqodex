@@ -8,6 +8,7 @@
 // set around openqodex points git elsewhere. Read-only callers and the
 // checkout itself go through here; diffs add --no-ext-diff and --no-textconv.
 import { spawn } from "node:child_process";
+import { endInput } from "./child-input.js";
 import { OpenQodexError } from "./types.js";
 
 export type SafeGitResult = { code: number; stdout: Buffer; stderr: string };
@@ -43,7 +44,7 @@ function runGit(cwd: string, argv: string[], input?: string, env?: Record<string
     child.stderr?.on("data", (b: Buffer) => err.push(b));
     child.on("error", (e) => fail(new OpenQodexError(`could not run git: ${e.message}`)));
     child.on("close", (code) => overflow ? fail(new OpenQodexError(`git output is over ${maxBytes} bytes`)) : done({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") }));
-    if (input !== undefined) child.stdin?.end(input);
+    if (input !== undefined) endInput(child.stdin, input);
   });
 }
 
