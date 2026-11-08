@@ -1,0 +1,19 @@
+{
+  "guards": "detects nothing from a Maven dependency without an annotation",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 0,
+    "none": [
+      "role",
+      "tests",
+      "registration"
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:2",
+      "tier": "certain"
+    }
+  ]
+}

@@ -31,7 +31,7 @@ const FAN_OUT_CUTS = 10; // capped dispatch sites named per symbol
 export const SUMMARY_CONSUMERS = 200; // consumers of a public name the summary keeps
 const NEAR_SHOWN = 40;
 
-const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|testdata|fixtures?)\/|[._-](test|spec)\.[^/]+$|_test\.go$|(^|\/)test_[^/]+\.py$|_spec\.rb$/;
+const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|testdata|fixtures?)\/|[._-](test|spec)\.[^/]+$|_test\.go$|(^|\/)test_[^/]+\.py$|_spec\.rb$|(Test|Tests|TestCase|IT|ITCase)\.java$|(^|\/)(Test|IT)[A-Z][^/]*\.java$/;
 
 export function isTestPath(path: string): boolean {
   return TEST_PATH.test(path);
@@ -115,6 +115,7 @@ function missTargets(node: GraphNode, path: string): Set<string> {
       out.add(`${file}::${owner}`);
       out.add(`go:${dir}::${owner}`);
       out.add(`rb::${owner}`);
+      out.add(`java:${file}::${owner}`);
     } else {
       out.add(file);
       out.add(`go:${dir}`);

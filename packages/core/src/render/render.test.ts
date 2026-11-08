@@ -19,7 +19,7 @@ import { finalizeReview, scanReport } from "../finalize.js";
 import { SECRET, finding, makeChange, makeConfig, makeManifest, makeScan, makeSubmission } from "../test-fixtures.js";
 import type { CompletionRecord, Config, ImpactSummary, Report } from "../types.js";
 import { renderHtml, renderJson, renderMarkdown, renderSarif, renderTerminal } from "./index.js";
-import { renderReview } from "./review.js";
+import { renderFindingDetails, renderReceipt, renderReview } from "./review.js";
 
 // Failure case: an unverified candidate looks like a low-confidence finding.
 it("renders a staged candidate's not verified reason in the receipt, terminal, markdown and html", () => {
@@ -50,7 +50,7 @@ function fullReview(config: Partial<Config> = {}): Report {
       findings: [
         finding({ title: "SQL built | from input", description: `Injectable; seen next to ${SECRET}.` }),
         finding({ source: null, candidate: null, file_path: "app/other.py", title: "Elsewhere" }),
-        finding({ source: null, candidate: null, confidence: 0.5, title: "Unsure" }),
+        finding({ source: null, candidate: null, confidence: 0.45, title: "Unsure" }),
       ],
     }),
     config,
@@ -337,4 +337,34 @@ describe("verdict scanner coverage", () => {
     r.scanners = r.scanners.filter((s) => s.status !== "not_installed");
     for (const output of outputs(r)) expect(output).toContain("Passed: no findings");
   });
+});
+
+// Failure cases: formats omit possible items, reorder sections or reuse numbers.
+it("prints possible issues after observations in every format and numbers them in receipts and details", () => {
+  const report = review();
+  report.observations = [{ ...report.findings[0]!, title: "Observation item" }];
+  report.possible = [{ ...report.findings[0]!, title: "Possible item", confidence: 0.55 }];
+  for (const output of [renderTerminal(report, { color: false }), renderMarkdown(report), renderHtml({ report, display: null }), renderReview(report, { format: "terminal", color: false }), renderReview(report, { format: "markdown" }), renderReceipt(report, { html: "report.html", md: "report.md" })]) {
+    expect(output).toContain("Possible issues");
+    expect(output.indexOf("Observation item")).toBeLessThan(output.indexOf("Possible item"));
+  }
+  expect(JSON.parse(renderJson(report)).possible).toHaveLength(1);
+  const receipt = renderReceipt(report, { html: "report.html", md: "report.md" });
+  expect(receipt).toContain("3. Critical security: Possible item");
+  const details = renderFindingDetails(report, [3]);
+  expect(details).toContain("Possible issues (1), not counted");
+  expect(details).toContain("3. Critical security: Possible item");
+  const html = renderHtml({ report, display: null });
+  expect(html).toContain('id="f3"');
+  expect(html).toContain('href="#possible"');
+  const notes = JSON.parse(renderSarif(report)).runs[0].results;
+  expect(notes.map((f: { level: string }) => f.level)).toEqual(["error", "note", "note"]);
+  expect(notes[2].properties["openqodex.tier"]).toBe("possible");
+});
+it("renders reports without possible exactly as reports with an empty list", () => {
+  const report = review();
+  const { possible: _possible, ...old } = report;
+  for (const render of [(r: Report) => renderTerminal(r, { color: false }), renderMarkdown, renderSarif, (r: Report) => renderHtml({ report: r, display: null }), (r: Report) => renderReview(r, { format: "markdown" }), (r: Report) => renderReceipt(r, { html: "report.html", md: "report.md" })]) {
+    expect(render(old as Report)).toBe(render({ ...report, possible: [] }));
+  }
 });

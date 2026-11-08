@@ -23,7 +23,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { casesRoot, generatedValue, repoRoot } from "../lib/cases.mjs";
 import { boardHash, hashFolder } from "../lib/index.mjs";
 import { specCopy } from "../lib/suites.mjs";
@@ -32,6 +32,8 @@ import { extractAsset } from "../fetch-run.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
+beforeEach(() => vi.stubEnv("OPENQODEX_BENCH_CACHE", tempDir("oq-empty-cache-")));
+afterEach(() => vi.unstubAllEnvs());
 
 const write = (path, text) => {
   mkdirSync(dirname(path), { recursive: true });
@@ -141,10 +143,112 @@ describe("nothing private leaves in an asset", () => {
     expect(message).not.toContain(secret);
   });
 
-  it("refuses a run whose stderr holds this machine's home folder", async () => {
+  it("publishes a stderr holding this machine's home folder with a placeholder, and refuses another machine's", async () => {
     const run = plantedRun();
     write(join(run, "samples/flask-path-traversal/claude-graph-on/1/stderr.txt"), `warning: ${join(homedir(), "Projects", "x")} is not a git repository\n`);
-    expect(await refused(run)).toMatch(/samples\/flask-path-traversal\/claude-graph-on\/1\/stderr\.txt:1: the home folder path/);
+    const asset = await packageRun(run, { out: tempDir("oq-publish-out-") });
+    expect(asset.pathsRedacted).toBe(1);
+    const back = extractAsset(asset.tarPath, asset, tempDir("oq-fetch-"), asset.runId);
+    expect(readFileSync(join(back, "samples/flask-path-traversal/claude-graph-on/1/stderr.txt"), "utf8")).toBe("warning: <home>/Projects/x is not a git repository\n");
+    write(join(run, "samples/flask-path-traversal/claude-graph-on/1/stderr.txt"), "warning: /home/someone/Projects/x is not a git repository\n");
+    expect(await refused(run)).toMatch(/samples\/flask-path-traversal\/claude-graph-on\/1\/stderr\.txt:1: a home folder path/);
+  });
+
+  it("publishes a run whose finding text holds another machine's home path when the exception file names that exact text, and records the exception on the entry", async () => {
+    const { folder: run } = boardRun();
+    const runs = join(tempDir("oq-publish-index-"), "runs");
+    const options = { runs, out: tempDir("oq-publish-out-"), env: { OPENQODEX_BENCH_CACHE: tempDir("oq-empty-cache-") } };
+    const finding = `${JSON.stringify({ findings: [{ text: "Example: /home/emailteam/x" }] })}\n`;
+    write(join(run, "rows.jsonl"), finding);
+    await expect(publishRun(run, { ...options, dryRun: true, writeIndex: true })).rejects.toThrow("rows.jsonl:1: a home folder path");
+    const exception = { file: "rows.jsonl", text: "/home/emailteam/", label: "a home folder path", reason: "The reviewer wrote an example path inside a finding." };
+    const exceptionPath = join(dirname(runs), "exceptions", "2026-10-10-aaaaaaa.json");
+    // A rule without a file excuses the same text in every packaged copy of the finding.
+    for (const rule of [exception, { ...exception, line: 1 }, { text: exception.text, label: exception.label, reason: exception.reason }]) {
+      write(exceptionPath, JSON.stringify([rule]));
+      const result = await publishRun(run, { ...options, dryRun: true, writeIndex: true });
+      const expected = [{ file: exception.file, line: 1, label: exception.label, reason: exception.reason }];
+      expect(result.asset.exceptions).toEqual(expected);
+      expect(JSON.parse(readFileSync(result.written, "utf8")).publishExceptions).toEqual(expected);
+      const back = extractAsset(result.asset.tarPath, result.asset, tempDir("oq-fetch-"), result.asset.runId);
+      expect(readFileSync(join(back, "rows.jsonl"), "utf8")).toBe(finding);
+      expect(readFileSync(join(run, "rows.jsonl"), "utf8")).toBe(finding);
+    }
+  });
+
+  it("refuses a hit the exception file does not name", async () => {
+    const run = plantedRun();
+    const runs = join(tempDir("oq-publish-index-"), "runs");
+    const options = { runs, out: tempDir("oq-publish-out-"), env: { OPENQODEX_BENCH_CACHE: tempDir("oq-empty-cache-") } };
+    const exception = { file: "rows.jsonl", text: "/home/emailteam/", label: "a home folder path", reason: "The reviewer wrote an example path inside a finding." };
+    write(join(run, "rows.jsonl"), `${JSON.stringify({ text: "/home/emailteam/x" })}\n${JSON.stringify({ text: "/home/otherteam/x" })}\n`);
+    const second = { ...exception, text: "/home/otherteam/", line: 2 };
+    for (const mismatch of [{ file: "outside/greptile/input.json" }, { text: "/home/absent/" }, { label: "the home folder path" }, { line: 1 }]) {
+      write(join(dirname(runs), "exceptions", "2026-10-10-abc1234.json"), JSON.stringify([exception, { ...second, ...mismatch }]));
+      await expect(packageRun(run, options)).rejects.toThrow(/^refused: 1 hit in the files to publish:\nrows\.jsonl:2: a home folder path$/);
+      expect(readdirSync(options.out)).toEqual([]);
+    }
+  });
+
+  it("refuses a line that holds a real home path beside the excused example text", async () => {
+    const run = plantedRun();
+    const runs = join(tempDir("oq-publish-index-"), "runs");
+    const options = { runs, out: tempDir("oq-publish-out-"), env: { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(runs, "missing") } };
+    const mixed = { findings: [{ text: "/home/emailteam/x" }, { text: "/home/someone/private" }] };
+    const example = { findings: [{ text: "/home/emailteam/x" }] };
+    write(join(run, "rows.jsonl"), `${JSON.stringify(mixed)}\n${JSON.stringify(example)}\n`);
+    write(join(dirname(runs), "exceptions", "2026-10-10-abc1234.json"), JSON.stringify([
+      { text: "/home/emailteam/", label: "a home folder path", reason: "The reviewer wrote an example path inside a finding." },
+    ]));
+    await expect(packageRun(run, options)).rejects.toThrow(/^refused: 1 hit in the files to publish:\nrows\.jsonl:1: a home folder path$/);
+    expect(readdirSync(options.out)).toEqual([]);
+  });
+
+  it("refuses a real home path that ends where the excused text begins", async () => {
+    const run = plantedRun();
+    const runs = join(tempDir("oq-publish-index-"), "runs");
+    const options = { runs, out: tempDir("oq-publish-out-"), env: { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(runs, "missing") } };
+    write(join(run, "rows.jsonl"), `${JSON.stringify({ findings: [{ text: "/home/bob/home/emailteam/x" }] })}\n`);
+    write(join(dirname(runs), "exceptions", "2026-10-10-abc1234.json"), JSON.stringify([
+      { text: "/home/emailteam/", label: "a home folder path", reason: "The reviewer wrote an example path inside a finding." },
+    ]));
+    await expect(packageRun(run, options)).rejects.toThrow(/^refused: 1 hit in the files to publish:\nrows\.jsonl:1: a home folder path$/);
+    expect(readdirSync(options.out)).toEqual([]);
+  });
+
+  it("refuses a real home path whose boundary sits inside the excused text", async () => {
+    const run = plantedRun();
+    const runs = join(tempDir("oq-publish-index-"), "runs");
+    const options = { runs, out: tempDir("oq-publish-out-"), env: { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(runs, "missing") } };
+    write(join(run, "rows.jsonl"), `${JSON.stringify({ findings: [{ text: "x /home/emailteam/ /home/bob/private" }] })}\n`);
+    write(join(dirname(runs), "exceptions", "2026-10-10-abc1234.json"), JSON.stringify([
+      { text: "x /home/emailteam/ ", label: "a home folder path", reason: "The reviewer wrote an example path inside a finding." },
+    ]));
+    await expect(packageRun(run, options)).rejects.toThrow(/^refused: 1 hit in the files to publish:\nrows\.jsonl:1: a home folder path$/);
+    expect(readdirSync(options.out)).toEqual([]);
+  });
+
+  it("refuses a second home path that starts where the excused one ends", async () => {
+    const run = plantedRun();
+    const runs = join(tempDir("oq-publish-index-"), "runs");
+    const options = { runs, out: tempDir("oq-publish-out-"), env: { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(runs, "missing") } };
+    write(join(run, "rows.jsonl"), `${JSON.stringify({ findings: [{ text: "/home/emailteam//home/bob/private" }] })}\n`);
+    write(join(dirname(runs), "exceptions", "2026-10-10-abc1234.json"), JSON.stringify([
+      { text: "/home/emailteam/", label: "a home folder path", reason: "The reviewer wrote an example path inside a finding." },
+    ]));
+    await expect(packageRun(run, options)).rejects.toThrow(/^refused: 1 hit in the files to publish:\nrows\.jsonl:1: a home folder path$/);
+    expect(readdirSync(options.out)).toEqual([]);
+  });
+
+  it("refuses an exception that excuses nothing", async () => {
+    const run = plantedRun();
+    const runs = join(tempDir("oq-publish-index-"), "runs");
+    const options = { runs, out: tempDir("oq-publish-out-"), env: { OPENQODEX_BENCH_CACHE: tempDir("oq-empty-cache-") } };
+    write(join(dirname(runs), "exceptions", "2026-10-10-abc1234.json"), JSON.stringify([
+      { file: "rows.jsonl", text: "/home/emailteam/", label: "a home folder path", reason: "The reviewer wrote an example path inside a finding." },
+    ]));
+    await expect(packageRun(run, options)).rejects.toThrow(/names no hit/);
+    expect(readdirSync(options.out)).toEqual([]);
   });
 
   it("refuses a run whose transcript holds the model key or base URL, without printing either", async () => {
@@ -347,6 +451,31 @@ it("publishes saved scanner reasons with placeholders without changing the run",
   expect(saved.scanners[1].reason).toBeNull();
   expect(readFileSync(join(back, "samples/demo-polyglot/claude-graph-on/1/report/brief.md"), "utf8")).toContain(saved.scanners[0].reason);
   expect(readFileSync(join(back, "samples/demo-polyglot/claude-graph-on/1/transcript.jsonl"), "utf8")).toBe(transcript);
+  expect(hashFolder(run)).toEqual(before);
+});
+
+// Failure case: a scanner's own message or a control row's hook command
+// holds a machine path outside a reason field, and the run cannot publish
+// or publishes the path.
+it("publishes a scanner message and a control row holding a machine path with placeholders without changing the run", async () => {
+  const run = plantedRun();
+  const message = `Lint/DuplicateMethods: Method \`A.b\` is defined at both ${homedir()}/.openqodex/checkouts/work-x/tree/a.rb:1 and ${homedir()}/.openqodex/checkouts/work-x/tree/a.rb:9.`;
+  const settings = JSON.stringify({ hooks: [{ command: `'node' '${run}/lib/control-gate.mjs'` }] });
+  write(join(run, "rows.jsonl"), `${JSON.stringify({ settings })}\n${JSON.stringify({ settings: null })}\n`);
+  const dir = join(run, "samples", "demo-polyglot", "claude-graph-on", "1");
+  write(join(dir, "report/scan.json"), JSON.stringify({ findings: [{ message }] }, null, 2));
+  write(join(dir, "report/brief.md"), `- c1 [rubocop] a.rb:9 ${message}\n`);
+  const before = hashFolder(run);
+  const asset = await packageRun(run, { out: tempDir("oq-publish-out-") });
+  expect(asset.reasonsRedacted).toBe(0);
+  expect(asset.pathsRedacted).toBe(3);
+  const back = extractAsset(asset.tarPath, asset, tempDir("oq-fetch-"), asset.runId);
+  const scan = JSON.parse(readFileSync(join(back, "samples/demo-polyglot/claude-graph-on/1/report/scan.json"), "utf8"));
+  expect(scan.findings[0].message).toBe("Lint/DuplicateMethods: Method `A.b` is defined at both <home>/.openqodex/checkouts/work-x/tree/a.rb:1 and <home>/.openqodex/checkouts/work-x/tree/a.rb:9.");
+  expect(readFileSync(join(back, "samples/demo-polyglot/claude-graph-on/1/report/brief.md"), "utf8")).toContain(scan.findings[0].message);
+  const rows = readFileSync(join(back, "rows.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  expect(rows[0].settings).toBe(JSON.stringify({ hooks: [{ command: "'node' '<run>/lib/control-gate.mjs'" }] }));
+  expect(rows[1].settings).toBeNull();
   expect(hashFolder(run)).toEqual(before);
 });
 

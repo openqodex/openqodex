@@ -1,0 +1,20 @@
+{
+  "guards": "binds an explicit Java import to the file that declares the package and the class, never to the file the folder layout suggests",
+  "callers": [
+    {
+      "to": "src/main/java/misc/Util.java#Util.clean",
+      "site": "src/main/java/com/example/app/App.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/com/example/util/Util.java#Util.clean",
+      "site": "src/main/java/com/example/app/App.java:7"
+    }
+  ],
+  "floor": {
+    "src/main/java/misc/Util.java#Util.clean": false
+  }
+}

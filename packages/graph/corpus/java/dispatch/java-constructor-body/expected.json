@@ -1,0 +1,43 @@
+{
+  "guards": "binds new T(...) to T's declared constructor, binds the constructor body's calls on the instance, and records a class without one as a type use, never a miss",
+  "callers": [
+    {
+      "to": "src/main/java/c/Widget.java#Widget.init",
+      "site": "src/main/java/c/Widget.java:8",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/c/Widget.java#Widget.Widget",
+      "site": "src/main/java/c/Maker.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "references": [
+    {
+      "to": "src/main/java/c/Plain.java#Plain",
+      "site": "src/main/java/c/Maker.java:9",
+      "kind": "uses_type",
+      "tier": "certain"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/main/java/c/Maker.java",
+      "line": 5
+    },
+    {
+      "file": "src/main/java/c/Maker.java",
+      "line": 9
+    },
+    {
+      "file": "src/main/java/c/Widget.java",
+      "line": 8
+    }
+  ],
+  "floor": {
+    "src/main/java/c/Widget.java#Widget.init": false,
+    "src/main/java/c/Widget.java#Widget.Widget": false
+  }
+}

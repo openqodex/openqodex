@@ -133,7 +133,8 @@
 //    score.json, refuses a copy of the asset (which has none) for an entry
 //    that has them, and records their hash (boardHash) beside the score hash.
 
-import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { benchRoot, repoRoot } from "./lib/cases.mjs";
@@ -550,7 +551,7 @@ export function acceptRefusals(e) {
 // copy fetched from the asset (its list hash is the asset's), and the entry
 // built from its files the way publish-run.mjs builds it must equal the
 // committed one, the accepted mark aside.
-export function runMismatch(entry, results) {
+export async function runMismatch(entry, results, index = indexRoot) {
   const folder = join(results, entry.runId);
   if (!existsSync(join(folder, "manifest.json"))) return [`the run folder ${folder} is missing: fetch it with node benchmark/fetch-run.mjs ${entry.runId}, or name the folder that holds it with --results`];
   const { listHash: hash } = hashFolder(folder);
@@ -566,6 +567,23 @@ export function runMismatch(entry, results) {
   } catch (error) {
     return [`the entry cannot be built again from ${folder}: ${error.message}`];
   }
+  // The exception file is proved by packaging the run again under it: the
+  // hits it excuses now must be the ones the entry records, so a rule
+  // changed, dropped or added since the publish, or an entry edited by
+  // hand, refuses. Nothing is uploaded; the package goes to a scratch folder.
+  const exceptionFile = relative(repoRoot, join(index, "exceptions", `${entry.runId}.json`));
+  const mismatch = `publishExceptions do not match ${exceptionFile}`;
+  const scratch = mkdtempSync(join(tmpdir(), "oq-accept-"));
+  try {
+    const { packageRun } = await import("./publish-run.mjs");
+    const packaged = await packageRun(folder, { out: scratch, runs: join(index, "runs") });
+    if (canonical(packaged.exceptions) !== canonical(entry.publishExceptions ?? [])) return [mismatch];
+  } catch (error) {
+    return [`the run cannot be packaged again under ${exceptionFile}: ${error.message}`];
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  if (entry.publishExceptions !== undefined) rebuilt.publishExceptions = entry.publishExceptions;
   if (canonical(rebuilt.outside ?? null) !== canonical(entry.outside ?? null)) throw new Refusal(`refused: ${entry.runId}'s board numbers (outside) differ from those in its score.json`);
   const committed = { ...entry, accepted: false, acceptedAt: null, acceptedBy: null };
   const differ = [...new Set([...Object.keys(rebuilt), ...Object.keys(committed)])].filter((k) => canonical(rebuilt[k] ?? null) !== canonical(committed[k] ?? null)).sort();
@@ -575,7 +593,7 @@ export function runMismatch(entry, results) {
 }
 
 // Marks one run accepted and points every group it holds at it.
-export function acceptRun({ index = indexRoot, results = resultsRoot, runId, by, people = readPeople(peopleFolder), now = new Date().toISOString(), log = console.log }) {
+export async function acceptRun({ index = indexRoot, results = resultsRoot, runId, by, people = readPeople(peopleFolder), now = new Date().toISOString(), log = console.log }) {
   if (typeof by !== "string" || by.trim() === "") throw new Refusal("--accept needs --by <name>: who accepts the run");
   // A person accepts a baseline, never a model or an agent (failure 16).
   if (!isPersonName(by, people)) throw new Refusal(`refused: --by ${JSON.stringify(by)} is not a person named in ${relative(repoRoot, join(peopleFolder, "people.json"))} (${people.join(", ") || "it names nobody"}); a model or an agent never accepts a run`);
@@ -583,7 +601,7 @@ export function acceptRun({ index = indexRoot, results = resultsRoot, runId, by,
   const entry = byId.get(runId);
   if (!entry) throw new Refusal(`refused: the index holds no entry ${runId}`);
   const why = acceptRefusals(entry);
-  if (why.length === 0) why.push(...runMismatch(entry, results));
+  if (why.length === 0) why.push(...await runMismatch(entry, results, index));
   if (why.length > 0) throw new Refusal(`refused: ${runId} cannot be accepted:\n${why.map((w) => `- ${w}`).join("\n")}`);
   if (entry.mode !== "scan" && entry.reviewers?.claude) {
     // The index entry keeps no requested model; the run folder's manifest, checked above, does.
@@ -607,7 +625,7 @@ export function acceptRun({ index = indexRoot, results = resultsRoot, runId, by,
 
 const USAGE = "usage: node benchmark/trend.mjs [--suite <suite>] [--mode review|scan] [--config <config>] [--alpha 0.05] [--index <folder>]\n       node benchmark/trend.mjs --accept <run-id> --by <name> [--index <folder>] [--results <folder>]\n       node benchmark/trend.mjs --mode scan --against-run <run folder> [--summary <file>] [--index <folder>] [--branch-index <folder>]";
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   const o = { index: indexRoot, results: resultsRoot, suite: null, mode: null, config: null, alpha: ALPHA, accept: null, by: null, againstRun: null, summary: null, branchIndex: null };
   const value = (i) => {
@@ -645,7 +663,7 @@ function main() {
     }
     if (o.summary !== null || o.branchIndex !== null) throw new Refusal(`--summary and --branch-index go with --against-run\n${USAGE}`);
     if (o.accept !== null) {
-      acceptRun({ index: o.index, results: o.results, runId: o.accept, by: o.by });
+      await acceptRun({ index: o.index, results: o.results, runId: o.accept, by: o.by });
       process.exit(0);
     }
     process.exit(runTrend(o) ? 1 : 0);

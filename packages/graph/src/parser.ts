@@ -1,4 +1,4 @@
-// Loads the tree-sitter runtime and the six grammars. The wasm files ship
+// Loads the tree-sitter runtime and the seven grammars. The wasm files ship
 // beside the CLI bundle in `wasm/` (copied by scripts/copy-assets.mjs); in
 // this package's own build and tests they are read from the installed
 // dependencies. Paths come from import.meta.url, never the current folder.
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { Language, Parser } from "web-tree-sitter";
 import type { Lang } from "./types.js";
 
-export const LANGS: readonly Lang[] = ["typescript", "tsx", "javascript", "python", "go", "ruby"];
+export const LANGS: readonly Lang[] = ["typescript", "tsx", "javascript", "python", "go", "ruby", "java"];
 
 export const RUNTIME_WASM = "web-tree-sitter.wasm";
 export function grammarFile(lang: Lang): string {

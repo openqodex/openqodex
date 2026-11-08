@@ -4,7 +4,7 @@
 // their order are the same in both; only the markup differs.
 import pc from "picocolors";
 import type { ModelCompletionRecord, Report, ReportFinding, ReviewerRecord } from "../types.js";
-import { candidateLocation, coverageLine, display, escapeMarkdown, findingTitle, firstLine, location, lowConfidenceReason, notOpenedLabel, observationsOmittedLine, orderFindings, orderObservations, severityBreakdown, verdictLine } from "./common.js";
+import { candidateLocation, coverageLine, display, escapeMarkdown, findingTitle, firstLine, location, lowConfidenceReason, notOpenedLabel, observationsOmittedLine, orderFindings, orderObservations, orderPossible, severityBreakdown, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
 
 type Line =
@@ -85,6 +85,23 @@ function observationLines(report: Report): Line[] {
   return out;
 }
 
+function possibleHeading(report: Report): string {
+  // wording: session
+  return `Possible issues (${report.possible?.length ?? 0}), not counted`;
+}
+
+function possibleLines(report: Report): Line[] {
+  const ordered = orderPossible(report);
+  if (ordered.length === 0) return [];
+  const out: Line[] = [{ kind: "heading", text: possibleHeading(report) }];
+  const offset = report.findings.length + orderObservations(report).length;
+  ordered.forEach((f, i) => {
+    out.push(...findingLines(f, offset + i + 1));
+    if (f.suggested_change) out.push({ kind: "label", text: "Suggested change" }, { kind: "code", text: f.suggested_change });
+  });
+  return out;
+}
+
 // A dropped candidate, as one item and its source.
 function droppedLines(d: Report["dropped"][number]): Line[] {
   const cited = d.cited ? ` (see ${d.cited.file_path}:${d.cited.line_number})` : "";
@@ -133,10 +150,10 @@ function lines(report: Report): Line[] {
     if (ordered.length === 0) out.push({ kind: "text", text: "No findings on the changed lines." });
   }
   ordered.forEach((f, i) => out.push(...findingLines(f, i + 1)));
-  out.push(...observationLines(report));
+  out.push(...observationLines(report), ...possibleLines(report));
   if (report.outside_change.length > 0) {
-    // Numbered after the findings and the observations, so no two shown items share a number.
-    const shown = ordered.length + orderObservations(report).length;
+    // Numbered after findings, observations and possible issues.
+    const shown = ordered.length + orderObservations(report).length + orderPossible(report).length;
     out.push({ kind: "heading", text: `Outside the changed lines (${report.outside_change.length}), never counted` });
     report.outside_change.forEach((f, i) => out.push(...findingLines(f, shown + i + 1)));
   }
@@ -230,6 +247,11 @@ export function renderReceipt(report: Report, opts: { html: string; md: string; 
     observations.forEach((f, i) => out.push(display(`${findingLabel(f, ordered.length + i + 1)} (${location(f)})`)));
     if (omitted) out.push(omitted);
   }
+  const possible = orderPossible(report);
+  if (possible.length > 0) {
+    out.push(possibleHeading(report));
+    possible.forEach((f, i) => out.push(display(`${findingLabel(f, ordered.length + observations.length + i + 1)} (${location(f)})`)));
+  }
   if (!complete && report.not_reviewed.length > 0) {
     // One line each: the developer sees what the scanners found, unchecked.
     out.push(`${UNCHECKED} (${report.not_reviewed.length}):`);
@@ -247,19 +269,25 @@ export function renderReceipt(report: Report, opts: { html: string; md: string; 
 // the fix, any suggested change and the source. `numbers` are the receipt's
 // and must exist; they are printed in the order given.
 export function renderFindingDetails(report: Report, numbers: number[]): string {
-  const ordered = [...orderFindings(report.findings), ...orderObservations(report)];
+  const ordered = [...orderFindings(report.findings), ...orderObservations(report), ...orderPossible(report)];
   const out: string[] = [];
   let observations = false;
+  let possible = false;
   for (const n of numbers) {
     const f = ordered[n - 1];
     if (f === undefined) continue;
-    const observation = n > report.findings.length;
+    const possibleItem = n > report.findings.length + (report.observations?.length ?? 0);
+    const observation = n > report.findings.length && !possibleItem;
+    if (possibleItem && !possible) {
+      out.push(possibleHeading(report));
+      possible = true;
+    }
     if (observation && !observations) {
       out.push("Observations (do not count toward the verdict):");
       observations = true;
     }
     out.push(display(findingLabel(f, n)));
-    const fields = f.problem !== undefined || observation ? findingLines(f, n).slice(1) : [{ kind: "field" as const, label: "Where", text: location(f) }, { kind: "field" as const, label: "Description", text: f.description }, { kind: "field" as const, label: "Source", text: f.source ?? "the reviewer" }];
+    const fields = f.problem !== undefined || observation || possibleItem ? findingLines(f, n).slice(1) : [{ kind: "field" as const, label: "Where", text: location(f) }, { kind: "field" as const, label: "Description", text: f.description }, { kind: "field" as const, label: "Source", text: f.source ?? "the reviewer" }];
     for (const l of fields) if (l.kind === "field") out.push(`   ${l.label}: ${display(l.text)}`);
     if (f.suggested_change !== null && f.suggested_change.trim() !== "") {
       out.push("   Suggested change:");

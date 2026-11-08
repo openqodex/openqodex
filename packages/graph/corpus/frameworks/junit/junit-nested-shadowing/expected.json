@@ -1,0 +1,29 @@
+{
+  "guards": "lets enclosing and inherited nested annotation declarations shadow JUnit imports",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 0,
+    "none": [
+      "role",
+      "tests",
+      "registration"
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:4",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:7",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:11",
+      "tier": "certain"
+    }
+  ]
+}

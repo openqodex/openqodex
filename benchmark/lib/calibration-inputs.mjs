@@ -7,13 +7,13 @@ import { promisify } from "node:util";
 import { benchRoot } from "./cases.mjs";
 import { cacheRoot } from "./licence.mjs";
 import { checkedBytes, hash } from "./calibration.mjs";
-import { canonicalJson, greptileTruth, truthHashOf } from "./suites.mjs";
+import { canonicalJson, greptileTruth, readSuite, truthHashOf } from "./suites.mjs";
 import { GREPTILE_REPOS, greptileRows } from "./greptile.mjs";
 
 const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 const run = promisify(execFile);
-export async function publicSource(board, pin) {
-  const local = join(benchRoot, "results/calibration-sources", board, pin.path);
+export async function publicSource(board, pin, { root = benchRoot } = {}) {
+  const local = join(root, "results/calibration-sources", board, pin.path);
   const raw = join(cacheRoot(), "raw", board, pin.path);
   for (const file of [local, raw]) if (existsSync(file)) return checkedBytes(readFileSync(file), pin);
   let body;
@@ -40,14 +40,15 @@ async function commentsAt(url) {
   return { comments, sources: [{ url: `https://api.github.com/${endpoint}`, sha256: hash(stdout), encoding: "Paginated JSON from gh api --slurp" }] };
 }
 
-export async function greptileInputs() {
-  const sources = json(join(benchRoot, "suites/greptile/sources.json"));
-  const asset = await publicSource("greptile", sources.original.asset);
+export async function greptileInputs({ root = benchRoot } = {}) {
+  const { file: suite, split, def } = readSuite("greptile", { root });
+  const count = Object.values(split?.cases ?? {}).flat().length;
+  if (suite.cases.length !== count) throw new Error(`Greptile requires all ${count} cases from ${def.split}`);
+  const sources = json(join(root, "suites/greptile/sources.json"));
+  const asset = await publicSource("greptile", sources.original.asset, { root });
   const originals = greptileRows(asset.toString("utf8"));
   const corrected = new Map();
-  for (const pin of sources.corrected.files) corrected.set(pin.path, JSON.parse(await publicSource("greptile", pin)));
-  const suite = json(join(benchRoot, "suites/greptile/cases.json"));
-  if (suite.cases.length !== 50) throw new Error("Greptile requires all 50 cases");
+  for (const pin of sources.corrected.files) corrected.set(pin.path, JSON.parse(await publicSource("greptile", pin, { root })));
   const cases = []; const reviewSources = [];
   for (const c of suite.cases) {
     const original = originals.find((r) => r.prUrl === c.prUrl);
@@ -83,17 +84,19 @@ export async function greptileInputs() {
   return { cases, published, sources: { original: sources.original, corrected: sources.corrected, reviews: reviewSources } };
 }
 
-export async function martianInputs() {
-  const manifest = json(join(benchRoot, "suites/martian/calibration-sources.json"));
-  const root = join(benchRoot, "results/calibration-sources/martian");
+export async function martianInputs({ root = benchRoot } = {}) {
+  const { split, def } = readSuite("martian", { root });
+  const count = Object.values(split?.cases ?? {}).flat().length;
+  const pin = json(join(root, "suites/martian/verification-source.json"));
+  const all = JSON.parse(await publicSource("martian", pin, { root }));
+  if (Object.keys(all).length !== count) throw new Error(`Martian requires all ${count} public reviews from ${def.split}`);
+  const manifest = json(join(root, "suites/martian/calibration-sources.json"));
+  const pipeline = join(root, "results/calibration-sources/martian");
   const files = new Map();
-  for (const pin of manifest.files) files.set(pin.path, await publicSource("martian", pin));
+  for (const pin of manifest.files) files.set(pin.path, await publicSource("martian", pin, { root }));
   // publicSource may have read a raw cache file. The complete immutable
   // pipeline is materialised under results, without modifying their code.
-  for (const [path, bytes] of files) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), bytes); }
-  const pin = json(join(benchRoot, "suites/martian/verification-source.json"));
-  const all = JSON.parse(await publicSource("martian", pin));
-  if (Object.keys(all).length !== 50) throw new Error("Martian requires all 50 public reviews");
+  for (const [path, bytes] of files) { mkdirSync(dirname(join(pipeline, path)), { recursive: true }); writeFileSync(join(pipeline, path), bytes); }
   const data = {};
   for (const [url, entry] of Object.entries(all)) {
     const reviews = entry.reviews.filter((r) => r.tool === "augment");
@@ -103,5 +106,5 @@ export async function martianInputs() {
   }
   const prompts = manifest.files.filter((p) => /step[23]/.test(p.path));
   const promptHash = hash(canonicalJson(prompts));
-  return { data, checkout: join(root, "offline"), state: { commit: manifest.revision, tree: manifest.tree }, promptHash, sources: { ...manifest, data: pin }, published: () => JSON.parse(files.get("offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json")) };
+  return { data, checkout: join(pipeline, "offline"), state: { commit: manifest.revision, tree: manifest.tree }, promptHash, sources: { ...manifest, data: pin }, published: () => JSON.parse(files.get("offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json")) };
 }

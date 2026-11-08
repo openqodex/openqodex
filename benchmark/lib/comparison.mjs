@@ -2,11 +2,14 @@
 // Failure cases are listed in test/comparison.test.mjs before this code.
 // This module reads local fingerprints only. It never runs a reviewer or
 // accepts a comparison on someone's behalf.
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { benchRoot, caseHash, git, readLock } from "./cases.mjs";
-import { entryProblems, hashFolder, sha256 } from "./index.mjs";
+import { entryProblems, hashFolder, hashReviewedFolder, sha256 } from "./index.mjs";
+import { toolName } from "./aacr-board.mjs";
+import { boardConfigOf, boardToolName } from "./martian-board.mjs";
+import { boardRefusal } from "./board-readback.mjs";
 import { bundleHash } from "./runner.mjs";
 import { isPersonName, readPeople } from "./rulings.mjs";
 import { canonicalJson, entryHash, readSuite, SUITES } from "./suites.mjs";
@@ -95,7 +98,93 @@ function reference(root, file, kind) {
   need(realpathSync(path).startsWith(`${realpathSync(root)}${sep}`), `${kind}: ${file} leaves benchmark`);
   return path;
 }
+function committedRunEntry(root, runId) {
+  const path = reference(root, `index/runs/${runId}.json`, "run");
+  const bytes = readFileSync(path);
+  const message = `run ${runId} entry is not committed at HEAD; commit it before attaching`;
+  let committed;
+  try {
+    const repo = git(root, "rev-parse", "--show-toplevel").trim();
+    committed = git(repo, "show", `HEAD:${relative(realpathSync(repo), realpathSync(path)).split(sep).join("/")}`);
+  } catch { throw new Error(message); }
+  need(bytes.equals(Buffer.from(committed, "utf8")), message);
+  return bytes;
+}
 const buildProblems = (b) => object(b) && HEX40.test(b.commit ?? "") && HEX40.test(b.tree ?? "") && HEX64.test(b.bundleHash ?? "") && text(b.version);
+const suiteCaseIds = (name, suite) => Object.entries(suite.caseHashes).map(([c, h]) => `${name}/${c}@${h.slice(0, 8)}`);
+const sameIds = (a, b) => Array.isArray(a) && equal([...a].sort(), [...b].sort());
+
+// These are the files the board readers hash, rather than every work file
+// a board pipeline happened to leave behind.
+function validateRunBoard(entry, folder, ids, casesNotRun, pin, options) {
+  const name = SUITES[entry.suite]?.board;
+  if (!name) return;
+  const block = entry.outside?.[name];
+  const at = `run ${entry.runId} outside.${name}`;
+  need(object(block), `run ${entry.runId} needs a non-null outside.${name} block`);
+  if (name === "greptile") {
+    need(block.truthSet === pin.profile, `${at} truth set differs from the comparison profile`);
+    need(block.board?.commit === pin.commit && block.board?.promptHash === pin.promptHash && block.board?.judgeModel === pin.judgeModel, `${at} board pins differ from the comparison pin`);
+    need(block.judgeModel === null || block.judgeModel === pin.judgeModel, `${at} judge model differs from the comparison pin`);
+  } else need(block.judge?.deployment === pin.judgeModel, `${at} judge model differs from the comparison pin`);
+  if (name === "aacr") need(Array.isArray(block.problems) && block.problems.length === 0, `${at} has problems: ${block.problems?.join("; ") ?? "no problem list"}`);
+  const tools = name === "aacr" ? Object.fromEntries(block.folders.map((t) => [t.tool, t])) : block.perTool;
+  for (const [tool, t] of Object.entries(tools)) if (t.held?.length) {
+    const why = Array.isArray(t.held) ? t.held.map((h) => `${h.case} index ${h.index}: lacks ${h.lacking.join(", ")}`).join("; ") : t.held;
+    throw new Error(`${at} tool ${tool} is held by the judge: ${why}`);
+  }
+  const paths = name === "greptile" ? ["input.json", "eval.json", ...Object.keys(tools).map((tool) => `${tool}/verdicts.json`)]
+    : name === "martian" ? ["convert.json", "eval.json", "benchmark_data.json", ...Object.keys(tools).map((tool) => `${tool}/evaluation.json`)]
+      : ["convert.json", ...(existsSync(join(folder, "outside/aacr/eval.json")) ? ["eval.json"] : []), ...block.folders.flatMap((t) => t.metrics.map((file) => `${t.config}/r${t.repeat}/${file}`))];
+  const evidence = paths.map((path) => `outside/${name}/${path}`);
+  for (const path of evidence) reference(folder, path, `${at} evidence`);
+  need(hashFolder(folder, evidence).listHash === block.evidenceHash, `${at} evidence hash differs from its board files`);
+  const convert = name === "greptile" ? null : json(join(folder, "outside", name, "convert.json"));
+  for (const config of entry.configs) for (let repeat = 1; repeat <= entry.repeat; repeat++) {
+    const tool = name === "aacr" ? toolName(config, repeat) : boardToolName(config, repeat);
+    const t = tools[tool];
+    need(t && t.config === config && t.boardConfig === (name === "aacr" ? config : boardConfigOf(config)), `${at} is missing tool ${tool} or its configuration`);
+    let accounted;
+    if (name === "greptile") {
+      const notRun = t.labels.filter((c) => c.reason === "not-run").map((c) => c.id);
+      accounted = t.of === ids.length && t.planned === entry.caseIds.length && t.notRun === casesNotRun.length && t.planned + t.notRun === ids.length && sameIds(notRun, casesNotRun);
+    }
+    else if (name === "martian") {
+      const notRun = t.empty.filter((c) => c.reason === "not-run").map((c) => c.caseId);
+      accounted = sameIds(convert.cases?.map((c) => c.caseId), ids) && sameIds(notRun, casesNotRun) && entry.caseIds.length + notRun.length === ids.length;
+    } else {
+      need(t.judged === true, `${at} tool ${tool} is not judged: ${t.why}`);
+      const converted = convert.folders?.find((f) => f.tool === tool);
+      accounted = casesNotRun.length === 0 && converted?.files === ids.length && t.rounds.length > 0 && t.rounds.every((r) => r.evaluated === ids.length && r.missing === 0);
+    }
+    need(accounted, `${at} tool ${tool} has incomplete case accounting for the frozen suite`);
+  }
+  const refusal = boardRefusal(folder, entry.runId, { [name]: block }, options);
+  need(refusal === null, refusal);
+}
+
+// Both judges check compatibility before forecasting or contacting a provider.
+export function validateRunManifest(manifest, record) {
+  const need = (ok, why) => { if (!ok) throw new Error(`the run's ${why}`); };
+  const names = Object.keys(manifest.reviewers ?? {});
+  need(names.length > 0, "reviewers are missing");
+  for (const name of names) {
+    const pin = Object.values(record.reviewers).find((r) => r.reviewer === name);
+    need(pin, `reviewer ${name} has no comparison pin`);
+    if (name !== "control") {
+      const b = manifest.build;
+      need(equal(b && { commit: b.commit, tree: b.tree, bundleHash: b.bundleHash, version: b.cliVersion ?? b.version }, record.build), "build differs from the comparison build");
+    } else need(text(pin.version), "control reviewer must pin its Claude Code version");
+    const saved = manifest.reviewers[name];
+    need(saved.model === pin.model, `reviewer ${name} model differs from the comparison pin`);
+    need(pin.version === undefined || saved.version === pin.version, `reviewer ${name} version differs from the comparison pin`);
+    for (const field of ["effort", "maxOutputTokens"]) need((saved.settings?.[field] ?? null) === pin[field], `reviewer ${name} ${field} differs from the comparison pin`);
+    need(manifest.path === pin.path, `path differs from reviewer ${name}'s comparison pin`);
+    need(manifest.web === undefined || manifest.web === pin.web, `web setting differs from reviewer ${name}'s comparison pin`);
+    const config = `${name.replace(/:/g, "-")}-graph-${pin.graph}`;
+    need(Array.isArray(manifest.configs) && manifest.configs.length > 0 && manifest.configs.every((c) => (typeof c === "string" ? c : c?.id) === config), `configs differ from reviewer ${name}'s graph setting in the comparison pin`);
+  }
+}
 
 // Refuse stale or incomplete fingerprints even while the record is unsigned.
 // Empty acceptance is valid metadata, and always returns accepted: false.
@@ -160,17 +249,25 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     need(e.runId === r.runId && entryProblems(e).length === 0, `run ${r.runId} has an invalid index entry`);
     const suite = record.suites[e.suite];
     need(suite && e.splitHash === suite.splitHash && Array.isArray(e.caseIds) && e.caseIds.length > 0 && e.caseIds.every((id) => Object.entries(suite.caseHashes).some(([name, h]) => id === `${e.suite}/${name}@${h.slice(0, 8)}`)), `run ${r.runId} differs from the comparison suite`);
+    const ids = suiteCaseIds(e.suite, suite);
+    need(Array.isArray(r.casesNotRun) && sameIds([...e.caseIds, ...r.casesNotRun], ids), `run ${r.runId} caseIds and casesNotRun must account for every frozen suite case exactly once`);
     const folder = reference(root, `results/${r.runId}`, "run folder");
-    const { listHash } = hashFolder(folder);
+    const { listHash } = hashReviewedFolder(folder);
     need(listHash === e.asset.listHash || listHash === e.privateListHash, `run ${r.runId} folder differs from its asset or private list hash`);
     const manifest = json(reference(root, `results/${r.runId}/manifest.json`, "run manifest"));
     need(manifest.build?.commit === e.build.commit && manifest.build?.bundleHash === e.build.bundleHash, `run ${r.runId} build differs from its manifest`);
     const tree = e.build?.tree ?? manifest.build?.tree;
-    need(equal({ commit: e.build.commit, tree, bundleHash: e.build.bundleHash, version: e.build.cliVersion }, record.build), `run ${r.runId} build differs from the comparison build`);
     const reviewer = record.reviewers[r.reviewer];
+    if (reviewer?.reviewer === "control") need(text(reviewer.version), `run ${r.runId} control reviewer must pin its Claude Code version`);
+    else need(equal({ commit: e.build.commit, tree, bundleHash: e.build.bundleHash, version: e.build.cliVersion }, record.build), `run ${r.runId} build differs from the comparison build`);
     need(reviewer && e.path === reviewer.path && e.web === reviewer.web && e.reviewers?.[reviewer.reviewer]?.model === reviewer.model && (reviewer.version === undefined || e.reviewers[reviewer.reviewer].version === reviewer.version) && e.configs.every((c) => c === `${reviewer.reviewer.replace(/:/g, "-")}-graph-${reviewer.graph}`), `run ${r.runId} differs from its reviewer settings`);
+    for (const [name, entryReviewer] of Object.entries(e.reviewers)) {
+      const saved = manifest.reviewers?.[name];
+      need(saved && saved.version === entryReviewer.version && saved.model === entryReviewer.model, `run ${r.runId} reviewer ${name} differs from its manifest`);
+    }
     const settings = manifest.reviewers?.[reviewer.reviewer]?.settings;
     need((settings?.effort ?? null) === reviewer.effort && (settings?.maxOutputTokens ?? null) === reviewer.maxOutputTokens, `run ${r.runId} differs from its reviewer settings`);
+    validateRunBoard(e, folder, ids, r.casesNotRun, record.boards[SUITES[e.suite]?.board], { root });
   }
   const a = record.acceptance;
   need(object(a) && ["person", "date", "hash"].every((f) => typeof a[f] === "string"), "comparison acceptance must give person, date and hash");
@@ -181,7 +278,8 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
 
 // A comparison release uses the accepted record committed on this branch.
 // Admission checks the checkout; runtime access is logged in the cache.
-// Conversion checks the saved build and the installed bundle again.
+// Conversion and a judge check the run's saved build against the record;
+// only admission also checks the installed bundle and its provenance.
 export function comparisonRelease(manifest, { root = benchRoot, admit = false } = {}) {
   const { release, suite, split, splitHash, build: b, package: p } = manifest;
   need(typeof release === "string" && /^[a-z0-9][a-z0-9.-]*$/.test(release), "comparison release is missing or malformed");
@@ -195,14 +293,22 @@ export function comparisonRelease(manifest, { root = benchRoot, admit = false } 
   need(bytes === committed, `comparison ${release} differs from its committed record`);
   const record = JSON.parse(bytes);
   need(record.release === release, "comparison record names another release");
-  const checked = validateComparison(record, { root });
+  // The record keeps the build its runs were made on: a conversion or a
+  // judge on a later checkout validates it on that build (the run's own
+  // build is checked against it below); only a run made now needs the
+  // pinned build checked out and built.
+  const checked = validateComparison(record, { root, build: record.build });
   need(checked.accepted, `comparison ${release} is not accepted`);
+  if (admit) need(equal(record.build, buildFingerprint({ root })), "comparison release requires the pinned build checked out and built");
+  for (const r of record.runs) committedRunEntry(root, r.runId);
   need(p?.spec === "local" && p.commit === record.build.commit && p.dirty === false, "comparison release requires its pinned clean local build");
   const fingerprint = b ? { commit: b.commit, tree: b.tree, bundleHash: b.bundleHash, version: b.cliVersion ?? b.version } : null;
   need(equal(fingerprint, record.build), "comparison build fingerprint differs from the run's build");
   need(b.dirty === false && b.commitTree === b.tree && git(repo, "rev-parse", `${b.commit}^{tree}`).trim() === b.tree, "comparison build must be clean and match its commit tree");
-  const provenance = json(join(root, ".build/provenance.json"));
-  need(provenance.dirty === false && provenance.commitTree === b.tree, "comparison build provenance must be clean");
+  if (admit) {
+    const provenance = json(join(root, ".build/provenance.json"));
+    need(provenance.dirty === false && provenance.commitTree === b.tree, "comparison build provenance must be clean");
+  }
   need(record.suites[suite] && split === "test" && record.suites[suite].splitHash === splitHash, "comparison suite or test split differs from the accepted pins");
   if (admit) need(git(repo, "status", "--porcelain").trim() === "", "comparison release requires a clean checkout; the tree is dirty");
   return { release, package: p, comparison: { release, hash: checked.hash }, buildLabel: `local build ${b.commit}` };
@@ -238,8 +344,26 @@ export function validateOutsideRows(data, { root = benchRoot } = {}) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [flag, file, ...extra] = process.argv.slice(2);
-    need(file && extra.length === 0 && ["--outside-rows", "--comparison"].includes(flag), "usage: node benchmark/lib/comparison.mjs --outside-rows <file> | --comparison <file>");
-    const result = flag === "--outside-rows" ? validateOutsideRows(json(file)) : validateComparison(json(file));
+    need(file && ((extra.length === 0 && ["--outside-rows", "--comparison"].includes(flag)) || (flag === "--attach" && extra.length === 2)), "usage: node benchmark/lib/comparison.mjs --outside-rows <file> | --comparison <file> | --attach <record> <runId> <reviewer>");
+    const record = json(file);
+    let result;
+    if (flag === "--attach") {
+      const [runId, reviewer] = extra;
+      need(Array.isArray(record.runs), "comparison runs must be an array");
+      need(!record.runs.some((r) => r.runId === runId), `duplicate run ${runId}`);
+      need(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9._-]+$/.test(runId), "run must pin runId and sha256");
+      const bytes = committedRunEntry(benchRoot, runId);
+      const entry = JSON.parse(bytes.toString("utf8"));
+      // A stopped run lists the cases it planned, not the ones it reviewed, so
+      // its unreviewed cases would count as misses under a full case list.
+      need(entry.ended?.how === "finished", `run ${runId} ended ${entry.ended?.how ?? "unknown"}; only a finished run attaches`);
+      need(record.suites?.[entry.suite], `run ${runId} differs from the comparison suite`);
+      const casesNotRun = suiteCaseIds(entry.suite, record.suites[entry.suite]).filter((id) => !entry.caseIds?.includes(id));
+      record.acceptance = { person: "", date: "", hash: "" };
+      record.runs.push({ runId, sha256: sha256(bytes), reviewer, casesNotRun });
+      result = validateComparison(record, { build: record.build });
+      writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+    } else result = flag === "--outside-rows" ? validateOutsideRows(record) : validateComparison(record);
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error(error.message);

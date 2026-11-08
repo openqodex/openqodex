@@ -1,0 +1,30 @@
+{
+  "guards": "keys a Java nested class with its enclosing class and binds calls to it both by the outer name and by its simple name inside the outer class",
+  "callers": [
+    {
+      "to": "src/main/java/n/Outer.java#Outer.Inner.run",
+      "site": "src/main/java/n/Outer.java:11",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/n/Outer.java#Outer.Inner.run",
+      "site": "src/main/java/n/Other.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/m/Inner.java#Inner.run",
+      "site": "src/main/java/n/Outer.java:11"
+    },
+    {
+      "to": "src/main/java/m/Inner.java#Inner.run",
+      "site": "src/main/java/n/Other.java:5"
+    }
+  ],
+  "floor": {
+    "src/main/java/n/Outer.java#Outer.Inner.run": false
+  }
+}

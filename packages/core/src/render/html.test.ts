@@ -131,7 +131,7 @@ function report(change: Change, over: Partial<Report> = {}): Report {
     findings: [agentFinding({})],
     below_threshold: 0,
     outside_change: [],
-    low_confidence: [],
+    possible: [], low_confidence: [],
     not_reviewed: [],
     dropped: [],
     scanners: makeScan().scanners,

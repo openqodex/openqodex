@@ -77,7 +77,7 @@ const report = {
   findings: [],
   below_threshold: 0,
   outside_change: [],
-  low_confidence: [],
+  possible: [], low_confidence: [],
   not_reviewed: [],
   dropped: [],
   scanners: [],

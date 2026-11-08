@@ -18,6 +18,8 @@ A built-in scanner is handed only changed files that are regular files inside th
 
 A change can also tell a scanner to skip its own lines: with a suppression comment such as `# nosec`, or with an edit to a settings or ignore file the scanner reads. The scanner still obeys either one. OpenQodex shows each one as a candidate: the reviewer keeps or drops it in a review, and a scan counts it as a minor finding. `scanners` lists the comments.
 
+The Action's SARIF code scanning output includes observations and possible issues as notes with separate tier values.
+
 ## The trust step
 
 A custom scanner is an arbitrary command. It runs on your machine with your permissions. The config file that names it comes from whatever repository you cloned. So nothing installs or runs a custom scanner until you approve that exact entry:

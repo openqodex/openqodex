@@ -585,3 +585,203 @@ it("corrects a long scanner refutation in its existing verifier session", async 
   expect(r.submission.dropped).toHaveLength(1);
   expect(completion(r, f).status).toBe("complete");
 });
+
+// Failure cases: duplicate chains show twice, or possible observations become defects.
+it.each([false, true])("drops possible items linked to counted findings in either direction: %s", async (reverse) => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = [candidate(brief.unit!.files[0]!, brief.pass === "local" ? "Counted" : "Possible")];
+    if (answer.version === "verify-1") {
+      const [counted, possible] = answer.verdicts;
+      possible!.confidence = 0.6;
+      if (reverse) counted!.duplicate_of = possible!.id;
+      else possible!.duplicate_of = counted!.id;
+    }
+    return answer;
+  }, ["a.txt"]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings).toHaveLength(1);
+  expect(r.report.possible).toEqual([]);
+});
+it("puts an observation-tier item at 0.6 under the floor with its reason", async () => {
+  const f = setup((answer) => {
+    if (answer.version === "verify-1") answer.verdicts.forEach((v) => { v.confidence = 0.6; v.tier = "observation"; });
+    return answer;
+  }, ["a.txt"]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.possible).toEqual([]);
+  expect(r.report.observations).toEqual([]);
+  expect(r.report.low_confidence).toEqual([expect.objectContaining({ confidence: 0.6, reason: "observation under the floor" })]);
+});
+it("does not block on a critical possible item", async () => {
+  const f = setup((answer) => {
+    if (answer.version === "verify-1") answer.verdicts.forEach((v) => { v.confidence = 0.6; v.severity = "critical"; });
+    return answer;
+  }, ["a.txt"]);
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.possible).toHaveLength(1);
+  expect(r.report.verdict).toBe("passed");
+});
+it.each([false, true])("drops a possible item linked to a shown observation in either direction: %s", async (reverse) => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = [candidate(brief.unit!.files[0]!, brief.pass === "local" ? "Observation" : "Possible")];
+    if (answer.version === "verify-1") {
+      const [observation, possible] = answer.verdicts;
+      observation!.tier = "observation";
+      possible!.confidence = 0.6;
+      if (reverse) observation!.duplicate_of = possible!.id;
+      else possible!.duplicate_of = observation!.id;
+    }
+    return answer;
+  }, ["a.txt"]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.observations).toHaveLength(1);
+  expect(r.report.possible).toEqual([]);
+});
+
+// Failure cases: the severity filter loses under-floor observations or the
+// visible check restores possible defects that the primary filter hid.
+it("keeps an observation under the confidence and severity floors in low_confidence", async () => {
+  const f = setup((answer) => {
+    if (answer.version === "verify-1") answer.verdicts.forEach((v) => { v.confidence = 0.6; v.severity = "nitpick"; v.tier = "observation"; });
+    return answer;
+  }, ["a.txt"]);
+  f.config.severityThreshold = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.possible).toEqual([]);
+  expect(r.report.low_confidence).toEqual([expect.objectContaining({ confidence: 0.6, reason: "observation under the floor" })]);
+});
+it("retains a low-confidence trace when severity hides a possible defect", async () => {
+  const f = setup((answer) => {
+    if (answer.version === "verify-1") answer.verdicts.forEach((v) => { v.confidence = 0.6; v.severity = "minor"; });
+    return answer;
+  }, ["a.txt"]);
+  f.config.severityThreshold = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.possible).toEqual([]);
+  expect(r.report.low_confidence).toEqual([expect.objectContaining({ confidence: 0.6, floor: 0.7 })]);
+  expect(r.report.below_threshold).toBe(0);
+});
+
+// Duplicate ownership must cover possible components and capped observations.
+it.each([false, true])("folds linked possible items by severity then confidence, reversed: %s", async (reverse) => {
+  const f = setup((answer) => {
+    if (answer.version === "find-1" && answer.candidates.length) answer.candidates = ["Minor", "Major", "Best", "Separate"].map((title) => candidate("a.txt", title));
+    if (answer.version === "verify-1") {
+      const [minor, major, best, separate] = answer.verdicts;
+      minor!.severity = "minor"; minor!.confidence = 0.65;
+      major!.severity = "major"; major!.confidence = 0.55;
+      best!.severity = "major"; best!.confidence = 0.6;
+      separate!.confidence = 0.6;
+      if (reverse) { best!.duplicate_of = major!.id; major!.duplicate_of = minor!.id; }
+      else { minor!.duplicate_of = major!.id; major!.duplicate_of = best!.id; }
+    }
+    return answer;
+  }, ["a.txt"]);
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.possible.map((f) => f.title).sort()).toEqual(["Best", "Separate"]);
+});
+it("drops a possible duplicate of the thirteenth observation omitted by the cap", async () => {
+  const f = setup((answer) => {
+    if (answer.version === "find-1" && answer.candidates.length) answer.candidates = [...Array.from({ length: 13 }, (_, i) => candidate("a.txt", `Observation ${i}`)), candidate("a.txt", "Possible")];
+    if (answer.version === "verify-1") {
+      const omitted = answer.verdicts.find((v) => v.title === "Observation 12")!;
+      for (const v of answer.verdicts) {
+        if (v.title === "Possible") { v.confidence = 0.6; v.duplicate_of = omitted.id; }
+        else { v.tier = "observation"; v.confidence = v === omitted ? 0.8 : 0.9; }
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.observations).toHaveLength(12);
+  expect(r.report.observations_omitted).toBe(1);
+  expect(r.report.possible).toEqual([]);
+});
+it.each([[false, 0.6], [true, 0.6], [false, 0.45], [true, 0.45]] as const)("does not list a folded under-floor observation as low confidence, reversed: %s, confidence: %s", async (reverse, confidence) => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = [candidate("a.txt", brief.pass === "local" ? "Counted" : "Low observation")];
+    if (answer.version === "verify-1") {
+      const [counted, observation] = answer.verdicts;
+      observation!.tier = "observation"; observation!.confidence = confidence;
+      if (reverse) counted!.duplicate_of = observation!.id;
+      else observation!.duplicate_of = counted!.id;
+    }
+    return answer;
+  }, ["a.txt"]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings).toHaveLength(1);
+  expect(r.report.possible).toEqual([]);
+  expect(r.report.low_confidence).toEqual([]);
+});
+
+// Hidden possible traces remain only when no displayed item owns their chain.
+it.each([false, true])("removes a hidden possible trace only when folded into a counted finding, duplicate: %s", async (duplicate) => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = [candidate("a.txt", brief.pass === "local" ? "Counted" : "Hidden possible")];
+    if (answer.version === "verify-1") {
+      const [counted, possible] = answer.verdicts;
+      possible!.confidence = 0.6;
+      possible!.severity = "nitpick";
+      if (duplicate) possible!.duplicate_of = counted!.id;
+    }
+    return answer;
+  }, ["a.txt"]);
+  f.config.severityThreshold = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((f) => f.title)).toEqual(["Counted"]);
+  expect(r.report.possible).toEqual([]);
+  expect(r.report.low_confidence).toEqual(duplicate ? [] : [{ title: "Hidden possible", file_path: "a.txt", confidence: 0.6, floor: 0.7 }]);
+});
+
+// Trace fields omit line numbers, so matching must preserve unrelated twins.
+it.each(["finding", "observation"] as const)("keeps the twin hidden item's trace when one item folds, tier: %s", async (tier) => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1" && answer.candidates.length) answer.candidates = [1, 2, 3].map((line) => ({ ...candidate("a.txt", line === 1 ? "Counted" : "Twin"), line_number: line }));
+    if (answer.version === "verify-1") {
+      const counted = answer.verdicts.find((v) => v.title === "Counted")!;
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        v.line_number = c.kind === "finder" ? c.candidate.line_number : 1;
+        if (v.line_number > 1) { v.confidence = 0.6; v.severity = "nitpick"; }
+        if (v.line_number === 2) { v.duplicate_of = counted.id; v.tier = tier; }
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", new Set([1, 2, 3]));
+  f.config.severityThreshold = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((f) => f.title)).toEqual(["Counted"]);
+  expect(r.report.possible).toEqual([]);
+  expect(r.report.low_confidence).toEqual([{ title: "Twin", file_path: "a.txt", confidence: 0.6, floor: 0.7 }]);
+});
+it.each([false, true])("a shown possible item leaves a same-looking hidden item's trace, folded: %s", async (folded) => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1" && answer.candidates.length) answer.candidates = [1, 2, 3].map((line) => ({ ...candidate("a.txt", line === 3 ? "Counted" : "Twin"), line_number: line }));
+    if (answer.version === "verify-1") {
+      const counted = answer.verdicts.find((v) => v.title === "Counted")!;
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        v.line_number = c.kind === "finder" ? c.candidate.line_number : 1;
+        if (v.line_number < 3) v.confidence = 0.6;
+        if (v.line_number === 2) v.severity = "nitpick";
+        if (v.line_number === 1 && folded) v.duplicate_of = counted.id;
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", new Set([1, 2, 3]));
+  f.config.severityThreshold = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((f) => f.title)).toEqual(["Counted"]);
+  expect(r.report.possible.map((f) => f.line_number)).toEqual(folded ? [] : [1]);
+  expect(r.report.low_confidence).toEqual([{ title: "Twin", file_path: "a.txt", confidence: 0.6, floor: 0.7 }]);
+});

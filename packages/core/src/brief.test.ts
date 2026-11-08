@@ -58,6 +58,13 @@ function brief(over: { change?: Change; candidates?: Candidate[]; lenses?: Selec
   });
 }
 
+it("does not tell the agent that possible issues are dropped", () => {
+  const text = brief();
+  expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
+  expect(text).not.toMatch(/0\.7 or higher\./);
+  expect(text).not.toContain("the floor removes the rest");
+});
+
 // The lines of the instructions block: from its heading to the next line that starts a section.
 function instructionLines(out: string): string[] {
   const lines = out.split("\n");
@@ -200,19 +207,24 @@ describe("buildBrief with lenses from the shipped catalog", () => {
 describe("10. the reviewer brief's diff section", () => {
   it.each([0, 0.5, 0.9])("does not substitute the default for confidence floor %s", (confidenceFloor) => {
     const { text } = buildReviewerBrief({ change: makeChange(), scan: makeScan(), lenses: [], config: makeConfig(), secrets: [], confidenceFloor });
-    expect(text).toContain(`Raise every defect you can show from the code with confidence ${confidenceFloor} or higher.`);
-    expect(text).toContain(`Raise findings with evidence you can point at, with confidence ${confidenceFloor} or higher. Anchor each on an added or modified line or a deletion anchor.`);
-    expect(text).toContain(`Findings under ${confidenceFloor}, or under a cited lens's floor, are not counted.`);
+    expect(text).toContain(`Findings at ${confidenceFloor} or higher, and at a cited lens's floor, count toward the verdict.`);
+    if (confidenceFloor > 0.5) expect(text).toContain(`Findings under ${confidenceFloor} are shown as possible issues and never counted.`);
+    else {
+      // A floor at or under 0.5 counts everything it keeps; the brief must not promise possible issues the check never makes.
+      expect(text).toContain(`Findings under ${confidenceFloor} are dropped.`);
+      expect(text).toContain(`with confidence ${confidenceFloor} or higher.`);
+      expect(text).toContain("A finding under its cited lens's floor is a possible issue at 0.5 or higher, and dropped under 0.5.");
+      expect(text).not.toContain("are shown as possible issues");
+    }
   });
 
   it("does not omit shown defects at the confidence floor or weaken impact and scope rules", () => {
     const { text } = buildReviewerBrief({ change: makeChange(), scan: makeScan(), lenses: [], config: makeConfig(), secrets: [] });
-    expect(text).toContain("Raise every defect you can show from the code with confidence 0.7 or higher.");
-    expect(text).toContain("Set confidence honestly. The floor removes the rest.");
+    expect(text).toContain("Raise every defect you can show from the code with confidence 0.5 or higher. Set confidence honestly. Findings under 0.7 are shown as possible issues and never counted.");
     expect(text).not.toContain("A wrong finding is worse than a missed one");
     expect(text).not.toContain("leave it out");
-    expect(text).toContain("Raise findings with evidence you can point at, with confidence 0.7 or higher. Anchor each on an added or modified line or a deletion anchor.");
-    expect(text).toContain("Findings under 0.7, or under a cited lens's floor, are not counted.");
+    expect(text).toContain("Raise findings with evidence you can point at, with confidence set honestly. Anchor each on an added or modified line or a deletion anchor.");
+    expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
     expect(text).toContain("`severity` reflects impact on users or the system, not your confidence");
   });
 
@@ -305,9 +317,10 @@ const singlePassBuilders = [
 ];
 
 describe.each(singlePassBuilders)("$name investigation", ({ build }) => {
-  it("keeps the 0.7 floor without the old suppression rule", () => {
+  it("keeps the 0.7 floor without the old suppression rule or a 0.7 minimum", () => {
     const text = build({});
-    expect(text).toMatch(/confidence (?:to )?0\.7 or higher/);
+    expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict.");
+    expect(text).not.toMatch(/confidence (?:to )?0\.7 or higher/);
     expect(text).not.toContain(["A wrong finding", "is worse than a missed one"].join(" "));
     expect(text).toMatch(/Raise (?:every defect|what) you can show from the code/);
     expect(text).toMatch(/(?:set|Set) confidence honestly/);

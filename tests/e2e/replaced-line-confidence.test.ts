@@ -47,6 +47,6 @@ describe("replacement lens and honest confidence in a CLI review", () => {
   });
 
   it("does not replace honest confidence with the old omission rule", () => {
-    expect(brief).toContain("Raise every defect you can show from the code with confidence 0.7 or higher. Set confidence honestly. The floor removes the rest.");
+    expect(brief).toContain("Raise every defect you can show from the code with confidence 0.5 or higher. Set confidence honestly. Findings under 0.7 are shown as possible issues and never counted.");
   });
 });

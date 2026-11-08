@@ -456,6 +456,9 @@ For each candidate, read the cited lines and the code they depend on. Judge that
 Use "Code around the change" first, then your tools. Name the question you are answering before each read.
 Confirm when the code shows the claim is true. Cite the line where the defect manifests.
 That line must be one this change added or modified, or an anchor of a deletion. The finding starts there.
+When you confirm, keep the candidate's cause and consequence as its claim and evidence show them.
+Name each step by its code: the call, the exception, the keyword, the field.
+Correct a detail only when you cite the line that refutes it, and say so in `reason`.
 Refute when the code shows the claim is wrong or the path cannot happen. Cite the line that shows why.
 Check for an upstream guard, an unreachable branch, an already validated value, or generic "missing X" without a concrete path.
 Use unresolved when the code does not settle a finder candidate. Doubt alone is not a refutation.
@@ -519,18 +522,25 @@ Fields:
 - `severity`: impact according to the scale above.
 - `category`: `bug`, `security`, `performance`, `maintainability` or `style`: the kind of the problem as the code shows it, whatever the candidate said.
 - `confidence`: 0 to 1, set honestly from the code.
-- Findings under 0.7, or under a cited lens's floor, are not counted.
+- Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.
 - `file_path` and `line_number`: the manifestation line for a confirmed defect, or the line explaining another verdict.
 - A confirmed finding starts on an added or modified line or a deletion anchor. Overlapping the change is insufficient.
 - `line_end`: optional end of the range, at least `line_number`. It must exist and span at most 200 lines.
 - `title`: a short noun phrase naming the problem.
 - `problem`: what is wrong. `consequence`: why it matters, and to whom. `fix`: what to change.
+  When you confirm, keep the candidate's cause and consequence as its claim and evidence show them.
+  Name each step by its code: the call, the exception, the keyword, the field.
+  Correct a detail only when you cite the line that refutes it, and say so in `reason`.
 - `suggested_change`: the literal replacement for the cited lines when the fix fits in them, else null.
 - `tier`: `finding` for defects, `observation` for style, naming, docs, clarity, conventions and test coverage.
 - Supply every required field for every verdict. For refuted or unresolved items, use empty problem, consequence and fix strings.
 
 Writing rules, checked by a script that sends back every broken rule:
-- At most 20 words per sentence. Use at most two sentences in each of: `problem`, `consequence`, `fix`, `reason`.
+- At most 20 words per sentence.
+- At most 3 sentences in `problem`.
+- At most 2 sentences in `consequence`.
+- At most 2 sentences in `fix`.
+- At most 2 sentences in `reason`.
 - Plain text on one line: no line break, no em dash.
 - Never name a scanner or a rule id in `title`, `problem`, `consequence`, `fix`, `reason`. The report shows the source separately.
 - Use the active voice and name the actor. Say one fact per sentence. Use the same word for the same thing every time.

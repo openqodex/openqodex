@@ -18,6 +18,10 @@ export function orderObservations(report: Report): ReportFinding[] {
   return orderFindings([...(report.observations ?? [])].sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1)));
 }
 
+export function orderPossible(report: Report): ReportFinding[] {
+  return orderFindings(report.possible ?? []);
+}
+
 export function observationsOmittedLine(report: Report): string | null {
   const omitted = report.observations_omitted ?? 0;
   return omitted > 0 ? `${plural(omitted, "more observation was", "more observations were")} left out.` : null;

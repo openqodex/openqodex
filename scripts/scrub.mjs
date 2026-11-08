@@ -11,11 +11,15 @@ const patternFile = "scripts/scrub-patterns.txt";
 const excluded = new Set([patternFile, "scripts/scrub.mjs"]);
 
 // The private list is not in the repo. It holds names that must never be
-// published; a checkout without it still runs the public patterns.
-const privatePatternFile = ".private/scrub-patterns.txt";
-const patternText = [patternFile, privatePatternFile]
-  .filter((file) => existsSync(join(root, file)))
-  .map((file) => readFileSync(join(root, file), "utf8"))
+// published. OPENQODEX_PRIVATE_SCRUB_LIST names its path; without it the
+// public patterns still run, and a path that does not exist fails the check.
+const privatePatternFile = process.env.OPENQODEX_PRIVATE_SCRUB_LIST;
+if (privatePatternFile && !existsSync(privatePatternFile)) {
+  console.error(`scrub: OPENQODEX_PRIVATE_SCRUB_LIST names ${privatePatternFile}, which does not exist`);
+  process.exit(1);
+}
+const patternText = [join(root, patternFile), ...(privatePatternFile ? [privatePatternFile] : [])]
+  .map((file) => readFileSync(file, "utf8"))
   .join("\n");
 
 const patterns = patternText

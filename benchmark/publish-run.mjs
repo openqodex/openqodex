@@ -57,7 +57,7 @@
 // 7. An asset is uploaded twice under one name: an existing asset of that
 //    name refuses the upload.
 // 8. Board numbers edited by hand in score.json reach the index: the board
-//    block is computed again from <run>/outside/aacr, and a block that
+//    blocks are computed again through the board registry, and a block that
 //    differs refuses the publish.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -68,13 +68,10 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { benchRoot, generatedValue, repoRoot } from "./lib/cases.mjs";
 import { RELEASE, REPOSITORY, assetUrl, boardHash, buildEntry, byBytes, entryProblems, fileList, hashReviewedFolder, listHash, readEntry, runsRoot, reviewedBytes, sha256, writeEntry } from "./lib/index.mjs";
-import { readAacrOutside } from "./lib/aacr-board.mjs";
-import { readDecisions } from "./lib/rulings.mjs";
-import { canonical } from "./lib/score.mjs";
+import { boardRefusal } from "./lib/board-readback.mjs";
 import { archiveDir, readRecipes, scorerFiles, scorerHash } from "./legacy/rescore.mjs";
-import { redactRowReasons } from "./lib/runner.mjs";
+import { redactMachinePaths, redactRowReasons } from "./lib/runner.mjs";
 import { extractAsset } from "./fetch-run.mjs";
-import { decisionsPath, loadRun, scoreRun } from "./score.mjs";
 
 // The files a run may publish, by path inside the run folder.
 export const ALLOWED = [
@@ -83,6 +80,10 @@ export const ALLOWED = [
   /^samples\/[^/]+\/[^/]+\/[^/]+\/(sample\.json|stderr\.txt|receipt\.txt|usage\.json|dispositions\.json|completion\.json|transcript\.jsonl|progress\.jsonl)$/,
   /^samples\/[^/]+\/[^/]+\/[^/]+\/report\/(report|scan|trace|submission|reviewer|manifest|rounds)\.json$/,
   /^samples\/[^/]+\/[^/]+\/[^/]+\/report\/brief\.md$/,
+  /^outside\/greptile\/(input|eval)\.json$/,
+  /^outside\/greptile\/[^/]+\/verdicts\.json$/,
+  /^outside\/martian\/(convert|eval|benchmark_data)\.json$/,
+  /^outside\/martian\/(?!work\/)[^/]+\/evaluation\.json$/,
 ];
 const FIXED_MTIME = 1767225600; // 2026-01-01T00:00:00Z, the time every packaged file carries
 
@@ -169,17 +170,15 @@ function caseRecords(folder, paths) {
 
 // Privacy patterns from both lists. Quoted upstream punctuation is part
 // of the saved review, so the public typography pattern does not apply.
-// The private list beside the main checkout is shared by its worktrees.
+// The private list, when OPENQODEX_PRIVATE_SCRUB_LIST names one, joins them.
 function scrubPatterns() {
   const lists = [{ file: join(repoRoot, "scripts", "scrub-patterns.txt"), private: false }];
-  const common = (() => {
-    try {
-      return resolve(repoRoot, git(["rev-parse", "--git-common-dir"]).toString("utf8").trim(), "..");
-    } catch {
-      return repoRoot;
-    }
-  })();
-  for (const root of new Set([repoRoot, common])) lists.push({ file: join(root, ".private", "scrub-patterns.txt"), private: true });
+  // The private list stays out of the repo; OPENQODEX_PRIVATE_SCRUB_LIST names its path.
+  const privateList = process.env.OPENQODEX_PRIVATE_SCRUB_LIST;
+  if (privateList) {
+    if (!existsSync(privateList)) throw new Error(`refused: OPENQODEX_PRIVATE_SCRUB_LIST names ${privateList}, which does not exist`);
+    lists.push({ file: privateList, private: true });
+  }
   const out = [];
   const seen = new Set();
   for (const l of lists.filter((x) => existsSync(x.file))) {
@@ -252,7 +251,7 @@ function textsOf(line) {
 // A home folder of any platform, followed by a path inside it:
 // /Users/<name>/, /home/<name>/, C:\Users\<name>\ (or with forward slashes).
 // A name in angle brackets or starting with $ is a placeholder, not a home.
-const HOME_PATH = /(?:^|[^\w.~-])(?:\/Users\/[^/\s"'`<>$]+\/|\/home\/[^/\s"'`<>$]+\/|[A-Za-z]:[\\/]Users[\\/][^\\/\s"'`<>$]+[\\/])/;
+const HOME_PATH = /(?<=^|[^\w.~-])(?:\/Users\/[^/\s"'`<>$]+\/|\/home\/[^/\s"'`<>$]+\/|[A-Za-z]:[\\/]Users[\\/][^\\/\s"'`<>$]+[\\/])/;
 
 // Every hit in the files to publish, as "<path>:<line>: <what>", and how
 // many values and patterns of each kind were looked for.
@@ -267,6 +266,22 @@ export async function inspect(folder, files, { cases, env = process.env, manifes
   for (const value of modelValues(env, basename(folder), manifest)) needles.push({ value, label: "a value from the model settings file" });
   const patterns = scrubPatterns();
   patterns.push({ regex: HOME_PATH, label: "a home folder path" });
+  // Where each kind of private text sits in a text, as [start, end) spans,
+  // so an exception can be held to cover the private text itself.
+  const spans = new Map();
+  for (const { label } of [...needles, ...patterns]) {
+    if (spans.has(label)) continue;
+    const values = needles.filter((n) => n.label === label).map((n) => n.value);
+    const regexes = patterns.filter((p) => p.label === label).map((p) => new RegExp(p.regex.source, p.regex.flags.includes("g") ? p.regex.flags : `${p.regex.flags}g`));
+    spans.set(label, (text) => {
+      const out = [];
+      for (const value of values) for (let i = text.indexOf(value); i >= 0; i = text.indexOf(value, i + 1)) out.push([i, i + value.length]);
+      for (const regex of regexes) {
+        for (const m of text.matchAll(regex)) out.push([m.index, m.index + m[0].length]);
+      }
+      return out;
+    });
+  }
   // What was looked for, by kind and count only, for the publish's report.
   const looked = {
     secrets: needles.filter((n) => n.label.startsWith("the generated secret")).length,
@@ -280,11 +295,10 @@ export async function inspect(folder, files, { cases, env = process.env, manifes
     text.split("\n").forEach((line, i) => {
       const at = `${f.path}:${i + 1}`;
       const texts = textsOf(line);
-      for (const n of needles) if (texts.some((t) => t.includes(n.value))) hits.push(`${at}: ${n.label}`);
-      for (const p of patterns) if (texts.some((t) => p.regex.test(t))) hits.push(`${at}: ${p.label}`);
+      for (const [label, find] of spans) if (texts.some((text) => find(text).length > 0)) hits.push(`${at}: ${label}`);
     });
   }
-  return { hits: [...new Set(hits)], looked };
+  return { hits: [...new Set(hits)], looked, spans };
 }
 
 // For a legacy run: every file of the folder must be the blob the recipe's
@@ -310,7 +324,7 @@ function originalsProblems(folder, recipe) {
 
 // Packages a run into <out>/<run-id>.tar.gz after every check, and returns
 // what the index entry records about it. Throws, writing nothing, on any hit.
-export async function packageRun(folder, { out, env = process.env, recipes = readRecipes() } = {}) {
+export async function packageRun(folder, { out, env = process.env, recipes = readRecipes(), runs = runsRoot } = {}) {
   folder = resolve(folder);
   const runId = basename(folder);
   if (!existsSync(join(folder, "manifest.json"))) throw new Error(`${folder} has no manifest.json; it is not a benchmark run`);
@@ -376,9 +390,60 @@ export async function packageRun(folder, { out, env = process.env, recipes = rea
     for (const [from, to] of reasons) text = text.split(from).join(to);
     file.bytes = Buffer.from(text);
   }
+  // A machine path outside a reason field (a scanner's own message, a hook
+  // command in a control row, a trace) gets the same placeholders in the
+  // packaged copy of every text file. The inspection below still refuses
+  // a path the placeholders do not cover, and score.json at its source.
+  let pathsRedacted = 0;
+  for (const file of files) {
+    if (file.path.startsWith("_archive/")) continue;
+    const text = file.bytes.toString("utf8");
+    if (Buffer.from(text).length !== file.bytes.length) continue;
+    const clean = redactMachinePaths(text, folder);
+    if (clean.lines === 0) continue;
+    pathsRedacted += clean.lines;
+    file.bytes = Buffer.from(clean.text);
+  }
   const inspected = files.map((f) => f.path === "score.json" ? { path: f.path, bytes: readFileSync(join(folder, f.path)) } : f);
-  const { hits, looked } = await inspect(folder, inspected, { cases, env, manifest: readJson(join(folder, "manifest.json")) });
-  if (hits.length > 0) throw new Error(`refused: ${hits.length} hit${hits.length === 1 ? "" : "s"} in the files to publish:\n${hits.slice(0, 40).join("\n")}`);
+  const { hits, looked, spans } = await inspect(folder, inspected, { cases, env, manifest: readJson(join(folder, "manifest.json")) });
+  const exceptionPath = join(dirname(runs), "exceptions", `${runId}.json`);
+  const rules = existsSync(exceptionPath) ? readJson(exceptionPath) : [];
+  if (!Array.isArray(rules) || rules.some((rule) => !rule || ["text", "label", "reason"].some((field) => typeof rule[field] !== "string" || rule[field].length === 0) || (rule.file !== undefined && (typeof rule.file !== "string" || rule.file.length === 0)) || (rule.line !== undefined && (!Number.isInteger(rule.line) || rule.line < 1)))) {
+    throw new Error(`refused: ${exceptionPath} must contain an array of publish exceptions with text, label, reason and optional file and line`);
+  }
+  const used = new Set();
+  const exceptions = [];
+  const remaining = hits.filter((hit) => {
+    const [, file, number, label] = /^(.*):(\d+): (.*)$/.exec(hit);
+    const line = Number(number);
+    const texts = textsOf(inspected.find((f) => f.path === file).bytes.toString("utf8").split("\n")[line - 1]);
+    let reason;
+    rules.forEach((rule, i) => {
+      if ((rule.file !== undefined && rule.file !== file) || rule.label !== label || (rule.line !== undefined && rule.line !== line) || !texts.some((text) => text.includes(rule.text))) return;
+      // Two checks, both must pass. Every piece of private text on the line
+      // must sit inside an occurrence of the rule's text, so a real path
+      // beside the example, or a rule that names only part of a secret, keeps
+      // the hit. And with every occurrence replaced by a space, nothing may be
+      // found, which catches a span the first scan skipped because it began
+      // where an earlier match ended.
+      const find = spans.get(label);
+      const covered = texts.every((text) => {
+        const places = [];
+        for (let i = text.indexOf(rule.text); i >= 0; i = text.indexOf(rule.text, i + 1)) places.push([i, i + rule.text.length]);
+        return find(text).every(([start, end]) => places.some(([from, to]) => from <= start && end <= to));
+      });
+      if (!covered || texts.some((text) => find(text.split(rule.text).join(" ")).length > 0)) return;
+      used.add(i);
+      reason ??= rule.reason;
+    });
+    if (reason === undefined) return true;
+    exceptions.push({ file, line, label, reason });
+    return false;
+  });
+  if (remaining.length > 0) throw new Error(`refused: ${remaining.length} hit${remaining.length === 1 ? "" : "s"} in the files to publish:\n${remaining.slice(0, 40).join("\n")}`);
+  for (let i = 0; i < rules.length; i++) {
+    if (!used.has(i)) throw new Error(`refused: exception ${i + 1} in ${exceptionPath} names no hit`);
+  }
   const tar = tarGz(files.map((f) => ({ path: `${runId}/${f.path}`, bytes: f.bytes })));
   mkdirSync(out, { recursive: true });
   const tarPath = join(out, `${runId}.tar.gz`);
@@ -386,6 +451,8 @@ export async function packageRun(folder, { out, env = process.env, recipes = rea
   return {
     runId,
     reasonsRedacted,
+    pathsRedacted,
+    exceptions,
     tarPath,
     sha256: sha256(tar),
     bytes: tar.length,
@@ -402,22 +469,6 @@ export async function packageRun(folder, { out, env = process.env, recipes = rea
 function citedScore(folder, recipe) {
   const file = recipe ? recipe.headline : "score.json";
   return readJson(join(folder, file));
-}
-
-// Why the board numbers a score carries are not the ones the run's board
-// output gives, as score.mjs --outside aacr computes them (failure 8); null when they are.
-function boardRefusal(folder, runId, outside) {
-  if (outside === undefined) return null;
-  const d = readDecisions(decisionsPath);
-  const run = loadRun(folder);
-  const { jobs } = scoreRun(run, { decisionsHash: d.hash, decisions: d.lines, people: d.people });
-  let aacr = null;
-  try {
-    aacr = readAacrOutside(folder, jobs, run.specs);
-  } catch {
-    // score.mjs saves a board block it cannot read as null.
-  }
-  return canonical(outside) === canonical({ aacr }) ? null : `refused: ${runId}'s board numbers in score.json are not the ones its board output gives; run node benchmark/score.mjs ${folder} --outside aacr again`;
 }
 
 // Records an accepted entry's board numbers in the accepted pointer, in
@@ -452,7 +503,7 @@ function upload(tarPath, runId) {
   if (sent.status !== 0) throw new Error(`gh release upload failed: ${sent.stderr.trim()}`);
 }
 
-export async function publishRun(folder, { dryRun = false, writeIndex = false, out = null, env = process.env, runs = runsRoot } = {}) {
+export async function publishRun(folder, { dryRun = false, writeIndex = false, out = null, env = process.env, runs = runsRoot, boardOptions = {} } = {}) {
   folder = resolve(folder);
   const recipes = readRecipes();
   const runId = basename(folder);
@@ -464,7 +515,7 @@ export async function publishRun(folder, { dryRun = false, writeIndex = false, o
     if (scored.status === 2) throw new Error(`scoring ${runId} failed:\n${scored.stderr.trim()}`);
   }
   const outDir = out ?? mkdtempSync(join(tmpdir(), "oq-publish-"));
-  const asset = await packageRun(folder, { out: outDir, env, recipes });
+  const asset = await packageRun(folder, { out: outDir, env, recipes, runs });
   // The package must unpack, with the system tar, to the files it was made from.
   const check = mkdtempSync(join(tmpdir(), "oq-publish-check-"));
   try {
@@ -495,7 +546,7 @@ export async function publishRun(folder, { dryRun = false, writeIndex = false, o
     throw new Error(`refused: the committed entry for ${runId} names other files (list hash ${committed.asset.listHash}, private ${committed.privateListHash}) than this folder packages (list hash ${entry.asset.listHash}, private ${entry.privateListHash})`);
   }
   const rebytes = committed !== null && committed.asset.sha256 !== entry.asset.sha256;
-  const refusal = recipe ? null : boardRefusal(folder, runId, entry.outside);
+  const refusal = recipe ? null : boardRefusal(folder, runId, entry.outside, boardOptions);
   if (refusal) throw new Error(refusal);
   // An accepted run stays accepted: benchmark/index/accepted.json names it,
   // and only trend.mjs --accept sets the mark.
@@ -506,6 +557,8 @@ export async function publishRun(folder, { dryRun = false, writeIndex = false, o
     if (outside !== undefined) entry.outside = outside;
     else delete entry.outside;
   }
+  if (asset.exceptions.length > 0) entry.publishExceptions = asset.exceptions;
+  else delete entry.publishExceptions;
   if (!dryRun && !boardOnly) upload(asset.tarPath, runId);
   const written = !dryRun || writeIndex ? writeEntry(entry, runs) : null;
   const pointer = written && entry.accepted === true ? recordBoard(entry, runs) : null;
@@ -537,11 +590,13 @@ async function main() {
   }
   const { asset, entry, written, rebytes, boardOnly, pointer } = r;
   console.log(`${asset.runId}: ${asset.files} files in ${asset.tarPath} (${asset.bytes} bytes, sha256 ${asset.sha256}, list hash ${asset.listHash})`);
-  console.log(`${asset.reasonsRedacted} reasons redacted`);
+  console.log(`${asset.reasonsRedacted} reasons redacted, ${asset.pathsRedacted} lines with a machine path rewritten`);
+  for (const exception of asset.exceptions) console.log(`excused: ${exception.file}:${exception.line} ${exception.label} (${exception.reason})`);
+  console.log(`${asset.exceptions.length} inspection hits excused by benchmark/index/exceptions/${asset.runId}.json`);
   if (rebytes) console.log(`The committed entry names the same files packaged to other bytes; ${written ? "the entry now names this asset's sha256, and the change must be committed" : "a publish rewrites its sha256"}.`);
   if (asset.left.length > 0) console.log(`Left out (not on the allowlist): ${asset.left.length} files, such as ${asset.left.slice(0, 3).join(", ")}`);
   const l = asset.looked;
-  console.log(`Inspected every packaged file for: ${l.secrets} generated secrets, this machine's and any platform's home folder paths, ${l.modelValues} model settings values, ${l.patterns} public and ${l.privatePatterns} private scrub patterns. No hit.`);
+  console.log(`Inspected every packaged file for: ${l.secrets} generated secrets, this machine's and any platform's home folder paths, ${l.modelValues} model settings values, ${l.patterns} public and ${l.privatePatterns} private scrub patterns. ${asset.exceptions.length === 0 ? "No hit." : `No hit beyond the ${asset.exceptions.length} excused.`}`);
   console.log(dryRun ? `Dry run: nothing uploaded. The asset unpacks to the same file list.` : boardOnly ? "Board numbers refreshed in the index entry. The asset is unchanged, and nothing was uploaded." : `Uploaded to ${entry.asset.url}`);
   if (written) {
     console.log(`Index entry written: ${written}`);

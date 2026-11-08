@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "board": "martian",
+  "repo": "withmartian/code-review-benchmark",
+  "commit": "e616e849755441da38f18bf3adba2c9583b03803",
+  "golden": {
+    "repo": "withmartian/code-review-benchmark",
+    "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+    "files": [
+      "offline/golden_comments/oq_fixture.json 31ffbdf216447878b27bd2c3449b93349dffbd0738ef8087d9bde17fdd1107da"
+    ]
+  },
+  "run": "martian-board-test",
+  "release": "0.12.0",
+  "suite": "martian",
+  "split": "test",
+  "splitHash": "964891913bcf86bb4947f7a81cc26a7df5cb6cafc4ba5e87f0942faa4ab825bd",
+  "manifestSha256": "00f4584c1cdc5d051a0245e4b22358a2385db86c475d8cccbf03144e68a53ebb",
+  "package": {
+    "spec": "npm:0.12.0",
+    "version": "0.12.0",
+    "sha256": "8050be05d8be692b6f6a5f747d16a3dfa3c032f4e105a065798f5f0266452624",
+    "integrity": "sha512-rY6T5qdsl2wN3MUR1glOqRt2kuAsD8lFURI5J9mHI+UcDYDF6/xUhqnHER6ZwCUeXmlWiPYR/CPCXi/j1NLgAA=="
+  },
+  "registry": "https://registry.npmjs.org",
+  "tool": "openqodex-<config>-r<repeat>",
+  "access": {
+    "at": "2026-10-24T00:00:00.000Z",
+    "suite": "martian",
+    "caseCount": 3,
+    "purpose": "release-run",
+    "runId": "martian-board-test",
+    "release": "0.12.0",
+    "by": "tester"
+  },
+  "cases": [
+    {
+      "caseId": "martian/oq-fixture__ledger-7@b2e764d9",
+      "case": "oq-fixture__ledger-7",
+      "goldenUrl": "https://github.com/oq-fixture/ledger/pull/7",
+      "golden": 2,
+      "licence": "permissive"
+    },
+    {
+      "caseId": "martian/oq-fixture__shop-11@66dbd35b",
+      "case": "oq-fixture__shop-11",
+      "goldenUrl": "https://github.com/oq-fixture/shop/pull/11",
+      "golden": 2,
+      "licence": "permissive"
+    },
+    {
+      "caseId": "martian/oq-fixture__shop-12@31ac5ecd",
+      "case": "oq-fixture__shop-12",
+      "goldenUrl": "https://github.com/oq-fixture/shop/pull/12",
+      "golden": 1,
+      "licence": "permissive"
+    }
+  ],
+  "tools": [
+    {
+      "tool": "openqodex-library-r1",
+      "config": "model-scripted-graph-on",
+      "boardConfig": "library",
+      "repeat": 1,
+      "reviews": 3,
+      "findings": 5,
+      "statuses": {
+        "incomplete": 1,
+        "complete": 2
+      },
+      "held": false,
+      "why": null
+    }
+  ],
+  "failures": [],
+  "held": [],
+  "notRun": []
+}

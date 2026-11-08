@@ -40,10 +40,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { boardFolder as boardFolderFor } from "./board-files.mjs";
+import { hashFolder } from "./index.mjs";
 import { lineMatches, TEST_ONLY, TEST_ONLY_KINDS } from "./score.mjs";
 
 const BOARDS = JSON.parse(readFileSync(new URL("../outside/boards.json", import.meta.url), "utf8"));
-export const AACR_BOARD = Object.freeze({ repo: BOARDS.boards.aacr.repo, commit: BOARDS.boards.aacr.commit, source: BOARDS.boards.aacr.source });
+export const AACR_BOARD = Object.freeze({ repo: BOARDS.boards.aacr?.repo, commit: BOARDS.boards.aacr?.commit, source: BOARDS.boards.aacr?.source });
 // Their reader for generic comments: `ocr` is only the parser's label, the
 // one their CLI takes for a reviewer it does not run.
 export const AACR_READER = "ocr";
@@ -101,9 +102,11 @@ function unjudged(evalRecord, entry) {
  */
 export function readAacrOutside(folder, jobs, specs) {
   const out = join(folder, "outside", "aacr");
+  const paths = [];
+  const read = (path) => { paths.push(`outside/aacr/${path}`); return readJson(join(out, path)); };
   if (!existsSync(join(out, "convert.json"))) throw new Error(`${out} holds no convert.json; convert the run first (benchmark/outside/boards/aacr.sh)`);
-  const convert = readJson(join(out, "convert.json"));
-  const evalRecord = existsSync(join(out, "eval.json")) ? readJson(join(out, "eval.json")) : null;
+  const convert = read("convert.json");
+  const evalRecord = existsSync(join(out, "eval.json")) ? read("eval.json") : null;
   const problems = [];
   const folders = [];
   for (const f of convert.folders) {
@@ -123,7 +126,7 @@ export function readAacrOutside(folder, jobs, specs) {
     }
     if (leftOut !== (f.leftOutTestGaps ?? 0)) problems.push(`${f.dir}: convert.json says ${f.leftOutTestGaps ?? 0} test-gap findings were left out, but the rule leaves out ${leftOut} of ours`);
     const rounds = files.map((name) => {
-      const s = readJson(join(dir, name)).summary;
+      const s = read(`${f.dir}/${name}`).summary;
       return { file: name, evaluated: s.evaluated_instances, missing: s.missing_instances, expected: s.expected_notes, generated: s.generated_notes, lineMatches: s.matched_line_notes, semanticMatches: s.matched_semantic_notes };
     });
     if (rounds.length === 0) problems.push(`${f.dir}: their evaluator has written no metrics file here`);
@@ -146,7 +149,7 @@ export function readAacrOutside(folder, jobs, specs) {
             // docs/metrics.md: unmatched over generated; their evaluator does not print it.
             noiseRate: mean(rounds.map((r) => rate(r.generated - r.semanticMatches, r.generated))),
           };
-    folders.push({ config: f.config, repeat: f.repeat, tool: f.tool, metrics: files, rounds, ours, lineEqual, line, judged: why === null, why, semantic });
+    folders.push({ config: f.config, boardConfig: f.config, repeat: f.repeat, tool: f.tool, metrics: files, rounds, ours, lineEqual, line, judged: why === null, why, semantic });
   }
   const byConfig = {};
   for (const config of [...new Set(folders.map((f) => f.config))].sort()) {
@@ -157,6 +160,7 @@ export function readAacrOutside(folder, jobs, specs) {
     byConfig[config] = { repeats, mean: { line: { matches: m, generated: g, expected: e, precision: rate(m, g), recall: rate(m, e), f1: f1(rate(m, g), rate(m, e)) }, semantic } };
   }
   return {
+    evidenceHash: hashFolder(folder, paths).listHash,
     label: AACR_OUTSIDE_LABEL,
     board: { repo: AACR_BOARD.repo, commit: AACR_BOARD.commit, source: AACR_BOARD.source },
     reader: convert.reader,

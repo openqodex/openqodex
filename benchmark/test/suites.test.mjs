@@ -6,7 +6,7 @@ import { afterAll, expect, it } from "vitest";
 import { benchRoot } from "../lib/cases.mjs";
 import { cacheRoot } from "../lib/licence.mjs";
 import { attemptDir, planJobs, runManifest, sampleRecord } from "../lib/runner.mjs";
-import { rawPath, readCase, specCopy, truthOf } from "../lib/suites.mjs";
+import { rawPath, readCase, realSpecProblems, specCopy, truthOf } from "../lib/suites.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -56,12 +56,32 @@ it.skipIf(!hasTruth)("scores a Greptile run with empty line truth and saves both
   }
 });
 
+const martianSuite = JSON.parse(readFileSync(join(benchRoot, "suites/martian/cases.json"), "utf8"));
+const m = readCase(martianSuite.cases[0].id);
+const hasMartianTruth = existsSync(rawPath(cache, "martian", { path: m.source.dataset.file }));
+
+it.skipIf(!hasMartianTruth)("a Martian truth copy carries no line truth and matches its suite's golden comment count (needs the pinned Martian golden file in the bench cache; skipped without it)", () => {
+  const truth = truthOf(m, { cache });
+  expect(truth.kind).toBe("prose");
+  expect(truth.items.map((t) => t.id)).toEqual(truth.items.map((_, i) => `g${i + 1}`));
+  const copy = specCopy(m, truth);
+  expect(copy.bugs).toEqual([]);
+  expect(copy.truthCount).toEqual({ kind: "prose", items: truth.items.length });
+  expect(realSpecProblems(JSON.parse(JSON.stringify(copy)), m.name, { suite: "martian" })).toEqual([]);
+  // A suite that lists another count would score the copy against another set.
+  expect(() => specCopy({ ...m, truthCount: { kind: "prose", items: truth.items.length + 1 } }, truth)).toThrow(/lists \d+ golden comments, and the truth read holds g1/);
+  expect(() => specCopy({ ...m, truthCount: { kind: "lines", accepted: 2 } }, truth)).toThrow(/lists no count of golden comments/);
+  // Line truth smuggled into a prose copy would enter the recall denominator.
+  expect(realSpecProblems({ ...copy, bugs: [{ id: "c1" }] }, m.name, { suite: "martian" })).toEqual([`${m.name}: prose truth carries no line truth: bugs must be empty; the board judge reads the golden comments from the pinned file`]);
+  expect(realSpecProblems({ ...copy, truthCount: { kind: "prose", items: truth.items.length + 1 } }, m.name, { suite: "martian" })).toEqual([`${m.name}: the suite lists ${truth.items.length} golden comments, and the copy says ${truth.items.length + 1}`]);
+});
+
 it.each(["aacr", "martian"])("the %s converter refuses Greptile with one line naming its board judge", (board) => {
   const folder = savedRun();
   const result = spawnSync(process.execPath, [join(benchRoot, `outside/convert/${board}.mjs`), "convert", folder], { encoding: "utf8" });
   expect(result.status).toBe(2);
   expect(result.stdout).toBe("");
   expect(result.stderr.trim().split("\n")).toHaveLength(1);
-  expect(result.stderr).toMatch(/Greptile.*benchmark\/outside\/boards\/greptile-judge\.mjs.*W8-3/);
+  expect(result.stderr).toMatch(/Greptile.*benchmark\/outside\/boards\/greptile-run\.mjs/);
   expect(existsSync(join(folder, "outside"))).toBe(false);
 });

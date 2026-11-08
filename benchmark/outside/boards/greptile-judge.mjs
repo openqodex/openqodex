@@ -6,6 +6,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { hash } from "../../lib/calibration.mjs";
 import { relayClient } from "../../lib/calibration-relay.mjs";
+import { readSuite } from "../../lib/suites.mjs";
 
 // The recorded board method requires an inline comment identifying faulty code and explaining its impact, and excludes summary-only mentions.
 // The board verifies detection against the known bug, so semantic descriptions of its cause or consequence count while adjacent bugs and incomplete matches do not.
@@ -29,7 +30,8 @@ export async function main(argv = process.argv.slice(2)) {
   const [input, flag, truthSet, output] = argv;
   if (!input || flag !== "--truth-set" || !output || argv.length !== 4) throw new Error("usage: greptile-judge.mjs <blind-input.json> --truth-set greptile|augment <verdicts.json>");
   const cases = JSON.parse(readFileSync(input, "utf8"));
-  if (cases.length !== 50) throw new Error("Greptile requires all 50 cases");
+  const of = readSuite("greptile").file.cases.length;
+  if (cases.length !== of) throw new Error(`Greptile requires all ${of} cases`);
   const relay = await relayClient();
   try {
     const verdicts = await judgeGreptile(cases, { truthSet, complete: (request) => relay.complete(GREPTILE_PROMPT, request) });

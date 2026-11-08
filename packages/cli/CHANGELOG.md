@@ -1,5 +1,54 @@
 # openqodex
 
+## 0.16.0
+
+### Minor Changes
+
+- [#264](https://github.com/openqodex/openqodex/pull/264) [`e753a8b`](https://github.com/openqodex/openqodex/commit/e753a8b87f8f0b2ecba4f9e56238846e5fad4cf5) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The code graph links JUnit 4 and JUnit 5 test methods to the Java code they call.
+
+- [#278](https://github.com/openqodex/openqodex/pull/278) [`ddfaa3d`](https://github.com/openqodex/openqodex/commit/ddfaa3d83af513aaf3a1b3b6529746e566dd20f2) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Possible issues are shown separately and never counted toward the verdict.
+  A finding's problem field allows three sentences. Finder claims receive the same prose checks as other fields.
+  The finder is asked to follow each change through its flow.
+  A method name that ends in `!` or `?` no longer counts as a sentence end in the writing checks.
+
+### Patch Changes
+
+- [#264](https://github.com/openqodex/openqodex/pull/264) [`39c3562`](https://github.com/openqodex/openqodex/commit/39c3562ec3b4f81c2bf9c047f33beb935fa0cc79) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The Java graph follows method references held in locals and invoked through their receivers.
+  These calls use possible edges.
+  Reassignment drops the original callable alias.
+
+- [#264](https://github.com/openqodex/openqodex/pull/264) [`f6e427f`](https://github.com/openqodex/openqodex/commit/f6e427f83a12bf2e60f29ee111c6b4e410428647) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The Java graph reads anonymous classes, local classes and enum constant bodies as definitions.
+  Local class names stay within their declaring scopes.
+  Qualified this calls bind to the enclosing class.
+
+- [#264](https://github.com/openqodex/openqodex/pull/264) [`8c3fd88`](https://github.com/openqodex/openqodex/commit/8c3fd883baf60d4b7663da93b8ce5853b12e88e7) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The Java graph selects zero-parameter defaults from the most specific interface.
+  Methods with parameters keep both interface declarations as possible candidates.
+  Unrelated interface defaults stay possible. Class overrides keep their existing priority.
+
+- [#264](https://github.com/openqodex/openqodex/pull/264) [`5e87f13`](https://github.com/openqodex/openqodex/commit/5e87f1311d4020675da6100d3bc1629ffeff5e50) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Java pattern survival scans run only for supported negated patterns and stop at a node limit.
+  JUnit test roles stay likely when an unresolved base may supply the annotation name.
+
+- [#264](https://github.com/openqodex/openqodex/pull/264) [`7b972e4`](https://github.com/openqodex/openqodex/commit/7b972e451472c32139503f9e951243893b3eea1a) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The Java graph dispatches calls through the first type parameter bound.
+  Generic class arguments supply method result types, so `Box<Repo>.get().find()` binds to `Repo.find`.
+  Raw and external generic results remain unresolved.
+
+- [#264](https://github.com/openqodex/openqodex/pull/264) [`c15ce12`](https://github.com/openqodex/openqodex/commit/c15ce1273f8ad183579380d3359b99131b07d595) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The Java graph follows pattern variables after negated guards that exit and after negated while loops.
+  Pattern types stay within their supported branches and switch rules.
+
+- [#264](https://github.com/openqodex/openqodex/pull/264) [`5088807`](https://github.com/openqodex/openqodex/commit/5088807bc1ca6742ab3387bdb9bfacfecf0bdb16) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The code graph follows declared method results on typed Go and TypeScript receivers. Chained calls now retain their callers.
+
+- [#270](https://github.com/openqodex/openqodex/pull/270) [`7bb16d3`](https://github.com/openqodex/openqodex/commit/7bb16d33c0c1d4d9d73864305f6dce70522923c1) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Benchmark publishing takes a per-run exception file for a private-material hit that is not private. A hit is excused only when every private span on its line sits inside the named text. Accepting a run packages it again under that file.
+
+## 0.15.0
+
+### Minor Changes
+
+- [#250](https://github.com/openqodex/openqodex/pull/250) [`81d9a4b`](https://github.com/openqodex/openqodex/commit/81d9a4b3b04d7b5408d223ed84fb52be4d798f18) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The code graph reads Java: types, methods, constructors, imports, static imports and calls, with no build step. A call through an interface or a base class lists the implementations that may run. Overloads are told apart by their argument count. The review of a Java change names its callers, each with its tier.
+
+### Patch Changes
+
+- [#247](https://github.com/openqodex/openqodex/pull/247) [`1106615`](https://github.com/openqodex/openqodex/commit/1106615523c41165915dacd2501c76bb5c6d7b39) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Benchmark docs: the comparison record attaches judged runs with their board evidence, scores read Martian and Greptile board results, and the calibration takes a comment form.
+
 ## 0.14.0
 
 ### Minor Changes

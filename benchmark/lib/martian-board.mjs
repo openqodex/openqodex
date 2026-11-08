@@ -65,10 +65,15 @@
 //    tarball, only its sha512 integrity (and a sha1), so the integrity is
 //    what ties the record to the published build. An accepted comparison
 //    also admits its pinned clean local build, explicitly labelled local.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { PACKAGE_NAME } from "./package.mjs";
 import { benchRoot } from "./cases.mjs";
 import { comparisonRelease } from "./comparison.mjs";
+import { boardReview, martianReviewConversion, readAttempts, readBoardReviews } from "./board-reviews.mjs";
+import { hashFolder, sha256 } from "./index.mjs";
+import { canonical, martianFindings, martianGolden, population, readMartianEvaluation } from "./score.mjs";
+import { martianTruth, truthHashOf } from "./suites.mjs";
 
 const BOARDS = JSON.parse(readFileSync(new URL("../outside/boards.json", import.meta.url), "utf8"));
 export const MARTIAN_BOARD = Object.freeze({ repo: BOARDS.boards.martian.repo, commit: BOARDS.boards.martian.commit, source: BOARDS.boards.martian.source });
@@ -134,7 +139,8 @@ export function boardConfigOf(config) {
 }
 
 /** The tool name a configuration and repeat go by on the board. */
-export const martianToolName = (config, repeat) => boardConfigOf(config) === "control" ? `claude-code-control-r${repeat}` : `openqodex-${boardConfigOf(config)}-r${repeat}`;
+export const boardToolName = (config, repeat) => boardConfigOf(config) === "control" ? `claude-code-control-r${repeat}` : `openqodex-${boardConfigOf(config)}-r${repeat}`;
+export const martianToolName = boardToolName;
 
 const flat = (s) => (typeof s === "string" ? s.replace(/`{3,}/g, "`").replace(/\s+/g, " ").trim() : "");
 
@@ -231,11 +237,12 @@ export function martianEvaluations({ data, candidates, dedup, evaluations, total
         if (ev.total_golden !== goldenIds.size) problems.push(`${url}: ${tool} was judged against ${ev.total_golden} golden comments, and the entry holds ${goldenIds.size}`);
       }
       const findings = (review.openqodex?.findingIds ?? []).map((findingId, i) => ({ findingId, body: review.review_comments?.[i]?.body ?? "" }));
+      const falsePositives = new Set((ev?.false_positives ?? []).map((fp) => fp.candidate));
       list.forEach((c, k) => {
         const group = Array.isArray(groups) ? groups.findIndex((g) => Array.isArray(g) && g.includes(k)) : list.length === 1 ? 0 : -1;
         const { sourceFindingIds, attribution } = attributeCandidate(c.text, findings);
         if (sourceFindingIds.length === 0) problems.push(`${url}: ${tool}'s candidate ${c.id} has no finding of the review to come from`);
-        cands.push({ candidateId: c.id, prUrl: url, sourceFindingIds, attribution, extractedText: c.text, extraction: c.step ? { model: null, step: c.step, file: null } : extraction, dedupGroup: group === -1 ? null : group });
+        cands.push({ candidateId: c.id, prUrl: url, sourceFindingIds, attribution, extractedText: c.text, officialFp: falsePositives.has(c.text), extraction: c.step ? { model: null, step: c.step, file: null } : extraction, dedupGroup: group === -1 ? null : group });
       });
       for (const tp of ev?.true_positives ?? []) {
         const goldenId = goldenIds.get(tp.golden_comment);
@@ -255,4 +262,78 @@ export function martianEvaluations({ data, candidates, dedup, evaluations, total
     tools.push({ tool, evaluation, problems });
   }
   return { tools, problems: typeof totals?.beta === "number" ? [] : ["score_profiles gave no beta"] };
+}
+
+/** Check saved reviews and frozen truth hashes; never read pinned truth or work/. */
+export function readMartianOutside(folder, jobs, specs, options = {}) {
+  const out = join(folder, "outside", "martian");
+  if (!existsSync(join(out, "convert.json"))) throw new Error(`${out} holds no convert.json; convert the run first (benchmark/outside/boards/martian.sh <run>)`);
+  const paths = [];
+  const read = (path) => { paths.push(`outside/martian/${path}`); return JSON.parse(readFileSync(join(out, path), "utf8")); };
+  const convert = read("convert.json");
+  const manifestBytes = readFileSync(join(folder, "manifest.json"));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const need = (ok, why) => { if (!ok) throw new Error(`Martian ${why}`); };
+  need(convert.manifestSha256 === sha256(manifestBytes), "manifest sha256 differs from this run's manifest hash");
+  const pin = BOARDS.boards.martian;
+  const model = BOARDS.deployments[pin.judge.deployment].id;
+  need(convert.version === 1 && convert.board === "martian" && convert.repo === pin.repo && convert.commit === pin.commit, "conversion board pins differ from boards.json");
+  need(manifest.suite === "martian" && convert.splitHash === manifest.splitHash, "suite or split hash differs from this run");
+  if (!existsSync(join(out, "eval.json"))) throw new Error(`${out} holds no eval.json; judge the run first (benchmark/outside/boards/martian.sh <run>)`);
+  const evaluated = read("eval.json");
+  need(evaluated.version === 1 && evaluated.board === "martian" && evaluated.repo === pin.repo && evaluated.commit === pin.commit && evaluated.judge?.deployment === model, "evaluation board commit or judge differs from boards.json");
+  need(Array.isArray(evaluated.problems) && evaluated.problems.length === 0, `evaluation has problems: ${evaluated.problems?.join("; ") ?? "no problem list"}`);
+  const data = read("benchmark_data.json");
+  const entries = Object.values(data);
+  need(Array.isArray(convert.cases) && entries.length === convert.cases.length && entries.every((e) => convert.cases.some((c) => c.caseId === e.openqodex?.caseId)), "benchmark_data cases differ from convert.json");
+  const run = readBoardReviews(folder, options);
+  const cases = new Map(run.cases.map((c) => [c.source.prUrl, c]));
+  const fresh = martianReviewConversion(run).data;
+  for (const url of new Set([...Object.keys(data), ...Object.keys(fresh)])) {
+    const c = cases.get(url);
+    need(c && canonical(data[url]?.reviews) === canonical(fresh[url]?.reviews) && canonical(data[url]?.openqodex) === canonical({ caseId: c.id, case: c.name }), `${c?.id ?? data[url]?.openqodex?.caseId}: benchmark_data.json differs from a fresh conversion of this run`);
+    need(Array.isArray(data[url].golden_comments) && truthHashOf(martianTruth({ comments: data[url].golden_comments }).items) === c.truthHash, `${c.id}: golden comments differ from the frozen truth hash`);
+  }
+  const golden = entries.flatMap((e) => martianGolden(e.openqodex.caseId, martianTruth({ comments: e.golden_comments })));
+  const planned = population(manifest, readAttempts(folder));
+  need(planned.problems.length === 0, planned.problems.join("; "));
+  const reviews = planned.jobs.map(boardReview);
+  const expected = [...new Set(jobs.map((j) => boardToolName(j.config, j.repeat)))].sort();
+  need(Array.isArray(convert.tools) && convert.tools.length > 0 && new Set(convert.tools.map((t) => t.tool)).size === convert.tools.length, "conversion needs one row per tool");
+  need(canonical(convert.tools.map((t) => t.tool).sort()) === canonical(expected), "converted tools differ from the run's planned jobs");
+  need(canonical((evaluated.tools ?? []).map((t) => t.tool).sort()) === canonical(expected), "evaluated tools differ from the conversion");
+  const perTool = {};
+  for (const t of convert.tools) {
+    need(t.tool === boardToolName(t.config, t.repeat) && t.boardConfig === boardConfigOf(t.config), `${t.tool}: config or boardConfig differs from its tool name`);
+    const record = evaluated.tools.find((row) => row.tool === t.tool);
+    if (t.held) {
+      need(typeof t.why === "string" && t.why.trim() !== "" && record?.evaluation === null && record.core === null && canonical(record.problems) === canonical([`held by the converter: ${t.why}`]), `${t.tool}: held conversion and evaluation differ`);
+      perTool[t.tool] = { config: t.config, boardConfig: t.boardConfig, repeat: t.repeat, held: t.why, official: null, ours: null, candidates: [], matches: [], empty: [] };
+      continue;
+    }
+    const mine = reviews.filter((r) => r.config === t.config && r.repeat === t.repeat);
+    const findings = mine.flatMap((r) => r.native === null ? martianFindings(r.caseId, r.first?.report ?? null) : r.findingIds.map((findingId) => ({ findingId, caseId: r.caseId, config: r.config, repeat: r.repeat, index: 0, severity: null, source: "native", text: r.native })));
+    const empty = [];
+    for (const e of entries) {
+      const review = (e.reviews ?? []).find((r) => r.tool === t.tool);
+      need(review && Array.isArray(review.review_comments), `${t.tool}: a suite case has no converted review`);
+      const caseId = e.openqodex.caseId;
+      if (specs[e.openqodex.case]?.truthCount?.items !== undefined) need(specs[e.openqodex.case].truthCount.items === e.golden_comments.length, `${caseId}: golden comment count differs from the saved case`);
+      if (review.review_comments.length === 0) {
+        const notRun = (convert.notRun ?? []).some((r) => r.tool === t.tool && r.caseId === caseId);
+        const failed = (convert.failures ?? []).find((r) => r.config === t.config && r.repeat === t.repeat && r.caseId === caseId);
+        const reason = notRun ? "not-run" : review.openqodex.status === "complete" || review.openqodex.status === "incomplete" ? "empty" : review.openqodex.status;
+        empty.push({ caseId, reason, ...(failed ? { failure: failed.failure } : {}) });
+      }
+    }
+    need(record?.evaluation === `${t.tool}/evaluation.json` && record.problems?.length === 0, `${t.tool}: evaluation is missing or has problems`);
+    const evaluation = read(`${t.tool}/evaluation.json`);
+    need(evaluation.toolName === t.tool && evaluation.config === t.config && evaluation.repeat === t.repeat && evaluation.board?.repo === pin.repo && evaluation.board?.commit === pin.commit && evaluation.judge?.model === model, `${t.tool}: evaluation tool or board pins differ`);
+    const result = readMartianEvaluation(evaluation, { findings, golden, isNative: (f) => boardConfigOf(f.config) === "control" && boardToolName(f.config, f.repeat) === evaluation.toolName });
+    need(canonical(record.core) === canonical(result.official.core), `${t.tool}: eval.json core summary differs from its evaluation`);
+    // A candidate's words stay in evaluation.json; in the entry an em dash becomes a comma, as in a judge reason, so the entry passes the scrub.
+    const candidates = result.candidates.map((c) => (typeof c.extractedText === "string" ? { ...c, extractedText: c.extractedText.replace(/\s*\u2014\s*/g, ", ") } : c));
+    perTool[t.tool] = { config: t.config, boardConfig: t.boardConfig, repeat: t.repeat, official: result.official, ours: result.ours, candidates, matches: result.matches, empty };
+  }
+  return { board: { repo: pin.repo, commit: pin.commit }, judge: evaluated.judge, profile: "core", perTool, evidenceHash: hashFolder(folder, paths).listHash };
 }

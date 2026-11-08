@@ -10,6 +10,22 @@
 [![CI](https://github.com/openqodex/openqodex/actions/workflows/ci.yml/badge.svg)](https://github.com/openqodex/openqodex/actions/workflows/ci.yml)
 [![Discussions](https://img.shields.io/github/discussions/openqodex/openqodex)](https://github.com/openqodex/openqodex/discussions)
 
+Open source AI code review for coding agents. A separate reviewer checks every change your agent writes before you push. A code graph gives your agent a map of your codebase. Works in Claude Code, Codex, Cursor and Cline.
+
+For people, in your terminal:
+
+```
+npx openqodex init
+```
+
+After the install, say to your agent: "review my change with openqodex".
+
+![The report page of an OpenQodex review, scrolled to its list of findings](https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/report-findings.png)
+
+The report page of an OpenQodex review at its findings, captured 2026-10-25 with openqodex 0.14.0 and reviewer claude 2.1.310, on the openqodex/openqodex-lp repository.
+
+The landing page: https://openqodex.com
+
 AI agents: read the [agent guide](https://github.com/openqodex/openqodex/blob/main/docs/for-agents.md). After the install, `~/.openqodex/bin/openqodex guide for-agents` prints the guide for the installed version.
 
 OpenQodex reviews your code change before you push it. Your change is the commits you have not pushed plus everything uncommitted. OpenQodex runs on your machine, from your coding agent or your terminal.
@@ -38,20 +54,14 @@ In Cursor and Cline, the review needs Claude Code or Codex installed as the revi
 
 ## Install
 
-For people, in your terminal:
-
-```
-npx openqodex init
-```
-
 In a terminal, `init` finds Claude Code, Cursor, Codex CLI and Cline on your machine. It lists the files it will write. It asks you once. It starts the scanner downloads that your repository needs. Then it reviews your current change when a reviewer can start.
 
-After the install, say to your agent: "review my change with openqodex". In your own terminal, run `~/.openqodex/bin/openqodex review`. That path is the launcher, a small script that `init` writes. An `npx` install puts no `openqodex` on your `PATH`.
+In your own terminal, run `~/.openqodex/bin/openqodex review`. That path is the launcher, a small script that `init` writes. An `npx` install puts no `openqodex` on your `PATH`.
 
 For agents, the same install with no question:
 
 ```
-npx -y openqodex@0.14.0 init --yes --agent <host>
+npx -y openqodex@0.16.0 init --yes --agent <host>
 ```
 
 `<host>` is `claude-code`, `codex`, `cursor` or `cline`. In its default sandbox mode, Codex gives commands no network. From Codex, run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent.
@@ -93,6 +103,8 @@ OpenQodex itself collects no usage data. The built-in scanners, as OpenQodex run
 
 | Reviewer | Model | Cases | Issue recall | Precision | Clean rate | Cost per review |
 | --- | --- | --- | --- | --- | --- | --- |
+| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split | 150/153 (98.0%) | 249/295 (84.4%) to 295/295 (100.0%) | 6/6 (100.0%) | $0.4371 |
+| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split | 150/153 (98.0%) | 254/302 (84.1%) to 301/302 (99.7%) | 5/6 (83.3%) | $0.4248 |
 | Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split | 129/153 (84.3%) | 142/146 (97.3%) to 146/146 (100.0%) | 6/6 (100.0%) | $0.0870 |
 | Codex (codex-graph-on) | gpt-6.1-sol | Planted bugs, dev split | 115/153 (75.2%) | 125/146 (85.6%) to 146/146 (100.0%) | 6/6 (100.0%) | not measured |
 | Scanner only (scan) | no model | Planted bugs, dev split | 32/51 (62.7%) | 35/45 (77.8%) to 40/45 (88.9%) | 1/2 (50.0%) | not measured |

@@ -1,0 +1,83 @@
+{
+  "guards": "recognizes JUnit 4 test and lifecycle annotations by their exact names",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 1,
+    "roles": [
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "role": "test"
+      },
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.before",
+        "role": "fixture"
+      },
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.beforeClass",
+        "role": "fixture"
+      },
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.after",
+        "role": "fixture"
+      },
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.afterClass",
+        "role": "fixture"
+      }
+    ],
+    "edges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "to": "src/main/java/shop/Service.java#Service.read",
+        "tier": "certain",
+        "category": "direct-call"
+      }
+    ],
+    "notEdges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.before"
+      },
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.beforeClass"
+      },
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.after"
+      },
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.afterClass"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:8",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:9",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:10",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:11",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:12",
+      "tier": "certain"
+    }
+  ]
+}

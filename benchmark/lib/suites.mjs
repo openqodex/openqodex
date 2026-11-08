@@ -527,6 +527,19 @@ export function selectCases({ suite, split = "dev", subset = null, refs = null, 
 // a new accepted scan entry).
 export function specCopy(c, truth) {
   if (c.suite === "greptile") return { ...c, bugs: [], truthSets: Object.fromEntries(Object.entries(truth.sets).map(([name, set]) => [name, { ...c.truthSets[name], ...set }])) };
+  if (truth.kind === "prose") {
+    // Martian: the board judge reads the golden comments (g1, g2, ...) from
+    // the pinned file at conversion; the copy carries no line truth. The
+    // suite's count must be the count read, or the copy would score against
+    // another set.
+    const want = c.truthCount?.kind === "prose" ? c.truthCount.items : undefined;
+    const ids = truth.items.map((t) => t.id);
+    const expected = Number.isInteger(want) ? Array.from({ length: want }, (_, i) => `g${i + 1}`) : null;
+    if (expected === null || ids.join("\n") !== expected.join("\n")) {
+      throw new Error(`${c.id}: its suite lists ${want ?? "no count of"} golden comments, and the truth read holds ${ids.length === 0 ? "none" : ids.join(", ")}; the copy would score against another set`);
+    }
+    return { ...c, bugs: [] };
+  }
   const accepted = truth.items.filter((t) => t.valid !== false);
   const want = c.truthCount?.accepted;
   const ids = accepted.map((t) => t.id);
@@ -572,8 +585,22 @@ export function realSpecProblems(spec, name, { suite, root = benchRoot } = {}) {
     }
     return p;
   }
-  need(spec.origin === "real" && spec.clean === clean, clean ? "a clean suite case is real and clean" : "a pull request case is real and never clean");
+  const origin = SUITES[suite]?.origin ?? "real";
+  need(spec.origin === origin && spec.clean === clean, clean ? "a clean suite case is real and clean" : `a pull request case is ${origin} and never clean`);
   need(typeof spec.repoGroup === "string" && spec.repoGroup !== "", "repoGroup is missing");
+  if (spec.truthCount?.kind === "prose") {
+    const golden = spec.truthCount.items;
+    need(Number.isInteger(golden), "truthCount.items, the number of golden comments its suite lists, is missing");
+    need(Array.isArray(spec.bugs) && spec.bugs.length === 0, "prose truth carries no line truth: bugs must be empty; the board judge reads the golden comments from the pinned file");
+    if (id !== null && SUITES[suite]) {
+      const entry = readSuite(suite, { root }).byName.get(id.name);
+      if (entry?.hash.startsWith(id.hash8)) {
+        need(entry.truth?.items === golden, `the suite lists ${entry.truth?.items} golden comments, and the copy says ${golden}`);
+        need(entry.truthHash === spec.truthHash, "its truthHash is not the suite's");
+      }
+    }
+    return p;
+  }
   const count = spec.truthCount?.accepted;
   need(Number.isInteger(count), "truthCount.accepted, the number of accepted comments its suite lists, is missing");
   need(Array.isArray(spec.bugs), "bugs must be the list of its accepted comments");

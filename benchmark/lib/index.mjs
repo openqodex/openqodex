@@ -58,6 +58,7 @@ import { join } from "node:path";
 import { benchRoot } from "./cases.mjs";
 import { ISSUE_METRICS } from "./interval.mjs";
 import { canonical, caseSetHash } from "./score.mjs";
+import { outsideProblems } from "./outside-boards.mjs";
 
 export const INDEX_VERSION = 1;
 export const indexRoot = join(benchRoot, "index");
@@ -107,7 +108,8 @@ export function hashFolder(folder, paths = fileList(folder)) {
   return { files: entries.length, listHash: listHash(entries), entries };
 }
 
-// Board output is reproducible from the reviewed run and is not part of its asset.
+// The reviewed-run identity excludes board numbers. Published evidence has
+// its own evidenceHash and is included in the asset's file list.
 export function reviewedBytes(folder, path) {
   const bytes = readFileSync(join(folder, path));
   if (path !== "score.json") return bytes;
@@ -351,6 +353,7 @@ export function entryProblems(e) {
     } else headlineProblems(s, `scores.${config}`, e.rulesVersion).forEach((what) => need(false, what));
   }
   need(e.release === null || (typeof e.release === "string" && e.release !== ""), "release must be a version or null");
+  if (e.outside !== undefined) outsideProblems(e.outside).forEach((what) => need(false, what));
   if (e.split === "test") {
     need(typeof e.release === "string" && e.release !== "", "a held-out (test split) entry must name the release it was run for; no held-out case runs outside a release");
     need(e.perCase === null, "a held-out (test split) entry holds aggregates only: perCase must be null, and the per-case detail stays in the asset");

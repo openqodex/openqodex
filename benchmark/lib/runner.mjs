@@ -659,10 +659,27 @@ export function preflightRefusals(preflight, { allowMissing }) {
 const NAME = "[\\p{L}\\p{N}_@+~-]";
 const wholePath = (root) => new RegExp(`(?<!${NAME}|\\.)${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!${NAME}|\\.${NAME})`, "gu");
 
+// The run root and the home folder as placeholders, in that order, since
+// a run can live inside home.
+const pathReplacements = (runRoot) => [[resolve(runRoot), "<run>"], [homedir(), "<home>"]].filter(([root]) => root.length > 1).map(([root, placeholder]) => [wholePath(root), placeholder]);
+
+// Any text of a run can hold a machine path outside a reason field: a
+// scanner's own message (rubocop quotes the absolute checkout path in
+// Lint/DuplicateMethods), a hook command in a control row, a trace. The
+// text with every such path replaced, and how many lines changed.
+export function redactMachinePaths(text, runRoot) {
+  let clean = text;
+  for (const [pattern, placeholder] of pathReplacements(runRoot)) clean = clean.replace(pattern, placeholder);
+  if (clean === text) return { text, lines: 0 };
+  const before = text.split("\n");
+  const after = clean.split("\n");
+  return { text: clean, lines: before.filter((line, i) => line !== after[i]).length };
+}
+
 // A row's reason fields can quote scanner paths. Replace the run root
 // before home, since a run can live inside home. Count changed fields.
 export function redactRowReasons(row, runRoot) {
-  const replacements = [[resolve(runRoot), "<run>"], [homedir(), "<home>"]].filter(([root]) => root.length > 1).map(([root, placeholder]) => [wholePath(root), placeholder]);
+  const replacements = pathReplacements(runRoot);
   let count = 0;
   const reasons = new Map();
   const visit = (value) => {

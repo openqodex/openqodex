@@ -298,7 +298,7 @@ describe("a clean case enters a run without a person's ruling", () => {
     expect(realSpecProblems(JSON.parse(JSON.stringify(copy)), c.name, { suite: "clean", root: ctx.root })).toEqual([]);
     expect(selectCases({ suite: "clean", root: ctx.root }).map((x) => x.id)).toEqual([id("acme__app-11"), id("beta__lib-21")].sort());
     // The licence class travels with the case, so a run holding the
-    // unverified one is refused when it would be published.
+    // unverified one is refused at board submission.
     const unverified = readCase(id("beta__lib-21"), { root: ctx.root });
     expect(unverified.source.licence.class).toBe("unverified");
     expect(publishRefusal([{ name: unverified.name, licence: specCopy(unverified, truthOf(unverified)).source.licence.class }])).toMatch(/beta__lib-21/);

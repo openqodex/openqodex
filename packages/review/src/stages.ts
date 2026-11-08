@@ -1,4 +1,4 @@
-import { FINDER_CONFIDENCE_FLOOR, VERIFY_BATCH_SIZE, checkSubmission, findingKey, modelCoverage, outsideSnapshot, readCoverage, requiredCandidates, severityRank } from "@openqodex/core";
+import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, matchesGlob, redactByFingerprint, VERIFY_BATCH_SIZE, checkSubmission, findingKey, modelCoverage, outsideSnapshot, readCoverage, requiredCandidates, severityRank } from "@openqodex/core";
 import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
 import { MAX_CORRECTIONS, converse, deliverRanges } from "./conversation.js";
 import { TIMED_OUT } from "./agents/driver.js";
@@ -424,6 +424,77 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     report.below_threshold = Math.max(0, report.below_threshold - observations.filter((o) => !shownKeys.has(findingKey(o))).length);
     report.observations = observations.slice(0, 12);
     report.observations_omitted = Math.max(0, observations.length - 12);
+    // A shown member owns its whole duplicate chain, in either direction.
+    const neighbours = new Map<string, Set<string>>();
+    for (const item of built.items) {
+      const target = item.v.duplicate_of ? byId.get(item.v.duplicate_of) : undefined;
+      if (!target) continue;
+      const key = keyOf(item);
+      const targetKey = keyOf(target);
+      if (!neighbours.has(key)) neighbours.set(key, new Set());
+      if (!neighbours.has(targetKey)) neighbours.set(targetKey, new Set());
+      neighbours.get(key)!.add(targetKey);
+      neighbours.get(targetKey)!.add(key);
+    }
+    const owned = new Set([...report.findings, ...observations].map(findingKey));
+    const ownComponent = (keys: Set<string>, start: string[]) => {
+      const pending = [...start];
+      for (const key of start) keys.add(key);
+      for (let i = 0; i < pending.length; i++) for (const key of neighbours.get(pending[i]!) ?? []) {
+        if (keys.has(key)) continue;
+        keys.add(key);
+        pending.push(key);
+      }
+    };
+    ownComponent(owned, [...owned]);
+    const lowConfidenceOf = (f: FindingV2) => {
+      if (f.source && config.disabledRules.some((glob) => matchesGlob(f.source!, glob))) return null;
+      const lens = f.source?.startsWith("lens:") ? args.manifest.lenses.find((l) => l.name === f.source!.slice("lens:".length)) : undefined;
+      const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lens?.confidenceFloor ?? 0);
+      if (f.confidence >= floor) return null;
+      return { title: redactByFingerprint(f.title, scan.secretFingerprints), file_path: redactByFingerprint(f.file_path, scan.secretFingerprints), confidence: f.confidence, floor };
+    };
+    const matchesLow = (low: Report["low_confidence"][number], entry: Report["low_confidence"][number]) => low.title === entry.title && low.file_path === entry.file_path && low.confidence === entry.confidence && low.floor === entry.floor;
+    const removeLow = (entry: Report["low_confidence"][number]) => {
+      const index = report.low_confidence.findIndex((low) => matchesLow(low, entry));
+      if (index !== -1) report.low_confidence.splice(index, 1);
+    };
+    const shownPossibleKeys = new Set(report.possible.map(findingKey));
+    // Account for under-floor observations even below the severity threshold.
+    // Do not use the visible check to restore possible defects.
+    const lowObservationKeys = new Set<string>();
+    for (const item of built.items) {
+      const key = keyOf(item);
+      if (item.v.tier !== "observation" || !observationKeys.has(key) || lowObservationKeys.has(key)) continue;
+      const entry = lowConfidenceOf(item.finding);
+      if (!entry) continue;
+      lowObservationKeys.add(key);
+      if (duplicateKeys.has(key) || owned.has(key)) {
+        if (!shownPossibleKeys.has(key)) removeLow(entry);
+        continue;
+      }
+      // wording: session
+      const reason = "observation under the floor";
+      const existing = report.low_confidence.find((low) => matchesLow(low, entry));
+      if (existing) existing.reason = reason;
+      else report.low_confidence.push({ ...entry, reason });
+    }
+    const possibleOwned = new Set(owned);
+    report.possible = report.possible
+      .filter((f) => !observationKeys.has(findingKey(f)))
+      .sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || (b.confidence ?? 0) - (a.confidence ?? 0))
+      .filter((f) => {
+        const key = findingKey(f);
+        if (possibleOwned.has(key)) return false;
+        ownComponent(possibleOwned, [key]);
+        return true;
+      });
+    for (const item of built.items) {
+      const key = keyOf(item);
+      if (item.v.tier !== "finding" || shownPossibleKeys.has(key) || !possibleOwned.has(key) && !duplicateKeys.has(key)) continue;
+      const entry = lowConfidenceOf(item.finding);
+      if (entry) removeLow(entry);
+    }
     report.not_reviewed = requiredCandidates(scan, config).filter((c) => unverified.has(c.id));
     for (const c of allCandidates) {
       const verdict = verified.flatMap((o) => o.answer.verdicts).find((v) => v.id === c.id);

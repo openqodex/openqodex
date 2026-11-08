@@ -119,7 +119,7 @@ export async function graphFor(p: PipelineResult, host: GraphHost, noGraph: bool
   if (!p.config.graph.enabled) return emptyImpact("off", "graph.enabled is false in the config");
   const relevant = (path: string | null) => path !== null && (langOf(path) !== null || isManifest(path));
   if (!p.change.files.some((f) => relevant(f.path) || relevant(f.oldPath))) {
-    return emptyImpact("skipped", `no ${withBase ? "changed " : ""}file is TypeScript, JavaScript, Python, Go or Ruby code or a manifest`);
+    return emptyImpact("skipped", `no ${withBase ? "changed " : ""}file is TypeScript, JavaScript, Python, Go, Ruby or Java code or a manifest`);
   }
   try {
     const { store, refused } = host.store ? await host.store() : { store: null, refused: undefined };

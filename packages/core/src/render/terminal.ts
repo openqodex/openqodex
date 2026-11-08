@@ -11,6 +11,7 @@ import {
   lowConfidenceReason,
   observationsOmittedLine,
   orderObservations,
+  orderPossible,
   sourceLabel,
   verdictLine,
 } from "./common.js";
@@ -74,6 +75,13 @@ export function renderTerminal(report: Report, opts: { color: boolean }): string
     out.push("", "Observations (do not count toward the verdict):");
     for (const f of observations) out.push(...findingLines(f, c, true));
     if (omitted) out.push(omitted);
+  }
+
+  const possible = orderPossible(report);
+  if (possible.length > 0) {
+    // wording: session
+    out.push("", "Possible issues (not counted, confidence under the floor)");
+    for (const f of possible) out.push(...findingLines(f, c, true));
   }
 
   if (report.outside_change.length > 0) {

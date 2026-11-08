@@ -19,7 +19,7 @@
 // A plain ingest must preserve the report saved by --verify-published.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -243,11 +243,15 @@ describe("the Martian ingest", () => {
     const path = "offline/golden_comments/alpha.json";
     const rows = Array.from({ length: 50 }, (_, i) => ({ pr_title: `Change ${i}`, url: `https://github.com/alpha/app/pull/${101 + i}`, comments: Array.from({ length: i < 23 ? 4 : 3 }, (_, j) => ({ comment: `Bug ${i}.${j}`, severity: "High", category: "bug" })) }));
     const ctx = setup({ [path]: rows });
-    const { root, cases, report } = await ingestInto(ctx);
+    const parent = tempDir("oq-martian-verification-");
+    const { root, cases, report } = await ingestInto(ctx, join(parent, "benchmark"));
     for (const dir of ["ingest", "lib"]) {
       mkdirSync(join(root, dir));
       for (const file of readdirSync(join(benchRoot, dir)).filter((f) => f.endsWith(".mjs"))) cpSync(join(benchRoot, dir, file), join(root, dir, file));
     }
+    for (const file of ["score.mjs", "legacy"]) cpSync(join(benchRoot, file), join(root, file), { recursive: true });
+    mkdirSync(join(parent, "packages"));
+    symlinkSync(join(benchRoot, "../packages/scanners"), join(parent, "packages/scanners"));
     mkdirSync(join(root, "outside"));
     writeFileSync(join(root, "outside/boards.json"), encode(ctx.boards));
     const published = encode(Object.fromEntries(rows.map(({ comments, ...row }) => [row.url, { ...row, golden_source_file: "alpha.json", golden_comments: comments }])));
@@ -365,7 +369,18 @@ describe("one finding extracted into two issues, or matched to two golden commen
   it("counts a golden comment once when two candidates of two findings match it, judged by the first finding in report order", () => {
     const { evaluation, findings, golden } = fixtureInputs();
     // The third finding of alpha/app#1 (minor) also matched g1, and a match line is repeated.
-    const more = { ...evaluation, matches: [...evaluation.matches, { candidateId: "https://github.com/alpha/app/pull/1#3", goldenId: "martian/alpha__app-1@0a1b2c3d#g1", verdict: "match", confidence: 0.7 }, evaluation.matches[0]] };
+    // That candidate was a false positive before this added match. Keep
+    // the official totals consistent with the matches the reader checks.
+    const totals = structuredClone(evaluation.totals);
+    evaluation.candidates.find((c) => c.candidateId === "https://github.com/alpha/app/pull/1#3").officialFp = false;
+    for (const profile of ["strict", "core", "all"]) {
+      const t = totals[profile];
+      t.fp = 1;
+      t.precision = t.tp / (t.tp + t.fp);
+      t.f1 = 2 * t.precision / (t.precision + 1);
+      t.fbeta = 5 * t.precision / (4 * t.precision + 1);
+    }
+    const more = { ...evaluation, totals, matches: [...evaluation.matches, { candidateId: "https://github.com/alpha/app/pull/1#3", goldenId: "martian/alpha__app-1@0a1b2c3d#g1", verdict: "match", confidence: 0.7 }, evaluation.matches[0]] };
     const read = readMartianEvaluation(more, { findings, golden });
     expect(read.matches).toEqual(more.matches);
     expect(read.ours.golden).toEqual({ found: 5, of: 5 });

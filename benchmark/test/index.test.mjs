@@ -13,13 +13,19 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { acceptedPath, assetUrl, buildEntry, entryProblems, groupKeys, listEntries } from "../lib/index.mjs";
+import { acceptedPath, acceptedProblems, assetUrl, buildEntry, entryProblems, groupKeys, listEntries } from "../lib/index.mjs";
 import { planJobs, sampleRecord } from "../lib/runner.mjs";
 import { RULES_VERSION } from "../lib/score.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
+
+it("the committed accepted pointer records every accepted entry's current board hash", () => {
+  const pointer = JSON.parse(readFileSync(acceptedPath(), "utf8"));
+  const entries = new Map(listEntries().map(({ entry }) => [entry.runId, entry]));
+  expect(acceptedProblems(pointer, entries)).toEqual([]);
+});
 
 const write = (path, text) => {
   mkdirSync(dirname(path), { recursive: true });

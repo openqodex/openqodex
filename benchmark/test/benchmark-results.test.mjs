@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, expect, it } from "vitest";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
+import { aacrOutside } from "./outside-fixture.mjs";
 import { boardHash, groupKeys, scoreHash } from "../lib/index.mjs";
 
 afterAll(removeTempDirs);
@@ -122,10 +123,14 @@ it("keeps indexed board metrics and A/A issue noise separate", () => {
   const { runId, config: aacrConfig } = aacrGroup(root);
   const path = entryFile(root, runId);
   const entry = JSON.parse(readFileSync(path, "utf8"));
-  entry.outside = { aacr: { byConfig: { [aacrConfig]: { mean: {
-    semantic: { precision: 0.2, recall: 0.3, f1: 0.24, noiseRate: 0.8 },
-    line: { precision: 0.4, recall: 0.5 },
-  } } } } };
+  entry.outside = aacrOutside(aacrConfig, {
+    generated: 5, expected: 4, matched: 2, semanticMatched: 1, mode: "llm",
+  });
+  expect(entry.outside.aacr.problems).toEqual([]);
+  expect(entry.outside.aacr.byConfig[aacrConfig].mean).toEqual({
+    line: { matches: 2, generated: 5, expected: 4, precision: 0.4, recall: 0.5, f1: expect.closeTo(4 / 9) },
+    semantic: { precision: 0.2, recall: 0.25, f1: expect.closeTo(2 / 9), noiseRate: 0.8 },
+  });
   putRecorded(root, entry);
   // An A/A twin of an accepted run with at least three issues found, three issues apart.
   const accepted = Object.entries(pointer(root).groups).map(([key, a]) => {
@@ -140,10 +145,10 @@ it("keeps indexed board metrics and A/A issue noise separate", () => {
   twin.scores[config].issueRecall.all.hit -= 3;
   writeFileSync(entryFile(root, twin.runId), JSON.stringify(twin));
   expect(run(root).status).toBe(0);
-  expect(page(root)).toContain("20.0% | 30.0% | 24.0% | 80.0% | 40.0% | 50.0%");
+  expect(page(root)).toContain("20.0% | 25.0% | 22.2% | 80.0% | 40.0% | 50.0%");
   const headline = readFileSync(join(root, "README.md"), "utf8");
   expect(headline).toContain("Semantic precision");
-  expect(headline.split("\n").find((l) => l.includes(`(${aacrConfig})`) && l.includes("AACR-Bench"))).toContain("20.0% | 30.0% | 24.0% | 80.0% | 40.0% | 50.0%");
+  expect(headline.split("\n").find((l) => l.includes(`(${aacrConfig})`) && l.includes("AACR-Bench"))).toContain("20.0% | 25.0% | 22.2% | 80.0% | 40.0% | 50.0%");
   expect(page(root)).toContain(`The difference is 3 issues across ${parent.repeat} repeats`);
 });
 
@@ -179,7 +184,7 @@ it("keeps an AACR-Bench row with no board numbers and no ruled hit off the READM
   expect(block(root).some((l) => l.includes(`(${config})`) && l.includes("AACR-Bench"))).toBe(false);
   expect(page(root).split("\n").some((l) => l.startsWith("| ") && l.includes(`[${runId}]`))).toBe(true);
   // The same row with board numbers is on the README.
-  entry.outside = { aacr: { byConfig: { [config]: { mean: { semantic: null, line: { precision: 0.4, recall: 0.5 } } } } } };
+  entry.outside = aacrOutside(config);
   putRecorded(root, entry);
   expect(run(root).status).toBe(0);
   expect(block(root).some((l) => l.includes(`(${config})`) && l.includes("AACR-Bench"))).toBe(true);

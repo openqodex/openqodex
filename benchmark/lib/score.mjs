@@ -205,13 +205,21 @@ export function scoreBrief(spec, brief) {
 // Every finding the developer is shown: on the change, outside it (except
 // scanner information), and the observations of a staged review (shown
 // apart, never counted toward the verdict, judged here all the same because
-// the developer reads them). Each carries `tier`: "finding" or "observation".
+// the developer reads them). Each carries its presentation tier.
+// 45. A possible item is shown apart and judged like a finding:
+//     shownFindings lists report.possible after the observations, tier possible,
+//     and an outside-change item under its floor with them, not before the
+//     observations; a report without the field scores exactly as under version 11.
 export function shownFindings(report) {
   if (!report) return [];
+  const outside = (report.outside_change ?? []).filter((f) => f.origin !== "scanner");
+  const underFloor = (f) => f.confidence != null && f.floor != null && f.confidence < f.floor;
   return [
     ...(report.findings ?? []).map((f) => ({ ...f, tier: "finding" })),
-    ...(report.outside_change ?? []).filter((f) => f.origin !== "scanner").map((f) => ({ ...f, tier: "finding" })),
+    ...outside.filter((f) => !underFloor(f)).map((f) => ({ ...f, tier: "finding" })),
     ...(report.observations ?? []).map((f) => ({ ...f, tier: "observation" })),
+    ...outside.filter(underFloor).map((f) => ({ ...f, tier: "possible" })),
+    ...(report.possible ?? []).map((f) => ({ ...f, tier: "possible" })),
   ];
 }
 
@@ -594,7 +602,8 @@ export function regressions(oldSamples, newSamples) {
 //     each marked tier "observation", so every score, board file and judge
 //     export sees it like a finding. A report without the field, or with an
 //     empty list, scores exactly as under version 9.
-// Rules version 12 reads a finding with no line number the same way
+// Rules version 12: possible issues are shown and judged with tier possible.
+// Rules version 13 reads a finding with no line number the same way
 // whichever of null or undefined it is written as. Failure list, written
 // before the code:
 // 45. A finding's missing line number is read as line 0 when it is null, so
@@ -603,7 +612,7 @@ export function regressions(oldSamples, newSamples) {
 //     (AACR's line rule) now reads either as "no line", matching any truth
 //     location in the finding's file, the same way AACR-Bench's own
 //     evaluator reads a comment with no line.
-export const RULES_VERSION = 12;
+export const RULES_VERSION = 13;
 export const AACR_LINE_K = 1;
 // The order classify() tries the rules in; the first that holds decides.
 export const OUTCOME_ORDER = ["test-gap", "accepted", "hit", "wrong-kind", "near", "false"];
@@ -1386,6 +1395,9 @@ export const MARTIAN_VERDICTS = ["match", "no-match"];
 // What Martian's judge reads of a finding.
 export const JUDGE_FIELDS = ["title", "problem", "consequence", "fix"];
 
+// Re-exported by board-reviews for converters and native readback alike.
+export const nativeFindingId = (caseId, config, repeat, nativeBody) => createHash("sha256").update(JSON.stringify({ caseId, config, repeat, attempt: 1, nativeBody })).digest("hex");
+
 export const judgeFieldsMissing = (f) => JUDGE_FIELDS.filter((k) => typeof f?.[k] !== "string" || f[k].trim() === "");
 const lackingLines = (findings) =>
   findings
@@ -1437,7 +1449,7 @@ function totalsProblems(totals) {
 // for this tool name (martianFindings, in report order), `golden` the golden
 // comments of the cases it covers (martianGolden). Returns { toolName,
 // board, judge, official, candidates, matches } as given, and `ours`.
-export function readMartianEvaluation(evaluation, { findings, golden }) {
+export function readMartianEvaluation(evaluation, { findings, golden, isNative = () => false }) {
   const e = evaluation;
   const shape = [];
   if (!e || typeof e !== "object") throw new Error("the evaluation is not an object");
@@ -1449,7 +1461,12 @@ export function readMartianEvaluation(evaluation, { findings, golden }) {
   shape.push(...totalsProblems(e.totals));
   if (shape.length > 0) throw new Error(`the evaluation is not in Martian's shape (PLAN-benchmark 4.5): ${shape.join("; ")}`);
 
-  const lacking = lackingLines(findings);
+  const native = findings.filter((f) => f.source === "native" && isNative(f));
+  if (new Set(native.map((f) => f.caseId)).size !== native.length) throw new Error("a control review must have one native source per case");
+  for (const f of native) {
+    if (typeof f.text !== "string" || !f.text.trim() || f.findingId !== nativeFindingId(f.caseId, f.config, f.repeat, f.text)) throw new Error(`the native source id of ${f.caseId} does not match its body or tool`);
+  }
+  const lacking = lackingLines(findings.filter((f) => !native.includes(f)));
   if (lacking.length > 0) throw new Error(`the evaluation of ${e.toolName} is not scored: these findings were saved for Martian's judge without what it reads:\n${lacking.join("\n")}`);
   const byFinding = new Map();
   for (const f of findings) if (!byFinding.has(f.findingId)) byFinding.set(f.findingId, f);
@@ -1465,6 +1482,8 @@ export function readMartianEvaluation(evaluation, { findings, golden }) {
       continue;
     }
     if (byCandidate.has(id)) problems.push(`candidate ${id} is listed twice`);
+    if (typeof c.extractedText !== "string" || !c.extractedText.trim()) problems.push(`candidate ${id} has no saved text`);
+    if (typeof c.officialFp !== "boolean") problems.push(`candidate ${id} has no official false positive verdict`);
     if (!Array.isArray(c.sourceFindingIds) || c.sourceFindingIds.length === 0) problems.push(`candidate ${id} names no source finding`);
     for (const f of Array.isArray(c.sourceFindingIds) ? c.sourceFindingIds : []) if (!byFinding.has(f)) problems.push(`candidate ${id} names finding ${String(f).slice(0, 12)}, which the run did not send`);
     if (!c.extraction || typeof c.extraction !== "object") problems.push(`candidate ${id} has no extraction provenance`);
@@ -1496,6 +1515,30 @@ export function readMartianEvaluation(evaluation, { findings, golden }) {
     }
   }
   if (behind.size !== e.totals.all.tp) throw new Error(`the official totals count ${e.totals.all.tp} golden comments found (all profile), but the matches name ${behind.size}: a match was lost or added on the way from Martian's evaluations, so our numbers would not rest on the official matches`);
+  // withmartian/code-review-benchmark@e616e849755441da38f18bf3adba2c9583b03803:
+  // offline/analysis/score_profiles.py:19-25,103-120 includes only core
+  // golden categories in TP/FN, and every FP, even a match outside core.
+  // offline/code_review_benchmark/step3_judge_comments.py:304-331,357-358
+  // keys candidates by text within a PR and spares matched dedup siblings.
+  // A superseded winner also stays matched, so FP verdicts come from
+  // Martian's saved false_positives, not just the final winning matches.
+  const coreCategories = new Set(["bug", "security", "concurrency", "data", "api", "perf", "test_gap", "doc_defect"]);
+  const coreGolden = golden.filter((g) => coreCategories.has(g.rawCategory));
+  const tp = coreGolden.filter((g) => behind.has(g.goldenId)).length;
+  const fn = coreGolden.length - tp;
+  const foundCandidates = new Set(e.matches.filter((m) => m.verdict === "match").map((m) => m.candidateId));
+  const sameCase = (a, b) => caseOfCandidate(a)[0] === caseOfCandidate(b)[0];
+  const falsePositives = e.candidates.filter((c) => c.officialFp);
+  for (const c of falsePositives) {
+    if (e.candidates.some((m) => foundCandidates.has(m.candidateId) && sameCase(c, m) && (m.extractedText === c.extractedText || (m.dedupGroup !== null && m.dedupGroup !== undefined && m.dedupGroup === c.dedupGroup)))) throw new Error(`candidate ${c.candidateId} is an official false positive but is a winning match or its dedup sibling`);
+  }
+  const fp = new Set(falsePositives.map((c) => JSON.stringify([caseOfCandidate(c)[0], c.extractedText]))).size;
+  const precision = tp + fp === 0 ? 0 : tp / (tp + fp);
+  const recall = tp + fn === 0 ? 0 : tp / (tp + fn);
+  const f1 = precision + recall === 0 ? 0 : 2 * precision * recall / (precision + recall);
+  for (const [key, count] of Object.entries({ tp, fp, fn, precision, recall, f1 })) {
+    if (Math.abs(e.totals.core[key] - count) > 1e-12) throw new Error(`the core ${key} is ${e.totals.core[key]}, but the saved matches and candidates give ${count}`);
+  }
   const judged = golden
     .filter((g) => behind.has(g.goldenId))
     .map((g) => {

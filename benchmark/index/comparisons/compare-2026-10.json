@@ -323,13 +323,69 @@
       "caseHashes": {},
       "splitHash": "f80536ffd88b154ddaea85e55a3924eafb47d932d935dc5c7824bf86cf889959",
       "fileHash": "87c505316841fa4e0b053d7e4b7233c1a35b8b8dfd9391387729398aee94448c"
+    },
+    "greptile": {
+      "caseHashes": {
+        "ai-code-review-evaluation__cal.com-greptile-10": "93ec469b4b6210d02c259c913cc12be20d3bc3fb51dcf0d90bc55d827879b32e",
+        "ai-code-review-evaluation__cal.com-greptile-11": "33c9a938c5bfd8ac45d6aa3eda52bf670b59011d13dce80c110b5a86bc61fbf1",
+        "ai-code-review-evaluation__cal.com-greptile-2": "40eb8226fa08f86e48ff0f0228d6b0fb313b0fc390ce1636756e9e9693059c9d",
+        "ai-code-review-evaluation__cal.com-greptile-3": "abd5fc4f46b4a8f1a4b3c9f7207f21ee1befc30bb8997b3f2e3f2e864edfbf5f",
+        "ai-code-review-evaluation__cal.com-greptile-4": "44275b5e1429b7a86275a996d3f12920169604cb04d9a05b541a500579eefa91",
+        "ai-code-review-evaluation__cal.com-greptile-5": "ea3b55cf25c810d082452947a4c248ddd0ea6a9b63241df6b906df694b8a9899",
+        "ai-code-review-evaluation__cal.com-greptile-6": "413167ac46893762832687e3676deed75a3becbd1a279db66f345ff3d8a65aa5",
+        "ai-code-review-evaluation__cal.com-greptile-7": "3b4f1ddebd5477ec58ddccde27e58ff3f3faa639250045b1566a00afad7f7050",
+        "ai-code-review-evaluation__cal.com-greptile-8": "23b277e7ac80ac689897bbece449f05687b1b918b3824ac788d1b3aed0d07a62",
+        "ai-code-review-evaluation__cal.com-greptile-9": "41bedb6f9cc77ccfa69358270a8bc1ebf2ccd400684a8d5286690d355629c33b",
+        "ai-code-review-evaluation__discourse-greptile-1": "4bc399ee3a30e6120433cdb81712f2493c654615127415520754eb32854f7f8e",
+        "ai-code-review-evaluation__discourse-greptile-10": "c37a2a7164816303861a22ab30ef87fb22daf4ea08ccb69a36de44c6c4afd52b",
+        "ai-code-review-evaluation__discourse-greptile-2": "83bfeca805d55ed8229f147f298f88d039dbc650e9e04347a26d62f13f535b5f",
+        "ai-code-review-evaluation__discourse-greptile-3": "10f05d03f3142ca17f1c2c48daac35f0272c18d7faad261bdb3bd148920c96a3",
+        "ai-code-review-evaluation__discourse-greptile-4": "e32a7f6e5b25b05e21dccf27190beca5e861b1cd4fd655fe9492ede047defe36",
+        "ai-code-review-evaluation__discourse-greptile-5": "26b3e5b6de73e6c4f63c1eee651a783aedae413a6c06bd5424274cd0c8189fc9",
+        "ai-code-review-evaluation__discourse-greptile-6": "6ae6cb4c6e66e11777f3ebf86f8b13702baeebcd192fc4ab99cb0ec296efca79",
+        "ai-code-review-evaluation__discourse-greptile-7": "e7b1abe0ba8c45a39187a0d14b23e548ade564b4cddb97239e88cd6b1ff45266",
+        "ai-code-review-evaluation__discourse-greptile-8": "c2168b7befca0c39d796f2b7f9745c33396f372c4e4bcf912ecc1fa68746e070",
+        "ai-code-review-evaluation__discourse-greptile-9": "343352b12839b360512a1bb877c2901707d8870ca96581db11d1c45dab32160a",
+        "ai-code-review-evaluation__grafana-greptile-1": "ed8fc9ddde8ad6041a874f4bd44c17a658a8d2dd49bc5499419d43c4ddfc52e2",
+        "ai-code-review-evaluation__grafana-greptile-10": "2fa4d65b11de27deca8aa37ee80691155aa6259fd6eed687a0134a0eb4bd805a",
+        "ai-code-review-evaluation__grafana-greptile-2": "97b8a2089f405582f1149dbc18136437c575a38e6ff50e2806e15ad378725ab9",
+        "ai-code-review-evaluation__grafana-greptile-3": "23087fd603c91f77ac14fcf6247cc36d46755bbe4d13ed466223123165f9ff64",
+        "ai-code-review-evaluation__grafana-greptile-4": "9c146b7f246a5aa29ef50c5490718d34aee2a457e5d68d78dc8e92cc07cecab5",
+        "ai-code-review-evaluation__grafana-greptile-5": "c7de75e8710d5a94e960201d90110e3fce9de71d63885bf272dc942fa9925bb0",
+        "ai-code-review-evaluation__grafana-greptile-6": "ff73de124d8618aba134af4d7e397c1457f1738e87424c64b021ce46b6b7419a",
+        "ai-code-review-evaluation__grafana-greptile-7": "7ad4f99f990b6c14a93525b96c25a8a021b1edcefa033a80d282e9beb6813dda",
+        "ai-code-review-evaluation__grafana-greptile-8": "1c49bb7ac3eacdfe1cda85cebda1619d1810dab7710336b038fdb84222b39458",
+        "ai-code-review-evaluation__grafana-greptile-9": "d0e8dc122279a1c89a0b98ced64ab78e7999f793a95d8f81f651e49f3bca62d4",
+        "ai-code-review-evaluation__keycloak-greptile-1": "57543a966dde5b5dd0e6444c94e08f2b8bf5d125a459a0eb231d1aa70444582b",
+        "ai-code-review-evaluation__keycloak-greptile-10": "9b2036d95394808af50548cdb48a0e70f2d476f927eede766eb4e7f55bf6ac19",
+        "ai-code-review-evaluation__keycloak-greptile-2": "e356be7d0f33f2db9c6c08ec115187835cafa1213b24f98d185dc5d43207cdd1",
+        "ai-code-review-evaluation__keycloak-greptile-3": "53f77f0fc28d2b399eb60efd437e88936f29ffbeedc0fb06ea026bc32916774c",
+        "ai-code-review-evaluation__keycloak-greptile-4": "77387c5a3b3636d2fc84e94465d78f7f6a13efd687212a32b8e277783e47f8d0",
+        "ai-code-review-evaluation__keycloak-greptile-5": "b9e8a6cf74a1dcc20eb9c27a3f7a352c55fe21a82a770e67adb59b54cb634aa0",
+        "ai-code-review-evaluation__keycloak-greptile-6": "8cacaa8179fb96a7b9ea9c50d3e56be95d80347db47fe494c769747d3d1d9bfc",
+        "ai-code-review-evaluation__keycloak-greptile-7": "64b6916b67c75e93c8510b8c8c1781fb71b927a0e99186eea700cae48e3a3233",
+        "ai-code-review-evaluation__keycloak-greptile-8": "bdb6c3b589568804435b24fdd27e1c9d56eb8bb6ffe85e0e9b626ca98e9ba00e",
+        "ai-code-review-evaluation__keycloak-greptile-9": "ab97b00bc9fb350dacf324a9f121a051d09329a662c9e5a1064a8d156f254232",
+        "ai-code-review-evaluation__sentry-greptile-1": "ec55cdfdcba6d50d107cebba4f9d7dd49b0ea2a557cdd858954b84aedb447dc5",
+        "ai-code-review-evaluation__sentry-greptile-10": "cfbb4273cec9addbe4e41dc76537458fea33a2fcf14f37b4f7af49b299d65a28",
+        "ai-code-review-evaluation__sentry-greptile-2": "26f5d73cac6d2578b70094aa5b9b56e89514df9aed29253ebb01ed38fc8d15ce",
+        "ai-code-review-evaluation__sentry-greptile-3": "82aa2d7ca6e91488b9208c7434f4742229966e2e1ec0fe905ef50640be116506",
+        "ai-code-review-evaluation__sentry-greptile-4": "b56ee62da77719aa356ae169be1678575ff10a52c9933cd0cbc93cbdc56b46e2",
+        "ai-code-review-evaluation__sentry-greptile-5": "89b5cfa0c790e6268e4afbfd224f209ddaa1f8511b6bd7f9082162eb04633914",
+        "ai-code-review-evaluation__sentry-greptile-6": "a9bd36645768a0bb20dbaad0db8f03cf770365929aa532525668098c28f373bc",
+        "ai-code-review-evaluation__sentry-greptile-7": "a9b46a2c706f50240a37d537ef2961edf20e5c47095df5dafbcee804016f0102",
+        "ai-code-review-evaluation__sentry-greptile-8": "95dd22ca9ae038a173da15a6b52905297e0eedf4ebc1a2463017a1fd0ae27888",
+        "ai-code-review-evaluation__sentry-greptile-9": "acbcc279a5f884c87b4a2e1798563b631d3aa0533f927c3c6d20a729a2efeff4"
+      },
+      "splitHash": "8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64",
+      "fileHash": "8d6ccce66a543edb0b8d6ba303ef08d4c7b559a19f831209ee613715ca8f1915"
     }
   },
   "build": {
-    "commit": "320f1e46f072fe238bf46db8b56a4f8a4975d3df",
-    "tree": "a77cb19e82c7421097bda733f6eb0d171fc46fc3",
-    "bundleHash": "8e96c624eae7236c5b4b77cd59e4d1dcd2972d237bdc05ba9fce5362bf9bab15",
-    "version": "0.13.0"
+    "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+    "tree": "bcdf821fe25183f9be8f2d41c5717d3283516df2",
+    "bundleHash": "7b1034f473ad6ea7117bc780e653a8ee698445e0266adab0aa990187296ac8c5",
+    "version": "0.15.0"
   },
   "reviewers": {
     "library": {
@@ -345,7 +401,7 @@
       "path": "laptop",
       "reviewer": "claude",
       "model": "claude-opus-5-5",
-      "version": "2.1.296",
+      "version": "2.1.312",
       "graph": "on",
       "web": "off",
       "effort": null,
@@ -360,17 +416,27 @@
       "web": "off",
       "effort": null,
       "maxOutputTokens": null
+    },
+    "control": {
+      "path": "laptop",
+      "reviewer": "control",
+      "model": "claude-opus-5-5",
+      "graph": "off",
+      "web": "off",
+      "effort": null,
+      "maxOutputTokens": null,
+      "version": "2.1.312"
     }
   },
   "calibrations": [
     {
-      "file": "index/calibration/greptile-2026-10-22.json",
-      "sha256": "3372ac31e325691f3a42b282b855bbd9fed7edef9378f98768aa1958e384917e",
+      "file": "index/calibration/greptile-2026-10-27.json",
+      "sha256": "e94459eb7f247d623ed4c2756f5266137c965c2f0cfb88134be1025cef5c4a27",
       "build": {
-        "commit": "320f1e46f072fe238bf46db8b56a4f8a4975d3df",
-        "tree": "a77cb19e82c7421097bda733f6eb0d171fc46fc3",
-        "bundleHash": "8e96c624eae7236c5b4b77cd59e4d1dcd2972d237bdc05ba9fce5362bf9bab15",
-        "version": "0.13.0"
+        "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+        "tree": "bcdf821fe25183f9be8f2d41c5717d3283516df2",
+        "bundleHash": "7b1034f473ad6ea7117bc780e653a8ee698445e0266adab0aa990187296ac8c5",
+        "version": "0.15.0"
       },
       "agreement": {
         "caught": 0.8536585365853658,
@@ -378,13 +444,13 @@
       }
     },
     {
-      "file": "index/calibration/martian-2026-10-22.json",
-      "sha256": "67098b41a3e3ff380587552502fdd81b3ed03435ba64408dfef5295cb717569e",
+      "file": "index/calibration/martian-2026-10-27.json",
+      "sha256": "ed36514f897cddcb969fcdeabf687c5fc83667baafab44421051c70fe2266358",
       "build": {
-        "commit": "320f1e46f072fe238bf46db8b56a4f8a4975d3df",
-        "tree": "a77cb19e82c7421097bda733f6eb0d171fc46fc3",
-        "bundleHash": "8e96c624eae7236c5b4b77cd59e4d1dcd2972d237bdc05ba9fce5362bf9bab15",
-        "version": "0.13.0"
+        "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+        "tree": "bcdf821fe25183f9be8f2d41c5717d3283516df2",
+        "bundleHash": "7b1034f473ad6ea7117bc780e653a8ee698445e0266adab0aa990187296ac8c5",
+        "version": "0.15.0"
       },
       "agreement": {
         "positive": 0.9259259259259259,
@@ -403,11 +469,36 @@
       }
     }
   ],
-  "capUsd": 100,
-  "runs": [],
+  "capUsd": 10,
+  "runs": [
+    {
+      "runId": "2026-10-27-55a9d696-greptile-claude",
+      "sha256": "5454e099bc12dde5f6f9f20bfbd2e2cac02f1e9c0330f0c96c896c68e66a8cbf",
+      "reviewer": "cli-claude",
+      "casesNotRun": [
+        "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
+      ]
+    },
+    {
+      "runId": "2026-10-27-2221ffc6-greptile-control",
+      "sha256": "c5fe189f55b0d224b0e8031010340195e4131326e12a786cccae7f9768e92b00",
+      "reviewer": "control",
+      "casesNotRun": [
+        "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
+      ]
+    },
+    {
+      "runId": "2026-10-28-55a9d696-martian-control",
+      "sha256": "b167e234a3257d45ffd4bfc9dc0bbbee360ef802324cf9e0a71d62807a862bb7",
+      "reviewer": "control",
+      "casesNotRun": [
+        "martian/ai-code-review-evaluation__sentry-greptile-3@e43c2b26"
+      ]
+    }
+  ],
   "acceptance": {
-    "person": "",
-    "date": "",
-    "hash": ""
+    "person": "Sid",
+    "date": "2026-11-01",
+    "hash": "47f1912ff7d67c562ab60d41ac56bd79aa44e2b12d212e7cb8c1d9b12f6441e1"
   }
 }

@@ -63,6 +63,7 @@ export function finalizeCalibration(record) {
 // The comparison checks the ruling's board, person and date before passing
 // its percentages here. A ruling never bypasses record integrity checks.
 export function validateCalibration(record, { build, board, agreementRuling }) {
+  need(!Object.hasOwn(record, "form"), "form calibration cannot be used in a comparison");
   need(record.status !== "failed", "failed calibration has no agreement on both published classes");
   if (record.judgeFailures?.items) need(record.status === "complete" && record.excluded?.count === record.judgeFailures.items && Number.isInteger(record.excluded.count) && record.excluded.count > 0 && typeof record.excluded.reason === "string" && record.excluded.reason.trim().length > 0, "judge failures must have a matching excluded item count and reason");
   need(equal(record.build, build), "build differs from the comparison build");

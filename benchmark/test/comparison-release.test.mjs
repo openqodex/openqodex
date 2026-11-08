@@ -9,16 +9,21 @@
 //    resume or a later suite, or changes the tracked access log.
 // 8. An admitted scanner-only run loses permission to materialise test cases.
 // 9. The runner reads truth or logs access before refusing a changed build.
+// 10. A signed comparison release pins an entry that differs from HEAD.
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { benchRoot, git } from "../lib/cases.mjs";
-import { comparisonHash, freezeComparison } from "../lib/comparison.mjs";
+import { comparisonHash, comparisonRelease, freezeComparison } from "../lib/comparison.mjs";
+import { toolName } from "../lib/aacr-board.mjs";
+import { entryProblems, hashReviewedFolder } from "../lib/index.mjs";
+import { BOARDS } from "../lib/outside-boards.mjs";
 import { releaseGate } from "../lib/martian-board.mjs";
 import { caseRepo } from "../lib/materialise.mjs";
 import { bundleHash } from "../lib/runner.mjs";
+import { caseSetHash } from "../lib/score.mjs";
 import { aacrTruth, entryHash, readCase, selectCases, sha256, truthHashOf, truthOf } from "../lib/suites.mjs";
 
 const dirs = [];
@@ -78,6 +83,67 @@ function fixture({ accepted = true, committed = true, runner = false } = {}) {
   const options = { root, suite: "aacr", split: "test", release: record.release, build: manifest.build, packageRecord: manifest.package, runId: "test-run", by: "Sid" };
   return { repo, root, cache, build, record, manifest, options, file, log: join(cache, "heldout-access.jsonl"), trackedLog: join(root, "index/heldout-access.jsonl") };
 }
+function attachRun(f, suffix) {
+  const config = "model-gpt-6.1-sol-graph-on";
+  const reviewer = { path: "server", reviewer: "model:gpt-6.1-sol", model: "gpt-6.1-sol", graph: "on", web: "off", effort: "high", maxOutputTokens: 32000 };
+  f.record.reviewers.library = reviewer;
+  const entry = read(join(benchRoot, "index/runs/2026-10-12-b43b25b-aacr-gpt61.json"));
+  entry.runId = `2026-10-24-${suffix}`;
+  entry.date = "2026-10-24"; entry.startedAt = "2026-10-24T00:00:00.000Z";
+  entry.asset.url = entry.asset.url.replace(/[^/]+$/, `${entry.runId}.tar.gz`);
+  entry.build = { ...entry.build, ...f.build, short: f.build.commit.slice(0, 7), cliVersion: f.build.version };
+  entry.splitHash = f.record.suites.aacr.splitHash;
+  entry.caseIds = Object.entries(f.record.suites.aacr.caseHashes).map(([name, h]) => `aacr/${name}@${h.slice(0, 8)}`);
+  entry.caseSetHash = caseSetHash(entry.caseIds);
+  entry.perCase = {}; entry.perBug = {}; entry.intervals = { ...entry.intervals, cluster: "case", groups: null };
+  entry.configs = [config]; entry.repeat = 1;
+  const folder = join(f.root, "results", entry.runId);
+  write(join(folder, "manifest.json"), { build: f.build, reviewers: { [reviewer.reviewer]: { ...entry.reviewers[reviewer.reviewer], settings: { effort: reviewer.effort, maxOutputTokens: reviewer.maxOutputTokens } } } });
+  const out = join(folder, "outside/aacr");
+  const tool = toolName(config, 1);
+  const dir = `${config}/r1`;
+  write(join(out, "convert.json"), { reader: "ocr", lineK: null, references: {}, withoutLine: [], folders: [{ config, repeat: 1, tool, dir, files: entry.caseIds.length }] });
+  write(join(out, "eval.json"), { judge: { deployment: f.record.boards.aacr.judgeModel }, folders: [{ config, repeat: 1, mode: "llm", judgeErrors: 0, metrics: ["metrics_ocr_fixture.json"] }] });
+  write(join(out, dir, "metrics_ocr_fixture.json"), { summary: { evaluated_instances: entry.caseIds.length, missing_instances: 0, expected_notes: 0, generated_notes: 0, matched_line_notes: 0, matched_semantic_notes: 0 } });
+  entry.outside = { aacr: BOARDS.aacr(folder, [], {}) };
+  entry.privateListHash = hashReviewedFolder(folder).listHash;
+  expect(entryProblems(entry)).toEqual([]);
+  const file = join(f.root, "index/runs", `${entry.runId}.json`);
+  write(file, entry);
+  f.record.runs.push({ runId: entry.runId, sha256: sha256(readFileSync(file)), reviewer: "library", casesNotRun: [] });
+  return file;
+}
+
+for (const changed of ["first", "second"]) it(`comparison release refuses the ${changed} attached entry when its bytes differ from HEAD`, () => {
+  const f = fixture();
+  const files = [attachRun(f, "first"), attachRun(f, "second")];
+  const saveRecord = () => {
+    f.record.acceptance.hash = comparisonHash(f.record);
+    write(f.file, f.record);
+  };
+  saveRecord();
+  git(f.repo, "add", "benchmark/index"); git(f.repo, "commit", "-qm", "Attach run entries");
+  expect(comparisonRelease(f.manifest, { root: f.root }).release).toBe(f.record.release);
+  const index = changed === "first" ? 0 : 1;
+  writeFileSync(files[index], `${readFileSync(files[index], "utf8")}\n`);
+  f.record.runs[index].sha256 = sha256(readFileSync(files[index]));
+  saveRecord();
+  git(f.repo, "add", "benchmark/index/comparisons/test-release.json"); git(f.repo, "commit", "-qm", "Sign updated entry hash");
+  expect(() => comparisonRelease(f.manifest, { root: f.root })).toThrow(`run 2026-10-24-${changed} entry is not committed at HEAD; commit it before attaching`);
+});
+
+it("a conversion on a later checkout accepts the record on its pinned build, and making a run there is refused", () => {
+  const f = fixture();
+  writeFileSync(join(f.repo, "later.txt"), "a commit after the pinned build\n");
+  git(f.repo, "add", "."); git(f.repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "Later work");
+  expect(git(f.repo, "rev-parse", "HEAD").trim()).not.toBe(f.build.commit);
+  expect(comparisonRelease(f.manifest, { root: f.root }).buildLabel).toBe(`local build ${f.build.commit}`);
+  // The bundle built on the later commit is not the pinned build, so no run may be made from it.
+  const later = { commit: git(f.repo, "rev-parse", "HEAD").trim(), tree: git(f.repo, "rev-parse", "HEAD^{tree}").trim() };
+  write(join(f.root, ".build/provenance.json"), { ...f.build, ...later, commitTree: later.tree, dirty: false });
+  expect(() => comparisonRelease(f.manifest, { root: f.root, admit: true })).toThrow("comparison release requires the pinned build checked out and built");
+  expect(comparisonRelease(f.manifest, { root: f.root }).buildLabel).toBe(`local build ${f.build.commit}`);
+});
 
 it("refuses a development run on a held-out split", () => {
   expect(() => selectCases({ suite: "aacr", split: "test" })).toThrow(/held out/);

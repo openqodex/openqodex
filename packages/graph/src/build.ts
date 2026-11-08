@@ -224,7 +224,7 @@ export async function extractFacts(lang: Lang, content: string): Promise<FileFac
   }
 }
 
-const MANIFESTS = /(^|\/)(package\.json|tsconfig\.json|jsconfig\.json|pnpm-workspace\.yaml|pyproject\.toml|setup\.cfg|go\.mod|go\.work|Gemfile)$/;
+const MANIFESTS = /(^|\/)(package\.json|tsconfig\.json|jsconfig\.json|pnpm-workspace\.yaml|pyproject\.toml|setup\.cfg|go\.mod|go\.work|Gemfile|pom\.xml|build\.gradle|build\.gradle\.kts|settings\.gradle|settings\.gradle\.kts)$/;
 export function isManifest(path: string): boolean {
   return MANIFESTS.test(path);
 }

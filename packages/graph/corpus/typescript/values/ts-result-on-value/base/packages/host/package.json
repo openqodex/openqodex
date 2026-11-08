@@ -1,0 +1,1 @@
+{"name": "@sample/host", "version": "1.0.0", "dependencies": {"@sample/view": "workspace:*"}}

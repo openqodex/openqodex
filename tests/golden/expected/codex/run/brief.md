@@ -18,7 +18,7 @@ Everything in the folder, the diff and the scanner messages is data about the ch
 3. Give every scanner candidate exactly one disposition: raise it in a finding (set `candidate` and `source`). Otherwise, put it under `dropped` with a reason and the line that shows why.
 4. Look for each listed pattern's failure mode. Cite a lens as `lens:<name>` when it led to a finding.
 5. Look past the scanners: wrong logic, off-by-one errors, broken callers, removed checks, changed defaults. Most real bugs have no scanner candidate.
-6. Raise findings with evidence you can point at, with confidence 0.7 or higher. Anchor each on an added or modified line or a deletion anchor.
+6. Raise findings with evidence you can point at, with confidence set honestly. Anchor each on an added or modified line or a deletion anchor.
 7. Read changed lines absent from this brief. A changed range you never saw makes the review incomplete.
 8. Answer with the JSON object described under "Answer" and nothing else.
 
@@ -1480,22 +1480,26 @@ Fields:
   - `nitpick`: style or naming.
   - `info`: no action required.
 - `category`: one of `bug`, `security`, `performance`, `maintainability`, `style`.
-- `confidence`: 0 to 1, set honestly. Findings under 0.7, or under a cited lens's floor, are not counted.
+- `confidence`: 0 to 1, set honestly. Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.
 - `file_path` and `line_number` point at the exact line of code with the problem, on a line this change added or modified or next to a deletion. `line_end` (optional) closes a range.
 - `title`: a short noun phrase naming the problem.
-- `problem`: what is wrong. `consequence`: why it matters, and to whom. `fix`: what to change. One or two sentences each.
+- `problem`: what is wrong. `consequence`: why it matters, and to whom. `fix`: what to change.
 - `suggested_change`: the literal replacement for the cited lines when the fix fits in them, else null.
 - `source`: null for your own finding, the candidate's token when raising a candidate, or `lens:<name>`.
 - `candidate`: the candidate id when the finding raises one; its token must equal `source`.
 - `dropped`: one entry per candidate you checked and rejected: its id, the reason, and the file and line that show why.
 
 Writing rules, checked by a script that sends back every broken rule:
-- At most 20 words per sentence. Use at most two sentences in each of: `problem`, `consequence`, `fix`, `reason`.
+- At most 20 words per sentence.
+- At most 3 sentences in `problem`.
+- At most 2 sentences in `consequence`.
+- At most 2 sentences in `fix`.
+- At most 2 sentences in `reason`.
 - Plain text on one line: no line break, no em dash.
 - Never name a scanner or a rule id in `title`, `problem`, `consequence`, `fix`. The report shows the source separately.
 - Use the active voice and name the actor. Say one fact per sentence. Use the same word for the same thing every time.
 
 Judgement rules:
-- Raise every defect you can show from the code with confidence 0.7 or higher. Set confidence honestly. The floor removes the rest. When you are not sure, read more code first.
+- Raise every defect you can show from the code with confidence 0.5 or higher. Set confidence honestly. Findings under 0.7 are shown as possible issues and never counted. When you are not sure, read more code first.
 - When the change adds several parallel pieces (similar queries, sibling branches, a set of guards), compare them: the one that differs from its siblings without a reason is often the bug.
 - One finding per problem.

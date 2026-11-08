@@ -5,6 +5,7 @@ import { isAbsolute, resolve } from "node:path";
 import { FolderReader, type EntryResult } from "@openqodex/core";
 import { isFrameworkFileFacts } from "./frameworks/facts.js";
 import type { FileFacts } from "./types.js";
+import { MAX_TYPE_DEPTH } from "./types.js";
 
 // Repo-relative reads, each decided by what the filesystem holds at the
 // moment of that read and by nothing kept from an earlier one. The root is
@@ -68,9 +69,15 @@ function optBound(b: unknown, imports: number): boolean {
 
 const RELS = new Set(["implements", "include", "prepend", "extend"]);
 
-function isTypeRef(v: unknown, imports: number): boolean {
+
+function isTypeRef(v: unknown, imports: number, depth = 0): boolean {
   return (
+    depth <= MAX_TYPE_DEPTH &&
     isObj(v) &&
+    (v.on === undefined || isTypeRef(v.on, imports, depth + 1)) &&
+    (v.args === undefined || (Array.isArray(v.args) && v.args.every((a: unknown) => isTypeRef(a, imports, depth + 1)))) &&
+    (v.kind === undefined || v.kind === "param") &&
+    (v.param === undefined || (isInt(v.param) && (v.param as number) >= 0)) &&
     isStr(v.name) &&
     (v.qualifier === null || isStr(v.qualifier)) &&
     isInt(v.line) &&
@@ -78,6 +85,8 @@ function isTypeRef(v: unknown, imports: number): boolean {
     (v.result === undefined || isInt(v.result)) &&
     optBool(v.elem) &&
     optBool(v.declared) &&
+    optBool(v.promise) &&
+    optBool(v.awaited) &&
     optBound(v.bound, imports) &&
     (v.rel === undefined || RELS.has(v.rel as string))
   );
@@ -108,7 +117,7 @@ function isReceiver(v: unknown, imports: number): boolean {
 }
 
 const KINDS = new Set(["function", "method", "class", "module", "type"]);
-const LANGS = new Set(["typescript", "tsx", "javascript", "python", "go", "ruby"]);
+const LANGS = new Set(["typescript", "tsx", "javascript", "python", "go", "ruby", "java"]);
 
 function isDef(v: unknown, imports: number, values: number): boolean {
   const isType = (t: unknown) => isTypeRef(t, imports);
@@ -134,7 +143,10 @@ function isDef(v: unknown, imports: number, values: number): boolean {
     (v.bodyHash === undefined || (typeof v.bodyHash === "string" && /^[0-9a-f]{16}$/.test(v.bodyHash))) &&
     optBool(v.abstract) &&
     optBool(v.iface) &&
+    optBool(v.anonymous) &&
     optBool(v.pointer) &&
+    optBool(v.varargs) &&
+    optBool(v.ctor) &&
     (v.params === undefined || isList(v.params, isStr, 256)) &&
     (v.invokes === undefined || isList(v.invokes, (i) => isIndex(i, params), 256)) &&
     (v.returns === undefined || isList(v.returns, (i) => isIndex(i, values), 256)) &&
@@ -161,10 +173,13 @@ export function isFileFacts(v: unknown): v is FileFacts {
     optBool(c.implicit) &&
     optBool(c.shadowed) &&
     optBool(c.static) &&
+    optBool(c.ctor) &&
     optBool(c.dynamic) &&
+    (c.arity === undefined || (isInt(c.arity) && (c.arity as number) >= 0)) &&
     (c.local === undefined || (isInt(c.local) && (c.local as number) >= 0 && (c.local as number) < defs)) &&
     optBound(c.bound, imports) &&
     optIndex(c.alias, values) &&
+    (c.aliasOf === undefined || isStr(c.aliasOf)) &&
     optIndex(c.result, calls) &&
     optIndex(c.table, tables);
   const isValue = (r: unknown) =>
@@ -195,7 +210,9 @@ export function isFileFacts(v: unknown): v is FileFacts {
     typeof i.typeOnly === "boolean" &&
     optBool(i.relative) &&
     optBool(i.alias) &&
-    optBool(i.scoped);
+    optBool(i.scoped) &&
+    (i.staticMember === undefined || isStr(i.staticMember)) &&
+    optBool(i.staticStar);
   return (
     isList(v.calls, isCall) &&
     isList(v.values, isValue) &&
@@ -206,6 +223,7 @@ export function isFileFacts(v: unknown): v is FileFacts {
     isList(v.exportsLocal, (e) => isObj(e) && isStr(e.local) && isStr(e.exported) && (e.line === undefined || isInt(e.line)), 20_000) &&
     (v.defaultExport === null || isStr(v.defaultExport)) &&
     (v.goPackage === null || isStr(v.goPackage)) &&
+    (v.javaPackage === undefined || v.javaPackage === null || isStr(v.javaPackage)) &&
     (v.frameworks === undefined || isFrameworkFileFacts(v.frameworks))
   );
 }

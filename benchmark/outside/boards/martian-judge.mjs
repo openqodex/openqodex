@@ -72,6 +72,8 @@ import { createHash } from "node:crypto";
 import { boardFolder, checkoutState, leaksIn, outsideRepo, redactor } from "../../lib/board-files.mjs";
 import { MARTIAN_BETA, MARTIAN_BOARD, MARTIAN_CITED, MARTIAN_PROFILES, MARTIAN_STEPS, martianEvaluations, releaseGate } from "../../lib/martian-board.mjs";
 import { endpointSecrets, loadModelEnv, modelEnvPath, probedDeployment } from "../../lib/model-env.mjs";
+import { benchRoot } from "../../lib/cases.mjs";
+import { validateComparison, validateRunManifest } from "../../lib/comparison.mjs";
 import { canonicalJson } from "../../lib/suites.mjs";
 import { accessLogPath } from "../convert/martian.mjs";
 import { withoutCore } from "./aacr-judge.mjs";
@@ -152,7 +154,7 @@ function runStep(command, args, { cwd, env, emit, secrets, keepStdout, signal })
   });
 }
 
-export async function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2), { root = benchRoot } = {}) {
   let folder = null;
   let dry = false;
   let checkout = null;
@@ -173,6 +175,12 @@ export async function main(argv = process.argv.slice(2)) {
   // The conversion is the one the gate let through, of this very manifest (failure 7).
   const manifestBytes = readFileSync(join(folder, "manifest.json"));
   if (createHash("sha256").update(manifestBytes).digest("hex") !== convert.manifestSha256) throw new Error(`refused: the run's manifest is not the one ${out}/convert.json was written for (its sha256 differs); convert the run again`);
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  if (manifest.package?.spec === "local") {
+    const record = JSON.parse(readFileSync(join(root, "index/comparisons", `${manifest.release}.json`), "utf8"));
+    validateRunManifest(manifest, record);
+    if (!validateComparison(record, { root, build: record.build }).accepted) throw new Error("the comparison record is not accepted");
+  }
   const accessLog = accessLogPath();
   const logged = existsSync(accessLog) ? readFileSync(accessLog, "utf8").split("\n").filter((l) => l.trim() !== "") : [];
   const same = (line) => {
@@ -328,7 +336,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   main().then(
     (code) => process.exit(code),
     (error) => {
-      console.error(error.message);
+      console.error(error.message.replaceAll("\n", " "));
       process.exit(2);
     },
   );

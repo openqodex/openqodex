@@ -1422,6 +1422,8 @@ Pass: local
 ## How to work
 
 For each hunk, write what changed and what it could break before anything else.
+Then follow each changed condition, mutation, async completion and cleanup through the whole flow it belongs to.
+Look across the other hunks of this unit and the code around the change.
 Before judging a changed call, contract, default or fallback, read the other side in the other file.
 Use "Code around the change" first, then your tools. Name the question you are answering before each read.
 Raise every defect you can show with a line of code at confidence 0.5 or higher.
@@ -1591,13 +1593,17 @@ Fields:
 - `file_path` and `line_number`: the file and line showing the problem.
 - `line_end`: optional end of the range, at least `line_number`.
 - `title`: a short noun phrase naming the problem.
-- `claim`: what is wrong and why it matters, in one or two sentences.
+- `claim`: what is wrong and why it matters. Name the code that makes it happen at each step, from the changed line to the effect.
+  When the evidence line itself is the defect, quote its words (a bare `pass`, an empty handler).
 - `evidence`: one to three citations. Each has `file_path`, `line_number` and `quote`.
 - `quote`: the line's text, copied exactly without the diff marker. Set `removed: true` when the change removed it.
 - `lens`: the listed pattern's name when it led to the candidate. Otherwise omit it or set null.
 
 Writing rules, checked by a script that sends back every broken rule:
-- At most 20 words per sentence. Use at most two sentences in each of: `changed`, `could_break`, `claim`.
+- At most 20 words per sentence.
+- At most 2 sentences in `changed`.
+- At most 2 sentences in `could_break`.
+- At most 3 sentences in `claim`.
 - Plain text on one line: no line break, no em dash.
 - Never name a scanner or a rule id in `title`, `claim`. The report shows the source separately.
 - Use the active voice and name the actor. Say one fact per sentence. Use the same word for the same thing every time.

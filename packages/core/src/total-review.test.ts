@@ -362,3 +362,11 @@ describe("12. markdown injection from the reviewer's text or a repo path", () =>
     expect(out.split("\n").filter((l) => l.includes("Problem:"))).toEqual(["   Problem: Line one. Line two.[2J"]);
   });
 });
+
+// Failure cases: problem loses its third sentence, or other fields gain one.
+it("accepts three problem sentences but rejects four and three consequence sentences", () => {
+  const three = "close shuts down the pool. put raises ShutDown. submit catches it and commits.";
+  expect(check(withFinding({ problem: three })).ok).toBe(true);
+  expect(errorsOf(withFinding({ problem: `${three} Results disappear.` })).join(" ")).toContain("has 4 sentences; the limit is 3");
+  expect(errorsOf(withFinding({ consequence: three })).join(" ")).toContain("has 3 sentences; the limit is 2");
+});

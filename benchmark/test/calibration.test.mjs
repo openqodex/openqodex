@@ -1,9 +1,19 @@
 // Failure list: calibration-failures.md, written before implementation.
-import { describe, expect, it } from "vitest";
-import { agreementOf, checkedBytes, compareLabels, costOfUsage, finalizeCalibration, martianLabels, validateCalibration } from "../lib/calibration.mjs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { agreementOf, checkedBytes, compareLabels, costOfUsage, finalizeCalibration, hash, martianLabels, validateCalibration } from "../lib/calibration.mjs";
+import { greptileInputs, martianInputs } from "../lib/calibration-inputs.mjs";
+import { benchRoot } from "../lib/cases.mjs";
+import { suiteHashOf } from "../lib/suites.mjs";
+import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 import { judgeGreptile } from "../outside/boards/greptile-judge.mjs";
 import { MARTIAN_CITED } from "../lib/martian-board.mjs";
 import { calibrationSteps } from "../outside/boards/martian-judge.mjs";
+
+afterAll(removeTempDirs);
+const read = (file) => JSON.parse(readFileSync(file, "utf8"));
+const write = (file, data) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`); };
 
 const cases = [{ id: "one", comments: ["The callback runs without awaiting it."], truthSets: { greptile: { items: [{ text: "Unawaited callback" }] }, augment: { items: [{ text: "A different corrected issue" }] } } }];
 const labels = [{ id: "one", label: "caught" }, { id: "two", label: "missed" }];
@@ -15,6 +25,31 @@ function record() {
 }
 
 describe("board calibration", () => {
+  it("refuses a Greptile calibration suite missing a case from its split before reading public sources", async () => {
+    const root = tempDir("oq-calibration-greptile-count-");
+    const suite = read(join(benchRoot, "suites/greptile/cases.json"));
+    const split = read(join(benchRoot, "splits/greptile-v1.json"));
+    suite.cases = suite.cases.slice(0, 1);
+    split.cases.dev = split.cases.dev.slice(0, 2);
+    suite.hash = suiteHashOf(suite.cases);
+    write(join(root, "suites/greptile/cases.json"), suite);
+    write(join(root, "splits/greptile-v1.json"), split);
+    const count = split.cases.dev.length + split.cases.test.length;
+    await expect(greptileInputs({ root })).rejects.toThrow(`Greptile requires all ${count} cases from splits/greptile-v1.json`);
+  });
+  it("refuses a Martian public review count that differs from its split instead of a literal fifty", async () => {
+    const root = tempDir("oq-calibration-martian-count-");
+    const suite = read(join(benchRoot, "suites/martian/cases.json"));
+    const split = read(join(benchRoot, "splits/martian-v1.json"));
+    split.cases.test = split.cases.test.slice(0, 2);
+    write(join(root, "suites/martian/cases.json"), suite);
+    write(join(root, "splits/martian-v1.json"), split);
+    const reviews = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`review-${i}`, {}]));
+    const file = join(root, "results/calibration-sources/martian/reviews.json");
+    write(file, reviews);
+    write(join(root, "suites/martian/verification-source.json"), { path: "reviews.json", sha256: hash(readFileSync(file)) });
+    await expect(martianInputs({ root })).rejects.toThrow("Martian requires all 2 public reviews from splits/martian-v1.json");
+  });
   for (const name of ["caught", "missed"]) it(`refuses less than 90 percent agreement on ${name}`, () => {
     const r = record(); r.counts.byClass[name] = { agree: 8, disagree: 2, total: 10 }; r.counts.agree = 9; r.counts.disagree = 2; r.counts.total = 11; r.agreement = agreementOf(r.counts);
     expect(() => validateCalibration(r, { build, board })).toThrow(/90 percent/);
@@ -22,6 +57,12 @@ describe("board calibration", () => {
   it("refuses a calibration from another build", () => {
     const r = record(); r.build = { ...build, tree: "e".repeat(40) };
     expect(() => validateCalibration(r, { build, board })).toThrow(/build/);
+  });
+  it("a form calibration cited in a comparison is refused", () => {
+    expect(validateCalibration(record(), { build, board })).toMatchObject({ board });
+    for (const form of ["flat", "joined", null, undefined]) {
+      expect(() => validateCalibration({ ...record(), form }, { build, board })).toThrow(/form calibration/);
+    }
   });
   it("refuses judge failures without recorded exclusions even when the remaining labels agree", () => {
     const r = { ...record(), judgeFailures: { items: 1, labels: 2, byClass: { positive: 1, negative: 1 } } };

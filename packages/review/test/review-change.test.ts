@@ -323,8 +323,8 @@ describe("a model reviewer through reviewChange", () => {
   it("9. a server floor above 0.7 reaches the brief and the check", async () => {
     const r = await run({ floor: 0.8, fixture: { findings: [SUBTRACTION] } });
     const brief = r.model.requests[0]!.messages[1]!.text;
-    expect(brief).toContain("with confidence 0.8 or higher");
-    expect(brief).toContain("Findings under 0.8, or under a cited lens's floor, are not counted.");
+    expect(brief).toContain("Findings at 0.8 or higher, and at a cited lens's floor, count toward the verdict.");
+    expect(brief).toContain("Findings under 0.8 are shown as possible issues and never counted.");
     expect(r.result.status).toBe("complete");
     expect(r.result.findings).toEqual([]);
   });

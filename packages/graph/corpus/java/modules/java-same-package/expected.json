@@ -1,0 +1,20 @@
+{
+  "guards": "binds a Java call to a class of the same package, which needs no import, certain",
+  "callers": [
+    {
+      "to": "src/main/java/app/Util.java#Util.helper",
+      "site": "src/main/java/app/Main.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/main/java/app/Main.java",
+      "line": 5
+    }
+  ],
+  "floor": {
+    "src/main/java/app/Util.java#Util.helper": false
+  }
+}

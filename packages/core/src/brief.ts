@@ -6,7 +6,7 @@ import type { InstructionFile } from "./types.js";
 // matched secret ever reaches the brief.
 import { DELIVERY_ROW_BYTES, deliveryRow } from "./delivery.js";
 import { unquoteDiffPath } from "./diff.js";
-import { GLOBAL_CONFIDENCE_FLOOR } from "./finalize.js";
+import { FIELD_SENTENCE_LIMITS, GLOBAL_CONFIDENCE_FLOOR, POSSIBLE_CONFIDENCE_FLOOR } from "./finalize.js";
 import { computeMissingTestSignal } from "./missing-tests.js";
 import { redactSecrets, redactSecretsKeepingLines } from "./redact.js";
 import { coverageLine } from "./render/common.js";
@@ -50,7 +50,8 @@ const HOW_TO_REVIEW = [
   '2. Before judging a changed call, contract, default or fallback, read the other side in the other file. Use "Code around the change" first, then your tools. Name the question you are answering before each read.',
   "3. Verify every scanner candidate against the code: raise it (set `candidate` and `source`) or list it under `dropped` with a reason.",
   "4. Look for each listed pattern's failure mode. Cite a lens as `lens:<name>` when it led to a finding.",
-  "5. Raise findings with evidence you can point at, anchored on an added or modified line or a deletion anchor. Set confidence to 0.7 or higher.",
+  // wording: session
+  "5. Raise findings with evidence you can point at, anchored on an added or modified line or a deletion anchor. Set confidence honestly.",
   "6. Write the JSON described under \"Finding shape\" to the findings path, then run the finalize command under \"When you are done\".",
 ].join("\n");
 
@@ -231,7 +232,8 @@ function findingShapeBlock(change: Change, whole = false): string {
     "  - `nitpick`: style, naming or convention.",
     "  - `info`: a heads-up, no action required.",
     "- `category`: one of `bug`, `security`, `performance`, `maintainability`, `style`.",
-    "- `confidence`: 0 to 1, set honestly to what the evidence supports. Findings under 0.7, or under a cited lens's floor, are dropped. Do not inflate a number to keep a finding.",
+    // wording: session
+    `- \`confidence\`: 0 to 1, set honestly to what the evidence supports. Findings at ${GLOBAL_CONFIDENCE_FLOOR} or higher, and at a cited lens's floor, count toward the verdict. Findings from ${POSSIBLE_CONFIDENCE_FLOOR} up to the floor are shown as possible issues and never counted. Findings under ${POSSIBLE_CONFIDENCE_FLOOR} are dropped. Do not inflate a number to keep a finding.`,
     `- \`file_path\` and \`line_number\` point at the exact line of code with the problem, never a comment, a blank line, an import or a brace. \`line_end\` (optional, at least \`line_number\`) closes a range. ${
       whole
         ? "The file must be in the inventory and the line must exist in it; finalize rejects anything else."
@@ -246,7 +248,8 @@ function findingShapeBlock(change: Change, whole = false): string {
     "- `dropped`: one entry per candidate you checked and rejected, with the reason.",
     "",
     "Rules:",
-    "- Raise what you can show from the code, and set confidence honestly; the floor removes the rest. When you are not sure, read more code first.",
+    // wording: session
+    "- Raise what you can show from the code, and set confidence honestly. The `confidence` rule above says what counts. When you are not sure, read more code first.",
     "- Before raising or clearing a finding about a changed call, contract, default or fallback, read the other side in the other file: the function called, the caller that reads the result. Look for what the change does differently from before.",
     "- When the change adds several parallel pieces (similar queries, sibling branches, a set of guards), compare them: the one that differs from its siblings without a reason is often the bug.",
     "- Prefer fewer, sharper findings. One finding per problem.",
@@ -482,7 +485,8 @@ const HOW_TO_REVIEW_WHOLE = [
   '2. For each part you read, write what it does and what it could break. Read both sides of calls and contracts before judging them. Use "Code around the change" first, then your tools. Name the question you are answering before each read.',
   "3. Verify every scanner candidate against the code: raise it (set `candidate` and `source`) or list it under `dropped` with a reason.",
   "4. Look for the failure mode each pattern under \"Patterns to weigh\" describes; cite a lens as `lens:<name>` when it led to a finding.",
-  "5. Raise findings with evidence you can point at, anchored on the exact line of code, with confidence 0.7 or higher. Every line of every file in the inventory is in scope.",
+  // wording: session
+  "5. Raise findings with evidence you can point at, anchored on the exact line of code, with confidence set honestly. Every line of every file in the inventory is in scope.",
   "6. In `summary`, say which parts of the repository you read and which you did not. Missing coverage is an observation. Mention it in `summary` and raise no finding for it.",
   "7. Write the JSON described under \"Finding shape\" to the findings path, then run the finalize command under \"When you are done\".",
 ].join("\n");
@@ -589,7 +593,7 @@ const REVIEWER_ROLE = [
 ].join("\n");
 
 // `floor`: the lowest confidence a finding may have, the one the check applies.
-const howToReviewV2 = (floor: number) =>
+const howToReviewV2 = () =>
   [
     "## How to review",
     "",
@@ -598,7 +602,8 @@ const howToReviewV2 = (floor: number) =>
     "3. Give every scanner candidate exactly one disposition: raise it in a finding (set `candidate` and `source`). Otherwise, put it under `dropped` with a reason and the line that shows why.",
     "4. Look for each listed pattern's failure mode. Cite a lens as `lens:<name>` when it led to a finding.",
     "5. Look past the scanners: wrong logic, off-by-one errors, broken callers, removed checks, changed defaults. Most real bugs have no scanner candidate.",
-    `6. Raise findings with evidence you can point at, with confidence ${floor} or higher. Anchor each on an added or modified line or a deletion anchor.`,
+    // wording: session
+    "6. Raise findings with evidence you can point at, with confidence set honestly. Anchor each on an added or modified line or a deletion anchor.",
     "7. Read changed lines absent from this brief. A changed range you never saw makes the review incomplete.",
     "8. Answer with the JSON object described under \"Answer\" and nothing else.",
   ].join("\n");
@@ -609,7 +614,8 @@ const HOW_TO_REVIEW_WHOLE_V2 = [
   '1. Start where "Where to start" points: the most-called symbols and the files with the most scanner candidates. For each part you read, write what it does and what it could break. Read both sides of calls and contracts before judging them. Use "Code around the change" first, then your tools. Name the question you are answering before each read.',
   "2. Give every scanner candidate exactly one disposition: raise it in a finding (set `candidate` and `source`), or put it under `dropped` with a reason and the line that shows why.",
   "3. Look for the failure mode each pattern under \"Patterns to weigh\" describes; cite a lens as `lens:<name>` when it led to a finding.",
-  "4. Raise findings with evidence you can point at, with confidence 0.7 or higher. Every line of every file is in scope. The report lists the files you read and the ones you did not. Missing coverage is an observation. Mention it in `summary` and raise no finding for it.",
+  // wording: session
+  "4. Raise findings with evidence you can point at, with confidence set honestly. Every line of every file is in scope. The report lists the files you read and the ones you did not. Missing coverage is an observation. Mention it in `summary` and raise no finding for it.",
   "5. Answer with the JSON object described under \"Answer\" and nothing else.",
 ].join("\n");
 
@@ -735,7 +741,10 @@ export function writingRules(fields: string[], namedFields = ["title", ...fields
   const list = (names: string[]) => names.map((name) => `\`${name}\``).join(", ");
   return [
     "Writing rules, checked by a script that sends back every broken rule:",
-    `- At most 20 words per sentence. Use at most two sentences in each of: ${list(fields)}.`,
+    // wording: session
+    "- At most 20 words per sentence.",
+    // wording: session
+    ...fields.map((field) => `- At most ${field === "claim" ? FIELD_SENTENCE_LIMITS.problem : FIELD_SENTENCE_LIMITS[field as keyof typeof FIELD_SENTENCE_LIMITS] ?? 2} sentences in ${list([field])}.`),
     "- Plain text on one line: no line break, no em dash.",
     `- Never name a scanner or a rule id in ${list(namedFields)}. The report shows the source separately.`,
     "- Use the active voice and name the actor. Say one fact per sentence. Use the same word for the same thing every time.",
@@ -782,12 +791,13 @@ function answerBlock(change: Change, whole: boolean, floor: number = GLOBAL_CONF
     "- `summary`: one or two short sentences on what the code does.",
     ...SEVERITY_RULES,
     "- `category`: one of `bug`, `security`, `performance`, `maintainability`, `style`.",
-    `- \`confidence\`: 0 to 1, set honestly. Findings under ${floor}, or under a cited lens's floor, are not counted.`,
+    // wording: session
+    `- \`confidence\`: 0 to 1, set honestly. Findings at ${floor} or higher, and at a cited lens's floor, count toward the verdict.${floor > POSSIBLE_CONFIDENCE_FLOOR ? ` Findings from ${POSSIBLE_CONFIDENCE_FLOOR} up to the floor are shown as possible issues and never counted. Findings under ${POSSIBLE_CONFIDENCE_FLOOR} are dropped.` : ` Findings under ${floor} are dropped. A finding under its cited lens's floor is a possible issue at ${POSSIBLE_CONFIDENCE_FLOOR} or higher, and dropped under ${POSSIBLE_CONFIDENCE_FLOOR}.`}`,
     whole
       ? "- `file_path` and `line_number` point at the exact line of code with the problem; the line must exist in the file."
       : "- `file_path` and `line_number` point at the exact line of code with the problem, on a line this change added or modified or next to a deletion. `line_end` (optional) closes a range.",
     "- `title`: a short noun phrase naming the problem.",
-    "- `problem`: what is wrong. `consequence`: why it matters, and to whom. `fix`: what to change. One or two sentences each.",
+    "- `problem`: what is wrong. `consequence`: why it matters, and to whom. `fix`: what to change.",
     "- `suggested_change`: the literal replacement for the cited lines when the fix fits in them, else null.",
     "- `source`: null for your own finding, the candidate's token when raising a candidate, or `lens:<name>`.",
     "- `candidate`: the candidate id when the finding raises one; its token must equal `source`.",
@@ -796,7 +806,8 @@ function answerBlock(change: Change, whole: boolean, floor: number = GLOBAL_CONF
     ...writingRules(["problem", "consequence", "fix", "reason"], ["title", "problem", "consequence", "fix"]),
     "",
     "Judgement rules:",
-    `- Raise every defect you can show from the code with confidence ${floor} or higher. Set confidence honestly. The floor removes the rest. When you are not sure, read more code first.`,
+    // wording: session
+    `- Raise every defect you can show from the code with confidence ${Math.min(floor, POSSIBLE_CONFIDENCE_FLOOR)} or higher. Set confidence honestly.${floor > POSSIBLE_CONFIDENCE_FLOOR ? ` Findings under ${floor} are shown as possible issues and never counted.` : " A finding under its cited lens's floor is shown as a possible issue and never counted."} When you are not sure, read more code first.`,
     "- When the change adds several parallel pieces (similar queries, sibling branches, a set of guards), compare them: the one that differs from its siblings without a reason is often the bug.",
     "- One finding per problem.",
   ].join("\n");
@@ -862,7 +873,7 @@ export function buildReviewerBrief(args: {
   const blocks = [
     header(change, scan, config, args.target),
     REVIEWER_ROLE,
-    howToReviewV2(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR),
+    howToReviewV2(),
     instructions,
     candidatesBlockV2(scan),
     args.impactBlock ?? "",

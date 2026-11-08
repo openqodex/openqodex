@@ -1,0 +1,61 @@
+{
+  "guards": "binds a call on a field typed by a Java interface to the interface member and lists every implementing class as a possible callee",
+  "callers": [
+    {
+      "to": "src/main/java/store/Repo.java#Repo.find",
+      "site": "src/main/java/app/Service.java:10",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/impl/SqlRepo.java#SqlRepo.find",
+      "site": "src/main/java/app/Service.java:10",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/impl/MemRepo.java#MemRepo.find",
+      "site": "src/main/java/app/Service.java:10",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/store/Repo.java#Repo",
+      "site": "src/main/java/impl/SqlRepo.java:6",
+      "tier": "certain",
+      "kind": "implements"
+    },
+    {
+      "to": "src/main/java/store/Repo.java#Repo",
+      "site": "src/main/java/impl/MemRepo.java:6",
+      "tier": "certain",
+      "kind": "implements"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/main/java/app/Service.java:10",
+      "candidates": [
+        "src/main/java/impl/SqlRepo.java#SqlRepo.find",
+        "src/main/java/impl/MemRepo.java#MemRepo.find"
+      ]
+    }
+  ],
+  "references": [
+    {
+      "to": "src/main/java/store/Repo.java#Repo.find",
+      "site": "src/main/java/impl/SqlRepo.java:7",
+      "kind": "overrides",
+      "tier": "likely"
+    },
+    {
+      "to": "src/main/java/store/Repo.java#Repo",
+      "site": "src/main/java/app/Service.java:7",
+      "kind": "uses_type",
+      "tier": "certain"
+    }
+  ],
+  "floor": {
+    "src/main/java/impl/SqlRepo.java#SqlRepo.find": true
+  }
+}

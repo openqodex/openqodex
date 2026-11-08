@@ -1,0 +1,43 @@
+{
+  "guards": "keeps JUnit roles likely through unresolved bases and certain through a known base",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 1,
+    "roles": [
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "role": "test",
+        "tier": "likely",
+        "note": "An unresolved base may also supply Test: AbstractIntegrationTest."
+      },
+      {
+        "target": "src/test/java/shop/ServiceTest.java#IndirectTest.reads",
+        "role": "test",
+        "tier": "likely",
+        "note": "An unresolved base may also supply Test: external.Base."
+      },
+      {
+        "target": "src/test/java/shop/ServiceTest.java#KnownTest.reads",
+        "role": "test",
+        "tier": "certain"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:4",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:8",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:12",
+      "tier": "certain"
+    }
+  ]
+}

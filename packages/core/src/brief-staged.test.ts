@@ -261,12 +261,12 @@ describe("verify brief", () => {
       ...batch, candidates: [{ id: "k1", kind: "finder", candidate: { ...candidate, lens: "query" }, foundBy: ["local"] }],
     });
     expect(text).toContain("Lens: query (floor 0.85)");
-    expect(text).toContain("Findings under 0.7, or under a cited lens's floor, are not counted.");
+    expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
   });
 
   it("states the configured verifier floor instead of the default", () => {
     const { text } = buildVerifyBrief(args({ confidenceFloor: 0.85 }), batch);
-    expect(text).toContain("Findings under 0.85, or under a cited lens's floor, are not counted.");
+    expect(text).toContain("Findings at 0.85 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
     expect(text).not.toContain("Findings under 0.7");
   });
 
@@ -346,4 +346,31 @@ describe("staged brief redaction and framing", () => {
     const { text } = buildFindBrief(args({ change: makeChange({ diffs: [{ path: "app/search.py", text: diff }] }) }), unit, "local");
     expect(text).toContain("````diff\n");
   });
+});
+
+// Failure cases: the briefs omit the causal chain or advertise stale limits.
+it("asks both sessions to name each causal step and allows three claim and problem sentences", () => {
+  const finder = buildFindBrief(args(), unit, "local").text;
+  const verifier = buildVerifyBrief(args(), batch).text;
+  expect(finder).toContain("Name the code that makes it happen at each step");
+  expect(finder).toContain("a bare `pass`, an empty handler");
+  expect(finder).toContain("At most 3 sentences in `claim`");
+  expect(verifier.match(/keep the candidate's cause and consequence/g)).toHaveLength(2);
+  expect(verifier).toContain("Correct a detail only when you cite the line that refutes it");
+  expect(verifier).toContain("At most 3 sentences in `problem`");
+  expect(verifier).toContain("At most 2 sentences in `consequence`");
+  expect(buildReviewerBrief(args()).text).toContain("At most 3 sentences in `problem`");
+});
+
+// Failure case: the finder examines hunks without following their combined flow.
+it("asks the finder to follow changed operations through the whole flow across hunks", () => {
+  const text = buildFindBrief(args(), unit, "local").text;
+  expect(text).toContain("Then follow each changed condition, mutation, async completion and cleanup through the whole flow it belongs to.\nLook across the other hunks of this unit and the code around the change.");
+  const shape = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(text)![1]!);
+  expect(Object.keys(shape)).toEqual(["version", "change_id", "unit", "examined", "analysis", "candidates"]);
+});
+
+// Failure case: the verifier calibrates to findings disappearing under the floor.
+it("tells the verifier that possible issues are shown and never counted", () => {
+  expect(buildVerifyBrief(args(), batch).text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
 });

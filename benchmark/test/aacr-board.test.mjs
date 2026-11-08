@@ -10,7 +10,8 @@
 // 2. A sample on a case outside AACR-Bench is converted for the board.
 // 3. A failed or never-started review vanishes from AACR's denominators
 //    (their evaluator leaves out an instance with no result file).
-// 4. A case whose licence nobody verified is converted for a board.
+// 4. A case whose licence nobody verified reaches a board submission, or
+//    an excluded licence class is converted.
 // 5. The wrapper echoes the judge's key or base URL: a dry run with a fake
 //    settings file, traced by bash -x, leaves neither in any output or file.
 // 6. AACR's mock judge scores a run as if a model judged it.
@@ -379,14 +380,39 @@ describe("a failed or never-started review vanishes from AACR's denominators", (
   });
 });
 
-describe("a case whose licence nobody verified is converted for a board", () => {
+describe("an unverified licence reaches a board submission, or an excluded licence is converted", () => {
   // A licence record as the ingest writes it for a repository whose licence
   // file the licence API cannot name: class unverified, used and published in full,
-  // but refused for a board; unknown, the class before that; and for one
+  // but refused for a board submission; unknown, the class before that; and for one
   // with no licence file, class none.
   const licence = (cls) => ({ spdx: cls === "none" ? null : "NOASSERTION", chosen: null, class: cls, file: cls === "none" ? null : "LICENSE.txt", fileSha256: null, at: "the default branch on 2026-10-11", source: "the licence API", use: "local review and scoring", excerpts: "omit" });
 
-  it.each(["unverified", "unknown", "none"])("refuses a run holding a case whose licence class is %s, naming the case, and writes nothing", async (cls) => {
+  it("an unverified-licence case converts for the local judge and is still refused at submission", async () => {
+    const [name, other] = SMOKE;
+    const c = caseOf(name);
+    const spec = specCopy(c, aacrTruth({ comments: TRUTH[name] }, null));
+    const out = await savedRun({ names: [name, other], specs: { [name]: { ...spec, source: { ...spec.source, licence: licence("unverified") } } }, configs: [MODEL], repeat: 1 });
+    const manifest = readJson(join(out, "manifest.json"));
+    write(join(out, "manifest.json"), JSON.stringify({ ...manifest, reviewer: { model: "scripted" } }));
+    const { out: board, record } = convertRun(out);
+    expect(record.instances.map((i) => i.case).sort()).toEqual([name, other].sort());
+    expect(record.folders[0].files).toBe(2);
+    expect(readJson(join(board, MODEL, "r1", `${instanceIdOf(c)}.json`)).review.comments.length).toBeGreaterThan(0);
+    expect(readJson(join(out, "cases", `${name}.json`)).source.licence.class).toBe("unverified");
+
+    // Saved judge metadata lets submission reach its licence check without a model call.
+    write(join(board, "eval.json"), JSON.stringify({ folders: record.folders.map((f) => ({ config: f.config, repeat: f.repeat, mode: "llm", exit: 0, judgeErrors: 0 })) }));
+    write(join(board, "dataset.jsonl"), "");
+    const submission = join(out, "submission");
+    const result = spawnSync(process.execPath, [join(benchRoot, "outside/submit/aacr.mjs"), out, "--out", submission], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toMatch(/unverified licence/);
+    expect(result.stderr).toContain(name);
+    expect(result.stderr).not.toContain(other);
+    expect(existsSync(submission)).toBe(false);
+  });
+
+  it.each(["unknown", "none"])("refuses a run holding a case whose licence class is %s, naming the case, and writes nothing", async (cls) => {
     const [name, other] = SMOKE;
     const c = caseOf(name);
     const spec = specCopy(c, aacrTruth({ comments: TRUTH[name] }, null));
@@ -401,7 +427,7 @@ describe("a case whose licence nobody verified is converted for a board", () => 
     })();
     expect(refusal).toContain(name);
     expect(refusal).not.toContain(other);
-    expect(refusal).toMatch(/never converted for a board/);
+    expect(refusal).toContain(`licence ${cls}`);
     expect(existsSync(join(out, "outside"))).toBe(false);
   });
 });

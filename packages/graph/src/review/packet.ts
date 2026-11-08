@@ -232,7 +232,7 @@ export async function writePacket(args: {
   write("capabilities.json", "what this installation's graph can see", {
     apiVersion: API_VERSION,
     modelVersion: MODEL_VERSION,
-    languages: ["typescript", "tsx", "javascript", "python", "go", "ruby"],
+    languages: ["typescript", "tsx", "javascript", "python", "go", "ruby", "java"],
     relations: ["calls", "inherits", "implements", "dispatches_to", "may_invoke", "overrides", "uses_value", "uses_type", "imports"],
     tiers: {
       certain: [...CERTAIN_KINDS],

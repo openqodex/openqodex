@@ -1,0 +1,39 @@
+{
+  "guards": "binds an import of a class declared in several projects and source sets to the importer's own project and source set, and never a main importer to a test copy",
+  "callers": [
+    {
+      "to": "core/src/main/java/a/b/Util.java#Util.v",
+      "site": "core/src/main/java/app/Main.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "core/src/test/java/a/b/Util.java#Util.v",
+      "site": "core/src/test/java/app/MainTest.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "core/src/main/java/a/b/Util.java#Util.v",
+      "site": "core/src/test/java/app/MainTest.java:7"
+    },
+    {
+      "to": "core/src/main/java/a/b/Util.java#Util.v",
+      "site": "legacy/src/main/java/app/Old.java:7"
+    },
+    {
+      "to": "core/src/test/java/a/b/Util.java#Util.v",
+      "site": "core/src/main/java/app/Main.java:7"
+    },
+    {
+      "to": "core/src/test/java/a/b/Util.java#Util.v",
+      "site": "legacy/src/main/java/app/Old.java:7"
+    }
+  ],
+  "floor": {
+    "core/src/main/java/a/b/Util.java#Util.v": false,
+    "core/src/test/java/a/b/Util.java#Util.v": false
+  }
+}

@@ -42,6 +42,8 @@ A step through inheritance is part of the proof: a method found on a base class 
 | `go.mod` | calls and imports | the same |
 | `pyproject.toml`, `setup.cfg`, `requirements*.txt`, `requirements*.in`, the `.txt` and `.in` files of a `requirements/` folder, and the files any of them includes with `-r` or `-c` | nothing: imports of what it declares read as misses | the build stays complete |
 | `Gemfile` | nothing: requires of the gems it names read as misses | the build stays complete |
+| `pom.xml` | nothing: imports of what it declares read as misses | the build stays complete |
+| `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts` | nothing: imports of what it declares read as misses | the build stays complete |
 | `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock` | nothing: a binding through it is only less sure | the build stays complete |
 
   An include is read relative to the file that includes it, only inside the repository, and at most 64 includes in all; one outside the repository, missing, or past that bound is said as a gap of the including file.
@@ -70,7 +72,7 @@ A caller list is a floor, and the brief says so with the reasons, when a call of
 
 Every cut is recorded with what it left out: a symbol with more than 40 callers keeps its 20 nearest in the brief, the second hop keeps 20 callers of each caller, the walk stops at 200 symbols (what lies past that frontier is not counted), the brief shows 60 call sites, the summary keeps the first 200 places that used each changed public name (the brief shows 8), and the walk of `export *` re-exports opens at most 4,096 files in one version of the code (names re-exported past that are not compared). A call through an interface or a base type, a computed call on a table, and a call of a returned function each keep at most 32 possible targets, and the gap says how many were left out; the hub rule holds for the possible callers apart (20 of more than 40 listed), the brief shows 20 possible call sites, and the summary keeps 200 uses of each kind per symbol. Each barrel file is walked once, so two files that `export *` from each other end the walk where the cycle closes.
 
-Languages: TypeScript, TSX, JavaScript, Python, Go and Ruby. Files under `node_modules`, `dist`, `build`, `out`, `vendor` and the like, declaration files and minified files are left out.
+Languages: TypeScript, TSX, JavaScript, Python, Go, Ruby and Java. Files under `node_modules`, `dist`, `build`, `out`, `vendor` and the like, declaration files and minified files are left out.
 
 A file is listed as not read, with the reason, when it is over `graph.max_file_bytes`, past the `graph.max_files` parse cap, past the time budget or the memory bound, or when its parse takes over two seconds (the parser is slow on some broken files). Every one of these holds for the changed files too: they are read first, so a cap reached late never loses them.
 
@@ -170,7 +172,7 @@ A target is a name (`parse`, or `Parser.parse` for a method), or `file:line` for
 | `path` | The shortest chain from the first point to the second over calls and inheritance (or the relations `--edges` names), at most eight hops, each hop with its edge. When there is none that way, the chain from the second to the first. When neither is found, the answer is a floor if a call the graph could not bind in the code it searched, or a file it did not read, could hold one. Imports join files: with `--edges imports` alone, a symbol stands for its file. |
 | `impact` | The review's own walk: callers one and two hops out, the possible callers apart, every use that is not a call (the brief keeps 200 of each kind; this lists them all), callees, importers of the changed files and changed public names. With a target, as if its first line changed; with none, the change against its base, found as `review` finds it. |
 | `outline` | What a file defines, or every file under a folder, with each definition's kind, lines and call sites in and out. |
-| `packages` | Which projects import files of a project (a project is the folder of the nearest `package.json` or `go.mod`, or a Python source root, else the repository root), with the import lines; with no project, every project with what it depends on and what depends on it. |
+| `packages` | Which projects import files of a project (a project is the folder of the nearest `package.json`, `go.mod`, `pom.xml`, `build.gradle` or `build.gradle.kts`, or a Python source root, else the repository root), with the import lines; with no project, every project with what it depends on and what depends on it. |
 | `cycles` | Import cycles among files (the default) or among projects, each with the import lines that close it. |
 | `changes` | The public names the change removed or bound elsewhere, every place that used each one and what it binds now, and the removed and moved symbols. |
 | `unknowns` | What the graph could not see in a file or for a name, with causes. |
@@ -203,14 +205,25 @@ The `graph` keys of `.openqodex/config.yaml` are in `config`: `graph.enabled`, `
 
 ## Dispatch, values and types
 
+Go follows chained results through fields only when each field's struct is declared in the caller's file.
+
 A call through an interface or a base type binds to the member it declares, at the level its type is proved (an annotation, a declared result, a field type, `this` or `self`). Each implementation or override that may run instead is then a possible caller of the call's site, found by each class's own lookup, so an inherited implementation counts and an abstract member never does:
 
 - TypeScript and JavaScript: the class, then its superclass chain, then the interfaces it implements. Implementations are the classes that declare `implements`, their subclasses, interfaces that extend it, and a module-level `const x: Repo = { ... }`. A call through an interface also leaves an `unsupported-rule` gap, since an object of the same shape may answer it without declaring anything. A generic argument never drops an implementation: TypeScript compares `Repo<A>` and `Repo<B>` by the shapes of `A` and `B`, which the graph does not hold whole.
 - Python: the C3 method resolution order, so in `class D(B, C)` with `B(A)` and `C(A)` a method of `C` wins over `A`'s; an order that cannot be established is an `ambiguous` gap. Implementations are subclasses; for a `typing.Protocol`, also any class whose methods cover every member of the Protocol by name (likely: the signatures are not compared). Abstract members are those marked `@abstractmethod`; a method whose body only raises `NotImplementedError`, or is `...`, still runs when called, so it is an implementation like any other.
 - Go: only an interface dispatches. Its implementations are the types whose method set, their own methods and those promoted by embedding at the shallowest depth, covers every method of the interface by name (likely; a pointer receiver means only the pointer type implements it). Two methods promoted at the same depth are an `ambiguous` gap, as Go refuses the selector. An interface that embeds one from outside the repository has no method-set implementations.
+- Java: the class, then its superclass chain, then the interfaces, each visited once. Every member of the name on that path is collected, so an overload declared on a base class is not lost. A call keeps the members whose parameter count fits its argument count. A varargs member fits any count from its fixed parameters up. One member left binds at the receiver's tier. Several left bind as possible, and the note says how many members take that many arguments. A call whose argument list did not parse keeps every member as possible. A call on a declared type dispatches: a parameter, a local declared with its type, a field, a declared result or `this`. Its possible targets are the implementations and overrides with the same parameter count. A local declared with `var` from `new` binds to that class alone and does not dispatch. Interface and `abstract` methods are abstract members; `default` and `static` interface methods are not. A static method hides a static method of its base and never overrides it.
+  A sub-interface default hides an inherited default only for zero-parameter methods, because the graph records parameter names and not types.
+  A default beside an inherited abstract member with the same parameter count stays possible for the same reason.
+  Type parameters use their first bound; generic arguments supply class parameter results, such as `Box<Repo>.get()` returning `Repo`.
+  Additional bounds after `&`, wildcard bounds, and method type parameters inferred from arguments remain gaps.
+  A bound used inside a generic argument loses its own arguments.
+  For example, `T extends Supplier<Repo>` used as an argument keeps `Supplier` but loses `Repo`.
+  A bound that names a later parameter, as in `A extends B, B extends Repo`, gives `A` no bound.
+  A subclass of a generic class, as in `SBox extends Box<Repo>`, does not supply the parameter result: `sbox.get()` stays unresolved.
 - Ruby: prepended modules (the last first), the class, included modules (the last first), then the superclass; on the class itself, its class methods, then the modules it extends, then the superclass's.
 
-A value a constructor made in the same scope (`const r = new SqlRepo()`, `r = SqlRepo()`, `r := &Sql{}`), `super` and an explicit class name bind to that class alone. `this` and `self` dispatch to the overrides in subclasses. At most 32 implementations are kept per call, in path order; the rest is a `fan-out-capped` gap.
+A value a constructor made in the same scope (`const r = new SqlRepo()`, `r = SqlRepo()`, `r := &Sql{}`, Java `var r = new SqlRepo()`), `super` and an explicit class name bind to that class alone. `this` and `self` dispatch to the overrides in subclasses. At most 32 implementations are kept per call, in path order; the rest is a `fan-out-capped` gap.
 
 A function named where it is not called (an argument, the right side of an assignment, a returned value, an entry of an object, dict, list or map, a JSX attribute) is used as a value. It is a possible caller only when the graph reads why it may run:
 
@@ -270,6 +283,29 @@ Each table shows twelve rows; the rest, uncut, are in the review packet's `frame
 Levels follow the rest of the graph. A view bound through an import is certain; a Rails action found by its controller's path, a template found by its name under a templates or views folder, and a table name made by Rails or Django's naming rule are likely, with the note saying so; the HTTP methods of a class view, a template that several folders hold and a test request that several routes match are possible.
 
 What the plugins cannot see is said as a gap: a computed route path, include, template name, request path, signal or settings key (`dynamic`; a route under a computed prefix keeps its known part, shown as `{computed}accounts/login/`), a URL list a loop, a `del`, a `remove` or a write by index or slice changes (`dynamic`; a router joined into a list that a later statement replaces is not served, and a list joined with `+` holds only what it held at the join), a block inside a model's class body (`unsupported-rule`), a view that is not defined (`miss`), a URL entry whose function is not Django's (`unsupported-rule`), and every cap (`fan-out-capped` or `budget`), a field whose base classes go deeper than the plugin follows, a test request that matches more routes than it links, and a work budget used up inside a request. The brief's last framework table, and the packet's `unknowns.json` and `frameworks.json`, list every gap that can hide an entry of the change: each gap in a changed file or at the site of a listed route or a mount it rests on, each gap of an application or project that holds a changed file or a listed route wherever its site is (a computed root URL module or mount prefix, a cap), each cap a plugin counts across the whole build, and the summary's own cuts: the touched symbols past the first 25, whose entries are not looked for, and a route walk that stopped after 2,000 callers. A gap that names no relation, such as a file whose facts passed the per-file cap, counts against every question, so `routes` and `tests` answer it as a floor. A plugin reads no file over 1 MiB, keeps at most 10,000 route registrations and 20,000 entities per application, and matches test requests against routes by hand; the Django plugin's whole resolve draws on one work budget of two million steps, and the Rails plugin's route expansion and test matching on another; a plugin that runs out stops that work and says so as a `budget` gap. No regular expression from your repository is ever built or run. The facts the Django and Rails plugins cache under `.openqodex/graph/` keep a string from your code only where the plugin reads its value: a route path or pattern and the route options that build it (a prefix, a name, a namespace, a module, a `controller#action`, the actions and HTTP methods it answers), a module that `include()` or `ROOT_URLCONF` names, a template name, a model, association, table, column or field name, and the name (never the value) of a config key or an ENV entry. A route path and a test request keep their path alone (no scheme, host, user, query string or fragment), a Rails route target is kept only when it is `controller#action`, and any other literal, such as a setting's value, a route's `constraints:` or `format:`, or a template tag's name, is not kept. A string over 512 characters is not kept: the plugin reads it as a value it does not know and says so as a gap, so two long strings never match on the part they share. A key-shaped token in a kept string (a run of letters, digits, `_` and `-` with a known key prefix such as `sk_live_` or `ghp_` at its start or after a `_` or `-` in it, or an opaque run of sixteen or more letters and digits) is replaced by `[redacted:` and the first eight hex digits of its SHA-256 `]`: the same token always reads the same, so a route or a template named with one still matches its request or its file, and two tokens never match. A string whose percent-encoded form hides a key is not kept at all. The packet and the brief also remove every secret the scanners found.
+
+## Framework plugin: JUnit
+
+| Plugin | Detection | Output |
+|---|---|---|
+| JUnit 4 and JUnit 5 | Proven annotation identity, through an import or a qualified name | Test and fixture method roles. Direct test calls retain each call's tier. |
+
+JUnit uses exact annotation names. A Maven or Gradle dependency alone detects nothing.
+Each Java project gets one application, anchored to its first proven annotation.
+Supported test annotations are `Test`, `RepeatedTest`, and `ParameterizedTest` from their JUnit packages.
+JUnit 5 lifecycle annotations are `BeforeEach`, `BeforeAll`, `AfterEach`, and `AfterAll`.
+JUnit 4 lifecycle annotations are `Before`, `BeforeClass`, `After`, and `AfterClass`.
+Lifecycle annotations give fixture roles. Fixture calls do not link tests to production methods.
+Enclosing and inherited nested types shadow imports. A single-type import shadows a same-package type.
+A same-package type shadows a star import. A competing repository type produces a file gap that affects tests.
+One JUnit star with only unresolved external competitors gives a likely role, names those imports, and produces no gap.
+Star imports from `java.*` and `javax.*` never compete with JUnit annotations.
+The brief names directly calling test methods with their call tiers. Ambiguous overload calls remain possible.
+A test that calls a helper is not linked to the helper's callees.
+Disabled tests are still listed. The mapper reads `calls`, not `dispatches_to`.
+An implementation reached only by dispatch is not linked. An absent link never means untested.
+Maven and Gradle dependency versions are not read by this plugin.
+The reader keeps at most 1,999 candidate annotations per file. A reader cap produces a gap that affects tests.
 
 ## Framework plugins: Express, React, Next.js, FastAPI and Go net/http
 

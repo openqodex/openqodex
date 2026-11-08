@@ -82,7 +82,7 @@ export const report = ({ findings = [], outside = [], status = "complete" } = {}
   verdict: "passed",
   findings,
   outside_change: outside,
-  low_confidence: [],
+  possible: [], low_confidence: [],
   dropped: [],
   scanners: [],
   impact: { status: "ok", build: { durationMs: 100 } },
@@ -120,7 +120,7 @@ export async function savedRun(ctx, { plan, configs = [MODEL], repeat = 1, setti
   const first = readCase(ctx.ids.get(names[0]), { root: ctx.root });
   const manifest = runManifest({
     startedAt: "2026-10-11T10:00:00.000Z",
-    settings: { runId: "martian-board-test", mode: "review", path: "server", suite: "martian", split: "test", splitHash: first.splitHash, subset: null, release: RELEASE, smoke: false, package: PACKAGE, build: BUILD, reviewers: Object.fromEntries(reviewers.map((r) => [r, { name: r }])), cases: names, caseIds: names.map((n) => ctx.ids.get(n)), configs, repeat, concurrency: 1, ...settings },
+    settings: { runId: "martian-board-test", mode: "review", path: "server", suite: "martian", split: "test", splitHash: first.splitHash, subset: null, release: RELEASE, smoke: false, package: PACKAGE, build: BUILD, reviewers: Object.fromEntries(reviewers.map((r) => [r, { name: r }])), cases: names, caseIds: names.map((n) => ctx.ids.get(n)), caseHashes: Object.fromEntries(names.map((n) => [n, readCase(ctx.ids.get(n), { root: ctx.root }).hash])), configs, repeat, concurrency: 1, ...settings },
     jobs: kept,
   });
   await executeRun({

@@ -97,3 +97,27 @@ it("rejects a refuted scanner reason with three sentences during verification", 
   const value = { version: "verify-1", change_id: change.id, verdicts: [{ ...verdict(c, "refuted"), reason: "The input is checked. The operation is safe. The caller is trusted." }] };
   expect(checkVerifyAnswer(value, batch, change, snapshotText(dir), lineCounter(dir)).errors).toContain("candidate c1.reason: has 3 sentences; the limit is 2");
 });
+
+// Failure cases: finder prose bypasses checks, or verifier fields share one limit.
+it.each([
+  ["four sentences", "One. Two. Three. Four.", "has 4 sentences; the limit is 3"],
+  ["em dash", `Unsafe ${String.fromCharCode(0x2014)} input.`, "em dash"],
+  ["line break", "Unsafe\ninput.", "control character"],
+  ["long sentence", Array(21).fill("word").join(" "), "has 21 words"],
+])("returns a finder claim with %s as a broken rule", (_name, claim, error) => {
+  const { change, dir } = fixture();
+  const unit = unitsOf(change, hunkRefs(change))[0]!;
+  const out = checkFindAnswer({ version: "find-1", change_id: change.id, unit: unit.id, examined: ["h1"], analysis: [{ hunk: "h1", changed: "Changed.", could_break: "Output." }], candidates: [{ ...candidate("a.txt"), claim }] }, unit, change, snapshotText(dir));
+  expect(out.errors.join(" ")).toContain(`candidates[0].claim`);
+  expect(out.rejected[0]?.errors.join(" ")).toContain(error);
+});
+it("accepts three verifier problem sentences but rejects four and three consequence sentences", () => {
+  const { change, dir } = fixture();
+  const c = { kind: "finder" as const, id: "k1", candidate: candidate("a.txt"), foundBy: [] };
+  const batch = { file: "a.txt", hunks: hunkRefs(change), candidates: [c] };
+  const three = "close shuts down the pool. put raises ShutDown. submit catches it and commits.";
+  const check = (fields: object) => checkVerifyAnswer({ version: "verify-1", change_id: change.id, verdicts: [{ ...verdict(c), ...fields }] }, batch, change, snapshotText(dir), lineCounter(dir)).errors;
+  expect(check({ problem: three })).toEqual([]);
+  expect(check({ problem: `${three} Results disappear.` }).join(" ")).toContain("has 4 sentences; the limit is 3");
+  expect(check({ consequence: three }).join(" ")).toContain("has 3 sentences; the limit is 2");
+});

@@ -30,12 +30,10 @@
 //    (their evaluator leaves out an instance with no result file): every
 //    planned review's first attempt gets a file, with no comment when it
 //    failed or never started; a retry never replaces it, as in our score.
-// 4. A case whose licence nobody verified is converted for a board: runs
-//    publish these cases in full (Sid, 2026-10-12), but board conversion
-//    still refuses them. Every case's
-//    licence record goes through lib/licence.mjs, licenceExclusion (a class
-//    no run uses) and publishRefusal (a class board submissions refuse), and
-//    one refused case refuses the whole run.
+// 4. A case with an excluded licence class is converted: every case's
+//    licence record goes through lib/licence.mjs, licenceExclusion, and
+//    one excluded case refuses the whole run. Unverified cases convert
+//    for local judging; board submissions still apply publishRefusal.
 // 5. Our line count differs from AACR's on the same reports: each comment
 //    carries the path and the range our scorer reads (paths normalised, the
 //    range [line_number, max(line_end, line_number)]), and the dataset step
@@ -57,7 +55,7 @@ import { fileURLToPath } from "node:url";
 import { AACR_BOARD, AACR_K, AACR_READER, boardFolder, instanceIdOf, isTestGap, readAacrOutside, toolName } from "../../lib/aacr-board.mjs";
 import { parseCaseId } from "../../lib/cases.mjs";
 import { benchCache } from "../../lib/board-files.mjs";
-import { cacheRoot, licenceExclusion, publishRefusal } from "../../lib/licence.mjs";
+import { cacheRoot, licenceExclusion } from "../../lib/licence.mjs";
 import { normPath, population, shownFindings } from "../../lib/score.mjs";
 import { checkPinned, rawPath, readSuite } from "../../lib/suites.mjs";
 import { loadRun } from "../../score.mjs";
@@ -96,7 +94,7 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
   const manifest = existsSync(join(folder, "manifest.json")) ? readJson(join(folder, "manifest.json")) : null;
   if (!manifest) throw new Error(`${folder} has no manifest.json; it is not a benchmark run`);
   const suite = manifest.suite ?? "planted";
-  if (suite === "greptile") throw new Error("Greptile uses benchmark/outside/boards/greptile-judge.mjs (W8-3), with caught or missed per case against the chosen truth set");
+  if (suite === "greptile") throw new Error("Greptile uses benchmark/outside/boards/greptile-run.mjs, with caught or missed per case against the chosen truth set");
   if (suite !== "aacr") throw new Error(`${folder}: the run is of suite ${suite}, not aacr; only an AACR-Bench run is converted for its board`);
   if (manifest.mode === "scan") throw new Error(`${folder}: a scanner-only run shows the developer no finding, so it has nothing to convert for the board`);
   const out = boardFolder(folder);
@@ -111,8 +109,8 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
       continue;
     }
     const record = spec.source?.licence ?? null;
-    const why = record === null ? "its truth copy holds no licence record" : (licenceExclusion(record) ?? publishRefusal([{ name, licence: record.class }]));
-    if (why !== null) problems.push(`${name}: ${why}; a case whose licence is not verified is never converted for a board`);
+    const why = record === null ? "its truth copy holds no licence record" : licenceExclusion(record);
+    if (why !== null) problems.push(`${name}: ${why}`);
     if (spec.split === "test" || heldOut.has(name)) problems.push(`${name}: held out (the test split); a held-out case is never converted or exported before a release`);
   }
   for (const a of run.attempts) if (parseCaseId(run.specs[a.case]?.id)?.suite !== "aacr") problems.push(`samples/${a.case}/${a.config}: a sample of ${a.case}, which is not an AACR-Bench case`);
