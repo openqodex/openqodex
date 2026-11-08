@@ -8,6 +8,11 @@
 // and 296: 8.01 and 8.27 against the bound of 8).
 // They live here and not beside the readers because a test under src is
 // compiled with the package and cannot import another package's source.
+// Many openers left open are also checked beside the readers, on the fast
+// tier (src/suppression.test.ts, failure 16), by the characters the
+// searches for their closers cover: a count no load moves (issue 296). The
+// count sees only searches made through the reader's once-per-kind rule, so
+// the ratio here stays as the check of everything else the reader does.
 import { it } from "vitest";
 import type { BuiltinScanner } from "@openqodex/core";
 import { findMarkers } from "../src/suppression.js";
