@@ -12,6 +12,8 @@
 // 6. A subscription review's reported dollars, which nothing billed, use up
 //    the cap; or a billed review is taken for one that bills nothing.
 // 7. The AACR judge forecasts from the wrong calibration, or not at all.
+// 8. A review run reserves its estimate though it may spend up to its
+//    --max-usd, so one run overspends the wave's room.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -163,6 +165,33 @@ describe("the wave cap", () => {
     cal("martian-2026-10-27.json", 2, ["r1#g1", "r1#g2", "r2#g1", "r2#g2"]);
     cal("greptile-2026-10-27.json", 0.02, ["c1", "c2"]);
     expect(aacrForecast({ reviews: 3, rounds: 2, root })).toMatchObject({ usd: 6, estimated: true });
+  });
+});
+
+describe("a review run's wave reservation", () => {
+  // A dry run of a metered control review (an Anthropic key placeholder
+  // makes Claude Code billed): it prints the reservation and spends nothing.
+  const dryRun = (root, maxUsd) => spawnSync(process.execPath, ["benchmark/run.mjs", "--reviewers", "control", "--cases", "ts-removed-export", "--repeat", "1", "--max-usd", String(maxUsd), "--max-minutes", "2", "--wave", "w8", "--dry-run"], { cwd: repoRoot, encoding: "utf8", env: { ...process.env, ANTHROPIC_API_KEY: "test-placeholder", OPENQODEX_BENCH_WAVES: join(root, "index/waves") } });
+
+  it("refuses a run whose --max-usd is above the wave's room, and reserves the --max-usd ceiling when it fits (failure 8)", () => {
+    const root = tempDir("oq-wave-run-");
+    const wave = newWave("w8", { root });
+    reserve(wave, { id: "earlier-run", path: "run", forecastUsd: 6 });
+    settle(wave, "earlier-run", 6);
+    const over = dryRun(root, 6);
+    expect(over.status).toBe(2);
+    expect(over.stderr).toContain("the wave w8 has $4.00 of room left of its $10.00 cap, and this run may spend up to $6.00");
+    expect(over.stderr).toContain("Lower --max-usd to $4.00 or less, or start a new wave");
+    const fits = dryRun(root, 4);
+    expect(fits.status).toBe(0);
+    expect(fits.stdout).toContain("this run reserves $4.00 (its --max-usd room, the most it may spend)");
+    // Nothing was reserved by either dry run.
+    expect(outstanding(wave)).toEqual([]);
+    // The reservation is the ceiling; the settlement is what the run spent.
+    reserve(wave, { id: "this-run", path: "run", forecastUsd: 4 });
+    expect(waveState(wave)).toMatchObject({ reservedUsd: 4, roomUsd: 0 });
+    settle(wave, "this-run", 1.25);
+    expect(waveState(wave)).toMatchObject({ settledUsd: 7.25, reservedUsd: 0, roomUsd: 2.75 });
   });
 });
 

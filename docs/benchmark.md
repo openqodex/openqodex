@@ -220,7 +220,7 @@ Every path that pays a model names its wave with `--wave <wave>` and refuses to 
 
 | Path | Needs `--wave` | Reserves | Settles with |
 |---|---|---|---|
-| `run.mjs` review run | any reviewer but `model:scripted` | the run's estimate; its `--max-usd` room when some review has no measured cost | what its `budget.jsonl` says it spent; the larger of that and the forecast, marked estimated, when a reviewer reported no cost |
+| `run.mjs` review run | any reviewer but `model:scripted` | its ceiling, the room its `--max-usd` leaves, never its estimate; refused, the dry run too, when that is above the wave's room | what its `budget.jsonl` says it spent; the larger of that and the forecast, marked estimated, when a reviewer reported no cost |
 | `loop.mjs step` | a parent reviewed by anything but the scripted model | each `run.mjs` it starts, as above | as above |
 | `release-check.mjs --reviewers` | any reviewer but `model:scripted` | each `run.mjs` it starts, as above | as above |
 | `greptile-run.mjs`, priced | always | its forecast (the calibration's cost per case, times the cases judged) | the relay's reported usage at the pinned prices |

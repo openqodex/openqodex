@@ -176,9 +176,10 @@
 //    hold every model call before it is sent are lib/budget.mjs's, for the
 //    model reviewers and the judge. On top of the run's own caps, a review
 //    run that pays a model (any reviewer but model:scripted) names its wave
-//    with --wave and reserves its forecast in the wave journal
-//    (lib/wave.mjs) before it spends: the estimate when every review is
-//    priced, else the run's --max-usd room. --allow-over never passes the
+//    with --wave and reserves its ceiling in the wave journal
+//    (lib/wave.mjs) before it spends: the run's --max-usd room, never its
+//    estimate, and a ceiling above the wave's room is refused before
+//    anything is spent, the dry run too. --allow-over never passes the
 //    wave cap. At its end it settles with what its ledger says it spent
 //    (the larger of that and the forecast, marked estimated, when a
 //    reviewer reported no cost).
@@ -1291,17 +1292,24 @@ async function main() {
     leave(2);
   }
   // The wave cap, after the run's own caps and --allow-over, and above them
-  // (lib/wave.mjs): the estimate when every review is priced, else the room
-  // --max-usd leaves this run. A run whose reviewers bill nothing per call
+  // (lib/wave.mjs): the run reserves its hard ceiling, the room --max-usd
+  // leaves it, never its estimate, since it may spend up to that ceiling;
+  // it settles what it really spent. A run whose reviewers bill nothing per call
   // (Claude Code on the subscription, Codex on a ChatGPT login) reserves 0
   // and settles its reported dollars as not metered; a model reviewer
   // always bills, and a run with any billed reviewer counts as billed.
   const waveMetered = o.shape === "server" || o.reviewers.filter((r) => r !== SCRIPTED).some((r) => laptopMetered(r, env));
-  const waveForecast = !waveMetered ? 0 : estimate.unpriced > 0 ? Math.max(estimate.usd, o.maxUsd - spentBefore) : estimate.usd;
+  const waveForecast = !waveMetered ? 0 : Math.max(0, o.maxUsd - spentBefore);
   const waveId = basename(out);
   if (o.waveJournal) {
     const s = waveState(o.waveJournal);
-    console.log(`Wave ${o.wave}: ${usd(s.settledUsd)} settled (metered), ${usd(s.unmeteredUsd)} reported but not metered, and ${usd(s.reservedUsd)} reserved of its ${usd(s.cap)} cap; this run reserves ${usd(waveForecast)}${!waveMetered ? " (its reviewers bill nothing per call, so its dollars are recorded as not metered)" : estimate.unpriced > 0 ? " (its --max-usd room, since some reviews have no measured cost)" : ""}.`);
+    console.log(`Wave ${o.wave}: ${usd(s.settledUsd)} settled (metered), ${usd(s.unmeteredUsd)} reported but not metered, and ${usd(s.reservedUsd)} reserved of its ${usd(s.cap)} cap; this run reserves ${usd(waveForecast)}${!waveMetered ? " (its reviewers bill nothing per call, so its dollars are recorded as not metered)" : " (its --max-usd room, the most it may spend)"}.`);
+    // Refused before anything is spent, the dry run too: the run's ceiling
+    // must fit in the room the wave has left.
+    if (Math.round(waveForecast * 1e9) > Math.round(s.roomUsd * 1e9)) {
+      console.error(`The run cannot start: the wave ${o.wave} has ${usd(s.roomUsd)} of room left of its ${usd(s.cap)} cap, and this run may spend up to ${usd(waveForecast)} (its --max-usd room). Lower --max-usd to ${usd(s.roomUsd + spentBefore)} or less, or start a new wave with node benchmark/lib/wave.mjs --wave-new <id>. Nothing was spent.`);
+      leave(2);
+    }
   }
   if (o.dryRun) {
     for (const j of todo) console.log(`  ${j.case} ${j.config} #${j.repeat}`);
