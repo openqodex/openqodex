@@ -248,7 +248,7 @@ describe("frozen comparisons", () => {
   it("a run made on an earlier split is refused unless its run reference names that split hash", () => {
     const f = fixture("aacr"); const run = runFixture(f);
     // An earlier split file of the suite, committed beside the current one.
-    write(join(f.root, "splits/aacr-v0.json"), { version: 0, cases: { dev: [], test: [] } });
+    write(join(f.root, "splits/aacr-v0.json"), { version: 0, suite: "aacr", cases: { dev: [], test: [] } });
     const earlier = sha256(readFileSync(join(f.root, "splits/aacr-v0.json")));
     run.entry.splitHash = earlier; run.save();
     expect(() => validateComparison(f.record, f.options), "a run on an unnamed split hash was kept").toThrow(/differs from the comparison suite/);
@@ -266,9 +266,14 @@ describe("frozen comparisons", () => {
       name(splitHash);
       expect(() => validateComparison(f.record, f.options), `${why} was kept`).toThrow(`splitHash ${splitHash} is not the hash of a aacr split file under splits/, nor a aacr group's split hash in index/accepted.json`);
     }
-    // greptile-v1, committed as an earlier split file of this suite.
+    // Another suite's split copied under this suite's name is still another
+    // suite's: the file's own suite field decides, not its name.
     cpSync(join(benchRoot, "splits/greptile-v1.json"), join(f.root, "splits/aacr-v0.json"));
     name(sha256(readFileSync(join(benchRoot, "splits/greptile-v1.json"))));
+    expect(() => validateComparison(f.record, f.options), "a renamed copy of another suite's split was kept").toThrow(/is not the hash of a aacr split file/);
+    // An earlier split file of this suite, committed beside the current one.
+    write(join(f.root, "splits/aacr-v0.json"), { version: 0, suite: "aacr", cases: { dev: [], test: [] } });
+    name(sha256(readFileSync(join(f.root, "splits/aacr-v0.json"))));
     expect(validateComparison(f.record, f.options).accepted).toBe(false);
     // A split hash an accepted group was made on is known too, with no file left.
     const gone = sha256("an edited split file");

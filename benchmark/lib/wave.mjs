@@ -47,10 +47,12 @@
 // 6. A subscription review's reported dollars fill the cap though nothing
 //    was billed: a line with "metered":false is summed apart.
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { benchRoot } from "./cases.mjs";
 import { comparisonHash } from "./comparison.mjs";
+import { isPersonName, readPeople } from "./rulings.mjs";
 
 export const WAVE_CAP_USD = 10;
 export const WAVE_PATHS = ["run", "loop", "judge-greptile", "judge-martian", "judge-aacr", "judge-wording", "calibrate"];
@@ -76,8 +78,20 @@ function append(file, line) {
   }
 }
 
-// A cap above WAVE_CAP_USD needs a reason and a comparison record that Sid
-// signed (its acceptance hash matches) whose capUsd allows the cap.
+// A cap above WAVE_CAP_USD needs a reason and a comparison record that a
+// person in review-queue/people.json signed (its acceptance hash matches),
+// committed at HEAD as it stands, whose capUsd allows the cap. A record
+// written locally with a made-up person authorises nothing.
+function committedAtHead(root, path) {
+  try {
+    const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const rel = relative(realpathSync(top), realpathSync(path)).split(sep).join("/");
+    const committed = execFileSync("git", ["show", `HEAD:${rel}`], { cwd: top, stdio: ["ignore", "pipe", "ignore"] });
+    return committed.equals(readFileSync(path));
+  } catch {
+    return false;
+  }
+}
 function capProblem(line, root) {
   if (!(Number.isFinite(line.cap) && line.cap > 0)) return "its cap must be positive dollars";
   if (line.cap <= WAVE_CAP_USD) return null;
@@ -86,8 +100,9 @@ function capProblem(line, root) {
   const path = join(root, "index/comparisons", `${line.record}.json`);
   if (!existsSync(path)) return `a cap of ${money(line.cap)} names the comparison record ${line.record}, which is not in ${join(root, "index/comparisons")}`;
   const record = readJson(path);
-  const signed = typeof record.acceptance?.person === "string" && record.acceptance.person !== "" && record.acceptance.hash === comparisonHash(record);
-  if (!signed) return `a cap of ${money(line.cap)} names ${line.record}, which is not signed as it stands`;
+  const signed = isPersonName(record.acceptance?.person, readPeople(join(root, "review-queue"))) && record.acceptance.hash === comparisonHash(record);
+  if (!signed) return `a cap of ${money(line.cap)} names ${line.record}, which is not signed as it stands by a person in review-queue/people.json`;
+  if (!committedAtHead(root, path)) return `a cap of ${money(line.cap)} names ${line.record}, whose file differs from the one committed at HEAD`;
   if (!(record.capUsd >= line.cap)) return `a cap of ${money(line.cap)} is above ${line.record}'s signed capUsd ${record.capUsd}`;
   return null;
 }
@@ -187,6 +202,33 @@ const holderText = (h) => `process ${h.pid}${h.id ? ` (${h.path} ${h.id})` : ""}
 // process that died inside it and is removed.
 const TAKING_STALE_MS = 30_000;
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+// A taking folder is dead when the pid file inside names a process that
+// has ended, or when it has no pid file after TAKING_STALE_MS (its maker
+// died between making it and writing the pid). A live owner is waited for.
+function takingDead(dir) {
+  let pid;
+  try {
+    pid = Number(readFileSync(join(dir, "pid"), "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    try {
+      return Date.now() - statSync(dir).mtimeMs > TAKING_STALE_MS;
+    } catch (statError) {
+      if (statError.code === "ENOENT") return true;
+      throw statError;
+    }
+  }
+  return Number.isInteger(pid) && !alive(pid);
+}
+function removeTaking(dir) {
+  for (const step of [() => unlinkSync(join(dir, "pid")), () => rmdirSync(dir)]) {
+    try {
+      step();
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+}
 function whileTaking(lockFile, fn) {
   const dir = `${lockFile}.taking`;
   for (let tries = 0; tries < 200; tries++) {
@@ -194,26 +236,15 @@ function whileTaking(lockFile, fn) {
       mkdirSync(dir);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      let age;
-      try {
-        age = Date.now() - statSync(dir).mtimeMs;
-      } catch (statError) {
-        if (statError.code === "ENOENT") continue;
-        throw statError;
-      }
-      if (age > TAKING_STALE_MS) {
-        try {
-          rmdirSync(dir);
-        } catch (rmError) {
-          if (rmError.code !== "ENOENT") throw rmError;
-        }
-      } else pause(25);
+      if (takingDead(dir)) removeTaking(dir);
+      else pause(25);
       continue;
     }
     try {
+      writeFileSync(join(dir, "pid"), `${process.pid}\n`);
       return fn();
     } finally {
-      rmdirSync(dir);
+      removeTaking(dir);
     }
   }
   throw new WaveRefused(`refused, nothing spent: ${dir} stays held by another spender`);
@@ -352,10 +383,12 @@ export function main(argv = process.argv.slice(2), { root = benchRoot } = {}) {
     if (rest.length !== 3) throw new WaveRefused(USAGE);
     const [waveId, id, usd] = rest;
     const w = openWave(waveId, { root });
+    // The settlement holds the wave's lock, so no spender reserves against
+    // the old reservation while the real spend is being written.
     const text = readLock(w.lockFile);
     const h = text === null ? null : lockHolder(w, text);
     if (h?.live && h.pid !== process.pid) throw new WaveRefused(`refused: ${holderText(h)} holds ${w.lockFile} and may be the run itself; settle once it has ended`);
-    if (h && !h.live) takeOver(w.lockFile, text);
+    takeLock(w, { id, path: "settle" });
     settle(w, id, Number(usd));
     console.log(`Settled ${id} at ${money(Number(usd))}. ${stateText(w)}`);
     return 0;

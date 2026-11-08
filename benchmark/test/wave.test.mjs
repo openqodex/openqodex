@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { benchRoot, repoRoot } from "../lib/cases.mjs";
+import { comparisonHash } from "../lib/comparison.mjs";
 import { laptopMetered } from "../lib/reviewers.mjs";
 import { lockHolder, main as waveMain, newWave, openWave, outstanding, reserve, settle, takeOver, waveState, WaveRefused } from "../lib/wave.mjs";
 import { aacrForecast, main as aacrJudge } from "../outside/boards/aacr-judge.mjs";
@@ -167,6 +168,12 @@ describe("the wave cap", () => {
     expect(() => waveMain(["--wave-new", "w5", "--cap", "11"], { root })).toThrow(WaveRefused);
     expect(() => newWave("w5", { root, cap: 11, why: "three repeats need it" })).toThrow(/names no signed comparison record/);
     expect(() => newWave("w5", { root, cap: 11, why: "three repeats need it", record: "compare-none" })).toThrow(/not in/);
+    // A record written locally, self-consistent, signed by a made-up person: it authorises nothing.
+    const forged = { version: 1, capUsd: 100, runs: [], acceptance: { person: "Nobody", date: "2026-11-08", hash: "" } };
+    forged.acceptance.hash = comparisonHash(forged);
+    mkdirSync(join(root, "index/comparisons"), { recursive: true });
+    writeFileSync(join(root, "index/comparisons/compare-forged.json"), `${JSON.stringify(forged)}\n`);
+    expect(() => newWave("w5", { root, cap: 11, why: "three repeats need it", record: "compare-forged" })).toThrow(/not signed as it stands by a person in review-queue/);
     expect(() => openWave("w5", { root })).toThrow(/there is no wave w5/);
     expect(newWave("w5", { root, cap: 10 }).cap).toBe(10);
   });

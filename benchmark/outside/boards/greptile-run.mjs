@@ -111,10 +111,12 @@ export async function judgeRun(opts, record, { root = benchRoot } = {}) {
   if (existsSync(pending) || existsSync(superseded)) throw new Error("the pending or superseded folder exists already; the old evaluation stays in place");
   write(join(pending, "input.json"), input);
 
-  // The wave cap, after --max-usd and above it.
+  // The wave cap, after --max-usd and above it. The relay has no per-call
+  // stop of its own, so the reservation is the run's ceiling, --max-usd,
+  // never the forecast; the settlement is the relay's measured spend.
   const wave = openWave(opts.wave, { root });
   const waveId = `${run.manifest.runId ?? folder}:judge-greptile`;
-  reserve(wave, { id: waveId, path: "judge-greptile", forecastUsd: forecast });
+  reserve(wave, { id: waveId, path: "judge-greptile", forecastUsd: opts.maxUsd });
   let relay;
   try {
     if (judgedCases > 0) relay = await relayClient({});

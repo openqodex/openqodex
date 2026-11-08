@@ -122,7 +122,14 @@ function committedRunEntry(root, runId) {
 function knownSplitHashes(root, suite) {
   const known = new Set();
   const dir = join(root, "splits");
-  if (existsSync(dir)) for (const f of readdirSync(dir)) if (f.startsWith(`${suite}-`) && f.endsWith(".json")) known.add(sha256(readFileSync(join(dir, f))));
+  if (existsSync(dir)) for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".json")) continue;
+    const bytes = readFileSync(join(dir, f));
+    let split;
+    try { split = JSON.parse(bytes.toString("utf8")); } catch { continue; }
+    // The file's own suite field, not its name: a copy of another suite's split renamed is not this suite's.
+    if (split?.suite === suite) known.add(sha256(bytes));
+  }
   const accepted = join(root, "index/accepted.json");
   if (existsSync(accepted)) for (const key of Object.keys(json(accepted).groups ?? {})) {
     const [s, , h] = key.split("|");
@@ -305,7 +312,13 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     need(suite && e.splitHash === (r.splitHash ?? suite.splitHash) && Array.isArray(e.caseIds) && e.caseIds.length > 0 && e.caseIds.every((id) => Object.entries(suite.caseHashes).some(([name, h]) => id === `${e.suite}/${name}@${h.slice(0, 8)}`)), `run ${r.runId} differs from the comparison suite`);
     const ids = suiteCaseIds(e.suite, suite);
     need(Array.isArray(r.casesNotRun) && sameIds([...e.caseIds, ...r.casesNotRun], ids), `run ${r.runId} caseIds and casesNotRun must account for every frozen suite case exactly once`);
+    // The guards attach applies, applied again to every run the record
+    // holds: a stopped run lists the cases it planned, and an unhealthy
+    // review counts as a miss only when the exceptions block names it.
+    need(e.ended?.how === "finished", `run ${r.runId} ended ${e.ended?.how ?? "unknown"}; only a finished run counts in a comparison`);
     const folder = reference(root, `results/${r.runId}`, "run folder");
+    const unhealthy = attachRefusal(record, r.runId, folder);
+    need(unhealthy === null, unhealthy);
     const { listHash } = hashReviewedFolder(folder);
     need(listHash === e.asset.listHash || listHash === e.privateListHash, `run ${r.runId} folder differs from its asset or private list hash`);
     const manifest = json(reference(root, `results/${r.runId}/manifest.json`, "run manifest"));
