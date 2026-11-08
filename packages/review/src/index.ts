@@ -2,7 +2,7 @@
 // the conversation with the reviewer, the reviewer drivers, and the scan and
 // graph steps every command shares. Private to this repository; the CLI
 // bundle inlines it.
-export { checkoutsDir } from "./checkouts.js";
+export { CHECKOUT_MARKER, checkoutsDir } from "./checkouts.js";
 export { DELIVER_LINES, deliverRanges, parseAnswer, redactSnapshot } from "./conversation.js";
 export { buildGraphRun, buildHotSpots, nothingToReviewLine, ruleCoverage, scanChange, wholeRepoLenses } from "./pipeline.js";
 export type { GraphHost, GraphRun, PipelineResult, ScanHost } from "./pipeline.js";

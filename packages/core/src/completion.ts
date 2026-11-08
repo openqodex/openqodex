@@ -17,13 +17,16 @@ import type { Change, CompletionRecord, ModelAttempt, ModelCompletionRecord, Mod
 // outside the snapshot on the agent's own saved output of this session
 // (Claude Code's tool-results folder), which reads no repository file.
 // `session`: in a staged review, the ReviewerRole of the session that made
-// the call (every session's calls are kept in one trace).
-export type TraceEntry = { tool: string; path: string | null; inside: boolean | null; range: [number, number] | null; ok: boolean; detail?: string; own?: true; session?: string };
+// the call (every session's calls are kept in one trace). `checkoutParent`: a
+// refused call on the folder around the snapshot, which holds only the
+// checkout's marker file; a warning in the report.
+export type TraceEntry = { tool: string; path: string | null; inside: boolean | null; range: [number, number] | null; ok: boolean; detail?: string; own?: true; checkoutParent?: true; session?: string };
 
 // Whether a call left the snapshot: anything not shown inside it, except the
-// agent's own saved output of this session.
+// agent's own saved output of this session and a refused call on the
+// snapshot's own checkout folder.
 export function outsideSnapshot(t: TraceEntry): boolean {
-  return t.inside !== true && t.own !== true;
+  return t.inside !== true && t.own !== true && t.checkoutParent !== true;
 }
 
 export type Hunk = { path: string; start: number; end: number; deletion: boolean };
@@ -147,6 +150,7 @@ export function completionRecord(args: {
   // Fails closed: an attempt counts, whether or not the agent's own rules refused it.
   const outside = traced ? [...new Set(args.trace.filter(outsideSnapshot).map((t) => t.path ?? "(no path)"))] : [];
   if (outside.length > 0) missing.push(`the reviewer tried to read outside the snapshot: ${listed(outside)}`);
+  const refused = traced ? [...new Set(args.trace.filter((t) => t.checkoutParent === true).map((t) => t.path ?? "(no path)"))] : [];
   const given = args.tools ?? REVIEWER_TOOLS;
   const tools = traced ? [...new Set(args.trace.map((t) => t.tool).filter((t) => !given.includes(t)))] : [];
   if (tools.length > 0) missing.push(`the reviewer used a tool it was not given: ${tools.join(", ")}`);
@@ -171,6 +175,7 @@ export function completionRecord(args: {
     // Reads were not measured without a complete trace: no file is listed as read or not read.
     coverage: traced ? args.coverage : { ...args.coverage, files_read: [], files_not_read: [] },
     outside_reads: outside,
+    ...(refused.length > 0 ? { refused_checkout_reads: refused } : {}),
     trace_complete: traced,
   };
 }

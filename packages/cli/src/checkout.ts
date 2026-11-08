@@ -14,7 +14,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { OpenQodexError, quoteAlternate, readRepoFile, safeGit } from "@openqodex/core";
-import { checkoutsDir, lfsPaths } from "@openqodex/review";
+import { CHECKOUT_MARKER, checkoutsDir, lfsPaths } from "@openqodex/review";
 import type { SnapshotMaker } from "@openqodex/review";
 
 // How many changed files a checkout stores in Git LFS: the review core's
@@ -22,8 +22,6 @@ import type { SnapshotMaker } from "@openqodex/review";
 export { lfsPaths };
 
 const execFileAsync = promisify(execFile);
-
-export const CHECKOUT_MARKER = "openqodex-checkout.json";
 
 // A checkout older than this with no finalize is abandoned.
 const ABANDONED_MS = 24 * 3600_000;

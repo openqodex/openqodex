@@ -4,6 +4,9 @@
 import { join } from "node:path";
 import { openqodexHome } from "@openqodex/scanners";
 
+// The file a checkout keeps beside its tree, naming the repository.
+export const CHECKOUT_MARKER = "openqodex-checkout.json";
+
 export function checkoutsDir(): string {
   return join(openqodexHome(), "checkouts");
 }
