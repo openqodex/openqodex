@@ -184,10 +184,10 @@ export function attachRefusal(record, runId, folder) {
   return `run ${runId} has ${left.length} unhealthy review${left.length === 1 ? "" : "s"}; name each in the record's exceptions block as { runId, jobId, why } to attach it as a miss:\n${left.map((u) => `${u.jobId}: ${u.reason}`).join("\n")}`;
 }
 
-// Attaching refuses a board review run with fewer repeats than the record pins: a
-// record frozen before the pin existed holds BOARD_REPEATS. The check runs
-// at attach time only, so the runs a record already holds are not judged
-// again by it.
+// A board review run with fewer repeats than the record pins is refused, at
+// attach time and by validateComparison for every run the record holds: a
+// record frozen before the pin existed holds BOARD_REPEATS. A run the
+// record's exceptions block names with jobId "*" and a why is let through.
 export function repeatRefusal(record, entry) {
   if (!SUITES[entry.suite]?.board || entry.mode === "scan") return null;
   const pin = record.repeats ?? BOARD_REPEATS;
@@ -306,6 +306,9 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     const settings = manifest.reviewers?.[reviewer.reviewer]?.settings;
     need((settings?.effort ?? null) === reviewer.effort && (settings?.maxOutputTokens ?? null) === reviewer.maxOutputTokens, `run ${r.runId} differs from its reviewer settings`);
     validateRunBoard(e, folder, ids, r.casesNotRun, record.boards[SUITES[e.suite]?.board], { root });
+    const repeats = repeatRefusal(record, e);
+    const excused = (record.exceptions ?? []).some((x) => object(x) && x.runId === r.runId && x.jobId === "*" && text(x.why));
+    need(repeats === null || excused, `${repeats}; or name the run in the record's exceptions block as { runId, jobId: "*", why }`);
   }
   need(record.exceptions === undefined || (Array.isArray(record.exceptions) && record.exceptions.every((x) => object(x) && text(x.runId) && text(x.jobId) && text(x.why))), "comparison exceptions must each name runId, jobId and why");
   const a = record.acceptance;

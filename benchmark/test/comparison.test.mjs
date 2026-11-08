@@ -34,6 +34,7 @@
 // 33. A later checkout's build prevents attaching the record's own build.
 // 34. A diagnostic run attaches to a comparison.
 // 35. A board run with fewer repeats than the record pins attaches (step 2, O9).
+// 36. A record keeps a board run with fewer repeats than it pins, unnamed in its exceptions.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -290,6 +291,17 @@ describe("frozen comparisons", () => {
     const attached = attach(f, run.entry.runId);
     expect(attached.status, attached.stderr).toBe(0);
     for (const repeats of [0, 1.5, "3"]) expect(() => validateComparison({ ...f.record, repeats }, f.options)).toThrow(/repeats must be a whole number/);
+  });
+  it("a record pinning three repeats refuses a one repeat run it holds, unless its exceptions block names the run with jobId * (failure 36)", () => {
+    const f = fixture("aacr"); const run = runFixture(f);
+    expect(run.entry.repeat).toBe(1);
+    f.record.repeats = 3;
+    expect(() => validateComparison(f.record, f.options), "a one repeat run was kept under a pin of three").toThrow(`run ${run.entry.runId} has 1 repeat, and the record pins 3 for a board run`);
+    // An exception for one review is not an exception for the run's repeats.
+    f.record.exceptions = [{ runId: run.entry.runId, jobId: `${run.entry.caseIds[0]}/${run.entry.configs[0]}/1`, why: "an unhealthy review" }];
+    expect(() => validateComparison(f.record, f.options)).toThrow(/has 1 repeat/);
+    f.record.exceptions.push({ runId: run.entry.runId, jobId: "*", why: "run before the repeats pin existed; one repeat, wave 9" });
+    expect(validateComparison(f.record, f.options).accepted).toBe(false);
   });
   it("a run with an unhealthy review is refused, naming it, and attaches once the record's exceptions block names it (issue 284)", () => {
     const f = fixture("greptile", true); const run = runFixture(f);
