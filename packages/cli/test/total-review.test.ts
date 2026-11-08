@@ -686,7 +686,9 @@ describe("what leaves the process", () => {
 });
 
 // The installed gitleaks of the end-to-end home or the developer's home, for
-// the cases that need a secret found by the real scanner; null when neither has it.
+// the cases that need a secret found by the real scanner; null when neither
+// has it, and those cases are reported as skipped. The full gate fills the
+// end-to-end home first (scripts/require-scanners.mjs), so there they run.
 function installedGitleaks(): string | null {
   for (const h of [process.env.OPENQODEX_E2E_HOME ?? cacheFolder("openqodex-e2e-home"), join(homedir(), ".openqodex")]) {
     if (existsSync(join(h, "tools/gitleaks"))) return join(h, "tools/gitleaks");
@@ -714,8 +716,7 @@ describe("21. secrets outside file contents", () => {
     return readdirSync(run, { recursive: true }).map(String).filter((n) => statSync(join(run, n)).isFile()).map((n) => readFileSync(join(run, n), "utf8")).join("\n");
   };
 
-  it("a secret in a file name stops the review before the reviewer starts, and is printed nowhere", async () => {
-    if (gitleaks === null) return void process.stdout.write("filename secret: skipped, gitleaks is not installed\n");
+  it.skipIf(gitleaks === null)("a secret in a file name stops the review before the reviewer starts, and is printed nowhere", async () => {
     const key = secret();
     const dir = withSecret(key, true);
     const driver = fake([good]);
@@ -727,8 +728,7 @@ describe("21. secrets outside file contents", () => {
     expect(out + err + runFiles(dir)).not.toContain(key);
   });
 
-  it("a secret in a tool call's input is redacted in trace.json and the completion record", async () => {
-    if (gitleaks === null) return void process.stdout.write("trace secret: skipped, gitleaks is not installed\n");
+  it.skipIf(gitleaks === null)("a secret in a tool call's input is redacted in trace.json and the completion record", async () => {
     const key = secret();
     const dir = withSecret(key, false);
     const leak: Answer = () => ({ finalText: "not json", calls: [{ tool: "Read", input: { file_path: `/outside/${key}` }, ok: false, read: null }] });
@@ -736,8 +736,7 @@ describe("21. secrets outside file contents", () => {
     expect(out + err + runFiles(dir)).not.toContain(key);
   });
 
-  it("36. a secret the reviewer's answer holds as a key is redacted in rounds.json and every other run file", async () => {
-    if (gitleaks === null) return void process.stdout.write("round key secret: skipped, gitleaks is not installed\n");
+  it.skipIf(gitleaks === null)("36. a secret the reviewer's answer holds as a key is redacted in rounds.json and every other run file", async () => {
     const key = secret();
     const dir = withSecret(key, false);
     // Every answer fails its checks and holds the secret as a key, so each
@@ -929,9 +928,8 @@ describe("25. what a correction message may carry", () => {
     expect(r.text).toBe('a.py: 1 line removed between lines 1 and 2 (with context 1 to 2):\n1\tone\n-\tKEY = "[redacted]"\n2\ttwo');
   });
 
-  it("a planted secret in an unread range never reaches the correction the reviewer gets", async () => {
-    const gitleaks = installedGitleaks();
-    if (gitleaks === null) return void process.stdout.write("correction secret: skipped, gitleaks is not installed\n");
+  it.skipIf(installedGitleaks() === null)("a planted secret in an unread range never reaches the correction the reviewer gets", async () => {
+    const gitleaks = installedGitleaks()!;
     const dir = repo();
     const secret = `sk_live_${Array.from({ length: 24 }, (_, i) => "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[(i * 7 + Math.floor(Math.random() * 57)) % 57]).join("")}`;
     writeFileSync(join(dir, "big.py"), `${Array.from({ length: 3000 }, (_, i) => `value_${i} = "${"y".repeat(70)}"`).join("\n")}\nSTRIPE_KEY = "${secret}"\n`);
