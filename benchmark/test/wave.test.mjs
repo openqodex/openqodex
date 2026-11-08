@@ -14,14 +14,16 @@
 // 7. The AACR judge forecasts from the wrong calibration, or not at all.
 // 8. A review run reserves its estimate though it may spend up to its
 //    --max-usd, so one run overspends the wave's room.
+// 9. Two spenders that both saw a dead holder's lock both clear it and
+//    both take the wave: the second one clears the first one's fresh lock.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { benchRoot, repoRoot } from "../lib/cases.mjs";
 import { laptopMetered } from "../lib/reviewers.mjs";
-import { lockHolder, main as waveMain, newWave, openWave, outstanding, reserve, settle, waveState, WaveRefused } from "../lib/wave.mjs";
+import { lockHolder, main as waveMain, newWave, openWave, outstanding, reserve, settle, takeOver, waveState, WaveRefused } from "../lib/wave.mjs";
 import { aacrForecast, main as aacrJudge } from "../outside/boards/aacr-judge.mjs";
 import { main as greptileRun } from "../outside/boards/greptile-run.mjs";
 import { main as calibrate } from "../outside/calibrate.mjs";
@@ -111,6 +113,32 @@ describe("the wave cap", () => {
     expect(lockHolder(wave)).toMatchObject({ pid: process.pid, live: true });
     settle(wave, "second-run", 0.5);
     expect(lockHolder(wave)).toBeNull();
+  });
+
+  it("lets only one of two spenders that saw the same dead holder take the lock (failure 9)", async () => {
+    const root = tempDir("oq-wave-");
+    const wave = newWave("w9", { root });
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    const stale = `${JSON.stringify({ pid: dead, at: "2026-11-01T00:00:00.000Z", id: "dead-run", path: "run" })}\n`;
+    writeFileSync(wave.lockFile, stale);
+    // The first spender, a real process, clears the dead lock and takes the wave.
+    const first = spender(root, "w9", "first-run", 1);
+    try {
+      await first.reserved;
+      const fresh = readFileSync(wave.lockFile, "utf8");
+      expect(JSON.parse(fresh)).toMatchObject({ pid: first.child.pid, id: "first-run" });
+      // The second spender saw the same dead holder before the first took
+      // over: its takeover finds other bytes, puts them back and clears nothing.
+      expect(takeOver(wave.lockFile, stale)).toBe(false);
+      expect(readFileSync(wave.lockFile, "utf8")).toBe(fresh);
+      expect(() => reserve(wave, { id: "second-run", path: "run", forecastUsd: 1 })).toThrow(new RegExp(`process ${first.child.pid} \\(run first-run\\)`));
+    } finally {
+      await first.killed();
+    }
+    // Nothing is left aside, and a takeover of the bytes it saw clears the lock.
+    expect(readdirSync(wave.dir).filter((f) => f.includes(".stale-") || f.endsWith(".tmp"))).toEqual([]);
+    expect(takeOver(wave.lockFile, readFileSync(wave.lockFile, "utf8"))).toBe(true);
+    expect(existsSync(wave.lockFile)).toBe(false);
   });
 
   it("refuses a cap above 10 USD without a why, and without a signed record that allows it", () => {

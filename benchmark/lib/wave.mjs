@@ -46,7 +46,7 @@
 // 5. A cap above 10 is written without a reason or a signature.
 // 6. A subscription review's reported dollars fill the cap though nothing
 //    was billed: a line with "metered":false is summed apart.
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { benchRoot } from "./cases.mjs";
@@ -166,12 +166,12 @@ const alive = (pid) => {
   }
 };
 
-/** Who holds the wave's lock: { pid, at, id, path, live }, or null. */
-export function lockHolder(wave) {
-  if (!existsSync(wave.lockFile)) return null;
+/** Who holds the wave's lock: { pid, at, id, path, live }, or null. `text` is the lock's bytes when already read. */
+export function lockHolder(wave, text = null) {
+  if (text === null && !existsSync(wave.lockFile)) return null;
   let held;
   try {
-    held = readJson(wave.lockFile);
+    held = JSON.parse(text ?? readFileSync(wave.lockFile, "utf8"));
   } catch {
     held = {};
   }
@@ -180,23 +180,59 @@ export function lockHolder(wave) {
 
 const holderText = (h) => `process ${h.pid}${h.id ? ` (${h.path} ${h.id})` : ""}, since ${h.at}`;
 
-// Takes the lock for this process, clearing a stale one. Returns true when
-// it took it now, false when this process held it already.
-function takeLock(wave, who) {
-  for (let tries = 0; tries < 3; tries++) {
+// Clears a stale lock whose bytes were `staleText` when its holder was seen
+// dead. The lock is renamed aside first, so of two processes that saw the
+// same dead holder only one moves those bytes; one that moved another
+// spender's fresh lock instead puts it back. True when the stale lock is gone.
+export function takeOver(lockFile, staleText) {
+  const aside = `${lockFile}.stale-${process.pid}`;
+  try {
+    renameSync(lockFile, aside);
+  } catch (error) {
+    if (error.code === "ENOENT") return true;
+    throw error;
+  }
+  const moved = readFileSync(aside, "utf8");
+  if (moved !== staleText) {
     try {
-      const fd = openSync(wave.lockFile, "wx");
-      writeSync(fd, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString(), ...who })}\n`);
-      closeSync(fd);
-      return true;
+      linkSync(aside, lockFile);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
-    const h = lockHolder(wave);
-    if (h === null) continue;
-    if (h.pid === process.pid) return false;
-    if (h.live) throw new WaveRefused(`refused, nothing spent: the wave ${wave.id} has one spender at a time, and ${holderText(h)} holds ${wave.lockFile}`);
-    unlinkSync(wave.lockFile);
+  }
+  unlinkSync(aside);
+  return moved === staleText;
+}
+
+// Takes the lock for this process, clearing a stale one. Returns true when
+// it took it now, false when this process held it already. The lock is
+// written whole to a temp file and linked into place, so no reader sees it
+// half written.
+function takeLock(wave, who) {
+  const tmp = `${wave.lockFile}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString(), ...who })}\n`);
+  try {
+    for (let tries = 0; tries < 3; tries++) {
+      try {
+        linkSync(tmp, wave.lockFile);
+        return true;
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+      }
+      let staleText;
+      try {
+        staleText = readFileSync(wave.lockFile, "utf8");
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+      const h = lockHolder(wave, staleText);
+      if (h.pid === process.pid) return false;
+      if (h.live) throw new WaveRefused(`refused, nothing spent: the wave ${wave.id} has one spender at a time, and ${holderText(h)} holds ${wave.lockFile}`);
+      takeOver(wave.lockFile, staleText);
+    }
+  } finally {
+    unlinkSync(tmp);
   }
   throw new WaveRefused(`refused, nothing spent: could not take ${wave.lockFile}`);
 }
