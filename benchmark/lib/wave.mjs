@@ -323,7 +323,7 @@ export function main(argv = process.argv.slice(2), { root = benchRoot } = {}) {
     const w = openWave(waveId, { root });
     const h = lockHolder(w);
     if (h?.live && h.pid !== process.pid) throw new WaveRefused(`refused: ${holderText(h)} holds ${w.lockFile} and may be the run itself; settle once it has ended`);
-    if (h && !h.live) unlinkSync(w.lockFile);
+    if (h && !h.live) takeOver(w.lockFile, readFileSync(w.lockFile, "utf8"));
     settle(w, id, Number(usd));
     console.log(`Settled ${id} at ${money(Number(usd))}. ${stateText(w)}`);
     return 0;
