@@ -46,10 +46,10 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readState } from "../src/update/state.js";
+import { readState, updatesAllowed } from "../src/update/state.js";
 import { bundleChildEntry } from "./bundle.js";
 import { BIN, cli, env, git, sandbox, type Sandbox } from "./init-helpers.js";
-import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
+import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
 
@@ -114,15 +114,14 @@ describe("when a check starts", () => {
   // Each sandbox runs one command through the launcher (or not) with an
   // update due, then the test waits once. A worker writes checkedAt as its
   // first act, so a missing checkedAt after the wait means none started.
+  // The switches read from the environment and the user config are one
+  // decision (updatesAllowed), tested in-process below; `update: off` stays
+  // here as the run that proves the launcher's check goes through it.
   const cases: Record<string, { s?: Sandbox; run: (s: Sandbox) => void; setup?: (s: Sandbox) => void }> = {
     control: { run: (s) => launch(s, ["hook", "check"], {}, "{}") },
     recent: { setup: (s) => writeState(s, { checkedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() }), run: (s) => launch(s, ["hook", "check"], {}, "{}") },
     offlineFlag: { run: (s) => launch(s, ["scan", "--offline", "--no-install"]) },
-    offlineEnv: { run: (s) => launch(s, ["hook", "check"], { OPENQODEX_OFFLINE: "1" }, "{}") },
-    envSwitch: { run: (s) => launch(s, ["hook", "check"], { OPENQODEX_AUTO_UPDATE: "0" }, "{}") },
-    ci: { run: (s) => launch(s, ["hook", "check"], { CI: "true" }, "{}") },
     configOff: { setup: (s) => writeFileSync(join(s.oqHome, "config.yaml"), "update: off\n"), run: (s) => launch(s, ["hook", "check"], {}, "{}") },
-    configBroken: { setup: (s) => writeFileSync(join(s.oqHome, "config.yaml"), "update: [on\n"), run: (s) => launch(s, ["hook", "check"], {}, "{}") },
     npx: { run: (s) => direct(s, ["hook", "check"], {}, "{}") },
   };
   const checkedAt = (s: Sandbox): unknown => readState(s.oqHome).checkedAt;
@@ -147,36 +146,39 @@ describe("when a check starts", () => {
     expect(checkedAt(cases.recent.s!)).toBe(before.recent);
   });
   it("--offline starts no worker (failure 2)", () => expect(checkedAt(cases.offlineFlag.s!)).toBeNull());
-  it("OPENQODEX_OFFLINE=1 starts no worker (failure 2)", () => expect(checkedAt(cases.offlineEnv.s!)).toBeNull());
-  it("OPENQODEX_AUTO_UPDATE=0 starts no worker (failure 2)", () => expect(checkedAt(cases.envSwitch.s!)).toBeNull());
-  it("CI starts no worker (failure 2)", () => expect(checkedAt(cases.ci.s!)).toBeNull());
   it("update: off in the user config starts no worker (failure 2)", () => expect(checkedAt(cases.configOff.s!)).toBeNull());
-  it("a user config that does not parse starts no worker (failure 2)", () => expect(checkedAt(cases.configBroken.s!)).toBeNull());
   it("a run not started through the launcher starts no worker (failure 3)", () => expect(checkedAt(cases.npx.s!)).toBeNull());
 });
 
+describe("which switches allow a check (failure 2)", () => {
+  // The decision every launcher run consults before it starts a worker. The
+  // launcher run with `update: off` above proves the run goes through it.
+  const table: [string, NodeJS.ProcessEnv, string | null, boolean][] = [
+    ["no switch set", {}, null, true],
+    ["OPENQODEX_OFFLINE=1", { OPENQODEX_OFFLINE: "1" }, null, false],
+    ["OPENQODEX_AUTO_UPDATE=0", { OPENQODEX_AUTO_UPDATE: "0" }, null, false],
+    ["CI", { CI: "true" }, null, false],
+    ["update: off in the user config", {}, "update: off\n", false],
+    ["update: on in the user config", {}, "update: on\n", true],
+    ["a user config that does not parse", {}, "update: [on\n", false],
+  ];
+  it.each(table)("%s", (_name, environment, config, allowed) => {
+    const home = tempDir("oq-allowed-");
+    if (config !== null) writeFileSync(join(home, "config.yaml"), config);
+    expect(updatesAllowed(home, environment).allowed).toBe(allowed);
+  });
+});
+
 describe("what the command prints and returns", () => {
-  let s: Sandbox;
-  beforeAll(() => {
-    s = installed();
-    writeFileSync(join(s.repo, "app.py"), "print('hello')\n");
-  });
-
-  it("the exit code is the same with an update due and with updates off (failure 4)", () => {
-    const due = launch(s, ["scan", "--format", "json", "--no-install"]);
-    const off = launch(s, ["scan", "--format", "json", "--no-install"], { OPENQODEX_AUTO_UPDATE: "0" });
-    expect(due.status).toBe(off.status);
-  });
-
-  it("the notice goes to stderr, once, and stdout stays one JSON document (failures 5 and 6)", async () => {
-    // A home of its own: the test above starts a background update check in
-    // its home on purpose, which takes that home's lock, and an activation
-    // with no wait beside it reports busy (#57).
+  it("with an update due the exit code is 0 and stdout one JSON document; the notice goes to stderr, once (failures 4, 5 and 6)", async () => {
     const own = installed();
     await activateCopy(own, NEWER, version);
     writeFileSync(join(own.repo, "app.py"), "print('hello')\n");
-    const first = launch(own, ["scan", "--format", "json", "--no-install"], { OPENQODEX_AUTO_UPDATE: "0" });
+    // An update is due: this run starts a worker after it, and prints the notice.
+    const first = launch(own, ["scan", "--format", "json", "--no-install"]);
     const second = launch(own, ["scan", "--format", "json", "--no-install"], { OPENQODEX_AUTO_UPDATE: "0" });
+    expect(first.status, first.stderr).toBe(0);
+    expect(second.status, second.stderr).toBe(0);
     expect(() => JSON.parse(first.stdout)).not.toThrow();
     expect(first.stdout).not.toMatch(NOTICE);
     expect(first.stderr).toContain(`openqodex updated to ${NEWER} (was ${version}). Roll back: openqodex update --rollback`);
@@ -208,34 +210,57 @@ beforeAll(async () => {
   child = await bundleChildEntry();
 }, 60_000);
 
-describe("runtimes kept by init", () => {
+describe("runtimes kept by a background switch and by init", () => {
   let s: Sandbox;
   const rt = (v: string) => join(s.oqHome, "runtime", v);
+  // Which runtime folders were there right after the switch, before init ran.
+  let afterSwitch: Record<string, boolean> = {};
   beforeAll(async () => {
     s = installed();
+    // The switch first: it removes openqodex runtimes older than 7 days
+    // except the baked-in, current and previous ones.
     for (const v of ["0.0.5", "0.0.6", "0.0.8"]) copyRuntime(s, v);
+    for (const v of [version, "0.0.5", "0.0.8"]) age(rt(v), 8);
+    await activateCopy(s, NEWER, version);
+    afterSwitch = Object.fromEntries([version, NEWER, "0.0.5", "0.0.6", "0.0.8"].map((v) => [v, existsSync(rt(v))]));
+    expect(current(s)).toBe(NEWER);
+    // Then init, with old runtimes laid out again.
+    for (const v of ["0.0.5", "0.0.8"]) copyRuntime(s, v);
     // 0.0.7 is not an openqodex runtime: not ours to remove.
     mkdirSync(rt("0.0.7"));
     writeFileSync(join(rt("0.0.7"), "package.json"), JSON.stringify({ name: "something-else" }));
     writeFileSync(join(s.oqHome, "runtime/current"), `${NEWER}\n0.0.8\n`);
-    copyRuntime(s, NEWER);
     for (const v of [version, "0.0.5", "0.0.7", "0.0.8", NEWER]) age(rt(v), 8);
     const r = cli(s, ["init", "--yes", "--hook", "none", "--no-repo", "--agent", "claude-code"]);
     expect(r.status, r.stderr).toBe(0);
   }, 120_000);
 
-  it("keeps the baked-in runtime even when it is old (failure 11)", () => expect(existsSync(rt(version))).toBe(true));
-  it("keeps the runtime that was current before init, as previous, even when it is old (failure 11)", () => expect(existsSync(rt(NEWER))).toBe(true));
-  it("removes an openqodex runtime older than 7 days that no rule keeps", () => {
+  it("the switch removes openqodex runtimes older than 7 days except the baked-in, current and previous ones (failure 22)", () => {
+    expect(afterSwitch).toEqual({ [version]: true, [NEWER]: true, "0.0.6": true, "0.0.5": false, "0.0.8": false });
+  });
+  it("init keeps the baked-in runtime even when it is old (failure 11)", () => expect(existsSync(rt(version))).toBe(true));
+  it("init keeps the runtime that was current before init, as previous, even when it is old (failure 11)", () => expect(existsSync(rt(NEWER))).toBe(true));
+  it("init removes an openqodex runtime older than 7 days that no rule keeps", () => {
     expect(existsSync(rt("0.0.5"))).toBe(false);
     expect(existsSync(rt("0.0.8"))).toBe(false);
   });
-  it("leaves a runtime folder that is not openqodex", () => expect(existsSync(rt("0.0.7"))).toBe(true));
+  it("init leaves a runtime folder that is not openqodex", () => expect(existsSync(rt("0.0.7"))).toBe(true));
 });
+
+// One installed home for the boundary's refusals below. Each case leaves it
+// as it found it: the launcher on this version, no other runtime, no config.
+let refusals: Sandbox | null = null;
+function refusalHome(): Sandbox {
+  refusals ??= installed();
+  expect(current(refusals)).toBe(version);
+  expect(existsSync(join(refusals.oqHome, "runtime", NEWER))).toBe(false);
+  expect(existsSync(join(refusals.oqHome, "config.yaml"))).toBe(false);
+  return refusals;
+}
 
 describe("the contract a release declares", () => {
   it("a release whose own package.json declares another contract than the registry said is skipped, and the launcher stays (failure 20)", async () => {
-    const s = installed();
+    const s = refusalHome();
     await activateCopy(s, NEWER, version, { said: { agent: CONTRACT.agent + 1, config: CONTRACT.config }, outcome: "skip" });
     expect(current(s)).toBe(version);
     expect(existsSync(join(s.oqHome, "runtime", NEWER))).toBe(false);
@@ -254,23 +279,27 @@ describe("a worker that outlives the version that started it", () => {
   });
 
   it("is refused at the boundary when its own version is not the active one (failure 23)", async () => {
-    const s = installed();
+    const s = refusalHome();
     const out = await activateCopy(s, NEWER, version, { running: "0.98.0", outcome: "refused" });
     expect(out).toMatch(/0\.98\.0/);
     expect(current(s)).toBe(version);
   }, 120_000);
 
   it("is refused at the boundary when skip_version was written while it downloaded (failure 24)", async () => {
-    const s = installed();
+    const s = refusalHome();
     writeFileSync(join(s.oqHome, "config.yaml"), `skip_version: ${NEWER}\n`);
-    const out = await activateCopy(s, NEWER, version, { outcome: "refused" });
-    expect(out).toMatch(/skip_version/);
-    expect(current(s)).toBe(version);
-    expect(existsSync(join(s.oqHome, "runtime", NEWER))).toBe(false);
+    try {
+      const out = await activateCopy(s, NEWER, version, { outcome: "refused" });
+      expect(out).toMatch(/skip_version/);
+      expect(current(s)).toBe(version);
+      expect(existsSync(join(s.oqHome, "runtime", NEWER))).toBe(false);
+    } finally {
+      rmSync(join(s.oqHome, "config.yaml"), { force: true });
+    }
   }, 120_000);
 
   it("is refused at the boundary when the release changes the contract it keeps (failure 25)", async () => {
-    const s = installed();
+    const s = refusalHome();
     await activateCopy(s, NEWER, version, { keep: { agent: CONTRACT.agent + 1, config: CONTRACT.config }, outcome: "refused" });
     expect(current(s)).toBe(version);
   }, 120_000);
@@ -298,21 +327,15 @@ describe("a release's own package.json", () => {
   });
 });
 
-describe("runtimes kept by a background switch", () => {
-  it("the switch removes openqodex runtimes older than 7 days except the baked-in, current and previous ones (failure 22)", async () => {
-    const s = installed();
-    const rt = (v: string) => join(s.oqHome, "runtime", v);
-    for (const v of ["0.0.5", "0.0.6", "0.0.8"]) copyRuntime(s, v);
-    for (const v of [version, "0.0.5", "0.0.8"]) age(rt(v), 8);
-    await activateCopy(s, NEWER, version);
-    expect(current(s)).toBe(NEWER);
-    expect(existsSync(rt(version)), "baked-in and previous").toBe(true);
-    expect(existsSync(rt(NEWER)), "current").toBe(true);
-    expect(existsSync(rt("0.0.6")), "younger than 7 days").toBe(true);
-    expect(existsSync(rt("0.0.5"))).toBe(false);
-    expect(existsSync(rt("0.0.8"))).toBe(false);
-  }, 120_000);
-});
+// One installed home for the update command's refusals and switches below.
+// Each case leaves it as it found it: this version active, no user config.
+let updateHome: Sandbox | null = null;
+function commandHome(): Sandbox {
+  updateHome ??= installed();
+  expect(readFileSync(join(updateHome.oqHome, "runtime/current"), "utf8").split("\n")[0]).toBe(version);
+  expect(existsSync(join(updateHome.oqHome, "config.yaml"))).toBe(false);
+  return updateHome;
+}
 
 describe("rollback", () => {
   it("points back at the previous runtime, keeps updates on and skips the release it left (failures 12 and 13)", async () => {
@@ -332,26 +355,36 @@ describe("rollback", () => {
   }, 120_000);
 
   it("refuses when the previous runtime is gone and leaves the record alone (failure 12)", () => {
-    const s = installed();
-    writeFileSync(join(s.oqHome, "runtime/current"), `${version}\n0.0.9\n`);
-    const r = launch(s, ["update", "--rollback"]);
-    expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/0\.0\.9/);
-    expect(current(s)).toBe(version);
+    const s = commandHome();
+    const record = join(s.oqHome, "runtime/current");
+    const was = readFileSync(record, "utf8");
+    writeFileSync(record, `${version}\n0.0.9\n`);
+    try {
+      const r = launch(s, ["update", "--rollback"]);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/0\.0\.9/);
+      expect(readFileSync(record, "utf8")).toBe(`${version}\n0.0.9\n`);
+    } finally {
+      writeFileSync(record, was);
+    }
   });
 
   it("update --off and --on write the user config; --on refuses a config that does not parse", () => {
-    const s = installed();
-    expect(launch(s, ["update", "--off"]).status).toBe(0);
-    expect(readFileSync(join(s.oqHome, "config.yaml"), "utf8")).toMatch(/^update: off$/m);
-    expect(launch(s, ["update", "--on"]).status).toBe(0);
-    expect(readFileSync(join(s.oqHome, "config.yaml"), "utf8")).toMatch(/^update: on$/m);
-    writeFileSync(join(s.oqHome, "config.yaml"), "update: [on\n");
-    expect(launch(s, ["update", "--on"]).status).toBe(2);
+    const s = commandHome();
+    try {
+      expect(launch(s, ["update", "--off"]).status).toBe(0);
+      expect(readFileSync(join(s.oqHome, "config.yaml"), "utf8")).toMatch(/^update: off$/m);
+      expect(launch(s, ["update", "--on"]).status).toBe(0);
+      expect(readFileSync(join(s.oqHome, "config.yaml"), "utf8")).toMatch(/^update: on$/m);
+      writeFileSync(join(s.oqHome, "config.yaml"), "update: [on\n");
+      expect(launch(s, ["update", "--on"]).status).toBe(2);
+    } finally {
+      rmSync(join(s.oqHome, "config.yaml"), { force: true });
+    }
   });
 
   it("update refuses to run when not started through the launcher", () => {
-    const s = installed();
+    const s = commandHome();
     const r = direct(s, ["update"]);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/npx openqodex init/);
