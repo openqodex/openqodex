@@ -415,7 +415,7 @@ These are the known misses, where OpenQodex reads less than the scanner:
 - Settings: OpenQodex's own, with gosec switched on. OpenQodex does not load a `.golangci.yml` from the repository. As OpenQodex runs it, golangci-lint does not rewrite `go.mod` or `go.sum`.
 - Go version: golangci-lint 2.14.0 is built with Go 1.27. It checks code with Go 1.26 or 1.27 on your `PATH`. With a Go newer than 1.27, it cannot check the code. The report then lists `golangci` as failed, with the reason.
 - Network: OpenQodex runs it with the Go module proxy off, so it downloads no module. The modules that the repository needs must already be in your Go module cache.
-- Skipped: a module's dependencies can be listed in `go.sum` but missing from your Go module cache. The report names the packages it did not check and the fix, `go mod download`. When it checked no package, it lists `golangci` as skipped. When a changed `.go` file has no `go.mod` in its folder or above it, the report lists `golangci` as skipped for that folder. A skip is not a failure. A changed file that does not compile is still a failure, also next to a dependency that is not downloaded.
+- Skipped: a module's dependencies can be listed in `go.sum` but missing from your Go module cache. The report names the Go module, the missing dependencies and the fix, `go mod download`. When a changed `.go` file has no `go.mod` in its folder or above it, the report names that folder. When no module was linted, the report lists `golangci` as skipped. Otherwise it lists `golangci` as ran, with the note in its reason. A skip is not a failure. A changed file that does not compile is still a failure, also next to a dependency that is not downloaded.
 
 ## brakeman
 

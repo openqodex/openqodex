@@ -298,10 +298,11 @@ function asFolder(dir: string): string {
 // The fixed start of each skip part; the problem report's classifier
 // (packages/cli/src/feedback.ts) matches these words.
 function orphanSkip(orphans: string[]): string {
-  const shown = orphans.slice(0, 3).map(asFolder);
+  // Each folder is capped on its own, so a long third name is not cut.
+  const shown = orphans.slice(0, 3).map((o) => cap(toolText(asFolder(o))));
   const more = orphans.length > shown.length ? ` and ${orphans.length - shown.length} more` : "";
   const where = orphans.length > 1 ? "each folder" : "that folder";
-  return `not run on ${cap(toolText(folderList(shown)))}${more}. No go.mod is at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in ${where}`;
+  return `not run on ${folderList(shown)}${more}. No go.mod is at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in ${where}`;
 }
 
 function notDownloadedSkip(moduleRoot: string, imports: string[], partly: boolean): string {
@@ -552,7 +553,8 @@ function importNames(importPath: string, sourceLine: string): string[] {
   if (/^v\d+$/.test(last) && parts.length > 1) last = parts[parts.length - 2]!;
   const base = last.replace(/\.v\d+$/, "");
   // "github.com/satori/go.uuid" is uuid: the part after the last dot.
-  const names = [base, base.replace(/-/g, ""), base.replace(/^go-/, "").replace(/-go$/, ""), base.split(".").pop() ?? ""];
+  // "github.com/nats-io/nats.go" is nats: the part before the first dot.
+  const names = [base, base.replace(/-/g, ""), base.replace(/^go-/, "").replace(/-go$/, ""), base.split(".").pop() ?? "", base.split(".")[0] ?? ""];
   return [...new Set(names.map((n) => n.replace(/[^A-Za-z0-9_]/g, "")).filter((n) => /^[A-Za-z_]/.test(n)))];
 }
 

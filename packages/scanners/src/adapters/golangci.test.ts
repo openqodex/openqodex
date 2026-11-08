@@ -184,6 +184,12 @@ describe("parseGolangciJson on an import that is not downloaded", () => {
     Pos: { Filename: file, Line: 7 },
   });
 
+  it("reads undefined: nats next to the missing github.com/nats-io/nats.go as part of the skip", () => {
+    const out = parseGolangciJson(JSON.stringify({ Issues: [missing("github.com/nats-io/nats.go"), undefinedName("nats")] }));
+    expect(out.notDownloaded).toEqual(["github.com/nats-io/nats.go"]);
+    expect(out.typecheckErrors).toEqual([]);
+  });
+
   it("keeps a real undefined: limiter next to the missing github.com/acme/rate-limiter as a failure", () => {
     const out = parseGolangciJson(JSON.stringify({ Issues: [missing("github.com/acme/rate-limiter"), undefinedName("ratelimiter"), undefinedName("limiter")] }));
     expect(out.notDownloaded).toEqual(["github.com/acme/rate-limiter"]);
