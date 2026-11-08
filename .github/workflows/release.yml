@@ -17,11 +17,14 @@ name: Release
 # to this repository, with Contents and Pull requests read and write), not
 # with the workflow's own token: GitHub starts no workflow run for a push made
 # with that token, so the version pull request's checks would wait for a
-# click. The token is never stored while dependencies install (issue 304):
-# the checkout keeps no credentials, the install runs no dependency script,
-# and only the two steps that push get the token. When the token expires,
-# this job fails at the changesets step until a maintainer makes a new one
-# and replaces the secret.
+# click. The token is never stored while dependencies install or the
+# packages build (issue 304): the checkout keeps no credentials, the install
+# runs no dependency script, and the build step gets no secret. The changeset
+# CLI still runs with the token: changesets/action writes it to ~/.netrc and
+# passes it in the env of the version and publish commands, and ~/.netrc
+# stays for the rest of the job. When the token expires, this job fails at
+# the "Release token still valid" check, before anything is published, until
+# a maintainer makes a new one and replaces the secret.
 # Nothing else runs this workflow: not pull requests, not other branches.
 
 on:
@@ -175,8 +178,10 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       # The checkout keeps no credentials, so nothing in the git config holds
-      # a token while dependencies install. The two steps that push get the
-      # release token in their own env.
+      # a token while dependencies install or the packages build. The token
+      # reaches the job first at the "Release token still valid" check, then
+      # at the changesets step, which leaves it in ~/.netrc for the rest of
+      # the job.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -189,6 +194,15 @@ jobs:
       # No dependency's install script runs. The only one in the tree is
       # esbuild's postinstall, which the build does not need.
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      # The build runs here, with no secret in its env, not inside the
+      # changesets step, where the token is readable.
+      - run: pnpm build
+      # An expired or revoked token fails here, before npm gets a version that
+      # could then not be tagged or released.
+      - name: Release token still valid
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: gh api "repos/$GITHUB_REPOSITORY" >/dev/null
       - name: Version pull request or publish
         id: changesets
         # v1 of the action works with Changesets CLI 2, which this repo uses.
@@ -198,15 +212,16 @@ jobs:
           # openqodex@<version> in the skill, the plugin, the Action and the
           # pre-commit hook, so the gate's version check passes.
           version: pnpm version-packages
-          # Builds, then publishes through changeset publish.
-          publish: pnpm release
+          # Publishes the build made above. pnpm release would build again
+          # here, with the token readable.
+          publish: pnpm exec changeset publish
           commit: Version packages
           title: Version packages
         env:
           # The action writes this token to ~/.netrc before it runs anything,
-          # and its git-cli pushes (the version branch, the package tags) go
-          # out with it, so the version pull request's pull_request run
-          # starts on its own.
+          # and the file stays for the rest of the job. Its git-cli pushes
+          # (the version branch, the package tags) go out with it, so the
+          # version pull request's pull_request run starts on its own.
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
@@ -222,8 +237,8 @@ jobs:
           version=$(node -e 'const p = JSON.parse(process.env.PUBLISHED).find((x) => x.name === "openqodex"); if (p) process.stdout.write(p.version)')
           if [ -z "$version" ]; then echo "openqodex was not published in this run"; exit 0; fi
           # The pushes below carry the release token in an auth header set
-          # through git's environment for this step only; it is never written
-          # to the git config.
+          # through git's environment, never written to the git config, so
+          # they do not depend on the ~/.netrc changesets/action wrote.
           auth=$(printf 'x-access-token:%s' "$RELEASE_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
           export GIT_CONFIG_COUNT=1
