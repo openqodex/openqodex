@@ -19,10 +19,10 @@ name: Release
 # with that token, so the version pull request's checks would wait for a
 # click. The token is never stored while dependencies install or the
 # packages build (issue 304): the checkout keeps no credentials, the install
-# runs no dependency script, and the build step gets no secret. The changeset
-# CLI still runs with the token: changesets/action writes it to ~/.netrc and
-# passes it in the env of the version and publish commands, and ~/.netrc
-# stays for the rest of the job. When the token expires, this job fails at
+# runs no dependency script, and the build step gets no repository secret.
+# The version and publish commands still run with the token: changesets/action
+# writes it to ~/.netrc and passes it in their env, and ~/.netrc stays for
+# the rest of the job. When the token expires, this job fails at
 # the "Release token still valid" check, before anything is published, until
 # a maintainer makes a new one and replaces the secret.
 # Nothing else runs this workflow: not pull requests, not other branches.
