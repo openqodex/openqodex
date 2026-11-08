@@ -88,7 +88,9 @@ describe("matchesGlob", () => {
   // the length cap, about all that fits under the config's byte cap, against
   // a change of 100 files. Every glob runs against every path, since none
   // matches. It sets no time limit of its own; it shows the work finishes.
-  // The long timeout only ends a run that hangs.
+  // The long timeout only ends a run that hangs. One more path has 600
+  // characters the star globs match and a suffix they do not, so the old
+  // backtracking matcher hangs on it; the ordinary paths fail it fast.
   it("finishes 1,000 globs at the length cap against 100 paths", () => {
     const shapes = ["*a".repeat(MAX_GLOB / 2), `${"**a".repeat(341)}a`, "?".repeat(MAX_GLOB), `${"a/".repeat(MAX_GLOB / 2 - 1)}**`];
     const lines = Array.from({ length: 1000 }, (_, i) => `      - "${shapes[i % shapes.length]}"\n`);
@@ -98,6 +100,7 @@ describe("matchesGlob", () => {
     expect(exclude).toHaveLength(1000);
     expect(exclude.every((g) => g.length === MAX_GLOB)).toBe(true);
     const paths = Array.from({ length: 100 }, (_, i) => `packages/module-${i}/src/components/widget-${i}/index.test.tsx`);
+    paths.push(`${"a".repeat(600)}.ts`);
     expect(paths.filter((path) => exclude.some((g) => matchesGlob(path, g)))).toEqual([]);
   }, 300_000);
 });
