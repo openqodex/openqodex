@@ -76,7 +76,8 @@ function fixture({ accepted = true, committed = true, runner = false, greptile =
   git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "Build fixture");
   const build = { commit: git(repo, "rev-parse", "HEAD").trim(), tree: git(repo, "rev-parse", "HEAD^{tree}").trim(), bundleHash: bundleHash(join(repo, "packages/cli")), version: read(join(repo, "packages/cli/package.json")).version };
   write(join(root, ".build/provenance.json"), { ...build, commitTree: build.tree, dirty: false });
-  const record = freezeComparison({ release: "test-release", suites: ["aacr", ...(greptile ? ["greptile"] : [])], boards: ["aacr", ...(greptile ? ["greptile"] : [])], reviewers: { control: { path: "laptop", reviewer: "control", model: "claude-opus-5-5", graph: "off", web: "off", effort: null, maxOutputTokens: null } }, capUsd: 1 }, { root, build });
+  // The fixture runs have one repeat, so the fixture record pins one.
+  const record = freezeComparison({ release: "test-release", suites: ["aacr", ...(greptile ? ["greptile"] : [])], boards: ["aacr", ...(greptile ? ["greptile"] : [])], reviewers: { control: { path: "laptop", reviewer: "control", model: "claude-opus-5-5", graph: "off", web: "off", effort: null, maxOutputTokens: null } }, capUsd: 1, repeats: 1 }, { root, build });
   if (accepted) { record.acceptance = { person: "Sid", date: "2026-10-14", hash: "" }; record.acceptance.hash = comparisonHash(record); }
   const file = join(root, "index/comparisons/test-release.json"); write(file, record);
   if (committed) { git(repo, "add", "."); git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "Freeze comparison"); }
