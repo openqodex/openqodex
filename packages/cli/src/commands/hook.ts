@@ -80,7 +80,7 @@ function deny(message: string): void {
   emit({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: message } });
 }
 
-async function aliasOf(folder: string, name: string): Promise<string | null> {
+export async function aliasOf(folder: string, name: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync("git", ["config", "--get", `alias.${name}`], { cwd: folder, timeout: 2000 });
     return stdout.trim() === "" ? null : stdout.trim();
