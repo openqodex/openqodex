@@ -40,18 +40,20 @@ const recall = (s, interval = false) => (unruled(s) ? "not yet ruled" : ratio(s.
 // A number whose reviewer was tuned on the very cases it scored says so beside it.
 const tuned = (e, text) => (e.tunedOn === true ? `${text} (tuned on these cases)` : text);
 const suiteLabel = (e) => `${suiteName(e.suite)}, ${e.split} split${e.subset ? `, ${e.subset} subset` : ""}`;
+// The scoring rules a run was scored under; an entry from before the rules had versions is legacy.
+const rulesLabel = (e) => `scoring rules ${e.rulesVersion ?? "legacy"}`;
 // A README row names its scoring rules, so two runs that differ only there read apart (issue #280).
-// Rows that still read alike also name the rest of their group: mode, path and split hash.
+// Rows that still read alike also name the rest of their group key: mode, path, split hash and purpose.
 const casesCells = (rows) => {
-  const short = ({ e }) => `${suiteLabel(e)}, scoring rules ${e.rulesVersion}`;
+  const short = ({ e }) => `${suiteLabel(e)}, ${rulesLabel(e)}`;
   const seen = (r) => [reviewer(r.g), r.g.config, modelName(r.e, r.g), short(r)].join("\n");
   const count = new Map();
   for (const r of rows) count.set(seen(r), (count.get(seen(r)) ?? 0) + 1);
   return new Map(rows.map((r) => [r, count.get(seen(r)) > 1
-    ? `${short(r)}, ${r.e.mode} mode, ${r.e.path} path${r.e.splitHash ? `, split hash ${r.e.splitHash.slice(0, 12)}` : ""}`
+    ? `${short(r)}, ${r.e.mode} mode, ${r.e.path} path${r.e.splitHash ? `, split hash ${r.e.splitHash.slice(0, 12)}` : ""}${r.e.purpose ? `, ${r.e.purpose} purpose` : ""}`
     : short(r)]));
 };
-const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, `rules ${e.rulesVersion}`, ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : [])].join(", ");
+const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, rulesLabel(e), ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : []), ...(e.purpose ? [`${e.purpose} purpose`] : [])].join(", ");
 // A Greptile or Martian row's repeat range: the mean, never the best repeat, with the lowest and highest.
 const repeatRange = (e, g) => e.outside?.[SUITES[e.suite]?.board]?.range?.[boardConfigOf(g.config)];
 export function rangeLine(e, g) {

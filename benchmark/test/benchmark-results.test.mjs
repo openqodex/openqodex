@@ -234,19 +234,26 @@ it("a board score line of an entry tuned on its own cases carries the label", ()
 
 it("gives every README row a label of its own when two groups share a reviewer and a model", () => {
   const root = fixture();
-  // A second group that differs from an accepted planted one only in its path.
   const accepted = pointer(root);
   const [key, { runId }] = Object.entries(accepted.groups).find(([k]) => k.startsWith("planted|") && k.includes("|review|"));
   const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
-  const twin = structuredClone(entry);
-  twin.runId = `${runId}-server`;
-  twin.asset.url = entry.asset.url.replace(`/${runId}.tar.gz`, `/${twin.runId}.tar.gz`);
-  twin.path = entry.path === "server" ? "laptop" : "server";
-  writeFileSync(entryFile(root, twin.runId), JSON.stringify(twin));
   const { config } = groupKeys(entry).find((g) => g.key === key);
-  const twinKey = groupKeys(twin).find((g) => g.config === config).key;
-  expect(twinKey).not.toBe(key);
-  accepted.groups[twinKey] = { ...accepted.groups[key], runId: twin.runId, scoreHash: scoreHash(twin) };
+  // Groups that differ from an accepted planted one in a single part of the key, accepted beside it.
+  const plant = (suffix, edit) => {
+    const twin = structuredClone(entry);
+    twin.runId = `${runId}-${suffix}`;
+    twin.asset.url = entry.asset.url.replace(`/${runId}.tar.gz`, `/${twin.runId}.tar.gz`);
+    edit(twin);
+    writeFileSync(entryFile(root, twin.runId), JSON.stringify(twin));
+    const twinKey = groupKeys(twin).find((g) => g.config === config).key;
+    expect(twinKey).not.toBe(key);
+    accepted.groups[twinKey] = { ...accepted.groups[key], runId: twin.runId, scoreHash: scoreHash(twin) };
+    return twin;
+  };
+  // The case of issue #280: only the scoring rules differ.
+  const rules = plant("rules", (t) => { t.rulesVersion = entry.rulesVersion + 100; });
+  // Same scoring rules, another path: the rules alone cannot tell these apart.
+  const path = plant("path", (t) => { t.path = entry.path === "server" ? "laptop" : "server"; });
   writeFileSync(join(root, "benchmark/index/accepted.json"), JSON.stringify(accepted));
   const r = run(root);
   expect(r.status, r.stderr).toBe(0);
@@ -254,6 +261,6 @@ it("gives every README row a label of its own when two groups share a reviewer a
   // The reviewer, model and cases cells are what a reader tells two rows apart by.
   const labels = rows.map((l) => l.split(" | ").slice(0, 3).join(" | "));
   expect(new Set(labels).size, `rows a reader cannot tell apart:\n${labels.join("\n")}`).toBe(labels.length);
-  // The two rows that differ only in their path say so.
-  expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`${twin.path} path`))).toBe(true);
+  expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`scoring rules ${rules.rulesVersion}`))).toBe(true);
+  expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`${path.path} path`))).toBe(true);
 });
