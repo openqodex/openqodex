@@ -76,17 +76,18 @@ export async function judgeRun(opts, record, { root = benchRoot } = {}) {
   const manifest = read(join(folder, "manifest.json"));
   if (manifest.suite !== "greptile") throw new Error(`the run is of suite ${manifest.suite}, not greptile`);
   if (manifest.mode === "scan") throw new Error("a scanner-only run shows no review for the board to judge");
-  // The judge reads the truth of every suite case, the score cases too, so a
-  // tune run is never judged here; a run on a split with exposure on record
-  // names its purpose (lib/suites.mjs purposeProblems).
-  if (manifest.purpose === "tune") throw new Error("a tune run is not judged on Greptile's board: the judge reads the truth of every suite case, the score cases included");
+  // A run on a split with exposure on record names its purpose; the judge
+  // then reads and scores only the half that purpose reads
+  // (lib/board-reviews.mjs readBoardReviews), so a tune run never reads a
+  // score case's truth.
   const suite = readSuite("greptile", { root });
-  if (needsPurpose(suite.split) && manifest.splitHash === suite.splitHash && !PURPOSES.includes(manifest.purpose)) throw new Error(`the run names no purpose, and ${suite.split.name} has exposure on record: judge a score or diagnostic run`);
+  if (needsPurpose(suite.split) && manifest.splitHash === suite.splitHash && !PURPOSES.includes(manifest.purpose)) throw new Error(`the run names no purpose, and ${suite.split.name} has exposure on record: judge a tune, score or diagnostic run`);
   const run = readBoardReviews(folder, { root, heading: `${folder} is not converted for Greptile's board:` });
   if (run.manifest.splitHash !== record.suites.greptile.splitHash) throw new Error("the run's split hash differs from the accepted Greptile suite");
   validateRunManifest(manifest, record);
   if (opts.maxUsd !== null && opts.maxUsd > record.capUsd) throw new Error(`--max-usd ${opts.maxUsd} exceeds the record cap ${record.capUsd}`);
   const input = greptileInput(folder, truthSet, { root });
+  if (run.suite.subset) console.log(`A ${run.suite.purpose} run: the numbers are over the ${run.suite.subset} cases, ${run.suite.size} of the suite's ${suite.file.cases.length}.`);
   const held = new Set(run.tools.filter((t) => t.held).map((t) => t.tool));
   for (const t of run.tools) {
     const mine = input.cases.filter((c) => c.tool === t.tool);
@@ -142,7 +143,7 @@ export async function judgeRun(opts, record, { root = benchRoot } = {}) {
     write(join(pending, "eval.json"), {
       version: 1, board: { name: pin.name, repository: pin.repository, commit: pin.commit, judgeModel: pin.judgeModel, promptHash: pin.promptHash },
       truthSet, judgeModel: relay?.model ?? null, promptHash: GREPTILE_PROMPT_HASH,
-      manifestSha256: run.manifestSha256, splitHash: run.manifest.splitHash, relay: counts, perTool,
+      manifestSha256: run.manifestSha256, splitHash: run.manifest.splitHash, ...(run.suite.subset ? { half: { purpose: run.suite.purpose, subset: run.suite.subset, cases: run.suite.size } } : {}), relay: counts, perTool,
     });
   } finally {
     // Settled with the relay's usage; left standing when the relay cannot say.

@@ -119,14 +119,8 @@ describe("a score run is admitted only on a release build", () => {
     expect(r.logged).toBe(false);
   });
 
-  it("is refused on a build the release does not pin", () => {
-    const build = { commit: "0".repeat(40), tree: "0".repeat(40), bundleHash: "0".repeat(64), version: "0.0.0", dirty: false };
-    const r = refusal({ purpose: "score", split: "test", release: "compare-2026-10", build, packageRecord: { spec: "local" } });
-    // Until O12 re-freezes the record, the stale split pins refuse first;
-    // comparison-release.test.mjs proves the build refusal on its own fixture.
-    expect(r.message, "a score run off the release build was admitted").toMatch(/build|no longer match/);
-    expect(r.logged, "a refused score run logged access").toBe(false);
-  });
+  // A score run off the release build: comparison-release.test.mjs, on a
+  // record whose split pins match, so the release gate is what refuses it.
 
   it("is refused on the tune side", () => {
     expect(refusal({ purpose: "score" }).message, "a score run read the tune side").toMatch("a score run reads the score cases");

@@ -7,6 +7,7 @@
   "suite": "greptile",
   "split": "dev",
   "splitHash": "8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64",
+  "tunedOn": true,
   "mode": "review",
   "path": "laptop",
   "build": {

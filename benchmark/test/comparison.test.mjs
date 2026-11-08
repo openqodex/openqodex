@@ -32,6 +32,7 @@
 // 31. Greptile names a different not-run case with the same count.
 // 32. Attachment pins entry bytes that are not committed at HEAD.
 // 33. A later checkout's build prevents attaching the record's own build.
+// 34. A diagnostic run attaches to a comparison.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -214,6 +215,16 @@ describe("frozen comparisons", () => {
     const before = readFileSync(join(f.root, "comparison.json"), "utf8");
     const result = attach(f, run.entry.runId);
     expect(result.status).toBe(1); expect(result.stderr).toContain("ended stopped; only a finished run attaches");
+    expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
+  });
+  it("a diagnostic run is refused by attach and by the record: it never counts in a comparison", () => {
+    const f = fixture("greptile", true); const run = runFixture(f);
+    run.entry.purpose = "diagnostic"; run.save();
+    commitEntry(f, run);
+    f.record.runs = []; write(join(f.root, "comparison.json"), sign(f.record));
+    const before = readFileSync(join(f.root, "comparison.json"), "utf8");
+    const result = attach(f, run.entry.runId);
+    expect(result.status, "a diagnostic run attached").toBe(1); expect(result.stderr).toContain("is a diagnostic run, which never attaches");
     expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
   });
   it("a run that covers 49 of 50 cases is refused unless it names the case it did not run", () => {

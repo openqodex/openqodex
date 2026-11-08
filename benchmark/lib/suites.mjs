@@ -343,6 +343,16 @@ export function purposeProblems({ suite, splitFile, purpose, split = null, subse
   return out;
 }
 
+/**
+ * The half of a suite a run's purpose reads: tune the development side,
+ * score the test side, diagnostic or no purpose every case. `cases` are
+ * real cases (their `split` is their side). Returns { subset, cases }.
+ */
+export function purposeHalf(purpose, cases) {
+  const side = purpose === "tune" ? "dev" : purpose === "score" ? "test" : null;
+  return { subset: side === "dev" ? "tune" : side === "test" ? "score" : "all", cases: side === null ? cases : cases.filter((c) => c.split === side) };
+}
+
 const sideIn = (split, name) => (split?.cases?.dev?.includes(name) ? "dev" : split?.cases?.test?.includes(name) ? "test" : null);
 const subsetsOf = (split, name) => Object.entries(split?.subsets ?? {}).filter(([, names]) => names.includes(name)).map(([s]) => s).sort();
 

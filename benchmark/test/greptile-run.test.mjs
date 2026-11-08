@@ -37,11 +37,11 @@ const fixtureReviewers = {
 const boardPath = (folder, file) => join(folder, "outside/greptile", file);
 const report = (findings = [], status = "complete", extra = {}) => ({ completion: { status }, findings, outside_change: [], ...extra });
 
-function savedRun({ planned = cases.slice(0, 2), reviewers = ["model:scripted"], reports = [report([finding()]), report()], native = null } = {}) {
+function savedRun({ planned = cases.slice(0, 2), reviewers = ["model:scripted"], reports = [report([finding()]), report()], native = null, purpose = "diagnostic" } = {}) {
   const folder = tempDir("oq-greptile-board-");
   const { jobs, configs } = planJobs({ cases: planned.map((c) => c.name), caseIds: Object.fromEntries(planned.map((c) => [c.name, c.id])), reviewers, graph: native === null ? ["on"] : ["off"], repeat: 1 });
   const pins = Object.values(fixtureReviewers).filter((r) => reviewers.includes(r.reviewer));
-  const settings = { path: pins[0].path, web: pins[0].web, build: { ...fixtureBuild, cliVersion: fixtureBuild.version }, reviewers: Object.fromEntries(pins.map((r) => [r.reviewer, { model: r.model, version: r.version, settings: { effort: r.effort, maxOutputTokens: r.maxOutputTokens } }])), runId: "greptile-board-test", mode: "review", suite: "greptile", split: "test", purpose: "score", splitHash: suite.splitHash, cases: planned.map((c) => c.name), caseIds: planned.map((c) => c.id), caseHashes: Object.fromEntries(planned.map((c) => [c.name, c.hash])), configs, repeat: 1 };
+  const settings = { path: pins[0].path, web: pins[0].web, build: { ...fixtureBuild, cliVersion: fixtureBuild.version }, reviewers: Object.fromEntries(pins.map((r) => [r.reviewer, { model: r.model, version: r.version, settings: { effort: r.effort, maxOutputTokens: r.maxOutputTokens } }])), runId: "greptile-board-test", mode: "review", suite: "greptile", split: purpose === "tune" ? "dev" : "test", purpose, splitHash: suite.splitHash, cases: planned.map((c) => c.name), caseIds: planned.map((c) => c.id), caseHashes: Object.fromEntries(planned.map((c) => [c.name, c.hash])), configs, repeat: 1 };
   write(join(folder, "manifest.json"), runManifest({ startedAt: "2026-10-24T00:00:00Z", settings, jobs }));
   for (const c of planned) write(join(folder, "cases", `${c.name}.json`), specCopy(c, truthOf(c, { cache })));
   for (const job of jobs) {
@@ -135,7 +135,7 @@ test("a case the run never reviewed is counted missed, not dropped", async () =>
     const result = await cli(folder, ["--max-usd", "1"], model, { root: fixture.root, release: fixture.record.release });
     expect(result.code, result.stderr).toBe(0);
     const input = read(boardPath(folder, "input.json"));
-    expect(input.suite).toEqual({ name: "greptile", cases: cases.map((c) => c.id) });
+    expect(input.suite).toEqual({ name: "greptile", purpose: "diagnostic", subset: "all", size: 50, cases: cases.map((c) => c.id) });
     expect(input.cases).toHaveLength(cases.length);
     expect(input.cases[2]).toMatchObject({ caseId: cases[2].id, comments: [], status: "not-run", truthSets: truthOf(cases[2], { cache }).sets });
     expect(read(boardPath(folder, "eval.json")).perTool[tool]).toMatchObject({ caught: 1, missed: cases.length - 1, of: cases.length, planned: 2, notRun: cases.length - 2, rate: 1 / cases.length });
@@ -475,4 +475,38 @@ test("a changed planned case hash refuses conversion before writing input", asyn
   expect(result.code).toBe(2);
   expect(result.stderr).toMatch(/case hash.*suite/);
   expect(existsSync(boardPath(folder, "input.json"))).toBe(false);
+});
+
+// The tune and score halves, read from the split file, not from the code under test.
+const splitFile = read(join(benchRoot, SUITES.greptile.split));
+const tuneCases = cases.filter((c) => splitFile.subsets.tune.includes(c.name));
+const scoreIds = new Set(cases.filter((c) => splitFile.subsets.score.includes(c.name)).map((c) => c.id));
+
+test("a tune run judges only the tune cases: no score case is in the judge input or the denominator", async () => {
+  const folder = savedRun({ planned: tuneCases.slice(0, 2), purpose: "tune" });
+  const fixture = recordFixture();
+  const model = await provider();
+  try {
+    const result = await cli(folder, ["--max-usd", "1"], model, { root: fixture.root, release: fixture.record.release });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout, "the printed numbers do not name the half").toContain("A tune run: the numbers are over the tune cases, 30 of the suite's 50.");
+    const input = read(boardPath(folder, "input.json"));
+    expect(input.suite, "the input does not name the tune half").toEqual({ name: "greptile", purpose: "tune", subset: "tune", size: 30, cases: tuneCases.map((c) => c.id) });
+    expect(input.cases.filter((c) => scoreIds.has(c.caseId)), "a score case reached the judge input").toEqual([]);
+    expect(input.cases).toHaveLength(30);
+    const evaluation = read(boardPath(folder, "eval.json"));
+    expect(evaluation.half).toEqual({ purpose: "tune", subset: "tune", cases: 30 });
+    expect(evaluation.perTool[tool], "the denominator is not the tune half").toMatchObject({ caught: 1, missed: 29, of: 30, planned: 2, notRun: 28, rate: 1 / 30 });
+    expect(read(boardPath(folder, `${tool}/verdicts.json`)).some((v) => scoreIds.has(v.id)), "a score case has a verdict").toBe(false);
+  } finally { await model.close(); }
+});
+
+test("a tune run that holds a review of a score case is refused before any truth is read", async () => {
+  const score = cases.find((c) => scoreIds.has(c.id));
+  const folder = savedRun({ planned: [tuneCases[0], score], purpose: "tune" });
+  const fixture = recordFixture();
+  const result = await cli(folder, ["--dry-run"], null, { root: fixture.root, release: fixture.record.release });
+  expect(result.code).toBe(2);
+  expect(result.stderr, "the refusal does not name the score case").toContain(`${score.id}: a tune run reads tune cases only`);
+  expect(existsSync(boardPath(folder, "input.json")), "an input was written for a refused run").toBe(false);
 });

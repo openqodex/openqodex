@@ -569,8 +569,12 @@ Every run of a suite whose split has exposure on record names its purpose with `
 - `diagnostic` may read either side under the same gates. A diagnostic run never attaches to a comparison, and `validateComparison` refuses one.
 
 The manifest and the index entry record the purpose. A resume must name the same purpose. The loop reads tune runs only.
-The Greptile judge and the Martian converter refuse a tune run, because they read the truth of every suite case. On a split with exposure on record they also refuse a run that names no purpose.
-An index entry with `tunedOn: true` scored a reviewer that was tuned on the same cases. Wave 9's Greptile run is one. `scripts/benchmark-results.mjs` prints "(tuned on these cases)" beside its number.
+The Greptile judge and the Martian converter read only the half the run's purpose reads (`readBoardReviews` in `benchmark/lib/board-reviews.mjs`).
+A tune run is judged on the 30 tune cases, and its denominator is 30. No score case's truth is read for it, and a tune run that holds a review of a score case is refused.
+A score run uses the 20 score cases. A diagnostic run may read all 50.
+`input.json`, `eval.json`, `convert.json` and the index entry's board block name the purpose, the subset and its size, and the judge prints them beside its numbers.
+On a split with exposure on record, both refuse a run that names no purpose.
+An index entry with `tunedOn: true` scored a reviewer that was tuned on the same cases. Wave 9's two Greptile runs, the main run and the control, are marked. `scripts/benchmark-results.mjs` prints "(tuned on these cases)" beside its number.
 
 ## Martian's offline set
 

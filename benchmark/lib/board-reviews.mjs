@@ -9,7 +9,7 @@ import { benchRoot } from "./cases.mjs";
 import { nativeReviewBody } from "./claude-control.mjs";
 import { boardConfigOf, boardToolName, martianBody } from "./martian-board.mjs";
 import { attemptOf, findingId, judgeFieldsMissing, nativeFindingId, normPath, reviewHealth, reviewPopulation, shownFindings } from "./score.mjs";
-import { readCase, readPinned, readSuite, realCaseId, realSpecProblems, truthHashOf, truthOf } from "./suites.mjs";
+import { purposeHalf, readCase, readPinned, readSuite, realCaseId, realSpecProblems, truthHashOf, truthOf } from "./suites.mjs";
 
 export { boardToolName, martianBody, martianToolName } from "./martian-board.mjs";
 export { nativeFindingId } from "./score.mjs";
@@ -67,14 +67,21 @@ export function readBoardReviews(folder, { root = benchRoot, heading = `${folder
   const manifestBytes = readFileSync(join(folder, "manifest.json"));
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const suite = readSuite(manifest.suite, { root });
-  const cases = suite.file.cases.map((e) => readCase(realCaseId(manifest.suite, e.name, e.hash), { root }));
+  const every = suite.file.cases.map((e) => readCase(realCaseId(manifest.suite, e.name, e.hash), { root }));
+  // The half the run's purpose reads (lib/suites.mjs purposeHalf): a tune
+  // run's denominator is the tune cases, and no score case is read.
+  const half = purposeHalf(manifest.purpose ?? null, every);
+  const cases = half.cases;
   const byId = new Map(cases.map((c) => [c.id, c]));
+  const outside = new Set(every.filter((c) => !byId.has(c.id)).map((c) => c.id));
   const attempts = readAttempts(folder);
   const pop = reviewPopulation(manifest, attempts);
   const problems = [...pop.problems];
   if (pop.jobs.length === 0) problems.push("the run plans no review");
+  if (cases.length === 0) problems.push(`a ${manifest.purpose} run reads the ${half.subset} cases, and the ${manifest.suite} split holds none`);
   for (const j of pop.jobs) {
-    if (!byId.has(j.caseId)) problems.push(`${j.caseId}: not in the frozen ${manifest.suite} suite`);
+    if (outside.has(j.caseId)) problems.push(`${j.caseId}: a ${manifest.purpose} run reads ${half.subset} cases only, and this case is outside them`);
+    else if (!byId.has(j.caseId)) problems.push(`${j.caseId}: not in the frozen ${manifest.suite} suite`);
     else if (manifest.caseHashes?.[j.case] !== byId.get(j.caseId).hash) problems.push(`${j.caseId}: the run's case hash differs from the frozen suite`);
   }
   for (const c of cases) if (manifest.caseHashes?.[c.name] !== undefined && manifest.caseHashes[c.name] !== c.hash) problems.push(`${c.id}: the run's case hash differs from the frozen suite`);
@@ -98,7 +105,9 @@ export function readBoardReviews(folder, { root = benchRoot, heading = `${folder
     for (const c of cases) reviews.push(boardReview({ ...(jobs.get(c.id) ?? { case: c.name, caseId: c.id, config: t.config, repeat: t.repeat, first: null, notRun: true }), tool: t.tool }));
   }
   const held = reviews.flatMap(heldFindings);
-  return { manifest, manifestSha256: createHash("sha256").update(manifestBytes).digest("hex"), suite: { name: manifest.suite, cases: cases.map((c) => c.id) }, cases, reviews, tools: toolRows.map((t) => ({ ...t, held: held.some((h) => h.tool === t.tool) })), held };
+  // A run that names a purpose names its subset; an older run keeps its shape.
+  const named = manifest.purpose ? { purpose: manifest.purpose, subset: half.subset, size: cases.length } : {};
+  return { manifest, manifestSha256: createHash("sha256").update(manifestBytes).digest("hex"), suite: { name: manifest.suite, ...named, cases: cases.map((c) => c.id) }, cases, reviews, tools: toolRows.map((t) => ({ ...t, held: held.some((h) => h.tool === t.tool) })), held };
 }
 
 /** Shared rebuild: the judge reads not-run truth; readback supplies saved truth. */

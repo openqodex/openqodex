@@ -365,7 +365,7 @@ export async function runPipeline({ out, convert, checkout, python, state, judge
     log: "work/pipeline.log",
   };
   writeFileSync(join(out, "eval.json"), `${JSON.stringify(record, null, 2)}\n`);
-  console.log(`\nMartian's ${MARTIAN_PROFILES.join(", ")} totals are in each tool name's evaluation.json; the Core profile:`);
+  console.log(`\nMartian's ${MARTIAN_PROFILES.join(", ")} totals are in each tool name's evaluation.json; the Core profile${convert.half ? ` over the ${convert.half.subset} cases of a ${convert.half.purpose} run, ${convert.half.cases} cases` : ""}:`);
   for (const t of tools) console.log(`  ${t.tool}: ${t.core ? `precision ${t.core.precision.toFixed(3)}, recall ${t.core.recall.toFixed(3)}, F1 ${t.core.f1.toFixed(3)}` : "not scored"}`);
   if (sideBySide.length > 0) {
     console.log("The Core profile on all cases and on the cases no reader saw (unexposed), side by side:");
