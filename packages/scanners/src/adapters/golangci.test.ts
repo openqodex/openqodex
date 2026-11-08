@@ -5,12 +5,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 import {
   groupGoPackagesByModule,
+  joinParts,
   parseGolangciJson,
 } from "./golangci.js";
 
 describe("parseGolangciJson", () => {
   it("empty output or null Issues from a clean run yields no findings instead of a parse error", () => {
-    const empty = { findings: [], typecheckErrors: [] };
+    const empty = { findings: [], typecheckErrors: [], notDownloaded: [], blockedDirs: [] };
     expect(parseGolangciJson("")).toEqual(empty);
     expect(parseGolangciJson(JSON.stringify({ Issues: null }))).toEqual(empty);
     expect(parseGolangciJson(JSON.stringify({ Issues: "nope" }))).toEqual(empty);
@@ -139,5 +140,59 @@ describe("groupGoPackagesByModule", () => {
 
     expect(groups.map((g) => g.moduleRoot)).toEqual(["backend"]);
     expect(orphans).toEqual(["scripts"]);
+  });
+});
+
+// Review round 1: two skip parts joined and cut at 300 characters ended the
+// second part mid-word, inside the command the developer should run.
+describe("joinParts", () => {
+  it("leaves out a part that does not fit whole and counts it, so no fix is cut", () => {
+    const part = (n: number) => `not run on the Go module at m${n}/. Its dependencies are not in the Go module cache, such as github.com/x/y. To fix, run go mod download in m${n}/`;
+    const parts = [part(1), part(2), part(3)];
+    const out = joinParts(parts);
+    expect(out.length).toBeLessThanOrEqual(300);
+    const pieces = out.split("; ");
+    expect(pieces[pieces.length - 1]).toMatch(/^and \d+ more$/);
+    for (const piece of pieces.slice(0, -1)) expect(parts).toContain(piece);
+    expect(joinParts([part(1)])).toBe(part(1));
+  });
+
+  // Second review: a deep module folder made the first part longer than 300
+  // characters, and the cut at 300 lost the "To fix" sentence.
+  it("keeps the To fix sentence of a first part longer than the limit", () => {
+    const deep = `not run on some packages of the Go module at ${"d".repeat(77)}.../. Its dependencies are not in the Go module cache, such as ${"github.com/x/".padEnd(77, "y")}... and 4 more. To fix, run go mod download in ${"d".repeat(77)}.../`;
+    expect(deep.length).toBeGreaterThan(300);
+    const out = joinParts([deep, "timed out before module c"]);
+    expect(out.length).toBeLessThanOrEqual(300);
+    expect(out).toBe(`not run on some packages of the Go module at ${"d".repeat(77)}.../. To fix, run go mod download in ${"d".repeat(77)}.../; timed out before module c`);
+  });
+});
+
+// Review round 3: the names Go reports as undefined when an import did not
+// load. Too wide a set drops a real error of the change as a skip; too narrow
+// a set turns the skip of issue 289 back into a failure.
+describe("parseGolangciJson on an import that is not downloaded", () => {
+  const missing = (importPath: string, file = "/repo/a.go") => ({
+    FromLinter: "typecheck",
+    Text: `could not import ${importPath} (a.go:3:8: module lookup disabled by GOPROXY=off)`,
+    SourceLines: [`import "${importPath}"`],
+    Pos: { Filename: file, Line: 3 },
+  });
+  const undefinedName = (name: string, file = "/repo/a.go") => ({
+    FromLinter: "typecheck",
+    Text: `undefined: ${name}`,
+    Pos: { Filename: file, Line: 7 },
+  });
+
+  it("keeps a real undefined: limiter next to the missing github.com/acme/rate-limiter as a failure", () => {
+    const out = parseGolangciJson(JSON.stringify({ Issues: [missing("github.com/acme/rate-limiter"), undefinedName("ratelimiter"), undefinedName("limiter")] }));
+    expect(out.notDownloaded).toEqual(["github.com/acme/rate-limiter"]);
+    expect(out.typecheckErrors).toEqual(["/repo/a.go:7: undefined: limiter"]);
+  });
+
+  it("reads undefined: uuid next to the missing github.com/satori/go.uuid as part of the skip", () => {
+    const out = parseGolangciJson(JSON.stringify({ Issues: [missing("github.com/satori/go.uuid"), undefinedName("uuid")] }));
+    expect(out.notDownloaded).toEqual(["github.com/satori/go.uuid"]);
+    expect(out.typecheckErrors).toEqual([]);
   });
 });
