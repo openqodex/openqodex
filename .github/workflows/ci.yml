@@ -14,10 +14,11 @@ name: CI
 #   a green full gate; on a pull request with the label full-ci; and on each
 #   push to main, on the commit that landed.
 # - The version pull request's own pull_request run starts on its own: the
-#   release workflow pushes that branch as the openqodex GitHub App, not with
-#   the workflow's token (a push with that token starts no run). The full
-#   gate's condition matches the branch name and this repository, not who
-#   pushed, so it holds for the App's pushes. The queue run recognises the
+#   release workflow pushes that branch with the release token (a maintainer's
+#   fine-grained personal access token), not with the workflow's token (a push
+#   with that token starts no run). The full gate's condition matches the
+#   branch name and this repository, not who pushed, so it holds for those
+#   pushes. The queue run recognises the
 #   pull request by the branch name in the queue's merge commit message,
 #   "Merge pull request #N from <owner>/changeset-release/main".
 # - The cost of the narrowing: a break that only the full gate catches lands

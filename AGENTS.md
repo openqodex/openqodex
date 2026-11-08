@@ -41,7 +41,7 @@ OpenQodex is open source AI code review for Claude Code and Codex. It runs befor
 ## Pull requests and the merge queue
 
 - When the pull request is ready, a maintainer adds it to the merge queue. The queue merges it with main and with every pull request ahead of it in the queue, runs CI on that result, and merges the pull request into main when it passes. When it fails, the queue removes the pull request and main does not change. Fix the branch and add it to the queue again.
-- The "Version packages" pull request (the branch `changeset-release/main`) gets the real-programs tier on the pull request and in the merge queue, so the queue merges a release only on a green run. The release workflow pushes its branch as the openqodex GitHub App, so its pull request run starts on its own; before that it waited for a maintainer's approval click.
+- The "Version packages" pull request (the branch `changeset-release/main`) gets the real-programs tier on the pull request and in the merge queue, so the queue merges a release only on a green run. The release workflow pushes its branch with the release token (secret `RELEASE_TOKEN`, a maintainer's fine-grained personal access token limited to this repository), so its pull request run starts on its own; before that it waited for a maintainer's approval click.
 - A break only the real-programs tier catches shows on main's run and is fixed before the version pull request.
 - To get the real-programs tier on any pull request, for example a scanner or installer change, a maintainer adds the label `full-ci`.
 - Each push to main also runs the release workflow.
