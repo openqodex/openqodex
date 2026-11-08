@@ -5,12 +5,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 import {
   groupGoPackagesByModule,
+  joinParts,
   parseGolangciJson,
 } from "./golangci.js";
 
 describe("parseGolangciJson", () => {
   it("empty output or null Issues from a clean run yields no findings instead of a parse error", () => {
-    const empty = { findings: [], typecheckErrors: [], notDownloaded: [] };
+    const empty = { findings: [], typecheckErrors: [], notDownloaded: [], blockedDirs: [] };
     expect(parseGolangciJson("")).toEqual(empty);
     expect(parseGolangciJson(JSON.stringify({ Issues: null }))).toEqual(empty);
     expect(parseGolangciJson(JSON.stringify({ Issues: "nope" }))).toEqual(empty);
@@ -139,5 +140,20 @@ describe("groupGoPackagesByModule", () => {
 
     expect(groups.map((g) => g.moduleRoot)).toEqual(["backend"]);
     expect(orphans).toEqual(["scripts"]);
+  });
+});
+
+// Review round 1: two skip parts joined and cut at 300 characters ended the
+// second part mid-word, inside the command the developer should run.
+describe("joinParts", () => {
+  it("leaves out a part that does not fit whole and counts it, so no fix is cut", () => {
+    const part = (n: number) => `not run on the Go module at m${n}/. Its dependencies are not in the Go module cache, such as github.com/x/y. To fix, run go mod download in m${n}/`;
+    const parts = [part(1), part(2), part(3)];
+    const out = joinParts(parts);
+    expect(out.length).toBeLessThanOrEqual(300);
+    const pieces = out.split("; ");
+    expect(pieces[pieces.length - 1]).toMatch(/^and \d+ more$/);
+    for (const piece of pieces.slice(0, -1)) expect(parts).toContain(piece);
+    expect(joinParts([part(1)])).toBe(part(1));
   });
 });

@@ -32,7 +32,9 @@
 // with no go.mod above it, and a module whose dependencies are not in the Go
 // module cache (scanner runs keep Go offline, GOPROXY=off, so Go cannot fetch
 // them). Each is a skip with its reason and the command that fixes it. A run
-// where only some modules are skipped still ran, and the skip is its note.
+// where only some packages are skipped still ran, and the skip is its note.
+// The parts of a reason are joined with "; ", and tool text inside a part has
+// its own "; " turned into ", ", so the problem report can split the parts.
 // All errors are captured into the result; the runner never throws on a
 // scanner failure: static analysis is additive context, not a gate.
 
@@ -177,7 +179,7 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
     skips.push(orphanSkip(orphans));
   }
   if (groups.length === 0) {
-    return { findings: [], error: null, skipped: skips.join("; ").slice(0, 300) };
+    return { findings: [], error: null, skipped: joinParts(skips) };
   }
   const running = groups.slice(0, GOLANGCI_MAX_MODULES);
   if (groups.length > running.length) {
@@ -188,8 +190,11 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
   // clock ceiling as one.
   const deadline = started + GOLANGCI_TIMEOUT_MS;
   const findings: StaticFinding[] = [];
-  // Modules with at least one run whose packages all loaded.
+  // Runs whose packages all loaded and were linted.
   let loaded = 0;
+  // Per module: the imports that are not downloaded, and whether some of its
+  // packages were still linted.
+  const notDownloaded = new Map<string, { imports: string[]; partly: boolean }>();
   // A module with more packages than one process may take as arguments runs
   // once per chunk of packages, under the same deadline.
   const runs = running.flatMap((group) => splitArgs(group.packages, ARG_BUDGET_BYTES).map((packages) => ({ group, packages })));
@@ -199,58 +204,70 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
       notes.push(`timed out before module ${group.moduleRoot}`);
       break;
     }
-    // --no-config: a repo's .golangci.yml is never loaded, since it can turn
-    // on fixes that rewrite source, module downloads, or extra report files
-    // inside the repo. --modules-download-mode=readonly: go.mod and go.sum
-    // are never updated. --path-mode=abs: absolute paths, which the runner
-    // rebases onto the repo root, so a nested module never gets its folder
-    // prefixed twice. --output.json.path=stdout and --show-stats=false: the
-    // JSON report is the only output, on stdout. --enable=gosec layers the
-    // security linter on top of the default bug set. Package dirs are
-    // positional so we analyze only changed packages. Every flag was checked
-    // against the help of golangci-lint 2.14.0.
-    const cliArgs = [
-      "run",
-      "--no-config",
-      "--modules-download-mode=readonly",
-      "--path-mode=abs",
-      "--output.json.path=stdout",
-      "--show-stats=false",
-      "--enable=gosec",
-      ...packages,
-    ];
     const cwd =
       group.moduleRoot === "."
         ? args.repoDir
         : path.join(args.repoDir, ...group.moduleRoot.split("/"));
 
-    let stdout: string;
-    try {
-      stdout = await execGolangci(args.tool, cliArgs, cwd, remaining, args.scratch);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      notes.push(`${group.moduleRoot}: ${message.slice(0, 200)}`);
+    const lint = async (pkgs: string[]): Promise<GolangciReport | null> => {
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        notes.push(`timed out before module ${group.moduleRoot}`);
+        return null;
+      }
+      let stdout: string;
+      try {
+        stdout = await execGolangci(args.tool!, golangciArgs(pkgs), cwd, left, args.scratch);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        notes.push(`${group.moduleRoot}: ${toolText(message).slice(0, 200)}`);
+        return null;
+      }
+      try {
+        const report = parseGolangciJson(stdout);
+        findings.push(...reanchorToRunDir(report.findings, group.moduleRoot));
+        const first = report.typecheckErrors[0];
+        if (first) notes.push(`${group.moduleRoot}: could not type-check: ${toolText(first).slice(0, 200)}`);
+        return report;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        notes.push(`${group.moduleRoot}: parse: ${toolText(message).slice(0, 150)}`);
+        return null;
+      }
+    };
+
+    const report = await lint(packages);
+    if (!report || report.typecheckErrors.length > 0) continue;
+    if (report.notDownloaded.length === 0) {
+      loaded++;
       continue;
     }
-
-    try {
-      const report = parseGolangciJson(stdout);
-      findings.push(...reanchorToRunDir(report.findings, group.moduleRoot));
-      const first = report.typecheckErrors[0];
-      if (first) notes.push(`${group.moduleRoot}: could not type-check: ${first.slice(0, 200)}`);
-      if (report.notDownloaded.length > 0) skips.push(notDownloadedSkip(group.moduleRoot, report.notDownloaded));
-      else if (!first) loaded++;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      notes.push(`${group.moduleRoot}: parse: ${message.slice(0, 150)}`);
+    const entry = notDownloaded.get(group.moduleRoot) ?? { imports: [], partly: false };
+    notDownloaded.set(group.moduleRoot, entry);
+    addAll(entry.imports, report.notDownloaded);
+    // golangci-lint reports no linter's issue for any package of a run that
+    // has a type-check error, so the packages that did load are linted again
+    // on their own: one more run, never a loop.
+    const blocked = new Set(report.blockedDirs.map(realDir));
+    const rest = packages.filter((p) => !blocked.has(realDir(path.resolve(cwd, p))));
+    if (rest.length === 0 || rest.length === packages.length) continue;
+    const again = await lint(rest);
+    if (!again || again.typecheckErrors.length > 0) continue;
+    addAll(entry.imports, again.notDownloaded);
+    if (again.notDownloaded.length === 0) {
+      loaded++;
+      entry.partly = true;
     }
   }
 
+  for (const [moduleRoot, { imports, partly }] of notDownloaded) {
+    skips.push(notDownloadedSkip(moduleRoot, imports, partly));
+  }
   if (notes.length > 0) {
-    return { findings, error: [...notes, ...skips].join("; ").slice(0, 300) };
+    return { findings, error: joinParts([...notes, ...skips]) };
   }
   if (skips.length === 0) return { findings, error: null };
-  const reason = skips.join("; ").slice(0, 300);
+  const reason = joinParts(skips);
   // Nothing was linted: a skip. Something was: a run with a note.
   return findings.length > 0 || loaded > 0
     ? { findings, error: null, note: reason }
@@ -262,16 +279,85 @@ function asFolder(dir: string): string {
   return dir === "." ? "" : dir;
 }
 
+// The fixed start of each skip part; the problem report's classifier
+// (packages/cli/src/feedback.ts) matches these words.
 function orphanSkip(orphans: string[]): string {
   const shown = orphans.slice(0, 3).map(asFolder);
   const more = orphans.length > shown.length ? ` and ${orphans.length - shown.length} more` : "";
-  return `not run on ${folderList(shown)}${more}: no go.mod at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in their folder`;
+  const where = orphans.length > 1 ? "each folder" : "that folder";
+  return `not run on ${folderList(shown)}${more}. No go.mod is at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in ${where}`;
 }
 
-function notDownloadedSkip(moduleRoot: string, packages: string[]): string {
+function notDownloadedSkip(moduleRoot: string, imports: string[], partly: boolean): string {
   const root = asFolder(moduleRoot);
-  const command = root === "" ? "go mod download" : `cd ${root} && go mod download`;
-  return `not run on the Go module at ${folderName(root)}: its dependencies are not in the Go module cache, ${suchAs(packages)}. To fix, run ${command}`;
+  const what = partly ? "some packages of the Go module" : "the Go module";
+  // The folder stays in prose: a folder name pasted into a command can hold
+  // a space or a semicolon.
+  const where = root === "" ? "" : ` in ${folderName(root)}`;
+  const shown = imports.map((i) => (i.length > 80 ? `${i.slice(0, 77)}...` : i));
+  return `not run on ${what} at ${folderName(root)}. Its dependencies are not in the Go module cache, ${suchAs(shown)}. To fix, run go mod download${where}`;
+}
+
+// The reason's parts, joined with "; ", within the 300 characters the runner
+// keeps. A part that does not fit is left out whole and counted, so no part
+// is cut in the middle of its fix.
+export function joinParts(parts: string[], max = 300): string {
+  const kept: string[] = [];
+  let length = 0;
+  for (const [i, part] of parts.entries()) {
+    const left = parts.length - i - 1;
+    const tail = left > 0 ? `; and ${left} more` : "";
+    const add = (kept.length > 0 ? 2 : 0) + part.length;
+    if (length + add + tail.length > max && kept.length > 0) {
+      kept.push(`and ${parts.length - i} more`);
+      return kept.join("; ");
+    }
+    kept.push(kept.length === 0 ? part.slice(0, max) : part);
+    length += add;
+  }
+  return kept.join("; ");
+}
+
+// Tool text inside a reason part: its own "; " would read as a part break.
+function toolText(text: string): string {
+  return text.replace(/;\s*/g, ", ");
+}
+
+function addAll(into: string[], items: string[]): void {
+  for (const item of items) if (!into.includes(item)) into.push(item);
+}
+
+// A folder by its real path, so a path golangci-lint reports through a link
+// (/private/var against /var on macOS) still matches.
+function realDir(dir: string): string {
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return dir;
+  }
+}
+
+// --no-config: a repo's .golangci.yml is never loaded, since it can turn on
+// fixes that rewrite source, module downloads, or extra report files inside
+// the repo. --modules-download-mode=readonly: go.mod and go.sum are never
+// updated. --path-mode=abs: absolute paths, which the runner rebases onto
+// the repo root, so a nested module never gets its folder prefixed twice.
+// --output.json.path=stdout and --show-stats=false: the JSON report is the
+// only output, on stdout. --enable=gosec layers the security linter on top
+// of the default bug set. Package dirs are positional so we analyze only
+// changed packages. Every flag was checked against the help of golangci-lint
+// 2.14.0.
+function golangciArgs(packages: string[]): string[] {
+  return [
+    "run",
+    "--no-config",
+    "--modules-download-mode=readonly",
+    "--path-mode=abs",
+    "--output.json.path=stdout",
+    "--show-stats=false",
+    "--enable=gosec",
+    ...packages,
+  ];
 }
 
 export const golangci: Adapter = {
@@ -354,6 +440,7 @@ function golangciCacheDir(scratch: Scratch, moduleDir: string): string {
 type GolangciIssue = {
   FromLinter?: unknown;
   Text?: unknown;
+  SourceLines?: unknown;
   Pos?: { Filename?: unknown; Line?: unknown };
 };
 
@@ -366,16 +453,52 @@ export type GolangciReport = {
   // module cache and the offline scan may not download it. A state of the
   // machine, kept apart from the type-check errors the change can cause.
   notDownloaded: string[];
+  // The folders (packages) of the files whose imports were not downloaded.
+  blockedDirs: string[];
 };
 
 // Go's text when an import needs a module that is required but not in the
-// module cache, and GOPROXY=off forbids the download. An import that no
-// required module provides says "import lookup disabled by -mod=readonly"
-// instead: that is a defect of the change and stays a type-check error.
-const NOT_DOWNLOADED = /^could not import (\S+) \(.*module lookup disabled by GOPROXY=off/;
+// module cache, and the scan may not download it. On the laptop GOPROXY=off
+// says "module lookup disabled by GOPROXY=off". On a server the proxy is the
+// preinstalled module cache read as files (scratch.ts), and a module missing
+// there says "reading file:///.../@v/v1.2.3.zip: no such file or directory".
+// An import that no required module provides says "import lookup disabled by
+// -mod=readonly", and a module go.sum does not list says "missing go.sum
+// entry": both are defects of the change and stay type-check errors.
+const NOT_DOWNLOADED = /module lookup disabled by GOPROXY=off|reading file:\/\/\S+: no such file or directory/;
+const COULD_NOT_IMPORT = /could not import (\S+) \(/g;
+
+// The import that is not downloaded, and the import of this file that
+// failed because of it. A package of the repo that imports the missing
+// module nests the text: "could not import example.com/e/b (b/b.go:3:8:
+// could not import github.com/x/y (...GOPROXY=off))".
+function notDownloadedImport(text: string): { missing: string; outer: string } | null {
+  const tail = NOT_DOWNLOADED.exec(text);
+  if (!tail || !text.startsWith("could not import ")) return null;
+  const names = [...text.slice(0, tail.index).matchAll(COULD_NOT_IMPORT)].map((m) => m[1]!);
+  if (names.length === 0) return null;
+  return { missing: names[names.length - 1]!, outer: names[0]! };
+}
+
+// The names code may use for an import whose package could not load. Go
+// then reports "undefined: <name>" at each use. The name is the import's
+// alias in the file, else the package's own name, which is not in the path:
+// "github.com/go-chi/chi/v5" is chi, "github.com/mattn/go-sqlite3" is
+// sqlite3, "github.com/x/not-downloaded" is commonly notdownloaded.
+function importNames(importPath: string, sourceLine: string): string[] {
+  const alias = /^\s*(?:import\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+"/.exec(sourceLine)?.[1];
+  // "import" itself is the keyword of a one-line import, never an alias.
+  if (alias && alias !== "_" && alias !== "import") return [alias];
+  const parts = importPath.split("/");
+  let last = parts[parts.length - 1] ?? "";
+  if (/^v\d+$/.test(last) && parts.length > 1) last = parts[parts.length - 2]!;
+  const base = last.replace(/\.v\d+$/, "");
+  const names = [base, base.replace(/-/g, ""), base.replace(/^go-/, "").replace(/-go$/, ""), base.split("-").pop() ?? ""];
+  return [...new Set(names.map((n) => n.replace(/[^A-Za-z0-9_]/g, "")).filter((n) => /^[A-Za-z_]/.test(n)))];
+}
 
 export function parseGolangciJson(json: string): GolangciReport {
-  const report: GolangciReport = { findings: [], typecheckErrors: [], notDownloaded: [] };
+  const report: GolangciReport = { findings: [], typecheckErrors: [], notDownloaded: [], blockedDirs: [] };
   const body = extractJsonObject(json);
   if (!body) return report;
   const parsed = JSON.parse(body) as { Issues?: unknown };
@@ -383,15 +506,20 @@ export function parseGolangciJson(json: string): GolangciReport {
   if (!parsed || !Array.isArray(parsed.Issues)) return report;
   const out = report.findings;
   const issues = (parsed.Issues as GolangciIssue[]).filter((raw) => raw && typeof raw === "object");
-  // A package with an import that is not downloaded is type-checked without
-  // it, so its other type-check errors ("undefined: chi" when the import path
-  // ends in /v5) follow from the missing module, not from the change. Go
-  // keeps one package per folder.
-  const unloaded = new Set<string>();
+  // A file with an import that is not downloaded is type-checked without
+  // it, and each use of the import's name is "undefined: <name>". Only that
+  // error, in that file, follows from the missing module; every other
+  // type-check error is the change's own.
+  const unloadedNames = new Map<string, Set<string>>();
   for (const raw of issues) {
-    if (raw.FromLinter === "typecheck" && typeof raw.Text === "string" && NOT_DOWNLOADED.test(raw.Text)) {
-      unloaded.add(path.dirname(typeof raw.Pos?.Filename === "string" ? raw.Pos.Filename : ""));
-    }
+    if (raw.FromLinter !== "typecheck" || typeof raw.Text !== "string") continue;
+    const hit = notDownloadedImport(raw.Text);
+    if (!hit) continue;
+    const file = typeof raw.Pos?.Filename === "string" ? raw.Pos.Filename : "";
+    const line = Array.isArray(raw.SourceLines) && typeof raw.SourceLines[0] === "string" ? raw.SourceLines[0] : "";
+    const names = unloadedNames.get(file) ?? new Set<string>();
+    for (const n of importNames(hit.outer, line)) names.add(n);
+    unloadedNames.set(file, names);
   }
   for (const raw of issues) {
     const filePath = typeof raw.Pos?.Filename === "string" ? raw.Pos.Filename : "";
@@ -401,12 +529,15 @@ export function parseGolangciJson(json: string): GolangciReport {
     const linter = typeof raw.FromLinter === "string" && raw.FromLinter ? raw.FromLinter : "golangci";
     const message = typeof raw.Text === "string" ? raw.Text : "";
     if (linter === "typecheck") {
-      const missing = NOT_DOWNLOADED.exec(message);
-      if (missing) {
-        if (!report.notDownloaded.includes(missing[1]!)) report.notDownloaded.push(missing[1]!);
+      const hit = notDownloadedImport(message);
+      if (hit) {
+        if (!report.notDownloaded.includes(hit.missing)) report.notDownloaded.push(hit.missing);
+        const dir = path.dirname(filePath);
+        if (filePath && !report.blockedDirs.includes(dir)) report.blockedDirs.push(dir);
         continue;
       }
-      if (unloaded.has(path.dirname(filePath))) continue;
+      const undefinedName = /^undefined: ([A-Za-z_][A-Za-z0-9_]*)$/.exec(message)?.[1];
+      if (undefinedName && unloadedNames.get(filePath)?.has(undefinedName)) continue;
       report.typecheckErrors.push(trimMessage(`${filePath || "?"}:${line}: ${message}`));
       continue;
     }

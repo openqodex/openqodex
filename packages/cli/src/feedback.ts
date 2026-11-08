@@ -55,11 +55,13 @@ function scannerLabel(source: string): string {
 const NOT_LISTED = "failed for a reason not listed";
 
 // A scanner failure as a fixed class: the reason can hold the tool's stderr,
-// so none of its text is kept beyond the class and an exit code. A scanner
-// that ran several parts (golangci, one run per Go module) joins their
-// reasons with "; ", and each part gets its own class.
-export function failureClass(reason: string | null): string {
-  const parts = (reason ?? "").split("; ").map(partClass);
+// so none of its text is kept beyond the class and an exit code. golangci
+// runs once per Go module and joins the parts of its reason with "; ", after
+// it turns any "; " in tool text into ", ", so each part gets its own class.
+// Any other scanner's reason is one part: its "; " can be tool text.
+export function failureClass(reason: string | null, source = ""): string {
+  const r = reason ?? "";
+  const parts = (source === "golangci" ? r.split("; ") : [r]).map(partClass);
   const listed = [...new Set(parts.filter((c) => c !== NOT_LISTED))];
   if (listed.length === 0) return NOT_LISTED;
   return parts.includes(NOT_LISTED) ? [...listed, "a reason not listed"].join(", ") : listed.join(", ");
@@ -74,8 +76,10 @@ const GOLANGCI_CLASSES: [RegExp, string][] = [
   [/^timed out before module/, "ran out of time before a Go module"],
   [/^skipped \d+ module\(s\) past the cap/, "skipped Go modules past the cap"],
   // Skips: reported only when another part of the run failed.
-  [/^not run on .*: no go\.mod at or above/, "a changed Go file was outside any Go module"],
-  [/^not run on the Go module at .*: its dependencies are not in the Go module cache/, "Go dependencies were not downloaded"],
+  [/^not run on .*\. No go\.mod is at or above/, "a changed Go file was outside any Go module"],
+  [/^not run on .*\. Its dependencies are not in the Go module cache/, "Go dependencies were not downloaded"],
+  // A part left out to keep the reason short.
+  [/^and \d+ more$/, "more reasons left out"],
 ];
 
 function partClass(r: string): string {
@@ -109,7 +113,7 @@ export function noteScan(repoRoot: string, scan: ScanResult): void {
   run.pending = {
     code: "scanner-failed",
     component: [...new Set(failed.map((s) => `scanner:${scannerLabel(s.scanner)}`))].join(", "),
-    diagnostic: failed.map((s) => `${scannerLabel(s.scanner)}: ${failureClass(s.reason)}`).join("; "),
+    diagnostic: failed.map((s) => `${scannerLabel(s.scanner)}: ${failureClass(s.reason, s.scanner)}`).join("; "),
   };
 }
 
