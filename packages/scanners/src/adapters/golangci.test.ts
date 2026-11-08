@@ -156,6 +156,16 @@ describe("joinParts", () => {
     for (const piece of pieces.slice(0, -1)) expect(parts).toContain(piece);
     expect(joinParts([part(1)])).toBe(part(1));
   });
+
+  // Second review: a deep module folder made the first part longer than 300
+  // characters, and the cut at 300 lost the "To fix" sentence.
+  it("keeps the To fix sentence of a first part longer than the limit", () => {
+    const deep = `not run on some packages of the Go module at ${"d".repeat(77)}.../. Its dependencies are not in the Go module cache, such as ${"github.com/x/".padEnd(77, "y")}... and 4 more. To fix, run go mod download in ${"d".repeat(77)}.../`;
+    expect(deep.length).toBeGreaterThan(300);
+    const out = joinParts([deep, "timed out before module c"]);
+    expect(out.length).toBeLessThanOrEqual(300);
+    expect(out).toBe(`not run on some packages of the Go module at ${"d".repeat(77)}.../. To fix, run go mod download in ${"d".repeat(77)}.../; timed out before module c`);
+  });
 });
 
 // Review round 3: the names Go reports as undefined when an import did not

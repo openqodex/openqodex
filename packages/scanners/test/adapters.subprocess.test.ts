@@ -174,6 +174,9 @@ describe("builtin scanner subprocesses", () => {
     expect(result.scan.scanners[0]!.status).toBe("failed");
     expect(result.scan.scanners[0]!.reason).toContain("could not type-check");
     expect(result.scan.scanners[0]!.reason).toContain("cannot use");
+    // The reason still names the missing dependency and its fix.
+    expect(result.scan.scanners[0]!.reason).toContain("github.com/openqodex-test/not-downloaded");
+    expect(result.scan.scanners[0]!.reason).toContain("To fix, run go mod download");
   }, 300_000);
 
   // A package of the repo that imports the missing module: the reason names

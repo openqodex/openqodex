@@ -229,7 +229,7 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
         const report = parseGolangciJson(stdout);
         findings.push(...reanchorToRunDir(report.findings, group.moduleRoot));
         const first = report.typecheckErrors[0];
-        if (first) notes.push(`${toolText(group.moduleRoot)}: could not type-check: ${toolText(first).slice(0, 200)}`);
+        if (first) notes.push(`${toolText(group.moduleRoot)}: could not type-check: ${toolText(inModule(first, cwd)).slice(0, 200)}`);
         return report;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -239,7 +239,17 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
     };
 
     const report = await lint(packages);
-    if (!report || report.typecheckErrors.length > 0) continue;
+    if (!report) continue;
+    if (report.typecheckErrors.length > 0) {
+      // A failure, but the reason also names the missing dependency and its
+      // fix. No second run: the package that failed is the change's own.
+      if (report.notDownloaded.length > 0) {
+        const imports = notDownloaded.get(group.moduleRoot) ?? [];
+        notDownloaded.set(group.moduleRoot, imports);
+        addAll(imports, report.notDownloaded);
+      }
+      continue;
+    }
     if (report.notDownloaded.length === 0) {
       loaded++;
       linted.add(group.moduleRoot);
@@ -288,7 +298,7 @@ function orphanSkip(orphans: string[]): string {
   const shown = orphans.slice(0, 3).map(asFolder);
   const more = orphans.length > shown.length ? ` and ${orphans.length - shown.length} more` : "";
   const where = orphans.length > 1 ? "each folder" : "that folder";
-  return `not run on ${toolText(folderList(shown))}${more}. No go.mod is at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in ${where}`;
+  return `not run on ${cap(toolText(folderList(shown)))}${more}. No go.mod is at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in ${where}`;
 }
 
 function notDownloadedSkip(moduleRoot: string, imports: string[], partly: boolean): string {
@@ -296,9 +306,9 @@ function notDownloadedSkip(moduleRoot: string, imports: string[], partly: boolea
   const what = partly ? "some packages of the Go module" : "the Go module";
   // The folder stays in prose: a folder name pasted into a command can hold
   // a space or a semicolon.
-  const folder = toolText(folderName(root));
+  const folder = cap(toolText(folderName(root)));
   const where = root === "" ? "" : ` in ${folder}`;
-  const shown = imports.map((i) => (i.length > 80 ? `${i.slice(0, 77)}...` : i));
+  const shown = imports.map((i) => cap(i));
   return `not run on ${what} at ${folder}. Its dependencies are not in the Go module cache, ${suchAs(shown)}. To fix, run go mod download${where}`;
 }
 
@@ -311,15 +321,56 @@ export function joinParts(parts: string[], max = 300): string {
   for (const [i, part] of parts.entries()) {
     const left = parts.length - i - 1;
     const tail = left > 0 ? `; and ${left} more` : "";
-    const add = (kept.length > 0 ? 2 : 0) + part.length;
-    if (length + add + tail.length > max && kept.length > 0) {
+    if (kept.length === 0) {
+      // The first part is always kept, with room left for the count.
+      const first = fitPart(part, max - tail.length);
+      kept.push(first);
+      length = first.length;
+      continue;
+    }
+    const add = 2 + part.length;
+    if (length + add + tail.length > max) {
       kept.push(`and ${parts.length - i} more`);
       return kept.join("; ");
     }
-    kept.push(kept.length === 0 ? part.slice(0, max) : part);
+    kept.push(part);
     length += add;
   }
   return kept.join("; ");
+}
+
+// One part within `max` characters. A part too long keeps its first and its
+// last sentence (the "To fix" one) when they fit, else the sentences from
+// the start that fit, and is cut at `max` only when no sentence fits.
+function fitPart(part: string, max: number): string {
+  if (part.length <= max) return part;
+  const sentences = part.split(". ");
+  if (sentences.length >= 3) {
+    const ends = `${sentences[0]}. ${sentences[sentences.length - 1]}`;
+    if (ends.length <= max) return ends;
+  }
+  let out = "";
+  for (const sentence of sentences) {
+    const next = out === "" ? sentence : `${out}. ${sentence}`;
+    if (next.length > max) break;
+    out = next;
+  }
+  return out === "" ? part.slice(0, max) : out;
+}
+
+// A type-check error on a file of the module, with the file's path relative
+// to the module, so the reason keeps room for the parts after it. A file
+// outside the module (the standard library) keeps its path.
+function inModule(error: string, moduleDir: string): string {
+  for (const dir of new Set([realDir(moduleDir), moduleDir])) {
+    if (error.startsWith(`${dir}${path.sep}`)) return error.slice(dir.length + 1);
+  }
+  return error;
+}
+
+// A name or path inside a reason, at most 80 characters.
+function cap(text: string): string {
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
 // Tool text inside a reason part: its own "; " would read as a part break.
