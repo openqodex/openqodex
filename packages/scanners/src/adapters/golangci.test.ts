@@ -157,3 +157,32 @@ describe("joinParts", () => {
     expect(joinParts([part(1)])).toBe(part(1));
   });
 });
+
+// Review round 3: the names Go reports as undefined when an import did not
+// load. Too wide a set drops a real error of the change as a skip; too narrow
+// a set turns the skip of issue 289 back into a failure.
+describe("parseGolangciJson on an import that is not downloaded", () => {
+  const missing = (importPath: string, file = "/repo/a.go") => ({
+    FromLinter: "typecheck",
+    Text: `could not import ${importPath} (a.go:3:8: module lookup disabled by GOPROXY=off)`,
+    SourceLines: [`import "${importPath}"`],
+    Pos: { Filename: file, Line: 3 },
+  });
+  const undefinedName = (name: string, file = "/repo/a.go") => ({
+    FromLinter: "typecheck",
+    Text: `undefined: ${name}`,
+    Pos: { Filename: file, Line: 7 },
+  });
+
+  it("keeps a real undefined: limiter next to the missing github.com/acme/rate-limiter as a failure", () => {
+    const out = parseGolangciJson(JSON.stringify({ Issues: [missing("github.com/acme/rate-limiter"), undefinedName("ratelimiter"), undefinedName("limiter")] }));
+    expect(out.notDownloaded).toEqual(["github.com/acme/rate-limiter"]);
+    expect(out.typecheckErrors).toEqual(["/repo/a.go:7: undefined: limiter"]);
+  });
+
+  it("reads undefined: uuid next to the missing github.com/satori/go.uuid as part of the skip", () => {
+    const out = parseGolangciJson(JSON.stringify({ Issues: [missing("github.com/satori/go.uuid"), undefinedName("uuid")] }));
+    expect(out.notDownloaded).toEqual(["github.com/satori/go.uuid"]);
+    expect(out.typecheckErrors).toEqual([]);
+  });
+});

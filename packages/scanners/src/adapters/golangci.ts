@@ -192,16 +192,18 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
   const findings: StaticFinding[] = [];
   // Runs whose packages all loaded and were linted.
   let loaded = 0;
-  // Per module: the imports that are not downloaded, and whether some of its
-  // packages were still linted.
-  const notDownloaded = new Map<string, { imports: string[]; partly: boolean }>();
+  // Per module: the imports that are not downloaded.
+  const notDownloaded = new Map<string, string[]>();
+  // Modules with a run whose packages all loaded and were linted: a module
+  // split into chunks can have one clean chunk and one blocked chunk.
+  const linted = new Set<string>();
   // A module with more packages than one process may take as arguments runs
   // once per chunk of packages, under the same deadline.
   const runs = running.flatMap((group) => splitArgs(group.packages, ARG_BUDGET_BYTES).map((packages) => ({ group, packages })));
   for (const { group, packages } of runs) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      notes.push(`timed out before module ${group.moduleRoot}`);
+      notes.push(`timed out before module ${toolText(group.moduleRoot)}`);
       break;
     }
     const cwd =
@@ -212,7 +214,7 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
     const lint = async (pkgs: string[]): Promise<GolangciReport | null> => {
       const left = deadline - Date.now();
       if (left <= 0) {
-        notes.push(`timed out before module ${group.moduleRoot}`);
+        notes.push(`timed out before module ${toolText(group.moduleRoot)}`);
         return null;
       }
       let stdout: string;
@@ -220,18 +222,18 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
         stdout = await execGolangci(args.tool!, golangciArgs(pkgs), cwd, left, args.scratch);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        notes.push(`${group.moduleRoot}: ${toolText(message).slice(0, 200)}`);
+        notes.push(`${toolText(group.moduleRoot)}: ${toolText(message).slice(0, 200)}`);
         return null;
       }
       try {
         const report = parseGolangciJson(stdout);
         findings.push(...reanchorToRunDir(report.findings, group.moduleRoot));
         const first = report.typecheckErrors[0];
-        if (first) notes.push(`${group.moduleRoot}: could not type-check: ${toolText(first).slice(0, 200)}`);
+        if (first) notes.push(`${toolText(group.moduleRoot)}: could not type-check: ${toolText(first).slice(0, 200)}`);
         return report;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        notes.push(`${group.moduleRoot}: parse: ${toolText(message).slice(0, 150)}`);
+        notes.push(`${toolText(group.moduleRoot)}: parse: ${toolText(message).slice(0, 150)}`);
         return null;
       }
     };
@@ -240,11 +242,12 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
     if (!report || report.typecheckErrors.length > 0) continue;
     if (report.notDownloaded.length === 0) {
       loaded++;
+      linted.add(group.moduleRoot);
       continue;
     }
-    const entry = notDownloaded.get(group.moduleRoot) ?? { imports: [], partly: false };
-    notDownloaded.set(group.moduleRoot, entry);
-    addAll(entry.imports, report.notDownloaded);
+    const imports = notDownloaded.get(group.moduleRoot) ?? [];
+    notDownloaded.set(group.moduleRoot, imports);
+    addAll(imports, report.notDownloaded);
     // golangci-lint reports no linter's issue for any package of a run that
     // has a type-check error, so the packages that did load are linted again
     // on their own: one more run, never a loop.
@@ -253,15 +256,15 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
     if (rest.length === 0 || rest.length === packages.length) continue;
     const again = await lint(rest);
     if (!again || again.typecheckErrors.length > 0) continue;
-    addAll(entry.imports, again.notDownloaded);
+    addAll(imports, again.notDownloaded);
     if (again.notDownloaded.length === 0) {
       loaded++;
-      entry.partly = true;
+      linted.add(group.moduleRoot);
     }
   }
 
-  for (const [moduleRoot, { imports, partly }] of notDownloaded) {
-    skips.push(notDownloadedSkip(moduleRoot, imports, partly));
+  for (const [moduleRoot, imports] of notDownloaded) {
+    skips.push(notDownloadedSkip(moduleRoot, imports, linted.has(moduleRoot)));
   }
   if (notes.length > 0) {
     return { findings, error: joinParts([...notes, ...skips]) };
@@ -285,7 +288,7 @@ function orphanSkip(orphans: string[]): string {
   const shown = orphans.slice(0, 3).map(asFolder);
   const more = orphans.length > shown.length ? ` and ${orphans.length - shown.length} more` : "";
   const where = orphans.length > 1 ? "each folder" : "that folder";
-  return `not run on ${folderList(shown)}${more}. No go.mod is at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in ${where}`;
+  return `not run on ${toolText(folderList(shown))}${more}. No go.mod is at or above these Go files, so they are not in a Go module. To fix, run go mod init <module path> in ${where}`;
 }
 
 function notDownloadedSkip(moduleRoot: string, imports: string[], partly: boolean): string {
@@ -293,9 +296,10 @@ function notDownloadedSkip(moduleRoot: string, imports: string[], partly: boolea
   const what = partly ? "some packages of the Go module" : "the Go module";
   // The folder stays in prose: a folder name pasted into a command can hold
   // a space or a semicolon.
-  const where = root === "" ? "" : ` in ${folderName(root)}`;
+  const folder = toolText(folderName(root));
+  const where = root === "" ? "" : ` in ${folder}`;
   const shown = imports.map((i) => (i.length > 80 ? `${i.slice(0, 77)}...` : i));
-  return `not run on ${what} at ${folderName(root)}. Its dependencies are not in the Go module cache, ${suchAs(shown)}. To fix, run go mod download${where}`;
+  return `not run on ${what} at ${folder}. Its dependencies are not in the Go module cache, ${suchAs(shown)}. To fix, run go mod download${where}`;
 }
 
 // The reason's parts, joined with "; ", within the 300 characters the runner
@@ -493,7 +497,8 @@ function importNames(importPath: string, sourceLine: string): string[] {
   let last = parts[parts.length - 1] ?? "";
   if (/^v\d+$/.test(last) && parts.length > 1) last = parts[parts.length - 2]!;
   const base = last.replace(/\.v\d+$/, "");
-  const names = [base, base.replace(/-/g, ""), base.replace(/^go-/, "").replace(/-go$/, ""), base.split("-").pop() ?? ""];
+  // "github.com/satori/go.uuid" is uuid: the part after the last dot.
+  const names = [base, base.replace(/-/g, ""), base.replace(/^go-/, "").replace(/-go$/, ""), base.split(".").pop() ?? ""];
   return [...new Set(names.map((n) => n.replace(/[^A-Za-z0-9_]/g, "")).filter((n) => /^[A-Za-z_]/.test(n)))];
 }
 
