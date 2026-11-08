@@ -16,10 +16,6 @@
 export const NOT_PINS = [
   // The trivy release OpenQodex refuses to pin, named in its Pin line.
   "trivy 0.69.4",
-  // Part of the tflint binary, not a separate download.
-  "terraform ruleset 0.15.0",
-  // gosec's own source: a linter inside golangci-lint, with a version of its own.
-  "securego/gosec/blob/v2.29.0",
 ];
 
 // A tag such as v8.21.2 or oxlint_v1.86.0 in a link counts; a fourth number does not.
