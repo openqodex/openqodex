@@ -20,7 +20,7 @@ OpenQodex and the built-in scanners send no code anywhere. They use the network 
 
 - Scanner downloads on first use, into `~/.openqodex/tools/`. GitHub release files are checked against sha256 sums pinned in the package. semgrep, bandit, SQLFluff and Checkov come from PyPI through uv, with a Python 3.11 that uv downloads. brakeman and rubocop come from RubyGems. These package installs are pinned by version.
 - Semgrep rule packs. semgrep fetches `p/default`, `p/security-audit` and `p/secrets` from the Semgrep registry on each run.
-- The dependency check. At every review and scan of a change, osv-scanner reads every supported lockfile in the repository. It sends the names and versions of the dependencies in them to osv.dev. It never sends code.
+- The dependency check. At every review and scan of a change, osv-scanner reads every supported lockfile in the repository, except the paths you exclude. It sends the names and versions of the dependencies in them to osv.dev. It never sends code.
 - Kubernetes schemas. When the change holds a Kubernetes manifest, kubeconform downloads the JSON schema of each kind it meets from raw.githubusercontent.com, at one commit pinned in the package, so the requests name the kinds you use. It never sends a manifest. Each schema is cached and fetched once.
 - The RustSec advisory database. When the change holds a `Cargo.lock`, cargo-deny fetches the database from github.com with git into `~/.openqodex/cache/cargo-deny/`. Nothing about your code or your crates is sent. Cargo itself runs offline.
 - Custom scanners. `openqodex trust` reads the scanner's release from the GitHub API and downloads the asset.
