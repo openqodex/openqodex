@@ -15,11 +15,17 @@
 //  5. every pinned `openqodex@x.y.z` names the package version;
 //  6. every README link is absolute, so it works on the npm page; every
 //     link into this repository names a file that exists, at main or at a
-//     tag that GitHub already has.
+//     tag that GitHub already has;
+//  7. AGENTS.md states where CI runs each tier as ci.yml runs it: the events
+//     that get the fast tier, the four cases of the full condition, macOS
+//     and the benchmark only under it, and the required check names; no
+//     sentence in AGENTS.md or CONTRIBUTING.md says less; and the gate
+//     action's steps equal scripts/gate.sh's, one for one.
 // It cannot check what a sentence means, a measured time or a privacy
 // promise. Those are in the manual claims ledger.
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -255,6 +261,90 @@ for (const rel of [README, ...docsPages]) {
     } else if (path && !/^[a-z]+:/.test(path) && !existsSync(join(root, normalize(join(dirname(rel), path))))) {
       fail(rel, `links ${href}, which does not exist`);
     }
+  }
+}
+
+// 7. Where CI runs each tier. The YAML parser is core's own dependency.
+const YAML = createRequire(join(root, "packages/core/package.json"))("yaml");
+const CI = ".github/workflows/ci.yml";
+const ACTION = ".github/actions/gate/action.yml";
+const AGENTS = "AGENTS.md";
+const CONTRIBUTING = "CONTRIBUTING.md";
+const ci = YAML.parse(read(CI));
+const action = YAML.parse(read(ACTION));
+const expression = (value) => /^\$\{\{\s*([\s\S]*?)\s*\}\}$/.exec(String(value ?? ""))?.[1] ?? null;
+const jobs = ci.jobs ?? {};
+const full = expression(jobs.gate?.steps?.find((s) => s.uses === "./.github/actions/gate")?.with?.full);
+// The full condition, taken apart into its four cases and put back together:
+// any other shape is a change this check and AGENTS.md do not know yet.
+const queue = /contains\(github\.event\.merge_group\.head_commit\.message, '([^']+)'\)/.exec(full ?? "")?.[1];
+const branch = /github\.head_ref == '([^']+)'/.exec(full ?? "")?.[1];
+const label = /contains\(github\.event\.pull_request\.labels\.\*\.name, '([^']+)'\)/.exec(full ?? "")?.[1];
+const pushBranches = ci.on?.push?.branches ?? [];
+const shape = `github.event_name == 'push' || (github.event_name == 'merge_group' && contains(github.event.merge_group.head_commit.message, '${queue}')) || (github.event_name == 'pull_request' && ((github.head_ref == '${branch}' && github.event.pull_request.head.repo.full_name == github.repository) || contains(github.event.pull_request.labels.*.name, '${label}')))`;
+const events = Object.keys(ci.on ?? {}).sort().join(", ");
+if (full === null) fail(CI, "the Gate job's action step has no full condition");
+else if (full !== shape) fail(CI, "the full condition is not push, the queue run naming the version branch, the version branch's pull request and the label; update AGENTS.md and this check");
+if (events !== "merge_group, pull_request, push") fail(CI, `runs on ${events}; AGENTS.md describes merge_group, pull_request and push`);
+if (pushBranches.join(", ") !== "main") fail(CI, `a push to ${pushBranches.join(", ")} runs it; AGENTS.md says a push to main`);
+if (queue !== `/${branch}`) fail(CI, `the queue case names ${queue}, not the version branch /${branch}`);
+// The Linux gate runs on every event, fast or full; the other two jobs run
+// only under the full condition, and macOS runs the action's full default.
+if (jobs.gate?.if !== undefined) fail(CI, "the Linux gate has a condition; AGENTS.md says it runs on every event");
+for (const [id, job] of Object.entries(jobs)) {
+  if (id !== "gate" && expression(job.if) !== full) fail(CI, `${job.name ?? id} runs under a condition other than the full condition; AGENTS.md says only under it`);
+}
+const macStep = jobs["gate-macos"]?.steps?.find((s) => s.uses === "./.github/actions/gate");
+if (macStep?.with?.full !== undefined || action.inputs?.full?.default !== "true") fail(CI, "the macOS gate does not run the full gate by default");
+// The sentences AGENTS.md must hold, made from ci.yml's values.
+const required = [
+  "In CI, an ordinary pull request and its merge queue run get the fast tier, on Linux only.",
+  `CI runs the real-programs tier in four cases: a push to \`${pushBranches[0]}\`; a merge queue run whose merge commit message names \`${queue}\`; a pull request from the branch \`${branch}\` of this repository; a pull request with the label \`${label}\`.`,
+  "The macOS gate and the scanner-only benchmark run only in those four cases.",
+];
+const agentsText = read(AGENTS);
+const flat = (text) => text.replace(/\s*\n\s*(?:- )?/g, " ");
+for (const sentence of required) if (!flat(agentsText).includes(sentence)) fail(AGENTS, `must say "${sentence}" (from ${CI})`);
+// The required check names: each named check is a job, and every job is named.
+const names = Object.values(jobs).map((j) => j.name);
+const checks = /The (\w+) required checks are ([^.]+)\./.exec(flat(agentsText));
+if (checks === null) fail(AGENTS, "never names the required checks");
+else {
+  const listed = [...checks[2].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  if (numberOf(checks[1]) !== listed.length) fail(AGENTS, `says ${checks[1]} required checks and names ${listed.length}`);
+  for (const name of listed) if (!names.includes(name)) fail(AGENTS, `names the required check \`${name}\`, which is not a job in ${CI}`);
+  for (const name of names) if (!listed.includes(name)) fail(AGENTS, `leaves out the check \`${name}\` (${CI})`);
+}
+// No sentence in either page says less than ci.yml: a sentence that says
+// where the full tier runs names all four cases, and no sentence gives every
+// pull request the fast tier (only an ordinary one gets it).
+const CASES = [
+  ["a push to main", new RegExp(String.raw`\bpush(?:es)? to ${pushBranches[0]}\b`)],
+  ["the merge queue run", /\bmerge queue\b|\bqueue run\b/],
+  ["the version pull request", new RegExp(String.raw`version pull request|${branch}`)],
+  [`the label ${label}`, new RegExp(String.raw`\b${label}\b`)],
+];
+for (const rel of [AGENTS, CONTRIBUTING]) {
+  const sentences = flat(read(rel)).replace(/`/g, "").split(/(?<=[.:])\s+(?=[A-Z#])/);
+  for (const sentence of sentences) {
+    const s = sentence.toLowerCase();
+    if (/\b(?:full gate|full tier|real-programs tier) runs\b/.test(s)) {
+      const missing = CASES.filter(([, test]) => !test.test(s)).map(([what]) => what);
+      if (missing.length) fail(rel, `"${sentence.slice(0, 80)}..." says where the full tier runs and leaves out ${missing.join(", ")}`);
+    }
+    if (/\bfast (?:gate|tier)\b/.test(s) && /\b(?:a|every|each|any) pull request(?: and its merge queue run)? (?:gets?|runs?)\b/.test(s)) {
+      fail(rel, `"${sentence.slice(0, 80)}..." gives a pull request the fast tier; a pull request from ${branch} or with the label ${label} gets the full one`);
+    }
+  }
+}
+if (!read(CONTRIBUTING).includes("AGENTS.md")) fail(CONTRIBUTING, "must point at AGENTS.md for the gate and test rules");
+// The action's named steps and scripts/gate.sh's steps, in order.
+const actionSteps = (action.runs?.steps ?? []).filter((s) => s.name !== undefined && s.run !== undefined).map((s) => s.run.trim());
+const gateSteps = [...read("scripts/gate.sh").matchAll(/^step "[^"]+" (.+)$/gm)].map((m) => m[1].trim());
+for (let i = 0; i < Math.max(actionSteps.length, gateSteps.length); i++) {
+  if (actionSteps[i] !== gateSteps[i]) {
+    fail(ACTION, `step ${i + 1} runs ${actionSteps[i] ?? "nothing"}; scripts/gate.sh step ${i + 1} runs ${gateSteps[i] ?? "nothing"}`);
+    break;
   }
 }
 
