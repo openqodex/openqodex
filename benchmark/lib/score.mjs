@@ -951,6 +951,11 @@ export function population(manifest, attempts) {
 // samples) is not judged on it. A scanner-only sample (no reviewer) is
 // never judged on tokens. A stopped run marks only a review that did not
 // complete: a model review that finished before the halt is whole.
+// The "API Error" body check is Claude Code's: only the native control
+// (lib/claude-control.mjs) saves a nativeBody, and Claude Code prints
+// "API Error:" there when its call fails. Codex, the model reviewers and
+// the OpenQodex CLI save no body; a failed call of theirs shows as a
+// failed sample or a record that names no model.
 export function reviewHealth(row, report = null) {
   if (row === null || typeof row !== "object") return { ok: true };
   const body = typeof row.nativeBody === "string" ? row.nativeBody.trimStart() : "";
