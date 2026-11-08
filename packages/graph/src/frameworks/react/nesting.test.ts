@@ -8,9 +8,9 @@
 // the noise floor (expectLinearRepeated): read once, a quarter of the depth
 // costs a few milliseconds, and a quadratic reader at the full depth still
 // fits eight times the floor (issue #101: 5,000 nested elements, 105 ms).
-import { describe, it } from "vitest";
+import { it } from "vitest";
 import type { Node } from "web-tree-sitter";
-import { expectLinearRepeated, readerCpuMs } from "../../test-timing.js";
+import { expectLinearRepeated, growthTests, readerCpuMs } from "../../test-timing.js";
 import type { Lang } from "../../types.js";
 import { express } from "../express/index.js";
 import { fastapi } from "../fastapi/index.js";
@@ -30,7 +30,7 @@ const SOURCES: Record<"typescript" | "tsx" | "python" | "go", (n: number) => str
 
 const plugins = [express, react, nextjs, fastapi, goHttp] as FrameworkPlugin<FrameworkFactBase>[];
 
-describe("the fact readers on deeply nested code", () => {
+growthTests("the fact readers on deeply nested code", () => {
   for (const plugin of plugins) {
     for (const lang of Object.keys(SOURCES) as (keyof typeof SOURCES)[]) {
       if (!plugin.languages.includes(lang as Lang)) continue;

@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact } from "../src/index.js";
 import { EXPORT_WALK_STEPS } from "../src/resolve.js";
-import { expectLinear, stageCpuMs } from "../src/test-timing.js";
+import { expectLinear, growthTests, stageCpuMs } from "../src/test-timing.js";
 import { commitAll, makeRepo, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -72,17 +72,25 @@ describe("the export walk", () => {
     );
     const removed = impact.exports.find((e) => e.name === "fa");
     expect(removed?.consumers.map((c) => `${c.file}:${c.now}`)).toContain("use.ts:broken");
-    // Rings of 2 and of 8 such barrels: the walk's time grows with the ring.
-    expectLinear("the compare stage on rings of 2 and of 8 barrels", await compareCpuMs(...ring(2)), await compareCpuMs(...ring(8)));
   });
 
-  it("walks a 2,000-barrel diamond in time that grows with the barrels, not the paths (2)", async () => {
-    const own = "export function mine() {\n  return 2;\n}\n";
-    const after = (levels: number) => ({ "top.ts": diamond(levels, "function mine() {\n  return 2;\n}\n")["top.ts"] as string });
+  const own = "export function mine() {\n  return 2;\n}\n";
+  const after = (levels: number) => ({ "top.ts": diamond(levels, "function mine() {\n  return 2;\n}\n")["top.ts"] as string });
+  it("walks a 2,000-barrel diamond (2)", async () => {
     const { impact } = await change(diamond(1000, own), after(1000));
     expect(impact.exports.find((e) => e.name === "mine")).toMatchObject({ file: "top.ts", change: "removed" });
-    expectLinear("the compare stage on diamonds of 500 and of 2,000 barrels", await compareCpuMs(diamond(250, own), after(250)), await compareCpuMs(diamond(1000, own), after(1000)));
   }, 300_000);
+
+  growthTests("in time that grows with the barrels", () => {
+    it("finishes a ring of barrels that export * from each other in time that grows with the ring (1)", async () => {
+      // Rings of 2 and of 8 such barrels: the walk's time grows with the ring.
+      expectLinear("the compare stage on rings of 2 and of 8 barrels", await compareCpuMs(...ring(2)), await compareCpuMs(...ring(8)));
+    });
+
+    it("walks a 2,000-barrel diamond in time that grows with the barrels, not the paths (2)", async () => {
+      expectLinear("the compare stage on diamonds of 500 and of 2,000 barrels", await compareCpuMs(diamond(250, own), after(250)), await compareCpuMs(diamond(1000, own), after(1000)));
+    }, 300_000);
+  });
 
   it("records a cut when the walk passes its step budget (3)", async () => {
     const levels = Math.ceil(EXPORT_WALK_STEPS / 2) + 5;

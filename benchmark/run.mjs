@@ -526,7 +526,7 @@ function modelChecks(o, given, models) {
 // comments only (failure 30, lib/suites.mjs specCopy). Exits 2 on a
 // refusal, leaving no temp folder.
 function realCases(o, { build, packageRecord, out } = {}) {
-  const tempRoot = mkdtempSync(join(tmpdir(), "oq-bench-run-"));
+  const tempRoot = makeTempRoot();
   const refuse = (lines) => {
     rmSync(tempRoot, { recursive: true, force: true });
     console.error("The run cannot start:");
@@ -568,7 +568,7 @@ function lockedCases(o) {
     process.exit(2);
   }
   const cases = o.cases ?? listCases(authored.root).filter((c) => lock?.cases[c]?.retired !== true);
-  const tempRoot = mkdtempSync(join(tmpdir(), "oq-bench-run-"));
+  const tempRoot = makeTempRoot();
   const refuse = (lines) => {
     rmSync(tempRoot, { recursive: true, force: true });
     console.error("The run cannot start:");
@@ -678,6 +678,51 @@ function filesUnder(dir) {
 }
 
 const children = new Set();
+
+// The run's temp roots (oq-bench-run-*), each removed on every way out:
+// success, a refusal, an exception and SIGTERM or Ctrl-C (issue 237). The
+// exit hook first stops any child still running and waits for it to end, so
+// no child writes into a root after it is removed. Before the run installs
+// its own handlers (halt, which stops the children and lets the run end), a
+// signal ends the run at once through the same hook. SIGKILL cannot be
+// caught: a run killed that way leaves its root, so whoever starts run.mjs
+// and may kill it gives it a TMPDIR of its own and removes that
+// (benchmark/test/loop.test.mjs).
+const tempRoots = new Set();
+function makeTempRoot() {
+  const dir = mkdtempSync(join(tmpdir(), "oq-bench-run-"));
+  tempRoots.add(dir);
+  return dir;
+}
+process.on("exit", () => {
+  for (const c of children) {
+    try {
+      process.kill(-c.pid, "SIGKILL");
+    } catch {
+      // gone already
+    }
+  }
+  // At most five seconds in all: a group whose leader is not yet reaped
+  // can still answer on Linux, and its processes are already killed.
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  const until = Date.now() + 5000;
+  for (const c of children) {
+    while (Date.now() < until) {
+      try {
+        process.kill(-c.pid, 0);
+      } catch {
+        break;
+      }
+      Atomics.wait(pause, 0, 0, 20);
+    }
+  }
+  for (const dir of tempRoots) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+});
+for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]]) {
+  process.on(signal, () => {
+    if (process.listenerCount(signal) === 1) process.exit(code);
+  });
+}
 
 function runCli(cli, args, env, cwd, timeoutMs, graceMs = 120_000, invocation = null) {
   return new Promise((done) => {
@@ -999,7 +1044,7 @@ async function scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, 
   console.log(`Score: ${folders.map((f) => shown(join(f, "score.json"))).join(" and ")}`);
   // As on the review path: a real suite's case copies are removed once the
   // scan ends; a planted case's laptop repositories are kept to look at.
-  if (real) rmSync(tempRoot, { recursive: true, force: true });
+  if (!real) tempRoots.delete(tempRoot);
   if (!o.checkIdentical) process.exit(0);
   const cmp = comparePasses(folders[0], folders[1]);
   const record = { version: 1, runId, identical: cmp.identical, cause: cmp.cause, inputs: cmp.inputs, differences: cmp.differences, passes: folders.map((f, i) => ({ folder: basename(f), elapsedMin: ends[i].elapsedMin })) };
@@ -1576,7 +1621,7 @@ async function main() {
   // removed once the review ends, so those runs keep no temp folder; a
   // planted case's laptop repositories are kept to look at.
   if (workRoot) rmSync(workRoot, { recursive: true, force: true });
-  if (server || real) rmSync(tempRoot, { recursive: true, force: true });
+  if (!server && !real) tempRoots.delete(tempRoot);
   const finished = ended.reviewsWithAnAttempt;
   const spent = typeof ended.spentUsd === "number" ? `; $${ended.spentUsd.toFixed(2)} spent` : "";
   if (ended.how === "finished") console.log(`Done: ${finished} reviews saved in ${shown(out)}${spent}`);

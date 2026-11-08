@@ -1,13 +1,32 @@
 import { defineConfig } from "vitest/config";
+import { quarantined } from "./tests/quarantine.mjs";
+
+// The files that failed at random, with their issues (tests/quarantine.json
+// and its rule in tests/quarantine.mjs): run apart, with one retry.
+const held = quarantined();
 
 export default defineConfig({
   test: {
-    // benchmark/test: the review benchmark's generator and scorer (no reviewer runs there).
-    // tests/*.test.ts: the shared test helpers in tests/.
-    include: ["packages/*/src/**/*.test.ts", "packages/*/test/**/*.test.ts", "benchmark/test/**/*.test.mjs", "tests/*.test.ts"],
-    // The real-binary adapter checks need every scanner installed; the
-    // end-to-end config runs them.
-    exclude: ["**/node_modules/**", "packages/scanners/test/*.subprocess.test.ts"],
+    // Two projects with the settings below: unit, every file but the
+    // quarantined ones, and quarantine, those with one retry. Each names its
+    // own files: a project adds its include and exclude to the root's, so
+    // the root names none. An empty list gives the quarantine project a
+    // pattern no file has.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          // benchmark/test: the review benchmark's generator and scorer (no reviewer runs there).
+          // tests/*.test.ts: the shared test helpers in tests/.
+          include: ["packages/*/src/**/*.test.ts", "packages/*/test/**/*.test.ts", "benchmark/test/**/*.test.mjs", "tests/*.test.ts"],
+          // The real-binary adapter checks need every scanner installed; the
+          // end-to-end config runs them.
+          exclude: ["**/node_modules/**", "packages/scanners/test/*.subprocess.test.ts", ...held],
+        },
+      },
+      { extends: true, test: { name: "quarantine", include: held.length > 0 ? held : ["tests/quarantine.json.none"], retry: 1 } },
+    ],
     passWithNoTests: true,
     // Every temp folder a test makes is removed by its file; the run fails
     // when one is left (tests/temp-guard.ts).

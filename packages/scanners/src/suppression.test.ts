@@ -49,7 +49,8 @@
 //      thousands of distinct heredoc words left open, a heredoc word made of
 //      100,000 quote pairs, many unclosed openers of each kind, one very
 //      long line, deep nesting. Checked by the ratio of two sizes, which a
-//      slow runner does not change, and a bound only a gross slowdown passes.
+//      slow runner does not change, and a bound only a gross slowdown passes,
+//      in test/suppression-growth.test.ts on the full tier.
 //  17. A construct read wrongly hides a later real comment: an f-string
 //      field whose format spec is never closed; in Ruby, `x /y` read as a
 //      regular expression; in JavaScript, `} / 2` read as one.
@@ -566,120 +567,6 @@ describe("a heredoc ends only on a line that is its word", () => {
     const text = src("cat <<EPBVIVKP", ...Array(200).fill("ELXSADHD"), "it's", "EPBVIVKP", "echo $1 # shellcheck disable=SC2086", "echo 'x'");
     expect(findMarkers(text, ["shellcheck"]).map((m) => m.line)).toEqual([204]);
   });
-
-  // Lines that all share one hash cost each lookup no rescan: a file of
-  // them with a heredoc on every other line (172,000 lines that share the
-  // word's hash at 3.94 MB) grows linearly. CPU time of the fastest of three
-  // runs after one untimed run, at 1 MB, 2 MB and 3.94 MB.
-  it("stays linear on a file of lines that all share the word's hash", () => {
-    const MB = 1024 * 1024;
-    const timed = (size: number) => {
-      const text = Buffer.from("cat <<EPBVIVKP\nELXSADHD\n".repeat(Math.ceil(size / 24)), "utf8").toString("utf8");
-      findMarkers(text, ["shellcheck"]);
-      const runs: number[] = [];
-      for (let r = 0; r < 3; r++) {
-        const before = process.cpuUsage();
-        findMarkers(text, ["shellcheck"]);
-        const used = process.cpuUsage(before);
-        runs.push((used.user + used.system) / 1000);
-      }
-      return Math.min(...runs);
-    };
-    const small = timed(MB);
-    const middle = timed(2 * MB);
-    const large = timed(4 * MB - 64 * 1024);
-    const shown = `${small.toFixed(0)}, ${middle.toFixed(0)} and ${large.toFixed(0)} ms for 1, 2 and 3.94 MB`;
-    expect(middle / Math.max(small, 20), shown).toBeLessThan(8);
-    expect(large / Math.max(small, 20), shown).toBeLessThan(8);
-    expect(small).toBeLessThan(4000);
-  }, 180_000);
-});
-
-describe("linear time on generated input, per reader family (16)", () => {
-  const MB = 1024 * 1024;
-  // Two sizes about four times apart. The larger stays under 4 MB: past
-  // MAX_KEY_BYTES the YAML key reader reads raw lines instead, and its
-  // parser would go unmeasured.
-  const SMALL = MB;
-  const LARGE = 4 * MB - 64 * 1024;
-  // `unit` repeated to about `size`; `(k) => string` gives each repeat its own text.
-  const filler = (size: number) => (unit: string | ((k: number) => string)) => {
-    const parts: string[] = [];
-    let length = 0;
-    for (let k = 0; length < size; k++) {
-      const part = typeof unit === "string" ? unit : unit(k);
-      parts.push(part);
-      length += part.length;
-    }
-    return parts.join("");
-  };
-  type Fill = ReturnType<typeof filler>;
-  // The CPU time of the fastest of three runs, after one run that is not
-  // counted. CPU time of this process: other test files running beside it
-  // on a busy runner do not count. The untimed run takes the garbage
-  // collection the input's own making leaves, and compiles the reader for
-  // input this large. The text is copied flat first, as a file read from
-  // disk is.
-  const timed = (scanner: BuiltinScanner, made: string) => {
-    const text = Buffer.from(made, "utf8").toString("utf8");
-    findMarkers(text, [scanner]);
-    const runs: number[] = [];
-    for (let r = 0; r < 3; r++) {
-      const before = process.cpuUsage();
-      findMarkers(text, [scanner]);
-      const used = process.cpuUsage(before);
-      runs.push((used.user + used.system) / 1000);
-    }
-    return Math.min(...runs);
-  };
-  const cases: [BuiltinScanner, string, (fill: Fill) => string][] = [
-    ["semgrep", "one very long line", (fill) => fill("x nose ")],
-    ["bandit", "many unclosed openers of each kind", (fill) => fill((k) => [`a = '''${k}\n`, `b = """${k}\n`, `c = f'''{${k}\n`, `d = f"{e:${k}\n`, `g = '${k}\n`][k % 5] as string)],
-    ["bandit", "one very long line", (fill) => `x = ${fill("'a' + f\"{b}\" + ")}1  # nosec\n`],
-    ["bandit", "deep nesting", (fill) => `x = f"${fill("{a:")}"\n`],
-    ["shellcheck", "many unclosed openers of each kind", (fill) => fill((k) => [`echo '${k}\n`, `echo "${k}\n`, `echo $'${k}\n`, `x=$(echo ${k}\n`, `y=\`echo ${k}\n`][k % 5] as string)],
-    ["shellcheck", "many distinct heredoc words", (fill) => fill((k) => `cat <<E${k}\n`)],
-    ["shellcheck", "one very long line", (fill) => `cat <<${fill('""')}\nEOF\n`],
-    ["shellcheck", "one very long line of heredocs", (fill) => `cat ${fill('<<"a" ')}\n`],
-    ["shellcheck", "deep nesting", (fill) => `x="${fill("$(\"")}"\n`],
-    ["shellcheck", "a $( ) left open in every heredoc body (18)", (fill) => fill("cat <<E\n$(echo\nE\n")],
-    ["shellcheck", "backticks left open in every heredoc body (18)", (fill) => fill("cat <<E\n`echo\nE\n")],
-    ["kube-linter", "one very long flow map of near-miss keys", (fill) => `a: {${fill(", ignore-check.kube-linter.io/x y")}}\n`],
-    ["kube-linter", "many lines of dashes before a near-miss key", (fill) => fill("- - - - kube-linter.io/ignore-all x\n")],
-    ["hadolint", "many distinct heredoc words", (fill) => `FROM a\n${fill((k) => `RUN <<E${k}\n`)}`],
-    ["hadolint", "one very long line", (fill) => `FROM a\nRUN ${fill("<<a ")}\n`],
-    ["hadolint", "deep nesting", (fill) => `FROM a\n${fill("RUN a \\\n")}`],
-    ["rubocop", "many unclosed openers of each kind", (fill) => fill((k) => [`a = "${k}\n`, `b = '${k}\n`, `c = %q(${k}\n`, `=begin ${k}\n`, `d = "#{${k}\n`][k % 5] as string)],
-    ["rubocop", "many distinct heredoc words", (fill) => fill((k) => `x = <<~E${k}\n`)],
-    ["rubocop", "one very long line", (fill) => `x = ${fill('"a" + ')}1 # rubocop:disable Lint/Foo\n`],
-    ["rubocop", "deep nesting", (fill) => `x = ${fill('"#{')}\n`],
-    ["oxlint", "many unclosed openers of each kind", (fill) => fill((k) => [`a = \`${k}\n`, `/* ${k}\n`, `b = "${k}\n`, `c = /${k}\n`, `d = \`\${${k}\n`][k % 5] as string)],
-    ["oxlint", "one very long line", (fill) => `x = ${fill("a / b / ")}1; // eslint-disable-line\n`],
-    ["oxlint", "deep nesting", (fill) => `x = ${fill("`${")}\n`],
-    ["golangci", "many unclosed openers of each kind", (fill) => fill((k) => [`a := \`${k}\n`, `/* ${k}\n`, `b := "${k}\n`][k % 3] as string)],
-    ["golangci", "one very long line", (fill) => `x := ${fill('"a" + ')}1 //nolint\n`],
-    ["golangci", "deep nesting and package lines in comments", (fill) => fill("/*\npackage x\n*/\n")],
-    ["tflint", "many unclosed openers of each kind (24)", (fill) => fill((k) => [`a = "${k}\n`, `/* ${k}\n`, `b = "\${${k}\n`, `c = <<E${k}\n`, `d = "%{${k}\n`][k % 5] as string)],
-    ["tflint", "many distinct heredoc words (24)", (fill) => fill((k) => `x = <<E${k}\n`)],
-    ["tflint", "one very long line (24)", (fill) => `x = ${fill('"a" + ')}1 # tflint-ignore: all\n`],
-    ["tflint", "deep nesting (24)", (fill) => `x = ${fill('"${')}\n`],
-  ];
-  for (const [scanner, what, make] of cases) {
-    it(`${scanner}: ${what}`, () => {
-      const small = timed(scanner, make(filler(SMALL)));
-      const large = timed(scanner, make(filler(LARGE)));
-      // About four times the input: a linear reader takes about four times
-      // as long on any machine, one that rescans sixteen; the bound is the
-      // middle of the two. Measured here, every family took 2.8 to 4.2 times
-      // as long, and a linear one 5.2 times while other tests loaded the
-      // machine. A floor of 20 ms keeps the timer's noise on a fast reader
-      // from deciding.
-      expect(large / Math.max(small, 20), `${small.toFixed(0)} ms for 1 MB, ${large.toFixed(0)} ms for ${(LARGE / MB).toFixed(2)} MB of CPU time`).toBeLessThan(8);
-      // A gross slowdown fails on any runner: the slowest seen took 1.8 s
-      // of wall time for 1 MB of the YAML key reader.
-      expect(small).toBeLessThan(4000);
-    }, 180_000);
-  }
 });
 
 describe("tflint, tflint-ignore in HCL comments (20, 21)", () => {

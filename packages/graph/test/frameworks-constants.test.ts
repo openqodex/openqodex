@@ -5,11 +5,11 @@
 // thousands of times after thousands of other assignments costs the square
 // of its facts before any cap applies. The check: a file four times as large
 // takes about four times the CPU time to read, never about sixteen.
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { readFacts as expressFacts } from "../src/frameworks/express/facts.js";
 import { readFacts as fastapiFacts } from "../src/frameworks/fastapi/facts.js";
 import { readFacts as goFacts } from "../src/frameworks/go-http/facts.js";
-import { expectLinear, readerCpuMs } from "../src/test-timing.js";
+import { expectLinear, growthTests, readerCpuMs } from "../src/test-timing.js";
 import type { Lang } from "../src/types.js";
 
 // `n` other module-level assignments, the two constants, then n / 2
@@ -35,7 +35,7 @@ const sources: Record<string, { lang: Lang; read: (root: never) => unknown; sour
   },
 };
 
-describe("the constants a fact reader looks up", () => {
+growthTests("the constants a fact reader looks up", () => {
   for (const [plugin, s] of Object.entries(sources)) {
     it(`${plugin}: reads a file four times as large in about four times the CPU time, never the square`, async () => {
       const large = s.source(s.n * 2);
