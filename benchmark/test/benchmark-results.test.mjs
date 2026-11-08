@@ -197,7 +197,7 @@ it("rejects an accepted entry whose board numbers were edited after they were re
   const root = fixture();
   const { runId, config } = aacrGroup(root, { boarded: true });
   const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
-  expect(pointer(root).boardHash ?? Object.values(pointer(root).groups).find((a) => a.runId === runId).boardHash).toBe(boardHash(entry));
+  expect(Object.values(pointer(root).groups).find((a) => a.runId === runId).boardHash).toBe(boardHash(entry));
   entry.outside.aacr.byConfig[config].mean.semantic.precision = 0.9;
   writeFileSync(entryFile(root, runId), JSON.stringify(entry));
   for (const args of [[], ["--check"]]) {
@@ -224,4 +224,9 @@ it("a Greptile or Martian row prints the mean of its repeats with the lowest and
   const martian = { runId: "r-martian", asset, suite: "martian", outside: { martian: { range: { "cli-claude": { metric: "f1", profile: "core", repeats: 3, min: 0.25, mean: 0.375, max: 0.5 } } } } };
   expect(rangeLine(martian, { config: "claude-graph-on" })).toContain("F1 37.5% on average, from 25.0% to 50.0% across 3 repeats");
   expect(rangeLine({ ...martian, outside: undefined }, { config: "claude-graph-on" })).toBeNull();
+});
+
+it("a board score line of an entry tuned on its own cases carries the label", () => {
+  const greptile = { runId: "r-greptile", asset: { url: "https://example.invalid/run.tar.gz" }, suite: "greptile", tunedOn: true, outside: { greptile: { range: { library: { metric: "caught", of: 50, repeats: 3, min: 28, mean: 30, max: 33 } } } } };
+  expect(rangeLine(greptile, { config: "model-gpt-6.1-sol-graph-on" }), "a tuned board score is shown without its label").toContain("caught 30.0 of 50 cases on average (60.0%), from 28 to 33 (tuned on these cases) across 3 repeats");
 });

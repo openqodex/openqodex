@@ -483,6 +483,16 @@
           ]
         }
       },
+      "range": {
+        "cli-claude": {
+          "metric": "caught",
+          "of": 50,
+          "repeats": 1,
+          "min": 33,
+          "mean": 33,
+          "max": 33
+        }
+      },
       "evidenceHash": "af1c1481a80ff620e5a3858ebf7fcaf99dad849ed69dc51e7ad55d1b262fde24"
     }
   },

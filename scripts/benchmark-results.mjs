@@ -49,7 +49,7 @@ export function rangeLine(e, g) {
   const text = r.metric === "caught"
     ? `caught ${r.mean.toFixed(1)} of ${r.of} cases on average (${percent(r.mean / r.of)}), from ${r.min} to ${r.max}`
     : `F1 ${percent(r.mean)} on average, from ${percent(r.min)} to ${percent(r.max)}`;
-  return `${runLink(e)}, ${g.config}: ${text} across ${r.repeats} repeats. The range is the lowest and highest repeat, not a confidence interval.`;
+  return `${runLink(e)}, ${g.config}: ${tuned(e, text)} across ${r.repeats} repeats. The range is the lowest and highest repeat, not a confidence interval.`;
 }
 const precisionRange = (s) => (s.precision.lower.of === 0 ? "not measured" : `${ratio(s.precision.lower)} to ${ratio(s.precision.upper)}`);
 

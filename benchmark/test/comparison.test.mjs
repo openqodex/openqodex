@@ -241,6 +241,20 @@ describe("frozen comparisons", () => {
     f.record.runs[0].casesNotRun = [missing];
     expect(validateComparison(f.record, f.options).accepted).toBe(false);
   });
+  // Guards O12: a run made on a split file since replaced (wave 9 on greptile-v1)
+  // stays in the record only when its run reference names that split hash.
+  it("a run made on an earlier split is refused unless its run reference names that split hash", () => {
+    const f = fixture("aacr"); const run = runFixture(f);
+    const earlier = "a".repeat(64);
+    run.entry.splitHash = earlier; run.save();
+    expect(() => validateComparison(f.record, f.options), "a run on an unnamed split hash was kept").toThrow(/differs from the comparison suite/);
+    f.record.runs[0].splitHash = "b".repeat(64);
+    expect(() => validateComparison(f.record, f.options), "a run named under another split hash was kept").toThrow(/differs from the comparison suite/);
+    f.record.runs[0].splitHash = "not a hash";
+    expect(() => validateComparison(f.record, f.options)).toThrow(/splitHash must be a sha256/);
+    f.record.runs[0].splitHash = earlier;
+    expect(validateComparison(f.record, f.options).accepted).toBe(false);
+  });
   it("a judged run (with outside/) attaches", () => {
     const f = fixture("greptile", true); const run = runFixture(f);
     expect(validateComparison(f.record, f.options).accepted).toBe(false);

@@ -282,7 +282,11 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     need(e.runId === r.runId && entryProblems(e).length === 0, `run ${r.runId} has an invalid index entry`);
     need(e.purpose !== "diagnostic", `run ${r.runId} is a diagnostic run, which never counts in a comparison`);
     const suite = record.suites[e.suite];
-    need(suite && e.splitHash === suite.splitHash && Array.isArray(e.caseIds) && e.caseIds.length > 0 && e.caseIds.every((id) => Object.entries(suite.caseHashes).some(([name, h]) => id === `${e.suite}/${name}@${h.slice(0, 8)}`)), `run ${r.runId} differs from the comparison suite`);
+    // A run made before its suite's split file changed keeps the split hash
+    // it was made on; the run reference names that hash, or the run must
+    // match the split the record pins.
+    need(r.splitHash === undefined || HEX64.test(r.splitHash), `run ${r.runId} splitHash must be a sha256 when given`);
+    need(suite && e.splitHash === (r.splitHash ?? suite.splitHash) && Array.isArray(e.caseIds) && e.caseIds.length > 0 && e.caseIds.every((id) => Object.entries(suite.caseHashes).some(([name, h]) => id === `${e.suite}/${name}@${h.slice(0, 8)}`)), `run ${r.runId} differs from the comparison suite`);
     const ids = suiteCaseIds(e.suite, suite);
     need(Array.isArray(r.casesNotRun) && sameIds([...e.caseIds, ...r.casesNotRun], ids), `run ${r.runId} caseIds and casesNotRun must account for every frozen suite case exactly once`);
     const folder = reference(root, `results/${r.runId}`, "run folder");

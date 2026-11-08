@@ -227,32 +227,32 @@
           "official": {
             "beta": 2,
             "strict": {
-              "precision": 0.2043222003929273,
+              "precision": 0.20512820512820512,
               "recall": 0.7482014388489209,
-              "f1": 0.3209876543209877,
-              "fbeta": 0.48826291079812206,
+              "f1": 0.3219814241486068,
+              "fbeta": 0.48918156161806203,
               "tp": 104,
-              "fp": 405,
+              "fp": 403,
               "fn": 35,
               "prs": 50
             },
             "core": {
-              "precision": 0.22562141491395793,
+              "precision": 0.22648752399232247,
               "recall": 0.7468354430379747,
-              "f1": 0.3465491923641703,
-              "fbeta": 0.5108225108225107,
+              "f1": 0.3475699558173785,
+              "fbeta": 0.5117085862966175,
               "tp": 118,
-              "fp": 405,
+              "fp": 403,
               "fn": 40,
               "prs": 50
             },
             "all": {
-              "precision": 0.2358490566037736,
+              "precision": 0.23674242424242425,
               "recall": 0.7225433526011561,
-              "f1": 0.3556187766714083,
-              "fbeta": 0.5114566284779051,
+              "f1": 0.3566333808844508,
+              "fbeta": 0.5122950819672132,
               "tp": 125,
-              "fp": 405,
+              "fp": 403,
               "fn": 48,
               "prs": 50
             }
@@ -268,12 +268,12 @@
               "of": 173
             },
             "findings": {
-              "sent": 49,
+              "sent": 47,
               "matched": 43
             },
             "candidates": {
-              "extracted": 535,
-              "findings": 49
+              "extracted": 533,
+              "findings": 47
             },
             "severity": {
               "label": "Each found truth item once, by the first finding that hit it: the severity it gave against the truth item's, on the scale critical, major, minor, nitpick, info. Off is two steps or more; the matrix is truth severity, then given severity.",
@@ -12905,48 +12905,6 @@
                 "file": "work/results/gpt-5.2/candidates.json"
               },
               "dedupGroup": 6
-            },
-            {
-              "candidateId": "https://github.com/keycloak/keycloak/pull/38446#0",
-              "prUrl": "https://github.com/keycloak/keycloak/pull/38446",
-              "sourceFindingIds": [
-                "0b111f9b99bb25365d260698d489a705f4648ac459196bc2bc6ac104b0d5ee2e"
-              ],
-              "attribution": {
-                "method": "longest common run of words, then the share of its words",
-                "run": 2,
-                "share": 0.4,
-                "tied": 1
-              },
-              "extractedText": "API server is unreachable (ENOTFOUND), indicating a DNS resolution/network connectivity problem",
-              "officialFp": true,
-              "extraction": {
-                "model": "gpt-5.2",
-                "step": "step2_extract_comments",
-                "file": "work/results/gpt-5.2/candidates.json"
-              },
-              "dedupGroup": 0
-            },
-            {
-              "candidateId": "https://github.com/keycloak/keycloak/pull/40940#0",
-              "prUrl": "https://github.com/keycloak/keycloak/pull/40940",
-              "sourceFindingIds": [
-                "d2a7a492e24b4416d8838e7cfb42a63702c5fd0bcb24b54fbae6c1040ba51fc5"
-              ],
-              "attribution": {
-                "method": "longest common run of words, then the share of its words",
-                "run": 2,
-                "share": 0.364,
-                "tied": 1
-              },
-              "extractedText": "API server is unreachable (ENOTFOUND), indicating a DNS resolution failure or network connectivity issue",
-              "officialFp": true,
-              "extraction": {
-                "model": "gpt-5.2",
-                "step": "step2_extract_comments",
-                "file": "work/results/gpt-5.2/candidates.json"
-              },
-              "dedupGroup": 0
             }
           ],
           "matches": [
@@ -13705,12 +13663,41 @@
             {
               "caseId": "martian/ai-code-review-evaluation__sentry-greptile-3@e43c2b26",
               "reason": "not-run"
+            },
+            {
+              "caseId": "martian/keycloak__keycloak-38446@a4a3b579",
+              "reason": "failed",
+              "failure": "its body is an API error: API Error: Can't reach the API server, check your internet or DNS (ENOTFOUND)"
+            },
+            {
+              "caseId": "martian/keycloak__keycloak-40940@25ed18b4",
+              "reason": "failed",
+              "failure": "its body is an API error: API Error: Can't reach the API server, check your internet or DNS (ENOTFOUND)"
             }
           ]
         }
       },
-      "evidenceHash": "564fc235a7177358ac1228371b237816b85432d82e8072217fa66a1c8d744b54"
+      "range": {
+        "control": {
+          "metric": "f1",
+          "profile": "core",
+          "repeats": 1,
+          "min": 0.3475699558173785,
+          "mean": 0.3475699558173785,
+          "max": 0.3475699558173785
+        }
+      },
+      "evidenceHash": "69ddfe2b0de62f891e9902620d3ce0156ce04855d5deb71fcf566cf1531562db"
     }
+  },
+  "rescored": {
+    "date": "2026-11-08",
+    "rule": "health",
+    "reviews": [
+      "martian/keycloak__keycloak-38446@a4a3b579/control-graph-off/1",
+      "martian/keycloak__keycloak-40940@25ed18b4/control-graph-off/1"
+    ],
+    "note": "published package predates the rescore"
   },
   "perCase": null,
   "perBug": null,

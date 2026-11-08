@@ -541,7 +541,9 @@ export async function publishRun(folder, { dryRun = false, writeIndex = false, o
   // entry then gets the new sha256, and that change must be committed.
   const committed = readEntry(runId, runs);
   const boardOnly = committed !== null && writeIndex;
-  if (boardOnly && committed.asset.sha256 !== entry.asset.sha256) throw new Error(`refused: ${runId} packages to sha256 ${entry.asset.sha256}, not the ${committed.asset.sha256} its entry names, so --write-index cannot refresh its board numbers`);
+  // An entry rescored offline (its `rescored` note) names the package published before the rescore.
+  const rescored = committed?.rescored ? `; the entry was rescored offline on ${committed.rescored.date} (rule ${committed.rescored.rule}), and its published package predates the rescore, so the package must be uploaded again` : "";
+  if (boardOnly && committed.asset.sha256 !== entry.asset.sha256) throw new Error(`refused: ${runId} packages to sha256 ${entry.asset.sha256}, not the ${committed.asset.sha256} its entry names, so --write-index cannot refresh its board numbers${rescored}`);
   if (committed && (committed.asset.listHash !== entry.asset.listHash || committed.privateListHash !== entry.privateListHash)) {
     throw new Error(`refused: the committed entry for ${runId} names other files (list hash ${committed.asset.listHash}, private ${committed.privateListHash}) than this folder packages (list hash ${entry.asset.listHash}, private ${entry.privateListHash})`);
   }

@@ -483,6 +483,16 @@
           ]
         }
       },
+      "range": {
+        "control": {
+          "metric": "caught",
+          "of": 50,
+          "repeats": 1,
+          "min": 39,
+          "mean": 39,
+          "max": 39
+        }
+      },
       "evidenceHash": "7934111a3af41112f7b2ec56c453bb42c1413415562fcdd92f58f02faa2dac2e"
     }
   },

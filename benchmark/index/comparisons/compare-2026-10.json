@@ -316,7 +316,7 @@
         "keycloak__keycloak-38446": "a4a3b5793f5940d05b7eaf0f1d94623551dd2fd2d0fbb53e5875d5a73a6c5ba9",
         "keycloak__keycloak-40940": "25ed18b4c6b845f4b8fedeccc769049da25aa4efa2aa5ae787b6c69025d024e1"
       },
-      "splitHash": "3e75f963b36f268fc0c412edb24283d3f4a79aee2b4988397944fb524046bb5f",
+      "splitHash": "3a118ac9ed341393b23ae38ff762b0c9f354e4e21aa91d2626dd49909e2d3c15",
       "fileHash": "6d2f5b4f8d6312776d330ceff4f6f6c09683bf16f3bca34ca9ef289412821774"
     },
     "clean": {
@@ -377,7 +377,7 @@
         "ai-code-review-evaluation__sentry-greptile-8": "95dd22ca9ae038a173da15a6b52905297e0eedf4ebc1a2463017a1fd0ae27888",
         "ai-code-review-evaluation__sentry-greptile-9": "acbcc279a5f884c87b4a2e1798563b631d3aa0533f927c3c6d20a729a2efeff4"
       },
-      "splitHash": "8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64",
+      "splitHash": "f025bf96bb366c2a990669edffdf285f3d86a514d38aa83996c2298db5f07ed6",
       "fileHash": "8d6ccce66a543edb0b8d6ba303ef08d4c7b559a19f831209ee613715ca8f1915"
     }
   },
@@ -470,30 +470,46 @@
     }
   ],
   "capUsd": 10,
+  "repeats": 3,
   "runs": [
     {
       "runId": "2026-10-27-55a9d696-greptile-claude",
-      "sha256": "8c7266fb93b0d563fd6ae42197c2dd40c07846c3ac0241bcd34ef8681d3b04e2",
+      "sha256": "6d3fe6fbac369c70466d7a35e025ee894beba26a9971614b084889753cc9aa91",
       "reviewer": "cli-claude",
       "casesNotRun": [
         "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
-      ]
+      ],
+      "splitHash": "8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64"
     },
     {
       "runId": "2026-10-27-2221ffc6-greptile-control",
-      "sha256": "2924166293f0641c770d3e66e2dff04723d2a7473c40d1ab89191965fd6ff2df",
+      "sha256": "5477927f42c0676290b0f45fd861afa6ed4a760eff3bd820bc2f6a09b539d7b0",
       "reviewer": "control",
       "casesNotRun": [
         "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c"
-      ]
+      ],
+      "splitHash": "8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64"
     },
     {
       "runId": "2026-10-28-55a9d696-martian-control",
-      "sha256": "438ef3af16170297e577868db9e203870e7bc0fcde884f3e57439b8546c51737",
+      "sha256": "b4b59c8d46ab29a09f45237653a686a7374f4c2932800e2e079d48162d29d52f",
       "reviewer": "control",
       "casesNotRun": [
         "martian/ai-code-review-evaluation__sentry-greptile-3@e43c2b26"
-      ]
+      ],
+      "splitHash": "3e75f963b36f268fc0c412edb24283d3f4a79aee2b4988397944fb524046bb5f"
+    }
+  ],
+  "exceptions": [
+    {
+      "runId": "2026-10-28-55a9d696-martian-control",
+      "jobId": "martian/keycloak__keycloak-38446@a4a3b579/control-graph-off/1",
+      "why": "its body is an API error: API Error: Can't reach the API server, check your internet or DNS (ENOTFOUND); counted as a miss (issue 284)"
+    },
+    {
+      "runId": "2026-10-28-55a9d696-martian-control",
+      "jobId": "martian/keycloak__keycloak-40940@25ed18b4/control-graph-off/1",
+      "why": "its body is an API error: API Error: Can't reach the API server, check your internet or DNS (ENOTFOUND); counted as a miss (issue 284)"
     }
   ],
   "acceptance": {
