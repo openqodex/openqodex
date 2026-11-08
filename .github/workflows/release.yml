@@ -41,10 +41,14 @@ jobs:
     # and the release job then does not run: a loss refuses the publish, and
     # so does a check that could not run, which shows nothing either way.
     # Run the workflow again when the report says the Semgrep rule packs
-    # moved between the two runs.
+    # moved between the two runs. Before the comparison, it preinstalls
+    # every scanner of this build into a clean install root and runs each
+    # on its check case (the clean-root preinstall test), so a failure
+    # there stops the publish instead of following it (issue 224).
     if: github.repository == 'openqodex/openqodex'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The clean-root preinstall takes up to 30 minutes of the total.
+    timeout-minutes: 75
     permissions:
       contents: read
     steps:
@@ -103,6 +107,12 @@ jobs:
           pnpm install --frozen-lockfile
           node benchmark/build-cli.mjs
           node packages/cli/dist/bin.js doctor --install --all-scanners --require-all
+      # The same test check-self-update runs after the publish, on this build.
+      - name: Preinstall every scanner into a clean install root
+        if: steps.publish.outputs.publish == 'true'
+        env:
+          OPENQODEX_PREINSTALL_FULL: "1"
+        run: pnpm exec vitest run --config vitest.e2e.config.ts tests/e2e/preinstall-full.test.ts
       # --install-scanners adds every scanner the published package pins at
       # another version, so both builds run the same scanners.
       - name: Compare this build with the published package

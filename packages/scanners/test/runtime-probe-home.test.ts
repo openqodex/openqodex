@@ -23,6 +23,9 @@
 // 6. An empty ~/.rustup is handed to a rustup proxy, which writes its
 //    settings.toml there before it fails.
 // 7. An unreadable Go environment file makes the whole check reject.
+// 8. The strict check alone (issue 224), as `openqodex doctor --require-all`
+//    and the publish check run it, probes the runtimes under the OpenQodex
+//    home (cache/runtime-probe) and leaves that folder there.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -208,4 +211,16 @@ describe("an unreadable Go environment file makes the whole check reject", () =>
     const found = await goCheck(home, tempDir("oq-probe-review-"));
     expect(found.reason).toMatch(/go\/env/);
   }, 120_000);
+});
+
+describe("the strict check alone leaves its runtime probe folder in the OpenQodex home", () => {
+  it("leaves an empty OpenQodex home empty after checkScanners on an empty install root", () => {
+    const home = tempDir("oq-check-home-");
+    const root = join(tempDir("oq-check-root-"), "tools");
+    const code = `import { checkScanners } from ${JSON.stringify(DIST)}; const r = await checkScanners({ installRoot: ${JSON.stringify(root)}, require: ["golangci", "cargo-deny", "brakeman", "rubocop"] }); process.stdout.write(JSON.stringify(r.ok));`;
+    const p = spawnSync(process.execPath, ["--input-type=module", "-e", code], { env: { ...process.env, OPENQODEX_HOME: home }, encoding: "utf8", timeout: 120_000 });
+    expect(p.status, p.stderr).toBe(0);
+    expect(p.stdout).toBe("false");
+    expect(readdirSync(home)).toEqual([]);
+  });
 });
