@@ -13,7 +13,6 @@
 // adapters.subprocess.test.ts.
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { crc32 } from "node:zlib";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { parseConfig, scanReport } from "@openqodex/core";
 import type { ResolvedTool, ToolResolution } from "@openqodex/core";
@@ -23,6 +22,17 @@ import { runOsvScanner } from "../src/adapters/osv-scanner.js";
 import { runScanners } from "../src/run.js";
 import { ARG_BUDGET_BYTES } from "../src/exec.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
+
+// CRC-32 of the stored zip entry. node:zlib has crc32 only from Node 22.2,
+// and the package allows Node 22.0.
+function crc32(data: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
 
 afterAll(removeTempDirs);
 

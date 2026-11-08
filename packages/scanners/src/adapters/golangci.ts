@@ -264,6 +264,9 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
     const blocked = new Set(report.blockedDirs.map(realDir));
     const rest = packages.filter((p) => !blocked.has(realDir(path.resolve(cwd, p))));
     if (rest.length === 0 || rest.length === packages.length) continue;
+    // Past the deadline the loaded packages stay unlinted: the skip part
+    // above already says the module was not run, so no "before module" note.
+    if (deadline - Date.now() <= 0) continue;
     const again = await lint(rest);
     if (!again || again.typecheckErrors.length > 0) continue;
     addAll(imports, again.notDownloaded);

@@ -62,6 +62,9 @@ const NOT_LISTED = "failed for a reason not listed";
 export function failureClass(reason: string | null, source = ""): string {
   const r = reason ?? "";
   const parts = (source === "golangci" ? r.split("; ") : [r]).map(partClass);
+  // The runner keeps 300 characters of a reason. A golangci reason at that
+  // cap ends in a cut part, which names nothing: it is not a reason not listed.
+  if (source === "golangci" && r.length >= 300 && parts.length > 1 && parts[parts.length - 1] === NOT_LISTED) parts.pop();
   const listed = [...new Set(parts.filter((c) => c !== NOT_LISTED))];
   if (listed.length === 0) return NOT_LISTED;
   return parts.includes(NOT_LISTED) ? [...listed, "a reason not listed"].join(", ") : listed.join(", ");

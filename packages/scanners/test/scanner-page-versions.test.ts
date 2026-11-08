@@ -36,7 +36,7 @@ describe("versions on the scanners page", () => {
     expect(check(link)).toEqual([expect.stringMatching(/names cargo-deny at 0\.19\.0/)]);
     const prose = page.replace(`hadolint ${tools.hadolint.version} cannot parse`, "hadolint 2.12.0 cannot parse");
     expect(check(prose)).toEqual([expect.stringMatching(/names hadolint at 2\.12\.0/)]);
-    const row = page.replace(`| ruff | ${tools.ruff.version} | 9.9 MB`, "| ruff | 0.7.0 | 9.9 MB");
+    const row = page.replace(`| ruff | ${tools.ruff.version} |`, "| ruff | 0.7.0 |");
     expect(check(row)).toEqual([expect.stringMatching(/names ruff at 0\.7\.0/)]);
   });
 

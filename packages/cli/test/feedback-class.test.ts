@@ -47,6 +47,15 @@ describe("failureClass on golangci reasons", () => {
     );
   });
 
+  it("reads a cut last part of a reason at the runner's 300-character cap as a cut, not a reason not listed", () => {
+    // The runner puts a held-back file before the adapter's reason, then cuts the whole to 300.
+    const held = "vendor/x.go: outside the repo";
+    const skip = "not run on the Go module at backend. Its dependencies are not in the Go module cache, such as github.com/acme/" + "a".repeat(200) + ". To fix, run go mod download in backend";
+    const reason = `${held}; ${skip}`.slice(0, 300);
+    expect(reason.length).toBe(300);
+    expect(failureClass(reason, "golangci")).toBe("a file was outside the repo, Go dependencies were not downloaded");
+  });
+
   it("says a part is not listed when it is next to a listed one", () => {
     expect(failureClass("a: could not type-check: x.go:1: bad; something new", "golangci")).toBe("could not type-check a changed package, a reason not listed");
   });
