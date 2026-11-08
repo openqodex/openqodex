@@ -22,9 +22,13 @@ export const NOT_PINS = [
 const VERSION = /(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)/g;
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// `tools`: the "tools" object of toolchain.json. `names`: each tool's other
-// names on the page, by toolchain key (golangci is golangci-lint there).
-export function pinsOf(tools, names = {}) {
+// The names the pages use for a scanner, by adapter source and toolchain key.
+// scripts/docs-facts.mjs uses the same map.
+export const DISPLAY = { golangci: "golangci-lint", checkov: "Checkov", tflint: "TFLint", sqlfluff: "SQLFluff" };
+
+// `tools`: the "tools" object of toolchain.json. Each tool is found by its
+// key and by its name in DISPLAY.
+export function pinsOf(tools, names = DISPLAY) {
   const pins = new Map();
   for (const [key, tool] of Object.entries(tools)) {
     const set = new Set([tool.version]);

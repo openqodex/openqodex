@@ -15,7 +15,7 @@ import { pinsOf, scannerPageVersionProblems } from "../../../scripts/scanner-pag
 const root = new URL("../../../", import.meta.url);
 const page = readFileSync(new URL("docs/scanners.md", root), "utf8");
 const tools = JSON.parse(readFileSync(new URL("packages/scanners/toolchain.json", root), "utf8")).tools;
-const pins = pinsOf(tools, { golangci: "golangci-lint" });
+const pins = pinsOf(tools);
 const golangci = tools.golangci.version as string;
 const check = (text: string): string[] => scannerPageVersionProblems(text, pins);
 const lineOf = (text: string, needle: string): number => text.split("\n").findIndex((l) => l.includes(needle)) + 1;
