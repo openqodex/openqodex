@@ -17,7 +17,7 @@
 // 9. Two spenders that both saw a dead holder's lock both clear it and
 //    both take the wave: the second one clears the first one's fresh lock.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -136,8 +136,28 @@ describe("the wave cap", () => {
       await first.killed();
     }
     // Nothing is left aside, and a takeover of the bytes it saw clears the lock.
-    expect(readdirSync(wave.dir).filter((f) => f.includes(".stale-") || f.endsWith(".tmp"))).toEqual([]);
+    expect(readdirSync(wave.dir).filter((f) => f.endsWith(".taking") || f.endsWith(".tmp"))).toEqual([]);
     expect(takeOver(wave.lockFile, readFileSync(wave.lockFile, "utf8"))).toBe(true);
+    expect(existsSync(wave.lockFile)).toBe(false);
+  });
+
+  it("clears a taking folder left by a spender that died inside it, and waits for a fresh one", () => {
+    const root = tempDir("oq-wave-");
+    const wave = newWave("w9b", { root });
+    const taking = `${wave.lockFile}.taking`;
+    // Left a minute ago by a dead process: removed, and the reservation goes through.
+    mkdirSync(taking);
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(taking, old, old);
+    reserve(wave, { id: "after-stale", path: "run", forecastUsd: 1 });
+    expect(lockHolder(wave)).toMatchObject({ pid: process.pid, live: true });
+    expect(existsSync(taking)).toBe(false);
+    settle(wave, "after-stale", 0.5);
+    // A fresh one is another spender mid-step: this spender waits, and the refusal names the folder.
+    mkdirSync(taking);
+    const started = Date.now();
+    expect(() => reserve(wave, { id: "blocked", path: "run", forecastUsd: 1 })).toThrow(/stays held by another spender/);
+    expect(Date.now() - started).toBeGreaterThan(1000);
     expect(existsSync(wave.lockFile)).toBe(false);
   });
 

@@ -46,7 +46,7 @@
 // 5. A cap above 10 is written without a reason or a signature.
 // 6. A subscription review's reported dollars fill the cap though nothing
 //    was billed: a line with "metered":false is summed apart.
-import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { benchRoot } from "./cases.mjs";
@@ -180,61 +180,92 @@ export function lockHolder(wave, text = null) {
 
 const holderText = (h) => `process ${h.pid}${h.id ? ` (${h.path} ${h.id})` : ""}, since ${h.at}`;
 
-// Clears a stale lock whose bytes were `staleText` when its holder was seen
-// dead. The lock is renamed aside first, so of two processes that saw the
-// same dead holder only one moves those bytes; one that moved another
-// spender's fresh lock instead puts it back. True when the stale lock is gone.
-export function takeOver(lockFile, staleText) {
-  const aside = `${lockFile}.stale-${process.pid}`;
-  try {
-    renameSync(lockFile, aside);
-  } catch (error) {
-    if (error.code === "ENOENT") return true;
-    throw error;
-  }
-  const moved = readFileSync(aside, "utf8");
-  if (moved !== staleText) {
+// Every read, link and unlink of the lock happens while this process holds
+// <lock>.taking, a folder made in one step, so two spenders that both saw a
+// dead holder clear it one after the other, and a third cannot slip its
+// own lock in between. A folder older than TAKING_STALE_MS was left by a
+// process that died inside it and is removed.
+const TAKING_STALE_MS = 30_000;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function whileTaking(lockFile, fn) {
+  const dir = `${lockFile}.taking`;
+  for (let tries = 0; tries < 200; tries++) {
     try {
-      linkSync(aside, lockFile);
+      mkdirSync(dir);
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
+      let age;
+      try {
+        age = Date.now() - statSync(dir).mtimeMs;
+      } catch (statError) {
+        if (statError.code === "ENOENT") continue;
+        throw statError;
+      }
+      if (age > TAKING_STALE_MS) {
+        try {
+          rmdirSync(dir);
+        } catch (rmError) {
+          if (rmError.code !== "ENOENT") throw rmError;
+        }
+      } else pause(25);
+      continue;
+    }
+    try {
+      return fn();
+    } finally {
+      rmdirSync(dir);
     }
   }
-  unlinkSync(aside);
-  return moved === staleText;
+  throw new WaveRefused(`refused, nothing spent: ${dir} stays held by another spender`);
+}
+
+const readLock = (lockFile) => {
+  try {
+    return readFileSync(lockFile, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+};
+
+// Clears a stale lock whose bytes were `staleText` when its holder was seen
+// dead, and only that lock: a lock another spender wrote since stays. True
+// when the stale lock is gone.
+export function takeOver(lockFile, staleText) {
+  return whileTaking(lockFile, () => {
+    const now = readLock(lockFile);
+    if (now === null) return true;
+    if (now !== staleText) return false;
+    unlinkSync(lockFile);
+    return true;
+  });
 }
 
 // Takes the lock for this process, clearing a stale one. Returns true when
 // it took it now, false when this process held it already. The lock is
-// written whole to a temp file and linked into place, so no reader sees it
-// half written.
+// written whole beside its place and renamed in, so no reader sees it half
+// written.
 function takeLock(wave, who) {
-  const tmp = `${wave.lockFile}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString(), ...who })}\n`);
-  try {
-    for (let tries = 0; tries < 3; tries++) {
-      try {
-        linkSync(tmp, wave.lockFile);
-        return true;
-      } catch (error) {
-        if (error.code !== "EEXIST") throw error;
-      }
-      let staleText;
-      try {
-        staleText = readFileSync(wave.lockFile, "utf8");
-      } catch (error) {
-        if (error.code === "ENOENT") continue;
-        throw error;
-      }
-      const h = lockHolder(wave, staleText);
+  return whileTaking(wave.lockFile, () => {
+    const text = readLock(wave.lockFile);
+    if (text !== null) {
+      const h = lockHolder(wave, text);
       if (h.pid === process.pid) return false;
       if (h.live) throw new WaveRefused(`refused, nothing spent: the wave ${wave.id} has one spender at a time, and ${holderText(h)} holds ${wave.lockFile}`);
-      takeOver(wave.lockFile, staleText);
+      unlinkSync(wave.lockFile);
     }
-  } finally {
-    unlinkSync(tmp);
-  }
-  throw new WaveRefused(`refused, nothing spent: could not take ${wave.lockFile}`);
+    const tmp = `${wave.lockFile}.${process.pid}.tmp`;
+    try {
+      writeFileSync(tmp, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString(), ...who })}\n`);
+      renameSync(tmp, wave.lockFile);
+    } catch (error) {
+      try {
+        unlinkSync(tmp);
+      } catch {}
+      throw error;
+    }
+    return true;
+  });
 }
 
 function releaseLock(wave) {
@@ -321,9 +352,10 @@ export function main(argv = process.argv.slice(2), { root = benchRoot } = {}) {
     if (rest.length !== 3) throw new WaveRefused(USAGE);
     const [waveId, id, usd] = rest;
     const w = openWave(waveId, { root });
-    const h = lockHolder(w);
+    const text = readLock(w.lockFile);
+    const h = text === null ? null : lockHolder(w, text);
     if (h?.live && h.pid !== process.pid) throw new WaveRefused(`refused: ${holderText(h)} holds ${w.lockFile} and may be the run itself; settle once it has ended`);
-    if (h && !h.live) takeOver(w.lockFile, readFileSync(w.lockFile, "utf8"));
+    if (h && !h.live) takeOver(w.lockFile, text);
     settle(w, id, Number(usd));
     console.log(`Settled ${id} at ${money(Number(usd))}. ${stateText(w)}`);
     return 0;
