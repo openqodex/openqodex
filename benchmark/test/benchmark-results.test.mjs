@@ -11,6 +11,7 @@
 // 10. An accepted entry's board numbers are edited after they were recorded, and the page shows them.
 // 11. A number tuned on its own cases (tunedOn) is shown as if it were a score.
 // 12. A Greptile or Martian row shows its best repeat, or its range as a confidence interval (O9).
+// 13. Two README rows of one reviewer and model read alike when their groups differ (issue #280).
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -229,4 +230,37 @@ it("a Greptile or Martian row prints the mean of its repeats with the lowest and
 it("a board score line of an entry tuned on its own cases carries the label", () => {
   const greptile = { runId: "r-greptile", asset: { url: "https://example.invalid/run.tar.gz" }, suite: "greptile", tunedOn: true, outside: { greptile: { range: { library: { metric: "caught", of: 50, repeats: 3, min: 28, mean: 30, max: 33 } } } } };
   expect(rangeLine(greptile, { config: "model-gpt-6.1-sol-graph-on" }), "a tuned board score is shown without its label").toContain("caught 30.0 of 50 cases on average (60.0%), from 28 to 33 (tuned on these cases) across 3 repeats");
+});
+
+it("gives every README row a label of its own when two groups share a reviewer and a model", () => {
+  const root = fixture();
+  const accepted = pointer(root);
+  const [key, { runId }] = Object.entries(accepted.groups).find(([k]) => k.startsWith("planted|") && k.includes("|review|"));
+  const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
+  const { config } = groupKeys(entry).find((g) => g.key === key);
+  // Groups that differ from an accepted planted one in a single part of the key, accepted beside it.
+  const plant = (suffix, edit) => {
+    const twin = structuredClone(entry);
+    twin.runId = `${runId}-${suffix}`;
+    twin.asset.url = entry.asset.url.replace(`/${runId}.tar.gz`, `/${twin.runId}.tar.gz`);
+    edit(twin);
+    writeFileSync(entryFile(root, twin.runId), JSON.stringify(twin));
+    const twinKey = groupKeys(twin).find((g) => g.config === config).key;
+    expect(twinKey).not.toBe(key);
+    accepted.groups[twinKey] = { ...accepted.groups[key], runId: twin.runId, scoreHash: scoreHash(twin) };
+    return twin;
+  };
+  // The case of issue #280: only the scoring rules differ.
+  const rules = plant("rules", (t) => { t.rulesVersion = entry.rulesVersion + 100; });
+  // Same scoring rules, another path: the rules alone cannot tell these apart.
+  const path = plant("path", (t) => { t.path = entry.path === "server" ? "laptop" : "server"; });
+  writeFileSync(join(root, "benchmark/index/accepted.json"), JSON.stringify(accepted));
+  const r = run(root);
+  expect(r.status, r.stderr).toBe(0);
+  const rows = readFileSync(join(root, "README.md"), "utf8").split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Reviewer") && !l.startsWith("| ---"));
+  // The reviewer, model and cases cells are what a reader tells two rows apart by.
+  const labels = rows.map((l) => l.split(" | ").slice(0, 3).join(" | "));
+  expect(new Set(labels).size, `rows a reader cannot tell apart:\n${labels.join("\n")}`).toBe(labels.length);
+  expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`scoring rules ${rules.rulesVersion}`))).toBe(true);
+  expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`${path.path} path`))).toBe(true);
 });

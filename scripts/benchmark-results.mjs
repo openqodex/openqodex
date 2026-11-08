@@ -40,7 +40,20 @@ const recall = (s, interval = false) => (unruled(s) ? "not yet ruled" : ratio(s.
 // A number whose reviewer was tuned on the very cases it scored says so beside it.
 const tuned = (e, text) => (e.tunedOn === true ? `${text} (tuned on these cases)` : text);
 const suiteLabel = (e) => `${suiteName(e.suite)}, ${e.split} split${e.subset ? `, ${e.subset} subset` : ""}`;
-const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, `rules ${e.rulesVersion}`, ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : [])].join(", ");
+// The scoring rules a run was scored under; an entry from before the rules had versions is legacy.
+const rulesLabel = (e) => `scoring rules ${e.rulesVersion ?? "legacy"}`;
+// A README row names its scoring rules, so two runs that differ only there read apart (issue #280).
+// Rows that still read alike also name the rest of their group key: mode, path, split hash and purpose.
+const casesCells = (rows) => {
+  const short = ({ e }) => `${suiteLabel(e)}, ${rulesLabel(e)}`;
+  const seen = (r) => [reviewer(r.g), r.g.config, modelName(r.e, r.g), short(r)].join("\n");
+  const count = new Map();
+  for (const r of rows) count.set(seen(r), (count.get(seen(r)) ?? 0) + 1);
+  return new Map(rows.map((r) => [r, count.get(seen(r)) > 1
+    ? `${short(r)}, ${r.e.mode} mode, ${r.e.path} path${r.e.splitHash ? `, split hash ${r.e.splitHash.slice(0, 12)}` : ""}${r.e.purpose ? `, ${r.e.purpose} purpose` : ""}`
+    : short(r)]));
+};
+const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, rulesLabel(e), ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : []), ...(e.purpose ? [`${e.purpose} purpose`] : [])].join(", ");
 // A Greptile or Martian row's repeat range: the mean, never the best repeat, with the lowest and highest.
 const repeatRange = (e, g) => e.outside?.[SUITES[e.suite]?.board]?.range?.[boardConfigOf(g.config)];
 export function rangeLine(e, g) {
@@ -121,12 +134,13 @@ export function renderResults(index) {
   const shown = rows.filter(readable);
   const plain = shown.filter(({ e, g }) => !board(e, g));
   const boarded = shown.filter(({ e, g }) => board(e, g));
+  const cases = casesCells(shown);
   const headline = [START, "## Benchmark", "",
-    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review"], plain.map(({ e, g, s }) => [
-      `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), tuned(e, recall(s)), precisionRange(s), ratio(s.controls), cost(s),
+    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review"], plain.map((r) => [
+      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), precisionRange(r.s), ratio(r.s.controls), cost(r.s),
     ])), ""] : []),
-    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review"], boarded.map(({ e, g, s }) => [
-      `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), tuned(e, recall(s)), ...boardCells(board(e, g)), cost(s),
+    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review"], boarded.map((r) => [
+      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), ...boardCells(board(r.e, r.g)), cost(r.s),
     ])), ""] : []),
     "[Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)", END].join("\n");
   return { page: page.join("\n"), headline };
