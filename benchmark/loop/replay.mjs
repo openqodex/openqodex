@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // Replays saved submissions with the product's checks, with no reviewer:
 //   node benchmark/loop/replay.mjs threshold|union|floor <run> [--specs <folder>]
-//                                 [<run> [--specs <folder>]]... [--out <file>]
+//                                 [<run> [--specs <folder>]]... [--out <file>] [--floors <list>]
 // Threshold shows info at the product's confidence floor. Union merges
-// repeats 1 and 2 per case and configuration. Floor sweeps 0.6 to 0.9.
+// repeats 1 and 2 per case and configuration. Floor sweeps 0.6 to 0.9,
+// or --floors 0.5,0.6,... (comma-separated, 0 to 1) in their place.
 // Counts use the planted matching diagnostic in lib/score.mjs, without
 // adjudication. --specs follows its run; otherwise its own cases are used.
+// A saved review that is not complete is skipped (one line to stderr, a
+// count in the summary) rather than stopping the whole replay.
 // Saved runs are read only. Exit 0 printed, 2 invalid input or output path.
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -246,10 +249,14 @@ function rebuiltLengths(folder, run, name, specsDir) {
   }
 }
 
+// Thrown by inputsOf for a saved review that is not complete: replayRun
+// skips the sample rather than stopping the whole replay on it (issue 276).
+class Incomplete extends Error {}
+
 function inputsOf(folder, a, rebuilt) {
   const dir = join(folder, "samples", a.case, a.config, String(a.repeat), "report");
   for (const [name, value] of [["report.json", a.report], ["submission.json", a.submission], ["scan.json", a.scan], ["brief.md", a.brief]]) if (value === null) throw new Error(`${dir}: missing ${name}; cannot replay the product's checks`);
-  if (a.report.completion?.status !== "complete") throw new Error(`${dir}: the saved review is not complete`);
+  if (a.report.completion?.status !== "complete") throw new Incomplete(`${dir}: the saved review is not complete`);
   const manifest = readJson(join(dir, "manifest.json"));
   const scan = { ...a.scan, secretFingerprints: a.scan.secretFingerprints ?? [] };
   const settings = { ...DEFAULT_CONFIG, blockOnSeverity: a.report.block_on_severity ?? null };
@@ -278,7 +285,16 @@ export function replayRun(folder, { mode = "threshold", specsDir = null, floors 
       return [name, { reason: `${name}: reconstruction unavailable: ${error.message}` }];
     }
   }));
-  const checked = firsts.map((a) => ({ ...a, args: inputsOf(folder, a, rebuilt.get(a.case)) }));
+  const checked = [];
+  const skipped = [];
+  for (const a of firsts) {
+    try { checked.push({ ...a, args: inputsOf(folder, a, rebuilt.get(a.case)) }); }
+    catch (error) {
+      if (!(error instanceof Incomplete)) throw error;
+      skipped.push({ case: a.case, config: a.config, repeat: a.repeat, reason: error.message });
+    }
+  }
+  if (skipped.length) process.stderr.write(`replay: skipping ${skipped.length} incomplete review${skipped.length === 1 ? "" : "s"}\n`);
   const unresolved = [];
   for (const a of checked) {
     const pending = a.args.submission.findings.filter((f) => !a.args.hasFile(f.file_path) || ((run.manifest.suite ?? "planted") !== "planted" && a.args.lineCount(f.file_path) === null));
@@ -320,7 +336,8 @@ export function replayRun(folder, { mode = "threshold", specsDir = null, floors 
       rows.push({ config, status: "replayed", beforeHits: base.hits, beforeNonHits: base.nonHits, ...union });
     } else {
       const planned = (run.manifest.cases?.length ?? Object.keys(run.specs).length) * run.manifest.repeat;
-      if (samples.length !== planned) throw new Error(`${config}: ${samples.length} first attempts saved, ${planned} planned; cannot replay every submission`);
+      const configSkipped = skipped.filter((s) => s.config === config).length;
+      if (samples.length !== planned - configSkipped) throw new Error(`${config}: ${samples.length} first attempts saved, ${planned} planned, ${configSkipped} skipped as incomplete; cannot replay every submission`);
       const base = counts(samples.map((a) => score(a, reportAt(a))));
       if (mode === "threshold") {
         const info = counts(samples.map((a) => score(a, reportAt(a, { threshold: "info" }))));
@@ -328,7 +345,7 @@ export function replayRun(folder, { mode = "threshold", specsDir = null, floors 
       } else for (const floor of floors) rows.push({ config, samples: samples.length, floor, ...counts(samples.map((a) => score(a, reportAt(a, { floor })))) });
     }
   }
-  return { run: basename(folder), mode, specsFrom: run.specsFrom ?? "the run's own cases/", rows, unresolved };
+  return { run: basename(folder), mode, specsFrom: run.specsFrom ?? "the run's own cases/", rows, unresolved, skipped };
 }
 
 const table = (head, rows) => [`| ${head.join(" | ")} |`, `|${head.map(() => "---").join("|")}|`, ...rows.map((r) => `| ${r.join(" | ")} |`)].join("\n");
@@ -341,6 +358,8 @@ function render(runs) {
     else out.push(table(["Configuration", "Samples", "Floor", "Hits", "False", "Counted non-hits", "Test requests"], r.rows.map((x) => [x.config, x.samples, x.floor.toFixed(1), `${x.hits}/${x.of}`, x.false, x.nonHits, x.testRequests])), "");
     out.push(`Unresolved: ${r.unresolved.length} findings and dropped candidates.`, "");
     if (r.unresolved.length > 0) out.push(...r.unresolved.map((u) => `- ${u.case}/${u.config}/${u.repeat}: ${u.finding?.title ?? `dropped ${u.dropped.candidate}`}: ${u.reason}`), "");
+    out.push(`Skipped: ${r.skipped.length} incomplete review${r.skipped.length === 1 ? "" : "s"}.`, "");
+    if (r.skipped.length > 0) out.push(...r.skipped.map((s) => `- ${s.case}/${s.config}/${s.repeat}: ${s.reason}`), "");
   }
   return out.join("\n");
 }
@@ -349,6 +368,7 @@ function main(argv) {
   const mode = argv[0];
   const requests = [];
   let out = null;
+  let floors = null;
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--specs") {
@@ -357,12 +377,16 @@ function main(argv) {
     } else if (a === "--out") {
       if (!argv[i + 1] || argv[i + 1].startsWith("--")) throw new Error("--out takes a file");
       out = argv[++i];
+    } else if (a === "--floors") {
+      if (!argv[i + 1] || argv[i + 1].startsWith("--")) throw new Error("--floors takes comma-separated numbers from 0 to 1, such as 0.5,0.6,0.7");
+      floors = argv[++i].split(",").map(Number);
+      if (!floors.length || floors.some((f) => !Number.isFinite(f) || f < 0 || f > 1)) throw new Error("--floors takes comma-separated numbers from 0 to 1, such as 0.5,0.6,0.7");
     } else if (a.startsWith("--")) throw new Error(`unknown flag ${a}`);
     else requests.push({ folder: existsSync(a) ? resolve(a) : join(resultsRoot, a), specs: null });
   }
-  if (!requests.length || !["threshold", "union", "floor"].includes(mode)) throw new Error("usage: node benchmark/loop/replay.mjs threshold|union|floor <run> [--specs <folder>] [<run> ...] [--out <file>]");
+  if (!requests.length || !["threshold", "union", "floor"].includes(mode)) throw new Error("usage: node benchmark/loop/replay.mjs threshold|union|floor <run> [--specs <folder>] [<run> ...] [--out <file>] [--floors <list>]");
   const target = out === null ? null : checkOutput(out, requests.map((r) => r.folder));
-  const runs = requests.map((r) => replayRun(r.folder, { mode, specsDir: r.specs === null ? null : existsSync(r.specs) ? resolve(r.specs) : join(r.folder, r.specs) }));
+  const runs = requests.map((r) => replayRun(r.folder, { mode, specsDir: r.specs === null ? null : existsSync(r.specs) ? resolve(r.specs) : join(r.folder, r.specs), ...(floors === null ? {} : { floors }) }));
   const text = render(runs);
   if (target !== null) writeFileSync(target, text);
   process.stdout.write(text);
