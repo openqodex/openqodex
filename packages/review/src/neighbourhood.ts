@@ -6,7 +6,7 @@ import { changedHunks, display, escapeMarkdown, redactSecrets, secretTexts } fro
 import type { Change, ImpactSummary } from "@openqodex/core";
 import { PACKET_DIR, PACKET_ROOT } from "@openqodex/graph";
 import { redactStored } from "./redact.js";
-import { MAX_FILE_BYTES, snapshotText } from "./snapshot.js";
+import { snapshotText } from "./snapshot.js";
 
 // One place a symbol occurs. `kind` says whether a declaration regex matched
 // the line (a label, never a selector). `context` is the lines around it,
@@ -35,7 +35,7 @@ export const NEIGHBOURHOOD_MAX_FILES_PER_SYMBOL = 200;
 export const NEIGHBOURHOOD_SITES_PER_SYMBOL = 12;
 export const NEIGHBOURHOOD_SYMBOLS_PER_FILE = 30;
 
-const MAX_TEXT_BYTES = Math.min(MAX_FILE_BYTES, 512 * 1024);
+const MAX_TEXT_BYTES = 512 * 1024;
 const IGNORED = new Set([".git", "node_modules", "vendor", "dist", "build", "target", ".openqodex", PACKET_ROOT]);
 const STOP_WORDS = new Set([
   "if", "else", "for", "while", "return", "function", "const", "let", "var", "val", "def", "class", "import", "from",

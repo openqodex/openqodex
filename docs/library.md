@@ -105,7 +105,7 @@ A proof that fails ends the review as incomplete before any model call, with a r
 - `git failed`: git itself failed in the clone.
 - `missing objects`: a tree or a file of the head is not in the clone, as in a partial clone. Fetch them; OpenQodex fetches nothing.
 
-After the review ran, an incomplete review names what is missing: a changed range the reviewer was never shown, a candidate it neither raised nor dropped, an answer that failed its checks after the correction rounds, a budget refusal, a failed model call, or the deadline.
+Every file of the snapshot is redacted and remains readable regardless of size. Time and budget bound the review. After the review ran, an incomplete review names what is missing: a changed range the reviewer was never shown, a candidate it neither raised nor dropped, an answer that failed its checks after the correction rounds, a budget refusal, a failed model call, or the deadline.
 
 ### Incremental, scoped and context
 

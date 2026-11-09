@@ -410,9 +410,10 @@ function fileSection(entry: Entry, index: number, findings: Numbered[], dropped:
   }
 
   const body: string[] = [];
-  if (entry.omitted) body.push(`<p class="file-omitted">Diff not shown: ${text(entry.omitted)}</p>`);
-  else if (hunks.length > 0) body.push(diffTable(hunks, cardsByLine, droppedByLine, byCandidate, flagged));
-  else body.push('<p class="file-omitted">No lines to show.</p>');
+  // A budget note may accompany excerpts that were already read.
+  if (entry.omitted) body.push(`<p class="file-omitted">${hunks.length > 0 ? "Some lines not shown" : "Diff not shown"}: ${text(entry.omitted)}</p>`);
+  if (hunks.length > 0) body.push(diffTable(hunks, cardsByLine, droppedByLine, byCandidate, flagged));
+  else if (!entry.omitted) body.push('<p class="file-omitted">No lines to show.</p>');
   const leftovers = [...unanchored, ...[...cardsByLine.values()].flat()];
   const rest = [...droppedUnanchored, ...[...droppedByLine.values()].flat()];
   if (leftovers.length > 0 || rest.length > 0) {

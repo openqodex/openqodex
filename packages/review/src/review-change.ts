@@ -109,7 +109,7 @@ import { redactStored } from "./redact.js";
 import { serverScope } from "./scoped.js";
 import type { ScopedParts } from "./scoped.js";
 import { admitted, withinScopes } from "./scopes.js";
-import { hashSnapshot, lineCounter, snapshotText } from "./snapshot.js";
+import { clearLineIndexes, hashSnapshot, lineCounter, snapshotText } from "./snapshot.js";
 import { TOOL_NAMES } from "./tools/index.js";
 import type { ToolBox } from "./tools/index.js";
 import { usageTotals } from "./usage.js";
@@ -534,7 +534,6 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     const redact = (text: string): string => redactSecrets(text, p.secrets);
     const redaction = redactSnapshot(prep.snapshot.tree, p.secrets);
     if (redaction.redacted > 0) say(`Redacted secrets in ${redaction.redacted} ${redaction.redacted === 1 ? "file" : "files"} of the snapshot`);
-    if (redaction.removed.length > 0) warn(redact(`Left out of the review, too large to check for secrets: ${redaction.removed.join(", ")}`));
     const instructions = await deps.instructions(p.secrets);
     const context = contextItems ? useContext(contextItems, change, p.secrets, deps.scoped?.admit) : null;
     let lenses: SelectedLens[];
@@ -860,7 +859,12 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     over = true;
     for (const live of liveSessions) { try { await live.close(); } catch { /* Other cleanup must still run. */ } }
     try { graphLease?.release(); }
-    finally { if (snapshot !== null) await deps.snapshots.remove(repoRoot, snapshot as Snapshot); }
+    finally {
+      if (snapshot !== null) {
+        clearLineIndexes((snapshot as Snapshot).tree);
+        await deps.snapshots.remove(repoRoot, snapshot as Snapshot);
+      }
+    }
   }
 }
 

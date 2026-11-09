@@ -1,8 +1,33 @@
 import { z } from "zod";
-import { FIELD_SENTENCE_LIMITS, FINDER_CONFIDENCE_FLOOR, proseErrors, scannerTerms } from "@openqodex/core";
+import { DELIVERY_ROW_BYTES, FIELD_SENTENCE_LIMITS, FINDER_CONFIDENCE_FLOOR, proseErrors, scannerTerms } from "@openqodex/core";
 import type { Change, EvidenceCitation, FindAnswer, FindCandidate, ReviewUnit, ScanResult, VerifyAnswer, VerifyBatch } from "@openqodex/core";
 
-type SnapshotText = (path: string) => string | null;
+import type { SnapshotText } from "./snapshot.js";
+
+// Oversized neighbours are gaps in the window, never evidence that the
+// whole file is binary. A quote cannot bridge a row we could not check.
+const quoteLines = (read: SnapshotText, path: string, from: number, to: number): { rows: (string | null)[]; error: string | null } => {
+  try {
+    if (read.readRows) {
+      const rows = read.readRows(path, from, to, DELIVERY_ROW_BYTES);
+      if (rows === null) return { rows: [], error: "the file is not a text file in the snapshot" };
+      return { rows: [...rows].map((row) => row.text?.replace(/\n$/, "") ?? null), error: null };
+    }
+    const raw = read(path);
+    if (raw === null) return { rows: [], error: "the file is not a text file in the snapshot" };
+    const rows = raw.split("\n");
+    if (rows.at(-1) === "") rows.pop();
+    return { rows: rows.slice(from - 1, to).map((row) => Buffer.byteLength(row, "utf8") > DELIVERY_ROW_BYTES ? null : row), error: null };
+  } catch { return { rows: [], error: "the file could not be read in the snapshot" }; }
+};
+const citedLineError = (read: SnapshotText, path: string, line: number): string | null => {
+  if (read.lineCount) {
+    const count = read.lineCount(path);
+    return count === null ? "the file is not a text file in the snapshot" : line > count ? "the cited line is past the end of the file" : null;
+  }
+  const window = quoteLines(read, path, line, line);
+  return window.error ?? (window.rows.length === 0 ? "the cited line is past the end of the file" : null);
+};
 const normal = (text: string) => text.replace(/\s+/g, " ").trim();
 const line = z.number().int().min(1);
 const severity = z.enum(["critical", "major", "minor", "nitpick", "info"]);
@@ -35,12 +60,17 @@ export function checkEvidence(c: EvidenceCitation, snapshotText: SnapshotText, c
     }
     return normal(removed.join(" ")).includes(quote) ? null : `evidence ${at}: the quote is not in the removed lines of this file's diff`;
   }
-  const text = snapshotText(c.file_path);
-  if (text === null) return `evidence ${at}: the file is not a text file in the snapshot`;
-  const lines = text.split("\n");
-  const lineCount = lines.length - (lines.at(-1) === "" ? 1 : 0);
-  if (c.line_number > lineCount) return `evidence ${at}: the cited line is past the end of the file`;
-  const matches = normal(lines.slice(Math.max(0, c.line_number - 3), c.line_number + 2).join(" ")).includes(quote);
+  const from = Math.max(1, c.line_number - 2);
+  const window = quoteLines(snapshotText, c.file_path, from, c.line_number + 2);
+  if (window.error) return `evidence ${at}: ${window.error}`;
+  if (c.line_number - from >= window.rows.length) return `evidence ${at}: the cited line is past the end of the file`;
+  if (window.rows[c.line_number - from] === null) return `evidence ${at}: line ${c.line_number} is over 200 KB and cannot be checked; cite evidence from another line`;
+  const groups = [""];
+  for (const row of window.rows) {
+    if (row === null) groups.push("");
+    else groups[groups.length - 1] += ` ${row}`;
+  }
+  const matches = groups.some((group) => normal(group).includes(quote));
   return matches ? null : `evidence ${at}: the quote is not within two lines of the cited line`;
 }
 
@@ -61,7 +91,10 @@ export function checkFindAnswer(value: unknown, unit: ReviewUnit, change: Change
   answer.candidates.forEach((c, i) => {
     if (c.lens && !lenses.includes(c.lens)) c.lens = null;
     const candidateErrors = proseErrors(`candidates[${i}].claim`, c.claim, null, FIELD_SENTENCE_LIMITS.problem);
-    if (!change.files.some((f) => f.path === c.file_path && f.status === "deleted") && snapshotText(c.file_path) === null) candidateErrors.push(`candidates[${i}].file_path: ${c.file_path} is not a text file in the snapshot`);
+    if (!change.files.some((f) => f.path === c.file_path && f.status === "deleted")) {
+      const error = citedLineError(snapshotText, c.file_path, c.line_number);
+      if (error) candidateErrors.push(`candidates[${i}].file_path: ${c.file_path}: ${error}`);
+    }
     if (c.line_end !== undefined && c.line_end < c.line_number) candidateErrors.push(`candidates[${i}].line_end: it is before line_number`);
     for (const e of c.evidence) {
       const error = checkEvidence(e, snapshotText, change);
@@ -114,7 +147,10 @@ export function checkVerifyAnswer(value: unknown, batch: VerifyBatch, change: Ch
         if (v[field].trim() === "") errors.push(`${at}.${field}: must not be empty`);
         errors.push(...proseErrors(`${at}.${field}`, v[field], banned, field === "title" ? null : FIELD_SENTENCE_LIMITS[field]));
       }
-      if (!change.files.some((f) => f.path === v.file_path && f.status === "deleted") && snapshotText(v.file_path) === null) errors.push(`${at}: ${v.file_path} is not a text file in the snapshot`);
+      if (!change.files.some((f) => f.path === v.file_path && f.status === "deleted")) {
+        const error = citedLineError(snapshotText, v.file_path, v.line_number);
+        if (error) errors.push(`${at}: ${v.file_path}: ${error}`);
+      }
       const wrong = citesChange(v.file_path, v.line_number, v.line_end ?? v.line_number, change, lineCount);
       if (wrong) errors.push(`${at}: ${wrong}`);
       if (c?.kind === "finder") for (const e of c.candidate.evidence) {
