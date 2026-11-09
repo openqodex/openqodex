@@ -65,9 +65,9 @@ export type DisplayFile = {
   additions: number | null;
   deletions: number | null;
   hunks: DisplayHunk[];
-  // Why the file's lines are left out, in a few plain words the page puts
-  // after "Diff not shown:"; null when its lines are shown, or when it has
-  // none to show (a rename or a mode change with no line changed).
+  // Why some or all of the file's lines are left out, in a few plain words;
+  // null when all requested lines are shown, or when it has none to show
+  // (a rename or a mode change with no line changed).
   note: string | null;
 };
 
@@ -278,11 +278,11 @@ function linesOf(text: string, spans: [number, number][]): string[][] {
 // The display of a review of the whole repository: a few lines around each
 // cited line, read through `read` (the redacted snapshot), redacted again.
 // The spans are merged and measured against the file's line count before
-// any row is made: a file past a bound is left out at once.
+// any row is made. Spans past the byte budget keep earlier spans on the page.
 export function buildExcerptDisplay(args: {
   changeId: string;
   cited: { file_path: string; line_number: number; line_end: number }[];
-  read: (path: string) => string | null;
+  read: ((path: string) => string | null) & { lineCount?: (path: string) => number | null; readLines?: (path: string, from: number, to: number, maxBytes?: number) => string | null };
   secrets: string[];
 }): Display {
   const { secrets } = args;
@@ -298,12 +298,13 @@ export function buildExcerptDisplay(args: {
   for (const path of [...byFile.keys()].sort()) {
     const meta: DisplayFile = { path: redactSecrets(path, secrets), old_path: null, status: "modified", binary: false, additions: null, deletions: null, hunks: [], note: LIMIT_NOTE };
     if (!budget.list(meta)) continue;
-    const raw = args.read(path);
-    if (raw === null) {
+    const readLines = args.read.lineCount ? args.read.readLines : undefined;
+    const raw = readLines ? null : args.read(path);
+    const total = readLines ? args.read.lineCount!(path) : raw === null ? null : lineCount(raw);
+    if (total === null) {
       files.push({ ...meta, note: "the file could not be read for this page" });
       continue;
     }
-    const total = lineCount(raw);
     // Overlapping or touching spans become one; each is cut at the file's end.
     const merged: [number, number][] = [];
     for (const [s, e] of (byFile.get(path) ?? []).sort((a, b) => a[0] - b[0])) {
@@ -311,8 +312,8 @@ export function buildExcerptDisplay(args: {
       if (last && s <= last[1] + 1) last[1] = Math.max(last[1], e);
       else merged.push([s, e]);
     }
-    const spans = merged.map(([s, e]): [number, number] => [s, Math.min(e, total)]).filter(([s, e]) => s <= e);
-    const count = spans.reduce((n, [s, e]) => n + (e - s + 1), 0);
+    let spans = merged.map(([s, e]): [number, number] => [s, Math.min(e, total)]).filter(([s, e]) => s <= e);
+    let count = spans.reduce((n, [s, e]) => n + (e - s + 1), 0);
     if (spans.length === 0) {
       files.push({ ...meta, note: "the cited lines are past the end of the file" });
       continue;
@@ -321,7 +322,28 @@ export function buildExcerptDisplay(args: {
       files.push(meta);
       continue;
     }
-    const cut = linesOf(raw, spans);
+    let cut: string[][];
+    let limited = false;
+    if (readLines) {
+      cut = [];
+      let bytesLeft = ROWS_BUDGET - budget.rowBytes;
+      for (const [s, e] of spans) {
+        const text = readLines(path, s, e, bytesLeft);
+        if (text === null) { limited = true; break; }
+        bytesLeft -= Buffer.byteLength(text, "utf8");
+        const lines = text === "" ? [] : text.split("\n");
+        if (lines.at(-1) === "") lines.pop();
+        cut.push(lines);
+      }
+      // A bounded range read stops at EOF; keep only actual rows and numbers.
+      spans = spans.slice(0, cut.length).map(([s], k): [number, number] => [s, s + cut[k]!.length - 1]).filter(([s, e]) => s <= e);
+      cut = cut.filter((lines) => lines.length > 0);
+      count = cut.reduce((n, lines) => n + lines.length, 0);
+      if (count === 0) {
+        files.push({ ...meta, note: limited ? LIMIT_NOTE : "the cited lines are past the end of the file" });
+        continue;
+      }
+    } else cut = linesOf(raw!, spans);
     const hunks = spans.map(([s], k): DisplayHunk => {
       const lines = redactSecretsKeepingLines(cut[k]!.join("\n"), secrets).split("\n");
       const rows = lines.map((text, k): DisplayRow => {
@@ -334,7 +356,7 @@ export function buildExcerptDisplay(args: {
       files.push(meta);
       continue;
     }
-    files.push({ ...meta, hunks, note: null });
+    files.push({ ...meta, hunks, note: limited ? LIMIT_NOTE : null });
   }
   return { version: DISPLAY_VERSION, change_id: args.changeId, kind: "excerpts", files, omitted_files: budget.omitted, rows: budget.rows };
 }

@@ -48,7 +48,7 @@ A review uses your own Claude Code plan. It can take minutes. On the 2026-10-09 
 
 The reviewer is a fresh Claude Code process (`claude -p`) with no memory of your session. The reviewer:
 
-- reads a frozen copy of the change in `~/.openqodex/checkouts/`, never your folder. Secrets the scanners found are redacted in that copy first.
+- reads a frozen copy of the change in `~/.openqodex/checkouts/`, never your folder. Secrets the scanners found are redacted in every file of that copy first. Every file remains readable regardless of size; time and budget bound the review.
 - has the read, search and list tools, plus Claude Code's WebSearch and WebFetch. It has no shell, no edits, no MCP server and no subagent.
 - edits nothing and runs none of the repository's code.
 - loads none of your Claude Code settings, hooks, plugins, memory or `CLAUDE.md` files as agent instructions. Repository files chosen in `review.instructions_files` are quoted as convention data in the brief. See [Convention files](config.md#convention-files).

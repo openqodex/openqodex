@@ -969,7 +969,7 @@ describe("the snapshot", () => {
     writeFileSync(join(dir, "app/config.py"), `KEY = "${secret}"\n`);
     writeFileSync(join(dir, "app/other.py"), `# copied: ${secret}\nx = 1\n`);
     writeFileSync(join(dir, ".git"), "gitdir: /somewhere\n");
-    expect(redactSnapshot(dir, [secret])).toEqual({ redacted: 2, removed: [], named: 0 });
+    expect(redactSnapshot(dir, [secret])).toEqual({ redacted: 2, named: 0 });
     expect(readFileSync(join(dir, "app/config.py"), "utf8")).not.toContain(secret);
     expect(readFileSync(join(dir, "app/other.py"), "utf8")).toBe("# copied: [redacted]\nx = 1\n");
   });

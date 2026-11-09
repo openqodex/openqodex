@@ -2,22 +2,21 @@
 // correction rounds, each answer read and checked by script. Also the two
 // things that keep secrets away from the reviewer: the snapshot's own
 // redaction, and the check on every changed range the tool sends itself.
-import { lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, fchmodSync, fstatSync, openSync, readSync, renameSync, rmSync, writeSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
 import { DELIVERY_ROW_BYTES, OpenQodexError, deliveryRow, leftSnapshot, redactSecrets, redactSecretsKeepingLines, removedRuns, secretTexts } from "@openqodex/core";
 import type { Change, Hunk, Report, TraceEntry } from "@openqodex/core";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Turn } from "./agents/driver.js";
 import { classify } from "./agents/trace.js";
-import { MAX_FILE_BYTES, snapshotFiles } from "./snapshot.js";
+import { lineIndex, readRows, snapshotFiles } from "./snapshot.js";
 import type { ReviewerRole } from "./usage.js";
 
 export const MAX_CORRECTIONS = 2;
 const HEARTBEAT_MS = 15_000;
 // An answer bigger than this is not read.
 const MAX_ANSWER_BYTES = 2 * 1024 * 1024;
-// Snapshot files bigger than this cannot be checked for secrets and are removed from it.
-const MAX_REDACT_BYTES = 64 * 1024 * 1024;
 
 // Replaces every copy of a secret the scanners found, in every file of the
 // snapshot, so the reviewer never reads one. The snapshot is the tool's own
@@ -25,41 +24,138 @@ const MAX_REDACT_BYTES = 64 * 1024 * 1024;
 // Every file is checked, whatever the diff shows. Text gets "[redacted]" on
 // each line the secret held, its line breaks kept, so scanner locations and
 // citations still name the same lines; a file that is not UTF-8 text gets
-// each secret's bytes overwritten in place. A file too large to check is removed from the snapshot, so the
-// reviewer cannot read it. A file that still holds a secret afterwards, or
+// each secret's bytes overwritten. Files of every size are streamed.
+// A file that still holds a secret afterwards, or
 // cannot be read or written, stops the run: nothing unredacted is shown.
 // `named`: how many snapshot paths hold a secret in a file or folder name.
 // Names are not rewritten (the paths must match the change); the run refuses
 // to start the reviewer instead, since a listing would show the secret.
-export function redactSnapshot(dir: string, secrets: string[]): { redacted: number; removed: string[]; named: number } {
+export function redactSnapshot(dir: string, secrets: string[]): { redacted: number; named: number } {
   // Each secret and each line of a multi-line one, as every redaction looks for them.
   const usable = secretTexts(secrets).map((s) => Buffer.from(s, "utf8"));
-  const out = { redacted: 0, removed: [] as string[], named: 0 };
+  const out = { redacted: 0, named: 0 };
   if (usable.length === 0) return out;
+  const chunkBytes = 64 * 1024;
+  const carryBytes = Math.max(...usable.map((s) => s.length)) - 1;
+  // Inspect the entire byte stream before choosing text markers or binary
+  // overwrites. The same bounded carry checks the replacement afterwards.
+  const inspect = (full: string): { text: boolean; secret: boolean } => {
+    const fd = openSync(full, "r");
+    const chunk = Buffer.allocUnsafe(chunkBytes);
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let text = true;
+    let secret = false;
+    let carry: Buffer = Buffer.alloc(0);
+    try {
+      for (let n = readSync(fd, chunk); n > 0; n = readSync(fd, chunk)) {
+        const bytes = chunk.subarray(0, n);
+        if (bytes.includes(0)) text = false;
+        if (text) {
+          try { decoder.decode(bytes, { stream: true }); } catch { text = false; }
+        }
+        const window = Buffer.concat([carry, bytes]);
+        secret ||= usable.some((s) => window.includes(s));
+        carry = Buffer.from(window.subarray(Math.max(0, window.length - carryBytes)));
+      }
+      if (text) {
+        try { decoder.decode(); } catch { text = false; }
+      }
+      return { text, secret };
+    } finally { closeSync(fd); }
+  };
   for (const path of snapshotFiles(dir)) {
     if (usable.some((s) => Buffer.from(path, "utf8").includes(s))) out.named++;
     const full = join(dir, path);
+    const temp = join(dirname(full), `.oq-redact-${randomUUID().slice(0, 8)}`);
+    let input = -1;
+    let output = -1;
+    let created = false;
     try {
-      if (lstatSync(full).size > MAX_REDACT_BYTES) {
-        rmSync(full, { force: true });
-        out.removed.push(path);
-        continue;
+      const kind = inspect(full);
+      if (!kind.secret) continue;
+      input = openSync(full, "r");
+      const mode = fstatSync(input).mode & 0o7777;
+      output = openSync(temp, "wx", mode);
+      created = true;
+      const write = (bytes: Buffer): void => {
+        for (let at = 0; at < bytes.length;) at += writeSync(output, bytes, at, bytes.length - at);
+      };
+      const chunk = Buffer.allocUnsafe(chunkBytes);
+      let carry: Buffer = Buffer.alloc(0);
+      let carryMask: Buffer = Buffer.alloc(0);
+      let masked = false;
+      let marked = false;
+      let cr = false;
+      const endMask = (): void => {
+        if (cr) write(Buffer.from("\r"));
+        masked = false;
+        marked = false;
+        cr = false;
+      };
+      // Emit only bytes whose matches are all known. Keep the original
+      // carry and its mask, so overlapping secrets across a boundary are
+      // merged before any of their bytes can reach the reviewer.
+      for (;;) {
+        const n = readSync(input, chunk);
+        const window = Buffer.concat([carry, chunk.subarray(0, n)]);
+        const mask = Buffer.alloc(window.length);
+        carryMask.copy(mask);
+        const safe = n === 0 ? window.length : Math.max(0, window.length - carryBytes);
+        for (const secret of usable) {
+          for (let at = window.indexOf(secret); at !== -1; at = window.indexOf(secret, at + 1)) mask.fill(1, at, at + secret.length);
+        }
+        for (let at = 0; at < safe;) {
+          const hidden = mask[at] === 1;
+          const next = mask.indexOf(hidden ? 0 : 1, at);
+          const end = next === -1 ? safe : Math.min(safe, next);
+          if (!hidden) {
+            if (masked) endMask();
+            write(window.subarray(at, end));
+          } else if (!kind.text) {
+            write(Buffer.alloc(end - at, 0x78));
+          } else {
+            masked = true;
+            for (let i = at; i < end; i++) {
+              const byte = window[i];
+              if (byte === 10) {
+                if (cr) write(Buffer.from("\r"));
+                write(Buffer.from("\n"));
+                marked = false;
+                cr = false;
+              } else {
+                // A CR is kept only at a line or span end, as in the
+                // brief's line-preserving redaction.
+                if ((byte !== 13 || cr) && !marked) {
+                  write(Buffer.from("[redacted]"));
+                  marked = true;
+                }
+                cr = byte === 13;
+              }
+            }
+          }
+          at = end;
+        }
+        carry = Buffer.from(window.subarray(safe));
+        carryMask = Buffer.from(mask.subarray(safe));
+        if (n === 0) break;
       }
-      const buf = readFileSync(full);
-      if (!usable.some((s) => buf.includes(s))) continue;
-      const text = buf.toString("utf8");
-      let next: Buffer;
-      if (Buffer.from(text, "utf8").equals(buf) && !buf.includes(0)) {
-        next = Buffer.from(redactSecretsKeepingLines(text, secrets), "utf8");
-      } else {
-        next = Buffer.from(buf);
-        for (const s of usable) for (let at = next.indexOf(s); at !== -1; at = next.indexOf(s, at + 1)) next.fill(0x78, at, at + s.length);
-      }
-      writeFileSync(full, next);
-      if (usable.some((s) => readFileSync(full).includes(s))) throw new Error("a secret is still there");
+      if (masked) endMask();
+      // Restore the original mode after writing, regardless of the umask.
+      fchmodSync(output, mode);
+      closeSync(output);
+      output = -1;
+      closeSync(input);
+      input = -1;
+      if (inspect(temp).secret) throw new Error("a secret is still there");
+      renameSync(temp, full);
+      created = false;
       out.redacted++;
     } catch (error) {
       throw new OpenQodexError(`could not redact secrets in the snapshot copy of ${path} (${(error as Error).message.split("\n")[0]}); the review stops so the reviewer never reads it`);
+    } finally {
+      if (output !== -1) closeSync(output);
+      if (input !== -1) closeSync(input);
+      if (created) rmSync(temp, { force: true });
     }
   }
   return out;
@@ -116,6 +212,7 @@ function gaps(h: Hunk, earlier: Hunk[]): [number, number][] {
 // secret is still in it, nothing is sent and `leak` is set, which makes the
 // run incomplete.
 export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earlier?: Hunk[]; secrets: string[]; change?: Pick<Change, "files" | "deletionPoints" | "diffs"> }): { text: string; delivered: Hunk[]; left: Hunk[]; later: number; leak: boolean } {
+  const usable = secretTexts(args.secrets);
   let room = DELIVER_LINES;
   let bytes = DELIVER_BYTES;
   let later = 0;
@@ -123,32 +220,26 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
   const delivered: Hunk[] = [];
   const left: Hunk[] = [];
   let leak = false;
-  const files = new Map<string, string[] | null>();
-  const fileLines = (path: string): string[] | null => {
-    if (!files.has(path)) {
-      let lines: string[] | null = null;
-      try {
-        const full = join(args.snapshotDir, path);
-        const st = lstatSync(full);
-        if (st.isFile() && st.size <= MAX_FILE_BYTES) {
-          const buf = readFileSync(full);
-          if (!buf.includes(0) && Buffer.from(buf.toString("utf8"), "utf8").equals(buf)) {
-            const text = buf.toString("utf8");
-            // Check before chunking, since chunk labels can split a secret.
-            if (secretTexts(args.secrets).some((secret) => text.includes(secret))) leak = true;
-            else lines = text.split("\n");
+  const fileLines = (path: string): { length: number; read: (from: number, to: number) => Iterable<{ line: number; text: string | null }> } | null => {
+    const index = lineIndex(args.snapshotDir, path);
+    if (index === null || !index.text) return null;
+    return {
+      length: index.count,
+      read: function* (from, to) {
+        for (const { line, text } of readRows(args.snapshotDir, path, from, to, DELIVERY_ROW_BYTES)) {
+          // Check before chunk labels can split a secret. Oversized rows
+          // are skipped as bytes, never materialised as strings.
+          if (text !== null && usable.some((secret) => text.includes(secret))) {
+            leak = true;
+            throw new Error("a secret is still in the snapshot row");
           }
+          yield { line, text: text === null ? null : text.replace(/\n$/, "") };
         }
-      } catch {
-        lines = null;
-      }
-      files.set(path, lines);
-    }
-    return files.get(path) ?? null;
+      },
+    };
   };
-  // A context line is never a changed line: one over the byte budget is
-  // named as not shown, so it cannot keep the changed lines beside it unsent.
-  const context = (path: string, i: number, text: string): string[] => deliveryRow(path, i, text, `${i}\t`) ?? [`${i}\t(not shown: a context line over ${DELIVERY_ROW_BYTES / 1024} KB)`];
+  // Oversized context cannot keep the changed lines beside it unsent.
+  const context = (path: string, i: number, text: string | null): string[] => (text === null ? null : deliveryRow(path, i, text, `${i}\t`)) ?? [`${i}\t(not shown: a context line over ${DELIVERY_ROW_BYTES / 1024} KB)`];
   const runs = new Map<string, { after: number; oldStart: number; lines: string[] }[]>();
   // The lines that show deletion `h`, or null when the change does not hold
   // what it removed. A deleted file has no snapshot copy, so no context.
@@ -159,9 +250,9 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
     if (diff !== undefined && !runs.has(h.path)) runs.set(h.path, removedRuns(diff.text));
     const file = args.change?.files.find((f) => f.path === h.path);
     const gone = file?.status === "deleted";
-    const lines = gone ? [] : fileLines(h.path);
+    const lines = gone ? { length: 0, read: () => [] } : fileLines(h.path);
     if (lines === null) return null;
-    const count = lines.length > 0 && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+    const count = lines.length;
     const block: string[] = [];
     for (const p of points) {
       // A deleted empty text file removed no line, and git shows it no hunk.
@@ -174,9 +265,12 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
       }
       const from = Math.max(1, p.after - CONTEXT + 1);
       const to = Math.min(count, p.after + CONTEXT);
+      let rows: (string | null)[];
+      try { rows = [...lines.read(from, to)].map((row) => row.text); }
+      catch { return null; }
       const where = gone ? "with the file, which was deleted" : count === 0 ? "and the file is now empty" : p.after === 0 ? "above line 1" : p.after < count ? `between lines ${p.after} and ${p.after + 1}` : `below line ${p.after}`;
       block.push(`${h.path}: ${n} ${n === 1 ? "line" : "lines"} removed ${where}${to >= from ? ` (with context ${from} to ${to})` : ""}:`);
-      for (let i = from; i <= Math.min(p.after, to); i++) block.push(...context(h.path, i, lines[i - 1] ?? ""));
+      for (let i = from; i <= Math.min(p.after, to); i++) block.push(...context(h.path, i, rows[i - from] ?? null));
       // Redacted as the brief redacts its diff: the snapshot never held these lines.
       const removed = redactSecretsKeepingLines(run.lines.join("\n"), args.secrets).split("\n");
       for (let i = 0; i < removed.length; i++) {
@@ -184,7 +278,7 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
         if (rows === null) return null;
         block.push(...rows);
       }
-      for (let i = Math.max(from, p.after + 1); i <= to; i++) block.push(...context(h.path, i, lines[i - 1] ?? ""));
+      for (let i = Math.max(from, p.after + 1); i <= to; i++) block.push(...context(h.path, i, rows[i - from] ?? null));
     }
     return block;
   };
@@ -227,13 +321,18 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
           const from = Math.max(1, at - CONTEXT);
           const to = Math.min(lines.length, at + n - 1 + CONTEXT);
           block = [`${h.path} lines ${at} to ${at + n - 1} (with context ${from} to ${to}):`];
-          let omitted = false;
-          for (let i = from; i <= to; i++) {
-            const rows = i < at || i >= at + n ? context(h.path, i, lines[i - 1] ?? "") : deliveryRow(h.path, i, lines[i - 1] ?? "", `${i}\t`);
-            if (rows === null) { omitted = true; break; }
-            block.push(...rows);
-          }
-          size = omitted ? Infinity : block.reduce((k, l) => k + Buffer.byteLength(l, "utf8") + 1, 1);
+          size = Buffer.byteLength(block[0]!, "utf8") + 2;
+          try {
+            // Stop reading as soon as this candidate page cannot fit. Only
+            // the rows of a bounded page are ever kept together in memory.
+            for (const { line: i, text } of lines.read(from, to)) {
+              const rows = i < at || i >= at + n ? context(h.path, i, text) : text === null ? null : deliveryRow(h.path, i, text, `${i}\t`);
+              if (rows === null) { size = Infinity; break; }
+              block.push(...rows);
+              size += rows.reduce((k, row) => k + Buffer.byteLength(row, "utf8") + 1, 0);
+              if (size > DELIVER_BYTES || block.length + 1 > DELIVER_LINES) break;
+            }
+          } catch { size = Infinity; }
           if ((size <= bytes && block.length + 1 <= room) || n === 1) break;
           n = Math.ceil(n / 2);
         }
@@ -254,7 +353,6 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
     }
   }
   const text = redactSecrets(out.join("\n").replace(/\n$/, ""), args.secrets);
-  const usable = secretTexts(args.secrets);
   if (leak || usable.some((x) => text.includes(x)) || text !== out.join("\n").replace(/\n$/, "")) return { text: "", delivered: [], left: args.unread, later: 0, leak: true };
   return { text, delivered, left, later, leak: false };
 }
