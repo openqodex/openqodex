@@ -38,7 +38,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { COVERAGE_MAX_LINES, DIFF_CAP_BYTES, getChange } from "./change.js";
-import { changedHunks, completionRecord, readCoverage } from "./completion.js";
+import { changedHunks, completionRecord, singlePassCoverage } from "./completion.js";
 import type { TraceEntry } from "./completion.js";
 import { checkSubmission } from "./finalize.js";
 import { renderReview } from "./render/review.js";
@@ -169,11 +169,11 @@ describe("coverage from the trace", () => {
 
   it("8. counts a hunk outside the brief's diff as unread until a read covers it", () => {
     const change = makeChange();
-    const none = readCoverage({ change, briefFiles: new Set(["app/settings.py"]), trace: [] });
+    const none = singlePassCoverage({ change, diffFiles: new Set(["app/settings.py"]), trace: [] });
     expect(none.unread.map((h) => h.path)).toEqual(["app/search.py"]);
-    const partial = readCoverage({ change, briefFiles: new Set(["app/settings.py"]), trace: [read("app/search.py", 1, 14)] });
+    const partial = singlePassCoverage({ change, diffFiles: new Set(["app/settings.py"]), trace: [read("app/search.py", 1, 14)] });
     expect(partial.unread).toHaveLength(1);
-    const full = readCoverage({ change, briefFiles: new Set(["app/settings.py"]), trace: [read("app/search.py", 10, 20)] });
+    const full = singlePassCoverage({ change, diffFiles: new Set(["app/settings.py"]), trace: [read("app/search.py", 10, 20)] });
     expect(full.unread).toEqual([]);
     expect(full.files_read).toEqual(["app/search.py"]);
     expect(full.files_not_read).toEqual(["app/settings.py"]);
@@ -181,12 +181,12 @@ describe("coverage from the trace", () => {
   it("8. a deletion point is covered only by the diff in the brief, never by reading the new file", () => {
     const change = makeChange({ deletionPoints: new Map([["app/search.py", [{ after: 20, lines: 2, anchors: [20, 21] }]]]) });
     expect(changedHunks(change).some((h) => h.deletion)).toBe(true);
-    const c = readCoverage({ change, briefFiles: new Set(["app/settings.py"]), trace: [read("app/search.py", 1, 40)] });
+    const c = singlePassCoverage({ change, diffFiles: new Set(["app/settings.py"]), trace: [read("app/search.py", 1, 40)] });
     expect(c.unread).toEqual([{ path: "app/search.py", start: 20, end: 21, deletion: true }]);
   });
   it("8. a failed read covers nothing", () => {
     const change = makeChange();
-    const c = readCoverage({ change, briefFiles: new Set(["app/settings.py"]), trace: [{ ...read("app/search.py", 1, 40), ok: false }] });
+    const c = singlePassCoverage({ change, diffFiles: new Set(["app/settings.py"]), trace: [{ ...read("app/search.py", 1, 40), ok: false }] });
     expect(c.unread).toHaveLength(1);
   });
 });
@@ -219,10 +219,10 @@ describe("14. files the change could not map or brief", () => {
     const change = await getChange({ repoRoot: dir, scope: { uncommitted: true }, exclude: [] });
     expect(change.notReviewed).toEqual(["big.txt"]);
     const lineCount = (path: string) => (path === "big.txt" ? lines : 1);
-    const none = readCoverage({ change, briefFiles: new Set(["small.py"]), trace: [], lineCount });
+    const none = singlePassCoverage({ change, diffFiles: new Set(["small.py"]), trace: [], lineCount });
     expect(none.unread.map((h) => h.path)).toEqual(["big.txt"]);
     const read: TraceEntry = { tool: "Read", path: "big.txt", inside: true, range: [1, lines], ok: true };
-    expect(readCoverage({ change, briefFiles: new Set(["small.py"]), trace: [read], lineCount }).unread).toEqual([]);
+    expect(singlePassCoverage({ change, diffFiles: new Set(["small.py"]), trace: [read], lineCount }).unread).toEqual([]);
   }, 60_000);
 
   it("a file past the diff budget still has its changed lines mapped, so a deletion no brief carried stays unread", async () => {
@@ -232,14 +232,14 @@ describe("14. files the change could not map or brief", () => {
     writeFileSync(join(dir, "keep.py"), "a = 2\n");
     const change = await getChange({ repoRoot: dir, scope: { uncommitted: true }, exclude: [] });
     expect(change.notReviewed).toEqual(["gone.txt"]);
-    const c = readCoverage({ change, briefFiles: new Set(["keep.py"]), trace: [], lineCount: () => 1 });
+    const c = singlePassCoverage({ change, diffFiles: new Set(["keep.py"]), trace: [], lineCount: () => 1 });
     expect(c.unread.map((h) => h.path)).toEqual(["gone.txt"]);
   }, 120_000);
 });
 
 describe("the completion record", () => {
   const change = makeChange();
-  const coverage = readCoverage({ change, briefFiles: new Set(change.changedPaths), trace: [] });
+  const coverage = singlePassCoverage({ change, diffFiles: new Set(change.changedPaths), trace: [] });
   const base = { change, reviewer, snapshot: { tree: "a".repeat(40), before: "b".repeat(64), after: "b".repeat(64) }, candidates: { total: 3, disposed: 3 }, coverage, trace: [] as TraceEntry[], submissionErrors: [] as string[], wholeRepo: false };
 
   it("is complete when every condition holds", () => {
@@ -261,7 +261,7 @@ describe("the completion record", () => {
   });
   it("9. is incomplete when a candidate has no disposition or a changed range was not read", () => {
     expect(completionRecord({ ...base, candidates: { total: 3, disposed: 2 } }).status).toBe("incomplete");
-    const unread = readCoverage({ change, briefFiles: new Set(), trace: [] });
+    const unread = singlePassCoverage({ change, diffFiles: new Set(), trace: [] });
     expect(completionRecord({ ...base, coverage: unread }).missing.join("\n")).toMatch(/not read/);
   });
 });
@@ -270,7 +270,7 @@ function completeReport(): Report {
   const change = makeChange();
   const r = checkSubmission({ change, scan: makeScan(), manifest: makeManifest(change), config: makeConfig(), submission: v2(), lineCount });
   if (!r.ok) throw new Error(r.errors.join("\n"));
-  const coverage = readCoverage({ change, briefFiles: new Set(change.changedPaths), trace: [] });
+  const coverage = singlePassCoverage({ change, diffFiles: new Set(change.changedPaths), trace: [] });
   const completion: CompletionRecord = completionRecord({ change, reviewer, snapshot: { tree: null, before: "b", after: "b" }, candidates: { total: 3, disposed: 3 }, coverage, trace: [], submissionErrors: [], wholeRepo: false });
   return { ...r.report, completion };
 }

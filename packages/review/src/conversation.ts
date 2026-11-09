@@ -87,6 +87,21 @@ export const DELIVER_LINES = 4000;
 const DELIVER_BYTES = 512 * 1024;
 const CONTEXT = 3;
 
+// Shared with the part cutter, including context, labels and the final blank.
+export function pageRows(path: string, start: number, end: number, lines: string[]): string[] | null {
+  const from = Math.max(1, start - CONTEXT);
+  const to = Math.min(lines.length, end + CONTEXT);
+  const block = [`${path} lines ${start} to ${end} (with context ${from} to ${to}):`];
+  for (let i = from; i <= to; i++) {
+    const rows = deliveryRow(path, i, lines[i - 1] ?? "", `${i}\t`);
+    if (rows === null) {
+      if (i >= start && i <= end) return null;
+      block.push(`${i}\t(not shown: a context line over ${DELIVERY_ROW_BYTES / 1024} KB)`);
+    } else block.push(...rows);
+  }
+  return [...block, ""];
+}
+
 // The parts of `h` no earlier delivery covered.
 function gaps(h: Hunk, earlier: Hunk[]): [number, number][] {
   const out: [number, number][] = [];
@@ -167,7 +182,7 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
       // A deleted empty text file removed no line, and git shows it no hunk.
       const run = p.lines === 0 && gone && !file.binary ? { after: p.after, oldStart: 1, lines: [] } : runs.get(h.path)?.find((r) => r.after === p.after && r.lines.length === p.lines);
       if (run === undefined) return null;
-      const n = run.lines.length;
+      const n = typeof h.deletion === "object" ? h.deletion.oldEnd - h.deletion.oldStart + 1 : run.lines.length;
       if (n === 0) {
         block.push(`${h.path}: the file was deleted; it held no lines.`);
         continue;
@@ -175,12 +190,14 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
       const from = Math.max(1, p.after - CONTEXT + 1);
       const to = Math.min(count, p.after + CONTEXT);
       const where = gone ? "with the file, which was deleted" : count === 0 ? "and the file is now empty" : p.after === 0 ? "above line 1" : p.after < count ? `between lines ${p.after} and ${p.after + 1}` : `below line ${p.after}`;
-      block.push(`${h.path}: ${n} ${n === 1 ? "line" : "lines"} removed ${where}${to >= from ? ` (with context ${from} to ${to})` : ""}:`);
+      block.push(`${h.path}: ${n} ${n === 1 ? "line" : "lines"} removed ${where}${typeof h.deletion === "object" ? ` (old lines ${h.deletion.oldStart} to ${h.deletion.oldEnd})` : ""}${to >= from ? ` (with context ${from} to ${to})` : ""}:`);
       for (let i = from; i <= Math.min(p.after, to); i++) block.push(...context(h.path, i, lines[i - 1] ?? ""));
       // Redacted as the brief redacts its diff: the snapshot never held these lines.
-      const removed = redactSecretsKeepingLines(run.lines.join("\n"), args.secrets).split("\n");
+      const first = typeof h.deletion === "object" ? h.deletion.oldStart : run.oldStart;
+      const last = typeof h.deletion === "object" ? h.deletion.oldEnd : run.oldStart + run.lines.length - 1;
+      const removed = redactSecretsKeepingLines(run.lines.slice(first - run.oldStart, last - run.oldStart + 1).join("\n"), args.secrets).split("\n");
       for (let i = 0; i < removed.length; i++) {
-        const rows = deliveryRow(args.change?.files.find((f) => f.path === h.path)?.oldPath ?? h.path, run.oldStart + i, removed[i]!, "-\t", true);
+        const rows = deliveryRow(args.change?.files.find((f) => f.path === h.path)?.oldPath ?? h.path, first + i, removed[i]!, "-\t", true);
         if (rows === null) return null;
         block.push(...rows);
       }
@@ -190,7 +207,7 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
   };
   for (const h of args.unread) {
     if (h.deletion) {
-      if (args.earlier?.some((d) => d.deletion && d.path === h.path && d.start === h.start && d.end === h.end)) continue;
+      if (args.earlier?.some((d) => d.deletion && d.path === h.path && d.start === h.start && d.end === h.end && (typeof h.deletion !== "object" || typeof d.deletion === "object" && d.deletion.id === h.deletion.id && d.deletion.oldStart <= h.deletion.oldStart && d.deletion.oldEnd >= h.deletion.oldEnd))) continue;
       const block = removedBlock(h);
       if (block === null) {
         left.push(h);
@@ -220,20 +237,13 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
       while (at <= last && room > 2 * CONTEXT + 2) {
         // Halved until it fits the bytes left, so a range of wide lines is
         // sent in parts rather than promised for a round that cannot carry it.
-        let n = Math.min(last - at + 1, room - 2 * CONTEXT - 1);
+        let n = Math.min(last - at + 1, room - (h.part ? 2 : 2 * CONTEXT + 1));
         let block: string[];
         let size: number;
         for (;;) {
-          const from = Math.max(1, at - CONTEXT);
-          const to = Math.min(lines.length, at + n - 1 + CONTEXT);
-          block = [`${h.path} lines ${at} to ${at + n - 1} (with context ${from} to ${to}):`];
-          let omitted = false;
-          for (let i = from; i <= to; i++) {
-            const rows = i < at || i >= at + n ? context(h.path, i, lines[i - 1] ?? "") : deliveryRow(h.path, i, lines[i - 1] ?? "", `${i}\t`);
-            if (rows === null) { omitted = true; break; }
-            block.push(...rows);
-          }
-          size = omitted ? Infinity : block.reduce((k, l) => k + Buffer.byteLength(l, "utf8") + 1, 1);
+          const rendered = pageRows(h.path, at, at + n - 1, lines);
+          block = rendered?.slice(0, -1) ?? [];
+          size = rendered === null ? Infinity : rendered.reduce((k, l) => k + Buffer.byteLength(l, "utf8") + 1, 0);
           if ((size <= bytes && block.length + 1 <= room) || n === 1) break;
           n = Math.ceil(n / 2);
         }
@@ -244,7 +254,7 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
         out.push(...block, "");
         room -= block.length + 1;
         bytes -= size;
-        delivered.push({ path: h.path, start: at, end: at + n - 1, deletion: false });
+        delivered.push({ ...h, start: at, end: at + n - 1, deletion: false });
         at += n;
       }
       if (at <= last) {
@@ -330,6 +340,7 @@ export async function converse(args: {
   heartbeat?: boolean;
   staged?: boolean;
   sessionName?: string;
+  earlier?: Hunk[];
   // Seed a fresh verifier with its saved answer after assembly found an error.
   continuation?: { conversation: Conversation; errors: string[] };
 }): Promise<Conversation> {
@@ -380,7 +391,7 @@ export async function converse(args: {
       c.disposed = result.disposed;
       const problems = renumber(result.errors);
       if ((problems.length === 0 && result.unread.length === 0) || c.rounds > MAX_CORRECTIONS) break;
-      const given = args.deliver(result.unread, c.delivered);
+      const given = args.deliver(result.unread, [...(args.earlier ?? []), ...c.delivered]);
       if (given.leak) {
         c.failure = "a secret the scanners found was still in the changed lines to send, so they were not sent";
         break;

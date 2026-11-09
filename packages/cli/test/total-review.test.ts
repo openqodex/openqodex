@@ -1132,7 +1132,7 @@ describe("the Action's review flags", () => {
     writeFileSync(join(planted, "report.md"), "# PLANTED\n");
     const folder = join(tempDir("oq-report-dir-"), "review");
     expect(await withOptions(dir, fake([good]), { reportDir: folder })).toBe(0);
-    expect(readdirSync(folder).sort()).toEqual(["brief.md", "briefs", "impact.json", "manifest.json", "report.html", "report.json", "report.md", "report.sarif", "reviewer.json", "rounds.json", "scan.json", "submission.json", "trace.json", "usage.json"]);
+    expect(readdirSync(folder).sort()).toEqual(["brief.md", "briefs", "impact.json", "manifest.json", "report.html", "report.json", "report.md", "report.sarif", "reviewer.json", "rounds.json", "scan.json", "submission.json", "trace.json", "units.json", "usage.json"]);
     const report = JSON.parse(readFileSync(join(folder, "report.json"), "utf8")) as Report;
     expect(report.completion?.status).toBe("complete");
     expect(report).toEqual(JSON.parse(out) as Report);

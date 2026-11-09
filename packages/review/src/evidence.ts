@@ -4,7 +4,7 @@
 // A correction round's ranges count only when the request carrying them was
 // sent. Nothing comes from what the reviewer said. Shared by the primary
 // and the second reviewer, so both are judged by one rule.
-import { modelCoverage } from "@openqodex/core";
+import { singlePassModelCoverage } from "@openqodex/core";
 import type { Change } from "@openqodex/core";
 import type { Conversation } from "./conversation.js";
 import { modelToolEntry } from "./model-loop.js";
@@ -20,7 +20,7 @@ export function modelEvidence(args: {
   talk: Conversation;
   change: Change;
   snapshot: ModelReviewEvidence["snapshot"];
-  briefFiles: ReadonlySet<string>;
+  diffFiles: ReadonlySet<string>;
   lineCount: (path: string) => number | null;
   secrets: string[];
   startedAt: string;
@@ -30,7 +30,7 @@ export function modelEvidence(args: {
   const delivered = talk.carried.slice(0, Math.max(0, sent - 1)).flat();
   const toolLog = structuredClone(args.session?.log ?? []);
   const attempts = structuredClone(args.session?.attempts ?? []);
-  const coverage = modelCoverage({ change, briefSent: sent > 0, briefFiles: args.briefFiles, toolLog: toolLog.map(modelToolEntry), delivered, lineCount: args.lineCount });
+  const coverage = singlePassModelCoverage({ change, briefSent: sent > 0, diffFiles: args.diffFiles, toolLog: toolLog.map(modelToolEntry), delivered, lineCount: args.lineCount });
   // Redacted like the agent record: a path or a tool input may hold a secret.
   return redactStored<ModelReviewEvidence>(
     {
