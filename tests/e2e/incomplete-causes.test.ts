@@ -41,8 +41,8 @@ for (const [session, path] of [["verifier:app/config.py", "/dev/null"], ["finder
     expect(r.completion.refused).toEqual([path]);
     expect(r.completion.outside_reads).toEqual([path]);
     expect(r.trace).toContainEqual(expect.objectContaining({ tool: "Read", path, inside: false, ok: false }));
-    expect(r.result.stdout).toContain(`These requests were refused by the reviewer's own rules: ${path}`);
-    expect(readFileSync(join(r.out, "report.md"), "utf8")).toContain("These requests were refused by the reviewer's own rules:");
+    expect(r.result.stdout).toContain(`These requests were refused and were not served: ${path}`);
+    expect(readFileSync(join(r.out, "report.md"), "utf8")).toContain("These requests were refused and were not served:");
     expect(r.completion.reviewer!.sessions!.some((s) => s.role.includes("retry"))).toBe(false);
     expect(r.push.kind).toBe("complete");
     planted(r);
@@ -53,7 +53,7 @@ it("one refused Bash call discards the whole staged review", () => {
   expect(r.result.status, r.result.stderr).toBe(0);
   expect(r.completion.status).toBe("complete");
   expect(r.completion.refused).toEqual(["Bash"]);
-  expect(r.result.stdout).toContain("These requests were refused by the reviewer's own rules: Bash");
+  expect(r.result.stdout).toContain("These requests were refused and were not served: Bash");
   expect(r.push.kind).toBe("complete");
   planted(r);
 });
@@ -65,7 +65,7 @@ it("a read that left the snapshot completes the review", () => {
   expect(r.completion.status).toBe("incomplete");
   expect(r.completion.missing.join(" ")).toContain(path);
   expect(r.trace).toContainEqual(expect.objectContaining({ path, inside: false, ok: true }));
-  expect(r.saved.findings.some((f) => f.file_path === "app/server.py")).toBe(true);
+  planted(r);
   expect(r.push.kind).toBe("incomplete");
 });
 it("the single pass drops its answer after a refusal", () => {
@@ -74,5 +74,5 @@ it("the single pass drops its answer after a refusal", () => {
   expect(r.completion.status).toBe("complete");
   expect(r.completion.refused).toEqual(["/dev/null"]);
   expect(r.push.kind).toBe("complete");
-  expect(r.result.stdout).toContain("These requests were refused by the reviewer's own rules: /dev/null");
+  expect(r.result.stdout).toContain("These requests were refused and were not served: /dev/null");
 });

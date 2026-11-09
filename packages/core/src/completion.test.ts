@@ -16,7 +16,8 @@
 //  5. The brief counts as shown when its request was never sent (the budget
 //     refused the first call).
 //  6. A refused call fails the review, hides a served outside read or is not
-//     shown on the receipt. A served outside or unscoped read leaves it complete.
+//     shown on the receipt. A served outside or unscoped read, or a served
+//     tool the reviewer was not given, leaves it complete.
 //  7. A budget refusal leaves the record complete, or the record loses the
 //     usage of the attempts made before it.
 //  8. A tool name the brain never defined, returned by the model, is not
@@ -140,10 +141,22 @@ describe("1, 2. the agent record and its report", () => {
     expect(served.missing).toEqual(["the reviewer read outside the snapshot: /outside"]);
     const mixed = { ...checkedReport(), verdict: "incomplete" as const, completion: served };
     for (const text of [renderReceipt(mixed, { html: "/r/report.html", md: "/r/report.md" }), renderReview(mixed, { format: "terminal", color: false })]) {
-      expect(text).toContain("These requests were refused by the reviewer's own rules: /dev/null");
+      expect(text).toContain("These requests were refused and were not served: /dev/null");
       expect(text).toContain("the reviewer read outside the snapshot: /outside");
       expect(text).not.toContain("nothing outside");
     }
+  });
+
+  it("6. a served tool the reviewer was not given leaves the agent record complete", () => {
+    const call = { tool: "Bash", path: null, inside: true, range: null, ok: true };
+    const served = completionRecord({ change, reviewer, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, coverage, trace: [call], submissionErrors: [], wholeRepo: false });
+    expect(served.status).toBe("incomplete");
+    expect(served.missing).toEqual(["the reviewer used a tool it was not given: Bash"]);
+    expect(served.refused).toEqual([]);
+    const refused = completionRecord({ change, reviewer, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, coverage, trace: [{ ...call, ok: false }], submissionErrors: [], wholeRepo: false });
+    expect(refused.status).toBe("complete");
+    expect(refused.missing).toEqual([]);
+    expect(refused.refused).toEqual(["Bash"]);
   });
 
   it("1. the agent records change only by the added refused field", () => {
