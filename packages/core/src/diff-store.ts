@@ -8,8 +8,15 @@ const MEMORY_BYTES = 5 * 1024 * 1024;
 const owned = new Map<string, () => void>();
 
 // Remove only patches this process created, never a path supplied by a caller.
+// Every owned patch is attempted; one that cannot be removed does not
+// strand the ones after it. The first failure is thrown once all are tried.
 export function cleanupDiffs(change: Pick<Change, "diffs">): void {
-  for (const entry of change.diffs ?? []) if (entry.file) owned.get(entry.file)?.();
+  let failure: { error: unknown } | null = null;
+  for (const entry of change.diffs ?? []) if (entry.file) {
+    try { owned.get(entry.file)?.(); }
+    catch (error) { failure ??= { error }; }
+  }
+  if (failure) throw failure.error;
 }
 
 export class DiffStore {

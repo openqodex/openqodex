@@ -158,30 +158,48 @@ export function patchIndex(entry: DiffEntry): PatchIndex {
   return index;
 }
 
-// Both cursors are monotone, including zero-length sides. Search each
-// requested side independently, then merge their page intervals.
+// A pair can hold more than one section (a type change is a deletion then
+// an addition), and each section restarts both cursors. The runs where the
+// cursors rise are found once per span table.
+const monotoneRuns = new WeakMap<Span[], number[]>();
+function runsOf(spans: Span[]): number[] {
+  let runs = monotoneRuns.get(spans);
+  if (runs) return runs;
+  runs = [0];
+  for (let i = 1; i < spans.length; i++) if (spans[i]!.old < spans[i - 1]!.oldEnd || spans[i]!.next < spans[i - 1]!.nextEnd) runs.push(i);
+  runs.push(spans.length);
+  monotoneRuns.set(spans, runs);
+  return runs;
+}
+
+// Within one run both cursors are monotone, including zero-length sides.
+// Search each requested side in each run, then merge the page intervals.
 function selected(spans: Span[], range?: DiffRange): [number, number][] {
   if (!range) return [[0, spans.length]];
-  const interval = (start: number, end: number, side: "old" | "new"): [number, number] => {
+  const interval = (start: number, end: number, side: "old" | "new", runFrom: number, runTo: number): [number, number] => {
     const first = side === "old" ? "old" : "next";
     const last = side === "old" ? "oldEnd" : "nextEnd";
-    let lo = 0;
-    let hi = spans.length;
+    let lo = runFrom;
+    let hi = runTo;
     while (lo < hi) {
       const mid = (lo + hi) >>> 1;
       const span = spans[mid]!;
       if (Math.max(span[first], span[last] - 1) < start) lo = mid + 1; else hi = mid;
     }
     const from = lo;
-    hi = spans.length;
+    hi = runTo;
     while (lo < hi) {
       const mid = (lo + hi) >>> 1;
       if (spans[mid]![first] <= end) lo = mid + 1; else hi = mid;
     }
     return [from, lo];
   };
-  const ranges = [interval(range.start, range.end, range.side ?? "new")];
-  if (range.old) ranges.push(interval(range.old[0], range.old[1], "old"));
+  const runs = runsOf(spans);
+  const ranges: [number, number][] = [];
+  for (let r = 0; r + 1 < runs.length; r++) {
+    ranges.push(interval(range.start, range.end, range.side ?? "new", runs[r]!, runs[r + 1]!));
+    if (range.old) ranges.push(interval(range.old[0], range.old[1], "old", runs[r]!, runs[r + 1]!));
+  }
   ranges.sort((a, b) => a[0] - b[0]);
   const out: [number, number][] = [];
   for (const r of ranges) {

@@ -71,6 +71,7 @@ A long line's fragments may continue on the next delivery page.
 A reviewer's own read of a cut line credits only the bytes the read returned.
 A read with no recorded byte ranges credits none of a line over 2,000 bytes.
 A file that is not UTF-8 text is reviewed by bytes, and a read credits none of its long lines.
+A byte that is not valid UTF-8 shows as the replacement character.
 Missing bytes are listed beneath their changed range.
 The receipt counts ranges, not gaps.
 

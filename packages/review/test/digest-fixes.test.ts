@@ -8,6 +8,7 @@
 // 8. A full store page overflows the verifier brief and abandons a finding.
 // 9. Unbounded manifests and loose generated markers overflow every page.
 // 10. Deleted store files count as binary; changed keys lose multiline values.
+// 11. A long numeric value shows its first 120 digits before redaction.
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, expect, it } from "vitest";
@@ -154,4 +155,12 @@ it("verifies a store finding near the page bound using only its cited file entri
   expect(Buffer.byteLength(verified[0]!)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
   expect(verified[0]).toContain(paths[1]! + ":1-31");
   expect(verified[0]).not.toContain(paths[100]! + ":1-31");
+});
+
+it("redacts a 300-digit numeric value before showing its first 120 characters", () => {
+  const digits = "7".repeat(300);
+  const text = JSON.stringify([{ n: 1 }, { n: 1 }, { n: 1 }], null, 2).replace('"n": 1\n  },\n  {\n    "n": 1\n  }\n]', `"n": 1\n  },\n  {\n    "n": ${digits}\n  }\n]`);
+  const digest = jsonDigest("runs.json", text, [ref(30)], undefined, [digits]);
+  expect(digest.text).not.toContain(digits.slice(0, 120));
+  expect(digest.text).toContain("[redacted]");
 });

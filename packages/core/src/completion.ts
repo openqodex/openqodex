@@ -159,9 +159,16 @@ export function readCoverage(args: CoverageArgs): Coverage {
   const unread: Hunk[] = [];
   const deletionId = (h: Hunk) => typeof h.deletion === "object" ? h.deletion.id : `${h.path}#${h.point ?? (args.change.deletionPoints.get(h.path) ?? []).findIndex((p) => Math.min(...p.anchors) === h.start && Math.max(...p.anchors) === h.end)}`;
   const inventory: NonNullable<Coverage["inventory"]> = hunks.map((h) => ({ path: h.path, start: h.start, end: h.end, ...(h.deletion ? { deletion: deletionId(h) } : {}) }));
+  // Receipts by path, built once: a change of 100,000 files must not filter
+  // every receipt list for every obligation.
+  const byPath = sources.map((source) => {
+    const map = new Map<string, Hunk[]>();
+    for (const d of source.entries) { const list = map.get(d.path); if (list) list.push(d); else map.set(d.path, [d]); }
+    return map;
+  });
   for (const [index, h] of hunks.entries()) {
     if (h.end < h.start && !h.deletion) { unread.push(h); continue; }
-    let matching = sources.map((source) => ({ ...source, entries: source.entries.filter((d) => d.path === h.path && Boolean(d.deletion) === Boolean(h.deletion) && (!h.deletion || deletionId(d) === deletionId(h))) }));
+    let matching = sources.map((source, i) => ({ ...source, entries: (byPath[i]!.get(h.path) ?? []).filter((d) => Boolean(d.deletion) === Boolean(h.deletion) && (!h.deletion || deletionId(d) === deletionId(h))) }));
     const range = (d: Hunk): [number, number] => typeof d.deletion === "object" ? [d.deletion.oldStart, d.deletion.oldEnd] : [d.start, d.end];
     const [start, end] = range(h);
     type ByteCredit = { by: "brief" | "digest" | "page" | "read"; fragment: { of?: string; from: number; to: number } };

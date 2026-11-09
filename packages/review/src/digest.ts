@@ -178,7 +178,7 @@ export function jsonSections(path: string, text: string, changed: HunkRef[], pre
     const lengths = list.map((n) => typeof n.value === "string" ? Array.from(n.value).length : encoded(n.value).length);
     const span = extrema(lengths);
     if (longIndex++ < 50) fixed.push(`long values ${key}: count ${list.length}, length ${span.min}-${span.max} (JSON characters); first 120 characters of each:`);
-    for (const node of list) entry(node, `${node.path}@${node.line} = ${typeof node.value === "string" ? encoded(Array.from(safe(node.value) as string).slice(0, 120).join("")) : node.raw.slice(0, 120)}`);
+    for (const node of list) entry(node, `${node.path}@${node.line} = ${typeof node.value === "string" ? encoded(Array.from(safe(node.value) as string).slice(0, 120).join("")) : redactSecrets(node.raw, secrets).slice(0, 120)}`);
   }
   for (const node of nodes) if (node.type === "string" && Array.from(node.value as string).length > 2000) entry(node, `string over 2000 characters: ${node.path}@${node.line}, length ${Array.from(node.value as string).length}`);
   const oldByPath = new Map(old.map((n) => [n.path, n]));
