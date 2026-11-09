@@ -8,8 +8,8 @@
 // - provider-blocked: the endpoint refused the key (HTTP 401 or 403), the
 //   quota (insufficient_quota) or the billing. At once: every later call
 //   would get the same answer. Any other 429 is a rate limit: run.mjs waits
-//   and tries that review once more (retryOnce), and a rate limit that
-//   outlasts its retry counts like any other reason below.
+//   and tries that review once more (retryOnce). Two rate-limited attempts
+//   of one job halt the run with same-reason-twice.
 // - served-model-changed: a review names a served model the earlier reviews
 //   of its configuration did not, or names two. The deployment changed
 //   under the run. Each configuration (each model reviewer) has its own.

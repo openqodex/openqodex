@@ -352,9 +352,10 @@ it("redacts run and home paths in every saved reason and keeps null reasons", ()
 });
 
 // Resume failures: a saved retryable failure is skipped, saved retry failures
-// get another retry, or an unsaved folder consumes the retry allowance.
+// get another retry, an unsaved folder spends a retry, or a saved laptop
+// failure leaves a model retry pending.
 describe("retry state on disk", () => {
-  it("a job whose only attempt failed on transport is done to resume", () => {
+  it("resume keeps one shared retry for saved model failures and skips unsaved folders without spending it", () => {
     const out = tempDir("oq-retry-state-");
     const model = { ...job, reviewer: "model:test", config: "model-test-graph-on" };
     const save = (attempt, failure, status = "incomplete") => {
@@ -373,6 +374,14 @@ describe("retry state on disk", () => {
     expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false, next: 5, retriesUsed: 1 });
     save(5, "the model endpoint's answer is not JSON");
     expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false });
+  });
+
+  it("resume keeps a saved laptop failure done when stderr contains a transport error", () => {
+    const out = tempDir("oq-laptop-retry-state-");
+    const dir = attemptDir(out, job, 1);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "sample.json"), JSON.stringify({ status: "failed", failure: "Claude Code failed: TypeError: fetch failed" }));
+    expect(jobState(out, job)).toMatchObject({ done: true, retryPending: false, next: 2, retriesUsed: 0 });
   });
 
   it("resume drops the saved retry count or retries a complete or nonretryable sample", async () => {

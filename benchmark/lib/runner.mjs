@@ -63,7 +63,7 @@ import { REVIEWER_FAILED } from "./reviewers.mjs";
 import { SCAN_CONFIG } from "./scan-score.mjs";
 import { RULES_VERSION, jobIdOf, shownFindings } from "./score.mjs";
 import { controlArgs, controlInput } from "./claude-control.mjs";
-import { RATE_LIMIT_RETRIES, retryOnce } from "./halts.mjs";
+import { retryOnce } from "./halts.mjs";
 
 // The arguments of one laptop review (Claude Code or Codex through
 // `openqodex review`), the same for planted and pull request cases.
@@ -133,7 +133,7 @@ export function jobState(out, job) {
   }
   // The first failure asks for a retry; only later saved failures consume it.
   const retriesUsed = Math.max(0, retryFailures - 1);
-  const retryPending = last !== null && retryOnce(last, retriesUsed) !== null && retriesUsed < RATE_LIMIT_RETRIES;
+  const retryPending = job.reviewer?.startsWith("model:") === true && last !== null && retryOnce(last, retriesUsed) !== null;
   return { started: next > 1, done: last !== null && !retryPending, retryPending, retriesUsed, next };
 }
 
