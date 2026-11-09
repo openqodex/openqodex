@@ -109,7 +109,14 @@ A proof that fails ends the review as incomplete before any model call, with a r
 - `git failed`: git itself failed in the clone.
 - `missing objects`: a tree or a file of the head is not in the clone, as in a partial clone. Fetch them; OpenQodex fetches nothing.
 
-Every file of the snapshot is redacted and remains readable regardless of size. Time and budget bound the review. After the review ran, an incomplete review names what is missing: a changed range the reviewer was never shown, a candidate it neither raised nor dropped, an answer that failed its checks after the correction rounds, a budget refusal, a failed model call, or the deadline.
+Every file of the snapshot is redacted and stays readable at any size.
+Time and budget are the two bounds on the review.
+An incomplete review names what is missing.
+Reasons include a changed range the reviewer was never shown.
+Others are a scanner candidate with no disposition, or an answer still failing its checks after the correction rounds.
+Others are a budget refusal, a failed model call, no model call at all, or the deadline.
+Others are a read outside the snapshot or the review's scopes, or a call to an undefined tool.
+[What complete means](claude-code-review.md#what-complete-means) lists every reason.
 
 ### Incremental, scoped and context
 
