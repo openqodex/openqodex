@@ -1,3 +1,4 @@
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_CONFIG, configHash } from "@openqodex/core";
@@ -12,7 +13,7 @@ export function fixture(files = ["a.txt", "b.txt"]) {
   const dir = mkdtempSync(join(tmpdir(), "oq-stages-"));
   dirs.push(dir);
   for (const file of files) writeFileSync(join(dir, file), "unsafe operation\nsafe operation\n");
-  const change: Change = { repoRoot: dir, baseRef: "main", baseSha: "base", id: "a".repeat(64), shortId: "a".repeat(12), files: files.map((path) => ({ path, status: "modified", oldPath: null, binary: false })), changedPaths: files, coverage: new Map(files.map((f) => [f, new Set([1])])), deletionPoints: new Map(), diff: "", diffs: files.map((path) => ({ path, text: "@@ -1 +1 @@\n-old operation\n+unsafe operation\n" + " ".repeat(31 * 1024) })), notReviewed: [], stats: { files: files.length, additions: files.length, deletions: files.length } };
+  const change: Change = { repoRoot: dir, baseRef: "main", baseSha: "base", id: "a".repeat(64), shortId: "a".repeat(12), files: files.map((path) => ({ path, status: "modified", oldPath: null, binary: false })), changedPaths: files, coverage: new Map(files.map((f) => [f, makeLineSet([1])])), deletionPoints: new Map(), diff: "", diffs: files.map((path) => ({ path, text: "@@ -1 +1 @@\n-old operation\n+unsafe operation\n" + " ".repeat(31 * 1024) })), notReviewed: [], stats: { files: files.length, additions: files.length, deletions: files.length } };
   const scan: ScanResult = { candidates: [], scanners: [], secretFingerprints: [] };
   const config = { ...structuredClone(DEFAULT_CONFIG), stages: true };
   const manifest: RunManifest = { version: 3, change_id: change.id, config_hash: configHash(config), created_at: new Date().toISOString(), lenses: [], instructions_hash: null, runtime_version: "test" };

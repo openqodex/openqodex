@@ -29,15 +29,15 @@
 //     starts on an unchanged line, ends past the end of the file, or spans
 //     far beyond its start (`line_number: 1, line_end: 999999`).
 // 15. An incomplete review throws away the findings that passed every check.
-// 14. A changed file the change could not map (past the coverage line cap)
-//     or could not put in the brief (past the diff budget) counts as read
-//     when the reviewer never read it: the run completes by omission.
+// 14. A large changed file whose coverage is kept as intervals, or one the
+//     brief could not carry (past the diff budget), counts as read when the
+//     reviewer never read it: the run completes by omission.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { COVERAGE_MAX_LINES, DIFF_CAP_BYTES, getChange } from "./change.js";
+import { DIFF_CAP_BYTES, getChange } from "./change.js";
 import { changedHunks, completionRecord, readCoverage } from "./completion.js";
 import type { TraceEntry } from "./completion.js";
 import { checkSubmission } from "./finalize.js";
@@ -211,13 +211,14 @@ describe("14. files the change could not map or brief", () => {
     return dir;
   };
 
-  it("a file past the coverage line cap stays unread until a read covers all of it", async () => {
+  it("a large file keeps coverage and stays unread until a read covers all of it", async () => {
     const dir = repo({ "README.md": "hello\n" });
-    const lines = COVERAGE_MAX_LINES + 1;
+    const lines = 500_001;
     writeFileSync(join(dir, "big.txt"), "x\n".repeat(lines));
     writeFileSync(join(dir, "small.py"), "x = 1\n");
     const change = await getChange({ repoRoot: dir, scope: { uncommitted: true }, exclude: [] });
-    expect(change.notReviewed).toEqual(["big.txt"]);
+    expect(change.uncovered).toEqual([]);
+    expect(change.coverage.get("big.txt")?.ranges()).toEqual([[1, 500_001]]);
     const lineCount = (path: string) => (path === "big.txt" ? lines : 1);
     const none = readCoverage({ change, briefFiles: new Set(["small.py"]), trace: [], lineCount });
     expect(none.unread.map((h) => h.path)).toEqual(["big.txt"]);

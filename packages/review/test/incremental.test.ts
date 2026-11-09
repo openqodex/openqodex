@@ -25,10 +25,8 @@
 //  7. A replacement ref in the clone (refs/replace) forges a proof: a head
 //     that does not descend from the merge base passes, because the ref
 //     points it at a commit that does.
-//  8. A file previous..head changed but could not cover (a large merge of
-//     the base branch used the coverage limit up) is dropped from the
-//     obligation, so its changed lines go unreviewed or the review says
-//     there is nothing to review.
+//  8. A large base merge drops changed lines from the delta or includes
+//     lines that were already reviewed.
 // The merge base proofs themselves are tested once, through reviewChange
 // (merge-base.test.ts).
 import { join } from "node:path";
@@ -49,7 +47,7 @@ async function changes(dir: string, mergeBaseSha: string, headSha: string, previ
   return { decision, ...got };
 }
 
-const sorted = (s: Set<number> | undefined) => [...(s ?? [])].sort((a, b) => a - b);
+const sorted = (s: Iterable<number> | undefined) => [...(s ?? [])].sort((a, b) => a - b);
 
 describe("the obligation of an incremental review", () => {
   it("1. with the previous commit an ancestor, only what changed since, inside the whole change", async () => {
@@ -99,10 +97,10 @@ describe("the obligation of an incremental review", () => {
   });
 });
 
-describe("a delta that could not be covered", () => {
-  it("8. a file the delta could not cover keeps its whole-change lines as the obligation", async () => {
+describe("a delta after a large base merge", () => {
+  it("8. a large base merge keeps only lines changed since the previous review", async () => {
     const h = history();
-    // The base branch gains a file of exactly the coverage limit, which a
+    // The base branch gains a large file, which a
     // merge brings into the feature branch after the previous review.
     git(h.dir, "checkout", "-q", "main");
     write(h.dir, "a/big.txt", "x\n".repeat(500_000));
@@ -114,7 +112,7 @@ describe("a delta that could not be covered", () => {
     const r = await changes(h.dir, mainTip, head, h.previous);
     expect(r.decision.scope.kind).toBe("delta");
     expect(r.obligation.files.map((f) => f.path).sort()).toEqual(["s/a.ts", "s/b.ts"]);
-    expect(sorted(r.obligation.coverage.get("s/a.ts"))).toEqual([5, 25]);
+    expect(sorted(r.obligation.coverage.get("s/a.ts"))).toEqual([25]);
     expect(sorted(r.obligation.coverage.get("s/b.ts"))).toEqual([3, 7]);
   }, 120_000);
 });

@@ -16,6 +16,7 @@
 //     its record is lost.
 //  7. The result's markdown, SARIF or JSON lose the model record or print the
 //     agent's reviewer line.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { modelCoverage } from "@openqodex/core";
 import type { Change, Report } from "@openqodex/core";
 import { describe, expect, it } from "vitest";
@@ -30,7 +31,7 @@ const change = {
   id: "c".repeat(64),
   files: [{ path: "app/a.py", status: "modified", oldPath: null, binary: false }],
   changedPaths: ["app/a.py"],
-  coverage: new Map([["app/a.py", new Set([3, 4, 5])]]),
+  coverage: new Map([["app/a.py", makeLineSet([3, 4, 5])]]),
   deletionPoints: new Map(),
 } as unknown as Change;
 

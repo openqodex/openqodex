@@ -21,7 +21,7 @@
 // 14. The tool's own .openqodex/ folder is reported as part of the change.
 // 15. A folder that is not in a git repository is not reported as such.
 // 16. A huge change (a forgotten dump or node_modules) is buffered whole or
-//     expanded into per-line coverage instead of being left out.
+//     expanded into per-line coverage instead of compact intervals.
 // 17. A type change (symlink to regular file) gives two patch blocks for one
 //     file and breaks the file-to-patch pairing.
 // 18. A configured clean filter runs during the temp add and writes inside
@@ -43,7 +43,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { COVERAGE_MAX_LINES, DIFF_CAP_BYTES, findRepoRoot, getChange } from "../src/change.js";
+import { DIFF_CAP_BYTES, findRepoRoot, getChange } from "../src/change.js";
 import { OpenQodexError } from "../src/types.js";
 
 const roots: string[] = [];
@@ -160,7 +160,7 @@ describe("getChange", () => {
     write(repo, "a.ts", edited);
     const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
     // line 3 changed; line 8 deleted (no new-side line); line 11 appended at new line 10
-    expect(c.coverage.get("a.ts")).toEqual(new Set([3, 10]));
+    expect(Array.from(c.coverage.get("a.ts") ?? [])).toEqual(Array.from([3, 10]));
   });
 
   it("falls back to the remote's default branch without an upstream", async () => {
@@ -256,7 +256,7 @@ describe("getChange", () => {
     const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
     expect(paths(c)).toEqual([odd]);
     expect(c.changedPaths).toEqual([odd]);
-    expect(c.coverage.get(odd)).toEqual(new Set([1, 2]));
+    expect(Array.from(c.coverage.get(odd) ?? [])).toEqual(Array.from([1, 2]));
   });
 
   it("diffs a repo with no commits against the empty tree", async () => {
@@ -265,7 +265,7 @@ describe("getChange", () => {
     const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
     expect(c.baseRef).toBe("empty tree");
     expect(paths(c)).toEqual(["first.ts"]);
-    expect(c.coverage.get("first.ts")).toEqual(new Set([1, 2]));
+    expect(Array.from(c.coverage.get("first.ts") ?? [])).toEqual(Array.from([1, 2]));
     const wt = await getChange({ repoRoot: repo, scope: { uncommitted: true }, exclude: [] });
     expect(paths(wt)).toEqual(["first.ts"]);
   });
@@ -296,7 +296,7 @@ describe("getChange", () => {
     expect(c.files.find((f) => f.path === "src/lib.ts")).toMatchObject({ status: "added", oldPath: null });
     expect(c.files.find((f) => f.path === "src/moved.ts")).toMatchObject({ status: "deleted", oldPath: null });
     expect(paths(c)).toEqual(["src/lib.ts", "src/moved.ts"]);
-    expect(c.coverage.get("src/lib.ts")).toEqual(new Set(Array.from({ length: 19 }, (_, i) => i + 1)));
+    expect(Array.from(c.coverage.get("src/lib.ts") ?? [])).toEqual(Array.from(Array.from({ length: 19 }, (_, i) => i + 1)));
     expect(c.deletionPoints.has("src/lib.ts")).toBe(false);
     expect(c.diff).not.toContain("vendor/");
     expect(c.diff).not.toMatch(/^-lib /m);
@@ -313,7 +313,7 @@ describe("getChange", () => {
     const c = await getChange({ repoRoot: repo, scope: {}, exclude: ["cache"] });
     expect(paths(c)).toEqual(["cache/new.ts", "src/legacy.ts"]);
     expect(c.files.find((f) => f.path === "src/legacy.ts")).toMatchObject({ status: "added", oldPath: null });
-    expect(c.coverage.get("cache/new.ts")).toEqual(new Set([1]));
+    expect(Array.from(c.coverage.get("cache/new.ts") ?? [])).toEqual(Array.from([1]));
     expect(c.coverage.get("src/legacy.ts")?.size).toBe(20);
     expect(c.diff).toContain("+fresh");
     expect(c.diff).not.toMatch(/^-cached /m);
@@ -400,19 +400,20 @@ describe("getChange", () => {
     expect(git(repo, "status", "--porcelain")).toBe(statusBefore);
   });
 
-  it("leaves a change past the coverage line cap out of coverage and the brief", async () => {
+  it("7o. a 500,001-line change keeps every file covered in compact intervals", async () => {
     const repo = seeded();
     write(repo, "a.ts", lines(10).replace("line 2\n", "line two\n"));
-    write(repo, "dump.sql", "x\n".repeat(COVERAGE_MAX_LINES + 1));
+    write(repo, "dump.sql", "x\n".repeat(500_001));
     write(repo, "zz.ts", "z\n");
     const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
-    expect(c.notReviewed).toEqual(["dump.sql"]);
-    expect(c.coverage.has("dump.sql")).toBe(false);
-    expect(c.coverage.get("a.ts")).toEqual(new Set([2]));
-    expect(c.coverage.get("zz.ts")).toEqual(new Set([1]));
-    expect(c.diff).not.toContain("dump.sql");
-    expect(c.changedPaths).toContain("dump.sql");
-    expect(c.stats.additions).toBe(COVERAGE_MAX_LINES + 3);
+    expect([...c.coverage.keys()].sort()).toEqual(["a.ts", "dump.sql", "zz.ts"]);
+    expect(c.uncovered).toEqual([]);
+    expect(c.notReviewed).toEqual([]);
+    expect(c.coverage.get("dump.sql")?.size).toBe(500_001);
+    expect(c.coverage.get("dump.sql")?.ranges()).toEqual([[1, 500_001]]);
+    expect([...c.coverage.get("a.ts")!]).toEqual([2]);
+    expect([...c.coverage.get("zz.ts")!]).toEqual([1]);
+    expect(c.stats.additions).toBe(500_003);
   });
 
   it("leaves out a single line too long for the brief without holding it", async () => {
@@ -421,7 +422,7 @@ describe("getChange", () => {
     write(repo, "b.ts", "b\n");
     const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
     expect(c.notReviewed).toEqual(["app.min.js"]);
-    expect(c.coverage.get("app.min.js")).toEqual(new Set([1]));
+    expect(Array.from(c.coverage.get("app.min.js") ?? [])).toEqual(Array.from([1]));
     expect(c.diff).toContain("+b");
     expect(c.diff).not.toContain("yyyy");
   });
@@ -434,7 +435,7 @@ describe("getChange", () => {
     write(repo, "link", "plain\n");
     const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
     expect(c.files).toEqual([{ path: "link", status: "modified", oldPath: null, binary: false }]);
-    expect(c.coverage.get("link")).toEqual(new Set([1]));
+    expect(Array.from(c.coverage.get("link") ?? [])).toEqual(Array.from([1]));
     expect(c.diff).toContain("deleted file mode 120000");
     expect(c.diff).toContain("+plain");
   });
@@ -469,7 +470,7 @@ describe("getChange", () => {
     process.env.GIT_DIFF_OPTS = "--unified=3";
     try {
       const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
-      expect(c.coverage.get("a.ts")).toEqual(new Set([2, 6]));
+      expect(Array.from(c.coverage.get("a.ts") ?? [])).toEqual(Array.from([2, 6]));
     } finally {
       if (saved === undefined) delete process.env.GIT_DIFF_OPTS;
       else process.env.GIT_DIFF_OPTS = saved;
@@ -528,7 +529,7 @@ describe("getChange", () => {
     commitAll(repo, "base");
     write(repo, "a.ts", lines(4));
     const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
-    expect(c.coverage.get("a.ts")).toEqual(new Set([4]));
+    expect(Array.from(c.coverage.get("a.ts") ?? [])).toEqual(Array.from([4]));
   });
 
   it("finds a same-size edit made in the second the index was written (failure 23)", async () => {

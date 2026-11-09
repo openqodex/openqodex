@@ -138,7 +138,7 @@ async function anchorKeys(repoDir: string, findings: CheckovFinding[], coverage?
     const changed = coverage?.get(f.filePath);
     let chosen = ranges;
     if (coverage !== undefined) {
-      const touched = ranges.filter(([from, to]) => [...(changed ?? [])].some((line) => from <= line && line <= to));
+      const touched = ranges.filter(([from, to]) => changed?.overlaps(from, to));
       chosen = touched.length > 0 ? touched : ranges.slice(0, 1);
     }
     out.push({ ...f, lineStart: Math.min(...chosen.map((r) => r[0])), lineEnd: Math.max(...chosen.map((r) => r[1])) });

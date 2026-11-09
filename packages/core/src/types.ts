@@ -1,3 +1,4 @@
+import type { LineSet } from "./line-set.js";
 // Shared contracts for every OpenQodex package. Code against these types;
 // a change here is agreed first, never made inside a feature branch.
 
@@ -212,7 +213,7 @@ export type ResolveTool = (scanner: BuiltinScanner, call?: { probeHome?: string 
 // ---------- change ----------
 
 // Path to the set of new-side line numbers the developer added or changed.
-export type DiffCoverage = Map<string, Set<number>>;
+export type DiffCoverage = Map<string, LineSet>;
 
 // A place where the change only removed lines: `lines` lines were deleted
 // after new-side line `after` (0: at the top of the file). Its `anchors`, the
@@ -251,7 +252,7 @@ export type Change = {
   // The same diff split per file, in the same order; absent where a caller built a Change by hand.
   diffs?: { path: string; text: string }[];
   notReviewed: string[]; // paths left out because the change was too large
-  // Changed text files past the coverage cap, whose changed lines are not
+  // Hand-built changes may name text files whose changed lines are not
   // known: a review counts one as read only when the reviewer read all of it.
   // Absent where a caller built a Change by hand.
   uncovered?: string[];

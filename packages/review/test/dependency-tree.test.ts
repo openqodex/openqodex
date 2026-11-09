@@ -1,5 +1,6 @@
 // Failure cases: scanChange tries git or scans beyond the supplied inventory;
 // a server review reads the snapshot inventory with its tree scanner disabled.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -18,7 +19,7 @@ it("scanChange honours a given inventory without calling git", async () => {
   const workDir = mkdtempSync(join(tmpdir(), "oq-scoped-tree-")); dirs.push(workDir);
   writeFileSync(join(workDir, "package-lock.json"), "{}");
   writeFileSync(join(workDir, "admitted.txt"), "a harmless edit\n");
-  const p = await scanChange({ repoRoot: join(workDir, "absent-clone"), workDir, inventory: ["admitted.txt"], change: makeChange({ changedPaths: ["admitted.txt"], coverage: new Map([["admitted.txt", new Set([1])]]) }), config: makeConfig(), host: { resolveTool: createToolResolver({ allowInstall: false, installBudgetMs: null }), onProgress: () => {} } });
+  const p = await scanChange({ repoRoot: join(workDir, "absent-clone"), workDir, inventory: ["admitted.txt"], change: makeChange({ changedPaths: ["admitted.txt"], coverage: new Map([["admitted.txt", makeLineSet([1])]]) }), config: makeConfig(), host: { resolveTool: createToolResolver({ allowInstall: false, installBudgetMs: null }), onProgress: () => {} } });
   expect(p.scan?.selection?.find((s) => s.scanner === "osv-scanner")?.wanted).toBe(false);
   expect(p.scan?.scanners.find((s) => s.scanner === "osv-scanner")).toMatchObject({ status: "no_matching_files", reason: null });
   expect(p.scan?.outside ?? []).toEqual([]);

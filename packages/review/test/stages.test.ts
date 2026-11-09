@@ -8,6 +8,7 @@
 // open, verifier abandon reasons lose either attempt, and finders use the verifier's reserved time.
 // Round 2 failures: a missing file or inverted range discards a good answer,
 // a line tie splits duplicate candidates, and refutation prose waits for assembly.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
@@ -232,7 +233,7 @@ it("folds a duplicate into the first shown link of its chain when the chain's en
     return answer;
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
-  f.change.coverage.set("a.txt", new Set([1, 2, 3]));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
   f.args.confidenceFloor = 0.7;
   const r = await runStagedReview(f.args);
   expect(r.report.findings.map((finding) => finding.title)).toEqual(["Claim 2"]);
@@ -551,7 +552,7 @@ it("keeps seven candidates in one batch when the sixth and seventh share a line,
     return answer;
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(6));
-  f.change.coverage.set("a.txt", new Set([1, 2, 3, 4, 5, 6]));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3, 4, 5, 6]));
   f.scan.candidates.push({ ...scanner("a.txt"), lineStart: 6, lineEnd: 6 });
   const r = await runStagedReview(f.args);
   const briefs = f.requests.filter((request) => request.purpose === "verify").map((request) => JSON.parse(request.messages[1]!.text).batch as VerifyBatch);
@@ -771,7 +772,7 @@ it.each(["finding", "observation"] as const)("keeps the twin hidden item's trace
     return answer;
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
-  f.change.coverage.set("a.txt", new Set([1, 2, 3]));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
   f.config.severityThreshold = "major";
   const r = await runStagedReview(f.args);
   expect(r.missing).toEqual([]);
@@ -795,7 +796,7 @@ it.each([false, true])("a shown possible item leaves a same-looking hidden item'
     return answer;
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
-  f.change.coverage.set("a.txt", new Set([1, 2, 3]));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
   f.config.severityThreshold = "major";
   const r = await runStagedReview(f.args);
   expect(r.missing).toEqual([]);

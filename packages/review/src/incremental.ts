@@ -15,7 +15,7 @@
 // previous commit, history unknown (a cut history or a commit the clone does
 // not hold), diverged (a rewritten branch), not a commit, or a git failure.
 import { readFileSync } from "node:fs";
-import { OpenQodexError, SERVER_GIT_ENV, getAdmittedTreeChange, safeGit } from "@openqodex/core";
+import { LineSet, OpenQodexError, SERVER_GIT_ENV, getAdmittedTreeChange, safeGit } from "@openqodex/core";
 import type { Change, DeletionPoint } from "@openqodex/core";
 import type { Admit } from "./scopes.js";
 
@@ -202,17 +202,16 @@ function keptHunks(text: string, keep: (h: Hunk) => boolean): { text: string; ad
 // admitted paths) also changed. Line numbers are the head's in both, so a
 // line is kept when both changed it; a deletion when both removed lines at
 // the same place. A file the change deletes is kept when `since` deletes it
-// too; a binary file, or one too large for coverage, when `since` changed
+// too; a binary file, or one without coverage, when `since` changed
 // it. The brief's diff keeps the whole change's hunks that hold a kept line
 // or deletion, so the reviewer reads the change against the merge base, and
 // its counts are the lines those hunks add and remove. The id is the whole
 // change's: the brief and the check name the same change.
 export function deltaChange(full: Change, since: Change): Change {
   const sinceFiles = new Map(since.files.map((f) => [f.path, f]));
-  // Files previous..head changed but could not cover (past the coverage
-  // limit, as a large merge of the base branch makes it happen).
+  // Hand-built changes may leave the lines of some files unknown.
   const sinceUncovered = new Set(since.uncovered ?? []);
-  const coverage = new Map<string, Set<number>>();
+  const coverage = new Map<string, LineSet>();
   const deletionPoints = new Map<string, DeletionPoint[]>();
   const files = full.files.filter((f) => {
     const s = sinceFiles.get(f.path);
@@ -232,8 +231,8 @@ export function deltaChange(full: Change, since: Change): Change {
       if (points.length > 0) deletionPoints.set(f.path, points);
       return true;
     }
-    const now = since.coverage.get(f.path) ?? new Set<number>();
-    const lines = new Set([...was].filter((n) => now.has(n)));
+    const now = since.coverage.get(f.path) ?? new LineSet();
+    const lines = was.intersect(now);
     const at = new Set((since.deletionPoints.get(f.path) ?? []).map((p) => p.after));
     const points = (full.deletionPoints.get(f.path) ?? []).filter((p) => at.has(p.after));
     if (lines.size === 0 && points.length === 0) return false;
@@ -247,11 +246,11 @@ export function deltaChange(full: Change, since: Change): Change {
   const diffs: { path: string; text: string }[] = [];
   for (const d of full.diffs ?? []) {
     if (!kept.has(d.path)) continue;
-    const lines = coverage.get(d.path) ?? new Set<number>();
+    const lines = coverage.get(d.path) ?? new LineSet();
     const points = deletionPoints.get(d.path) ?? [];
     const cut = keptHunks(d.text, (h) => {
       const last = h.start + Math.max(h.count, 1) - 1;
-      for (let n = h.start; n <= last; n++) if (lines.has(n)) return true;
+      if (lines.overlaps(h.start, last)) return true;
       return points.some((p) => p.after >= h.start - 1 && p.after <= last);
     });
     additions += cut.additions;

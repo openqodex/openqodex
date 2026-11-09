@@ -1,3 +1,4 @@
+export * from "./line-set.js";
 export * from "./types.js";
 export * from "./severity.js";
 export * from "./redact.js";

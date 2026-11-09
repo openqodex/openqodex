@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkSubmission, DEFAULT_CONFIG, GLOBAL_CONFIDENCE_FLOOR, parseDiffCoverage, unquoteDiffPath } from "../../packages/core/dist/index.js";
+import { checkSubmission, DEFAULT_CONFIG, GLOBAL_CONFIDENCE_FLOOR, LineSet, parseDiffCoverage, unquoteDiffPath } from "../../packages/core/dist/index.js";
 import { mergeFindings } from "../../packages/review/dist/index.js";
 import { fileList, hashFolder, resultsRoot } from "../lib/index.mjs";
 import { buildCase, repoRoot } from "../lib/cases.mjs";
@@ -83,10 +83,10 @@ function savedChange(brief, manifest, report, inventory) {
   // as "- path: lines 3-5, 9", before any deletion-only anchor text.
   const omitted = section("Diff").split(/^These files changed but their diff is not in this brief\..*$/m)[1] ?? "";
   for (const m of omitted.matchAll(/^- (.+): lines (\d+(?:-\d+)?(?:, \d+(?:-\d+)?)*)(?:;[^\r\n]*)?\r?$/gm)) {
-    const lines = coverage.get(m[1]) ?? new Set();
+    const lines = coverage.get(m[1]) ?? new LineSet();
     for (const range of m[2].split(", ")) {
       const [start, end = start] = range.split("-").map(Number);
-      for (let line = start; line <= end; line++) lines.add(line);
+      lines.addRange(start, end);
     }
     coverage.set(m[1], lines);
   }
@@ -100,10 +100,16 @@ function savedChange(brief, manifest, report, inventory) {
   let next = null;
   let left = 0;
   let right = 0;
+  // Context rows are not changed lines: collected per path, then taken out
+  // of the coverage intervals once the diff is read (a LineSet only grows).
+  const context = new Map();
   for (const line of diff.split("\n")) {
     if (left > 0 || right > 0) {
       if (line.startsWith(" ")) {
-        coverage.get(path)?.delete(next);
+        if (path !== null) {
+          if (!context.has(path)) context.set(path, new Set());
+          context.get(path).add(next);
+        }
         next++;
         left--; right--;
       } else if (line.startsWith("+")) {
@@ -124,6 +130,13 @@ function savedChange(brief, manifest, report, inventory) {
         right = m[4] === undefined ? 1 : Number(m[4]);
       }
     }
+  }
+  for (const [p, rows] of context) {
+    const lines = coverage.get(p);
+    if (lines === undefined) continue;
+    const kept = new LineSet();
+    for (const n of lines) if (!rows.has(n)) kept.add(n);
+    coverage.set(p, kept);
   }
   // brief.md's Changed files and Deleted lines sections are emitted by
   // core's changedFilesBlock and deletionsBlock. Copy the recorded anchors,
