@@ -376,6 +376,20 @@ describe("retry state on disk", () => {
     expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false });
   });
 
+  it("a manifest job without a reviewer takes it from its saved sample, a cut-short sample reads as unsaved, and a pending retry still counts as saved", () => {
+    const out = tempDir("oq-manifest-retry-state-");
+    const manifestJob = { caseId: job.caseId, case: job.case, config: "model-test-graph-on", repeat: 1 };
+    const dir = (n) => attemptDir(out, manifestJob, n);
+    mkdirSync(dir(1), { recursive: true });
+    writeFileSync(join(dir(1), "sample.json"), '{"status":"incomplete","failure":"the model call failed: ECONN');
+    expect(jobState(out, manifestJob)).toMatchObject({ started: true, saved: false, done: false, retryPending: false, next: 2, retriesUsed: 0 });
+    mkdirSync(dir(2), { recursive: true });
+    writeFileSync(join(dir(2), "sample.json"), JSON.stringify({ status: "incomplete", failure: "the model call failed: ECONNRESET", reviewer: "model:test" }));
+    expect(jobState(out, manifestJob)).toMatchObject({ saved: true, done: false, retryPending: true, next: 3, retriesUsed: 0 });
+    writeFileSync(join(dir(2), "sample.json"), JSON.stringify({ status: "incomplete", failure: "the model call failed: ECONNRESET", reviewer: "claude" }));
+    expect(jobState(out, manifestJob)).toMatchObject({ saved: true, done: true, retryPending: false });
+  });
+
   it("resume keeps a saved laptop failure done when stderr contains a transport error", () => {
     const out = tempDir("oq-laptop-retry-state-");
     const dir = attemptDir(out, job, 1);

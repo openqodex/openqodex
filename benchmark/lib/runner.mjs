@@ -125,16 +125,28 @@ export function jobState(out, job) {
   let retryFailures = 0;
   while (existsSync(attemptDir(out, job, next))) {
     const sample = join(attemptDir(out, job, next), "sample.json");
-    if (existsSync(sample)) {
-      last = JSON.parse(readFileSync(sample, "utf8"));
+    // A sample cut short by a crash mid-write reads as not saved.
+    const saved = existsSync(sample) ? readSample(sample) : null;
+    if (saved !== null) {
+      last = saved;
       if (retryOnce(last, 0) !== null) retryFailures++;
     }
     next++;
   }
   // The first failure asks for a retry; only later saved failures consume it.
   const retriesUsed = Math.max(0, retryFailures - 1);
-  const retryPending = job.reviewer?.startsWith("model:") === true && last !== null && retryOnce(last, retriesUsed) !== null;
-  return { started: next > 1, done: last !== null && !retryPending, retryPending, retriesUsed, next };
+  // A manifest job carries no reviewer; its saved sample does.
+  const reviewer = job.reviewer ?? last?.reviewer ?? null;
+  const retryPending = typeof reviewer === "string" && reviewer.startsWith("model:") && last !== null && retryOnce(last, retriesUsed) !== null;
+  return { started: next > 1, saved: last !== null, done: last !== null && !retryPending, retryPending, retriesUsed, next };
+}
+
+function readSample(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 export const LOCK_FILE = ".run.lock";
@@ -317,7 +329,7 @@ export async function executeRun({ out, manifest, resume = false, checkResume = 
       ...(halt ? { halt } : {}),
       ...(how === "budget" ? { limit: spent.limit, limitKind: spent.limitKind } : {}),
       ...(budget ? budget.summary() : {}),
-      reviewsWithAnAttempt: jobs.filter((j) => jobState(out, j).done).length,
+      reviewsWithAnAttempt: jobs.filter((j) => jobState(out, j).saved).length,
       planned: jobs.length,
       elapsedMin: Math.round((Date.now() - started) / 600) / 100,
     };
