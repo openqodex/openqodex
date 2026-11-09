@@ -32,6 +32,11 @@ export type OwnFiles = { configDir: string; sessionId: string };
 // `glob` is a file pattern.
 const PATH_FIELDS = ["file_path", "path", "notebook_path", "cwd", "directory"];
 const PATTERN_FIELDS = ["pattern", "glob"];
+
+// The empty device every shell may redirect to or read from: never a file of
+// the snapshot, and never left outside it either (issue 299).
+const DEVICE_FILES = new Set(["/dev/null", "/dev/zero"]);
+const isDevice = (raw: string): boolean => DEVICE_FILES.has(raw.trim());
 const GREP_PATTERN_FIELDS = ["glob"];
 
 // The real path of `abs`: the deepest part that exists, resolved through
@@ -349,7 +354,7 @@ export function classify(snapshotDir: string, call: ToolCall, own: OwnFiles | nu
   for (const k of PATH_FIELDS) {
     if (fields[k] === undefined || fields[k] === null) continue;
     if (typeof fields[k] !== "string") return { tool: call.tool, path: `(a ${k} that is not text)`, inside: false, range: null, ok: true };
-    paths.push(fields[k] as string);
+    if (!isDevice(fields[k] as string)) paths.push(fields[k] as string);
   }
   for (const k of call.tool === "Grep" ? GREP_PATTERN_FIELDS : PATTERN_FIELDS) {
     if (fields[k] === undefined || fields[k] === null) continue;
@@ -367,7 +372,7 @@ export function classify(snapshotDir: string, call: ToolCall, own: OwnFiles | nu
     if (out.length > 0) ownPattern ??= fields[k] as string;
     else roots.push(...found);
   }
-  if (call.read) paths.push(call.read.path);
+  if (call.read && !isDevice(call.read.path)) paths.push(call.read.path);
   if (call.tool === "Read" && typeof fields.file_path !== "string") {
     return { tool: call.tool, path: "(a read with no file_path)", inside: false, range: null, ok: true };
   }
