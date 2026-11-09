@@ -693,13 +693,14 @@ function diffBlockV2(change: Change, secrets: string[]): { text: string; files: 
   // A Change built without its per-file split carries one block for every file in it.
   const all = change.files.filter((f) => !change.notReviewed.includes(f.path)).map((f) => f.path);
   const parts = change.diffs?.map((d) => ({ paths: [d.path], text: d.text })) ?? (change.diff.trim() === "" ? [] : [{ paths: all, text: change.diff }]);
+  const deletedBinaries = new Set(change.files.filter((f) => f.binary && f.status === "deleted").map((f) => f.path));
   const files = new Set<string>();
   const shown: string[] = [];
   const left: string[] = [];
   let bytes = 0;
   for (const p of parts) {
     const text = deliveryDiff(p.text, secrets);
-    const size = text === null ? Infinity : Buffer.byteLength(text, "utf8");
+    const size = text === null ? Infinity : p.paths.every((path) => deletedBinaries.has(path)) ? 0 : Buffer.byteLength(text, "utf8");
     if (text === null || bytes + size > MAX_DIFF_BYTES) {
       left.push(...p.paths);
       continue;
@@ -715,7 +716,8 @@ function diffBlockV2(change: Change, secrets: string[]): { text: string; files: 
     const fence = fenceFor(body);
     lines.push(`${fence}diff`, body.replace(/\n$/, ""), fence);
   }
-  const missing = [...new Set([...left, ...change.notReviewed])];
+  for (const path of deletedBinaries) files.add(path);
+  const missing = [...new Set([...left, ...change.notReviewed])].filter((path) => !deletedBinaries.has(path));
   if (missing.length > 0) {
     lines.push(
       "",
@@ -876,9 +878,6 @@ export function buildReviewerBrief(args: {
     return { text: redactSecrets(`${blocks.filter((b) => b !== "").join("\n\n")}\n`, args.secrets), diffFiles: new Set() };
   }
   const diff = diffBlockV2(change, args.secrets);
-  for (const file of change.files) {
-    if (file.binary && file.status === "deleted") diff.files.add(file.path);
-  }
   const blocks = [
     header(change, scan, config, args.target),
     REVIEWER_ROLE,

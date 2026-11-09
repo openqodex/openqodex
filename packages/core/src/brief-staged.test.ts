@@ -71,9 +71,10 @@ function answer(text: string): VerifyAnswer {
 }
 
 it("a binary deletion stays unread when its diff has no text lines", () => {
+  const diff = "diff --git a/logo.png b/logo.png\ndeleted file mode 100644\nindex 1234567..0000000\nBinary files a/logo.png and /dev/null differ\n";
   const deleted = makeChange({
     files: [{ path: "logo.png", status: "deleted", oldPath: null, binary: true }],
-    changedPaths: [], coverage: new Map(), diff: "", diffs: [],
+    changedPaths: [], coverage: new Map(), diff, diffs: [{ path: "logo.png", text: diff }],
     deletionPoints: new Map([["logo.png", [{ after: 0, lines: 0, anchors: [1] }]]]),
   });
   const deletedUnit: ReviewUnit = {

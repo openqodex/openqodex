@@ -10,7 +10,8 @@ afterAll(removeTempDirs);
 
 describe("binary deletion coverage", () => {
   for (const stages of [true, false]) {
-    it(`a deleted binary file keeps the ${stages ? "staged" : "single-pass"} review incomplete`, () => {
+    // The single-pass case is green on step2-batch and gives the route an owner.
+    it(stages ? "a deleted binary file keeps the staged review incomplete" : "the single pass stops listing a deleted binary file", () => {
       const dir = baseline();
       const image = join(dir, "logo.png");
       writeFileSync(image, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=", "base64"));
