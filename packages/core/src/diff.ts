@@ -7,6 +7,7 @@
 // cannot carry a finding. Context lines (" ") are counted too, which matters
 // only if a diff with context is passed in. A hunk that only deletes is kept
 // apart as a deletion point, so a finding can cite the lines around it.
+import { LineSet } from "./line-set.js";
 import type { DeletionPoint, DiffCoverage } from "./types.js";
 
 const C_ESCAPES: Record<string, number> = {
@@ -73,6 +74,11 @@ export function createCoverageParser(): {
   const deleted = new Map<string, Omit<DeletionPoint, "anchors">[]>();
   let currentFile: string | null = null;
   let rightLine = 0;
+  let runStart: number | null = null;
+  const flush = (): void => {
+    if (runStart !== null && currentFile !== null) out.get(currentFile)!.addRange(runStart, rightLine - 1);
+    runStart = null;
+  };
 
   // Header lines are only read in a block's preamble, before its first @@.
   // Inside hunk payload an added source line "++ x" renders as "+++ x" (SQL
@@ -83,6 +89,7 @@ export function createCoverageParser(): {
   let inHunk = false;
 
   const push = (rawLine: string): void => {
+    if (rawLine[0] !== "+" && rawLine[0] !== " ") flush();
     // File header on the new side: "+++ b/<path>", or "+++ /dev/null" for a
     // deletion. currentFile is set only when there is a new-side file.
     if (!inHunk && rawLine.startsWith("+++ ")) {
@@ -93,11 +100,11 @@ export function createCoverageParser(): {
         currentFile = null;
       } else if (target.startsWith("b/")) {
         currentFile = target.slice(2);
-        if (!out.has(currentFile)) out.set(currentFile, new Set());
+        if (!out.has(currentFile)) out.set(currentFile, new LineSet());
       } else {
         // Some diff producers omit the b/ prefix; accept as-is.
         currentFile = target;
-        if (!out.has(currentFile)) out.set(currentFile, new Set());
+        if (!out.has(currentFile)) out.set(currentFile, new LineSet());
       }
       return;
     }
@@ -127,17 +134,17 @@ export function createCoverageParser(): {
 
     const c = rawLine[0];
     if (c === "+") {
-      out.get(currentFile)!.add(rightLine);
+      runStart ??= rightLine;
       rightLine++;
     } else if (c === " ") {
-      out.get(currentFile)!.add(rightLine);
+      runStart ??= rightLine;
       rightLine++;
     }
     // "-" is an old-side line and does not advance the new side. Other
     // markers (the "\ No newline at end of file" sentinel, blank lines
     // outside any hunk) are ignored without changing line state.
   };
-  return { push, result: () => out, deletionPoints: () => deleted };
+  return { push, result: () => { flush(); return out; }, deletionPoints: () => { flush(); return deleted; } };
 }
 
 // What one file's diff removed at each deletion point: the runs of removed

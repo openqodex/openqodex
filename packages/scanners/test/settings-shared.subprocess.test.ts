@@ -4,6 +4,7 @@
 // form, and the runner to raise its settings-file note, or, where the
 // scanner ignores the form, to raise none. Run by the end-to-end config, not
 // the unit config.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseConfig } from "@openqodex/core";
@@ -18,7 +19,7 @@ afterAll(removeTempDirs);
 
 // The lines of `head` that a line diff from `base` marks as added: those
 // outside a longest common run of lines.
-function addedLines(base: string, head: string): Set<number> {
+function addedLines(base: string, head: string): ReturnType<typeof makeLineSet> {
   const a = base.split("\n");
   const b = head.split("\n");
   const longest = a.map(() => b.map(() => 0));
@@ -26,7 +27,7 @@ function addedLines(base: string, head: string): Set<number> {
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) (longest[i] as number[])[j] = a[i] === b[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
   }
-  const added = new Set<number>();
+  const added = makeLineSet();
   let i = 0;
   let j = 0;
   while (j < b.length) {

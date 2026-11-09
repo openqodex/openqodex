@@ -52,16 +52,7 @@ const MAX_LISTED = 10;
 export function changedHunks(change: Change): Hunk[] {
   const hunks: Hunk[] = [];
   for (const [path, lines] of change.coverage) {
-    let start = -1;
-    let prev = -1;
-    for (const n of [...lines].sort((a, b) => a - b)) {
-      if (n !== prev + 1) {
-        if (start !== -1) hunks.push({ path, start, end: prev, deletion: false });
-        start = n;
-      }
-      prev = n;
-    }
-    if (start !== -1) hunks.push({ path, start, end: prev, deletion: false });
+    for (const [start, end] of lines.ranges()) hunks.push({ path, start, end, deletion: false });
   }
   for (const [path, points] of change.deletionPoints) {
     for (const p of points) hunks.push({ path, start: Math.min(...p.anchors), end: Math.max(...p.anchors), deletion: true });

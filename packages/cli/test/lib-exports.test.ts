@@ -53,6 +53,7 @@ const VALUES = [
   "hotSymbols",
   "INDEX_FORMAT",
   "isTestPath",
+  "LineSet",
   "OPERATIONS",
   "parseTarget",
   "prepareIndexes",

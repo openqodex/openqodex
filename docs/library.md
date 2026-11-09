@@ -252,7 +252,7 @@ The library finds its files from where it is installed: the lenses in `lenses/`,
 
 - `repoDir`: the folder the scanners read.
 - `changedPaths`: the changed files, relative to `repoDir`.
-- `coverage` (optional): a `Map` from each path to the set of its changed line numbers. With it, only findings on changed lines are kept. Without it, every finding in a changed file is kept.
+- `coverage` (optional): a `Map<string, LineSet>` from each path to its changed lines. `LineSet` stores inclusive intervals with no line-count ceiling. Build one with `new LineSet().addRange(start, end)` or `.add(line)`. With it, only findings on changed lines are kept. Without it, every finding in a changed file is kept.
 - `baseText` (optional): `(path) => Promise<string | null>`, the base version of a file. With it, a change to what a scanner reads from a shared settings file, such as `pyproject.toml`, is reported.
 - `config`: a `Config`, from `parseConfig` or `loadConfig`.
 - `resolveTool`: from `createToolResolver`.

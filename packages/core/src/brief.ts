@@ -1,3 +1,4 @@
+import type { LineSet } from "./line-set.js";
 import type { InstructionFile } from "./types.js";
 // The review brief: the one document the developer's own agent reads to
 // review a change. It carries the scanner candidates, the selected lenses,
@@ -643,16 +644,8 @@ function candidatesBlockV2(scan: ScanResult): string {
 }
 
 // "3-5, 9": consecutive line numbers as ranges.
-function lineRanges(set: Set<number>): string {
-  const sorted = [...set].sort((a, b) => a - b);
-  const out: string[] = [];
-  for (let i = 0; i < sorted.length; ) {
-    let j = i;
-    while (j + 1 < sorted.length && sorted[j + 1] === (sorted[j] as number) + 1) j++;
-    out.push(i === j ? `${sorted[i]}` : `${sorted[i]}-${sorted[j]}`);
-    i = j + 1;
-  }
-  return out.join(", ");
+function lineRanges(set: LineSet): string {
+  return set.ranges().map(([a, b]) => a === b ? `${a}` : `${a}-${b}`).join(", ");
 }
 
 // Redaction precedes row formatting, so a secret spanning a chunk boundary

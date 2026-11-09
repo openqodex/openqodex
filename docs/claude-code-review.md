@@ -116,6 +116,8 @@ Open `report.html` in a browser to read the review. It shows each changed file a
 
 The same review is in `.openqodex/reviews/<time>-<id>/` in your repository, as `report.html`, `report.md`, `report.json` and `report.sarif`. `.openqodex/.gitignore` keeps the reports out of git.
 
+Changed-line coverage is stored as intervals, so no file loses its coverage because a change has too many lines.
+
 A complete review means every stage ran, every scanner finding was checked and every changed line was put in front of the reviewer. It does not mean nothing was missed. When a review is not complete, `review` prints "Review incomplete" with what is missing, and exits 2.
 
 ## Next

@@ -88,6 +88,7 @@
 //      runScanners throw or skips the scanner, now that the scan record
 //      asks each custom scanner for its file list.
 
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -144,8 +145,8 @@ function config(over: Partial<Config> = {}): Config {
   };
 }
 
-function lines(...ns: number[]): Set<number> {
-  return new Set(ns);
+function lines(...ns: number[]): ReturnType<typeof makeLineSet> {
+  return makeLineSet(ns);
 }
 
 // A real resolver: nothing is installed on this imaginary machine. It
@@ -436,7 +437,7 @@ describe("suppression comments the change adds", () => {
 
   it("raises the settings candidate of a file with 200,000 changed lines on its first one (35)", async () => {
     const dir = repo({});
-    const many = new Set(Array.from({ length: 200_000 }, (_, k) => 200_000 - k));
+    const many = makeLineSet(Array.from({ length: 200_000 }, (_, k) => 200_000 - k));
     const { scan } = await runScanners({
       repoDir: dir,
       changedPaths: [".gitleaksignore"],
