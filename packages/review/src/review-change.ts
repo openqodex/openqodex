@@ -50,6 +50,7 @@ import {
   readCoverage,
   singlePassCoverage,
   stagedDiffCache,
+  setFragmentSource,
   redactSecrets,
   requiredCandidates,
   outsideFromScan,
@@ -98,7 +99,7 @@ import { modelSession, modelToolEntry } from "./model-loop.js";
 import type { ModelSession } from "./model-loop.js";
 import { buildNeighbourhood, renderNeighbourhoodBlock } from "./neighbourhood.js";
 import type { Neighbourhood } from "./neighbourhood.js";
-import { obligations, unitsOf } from "./units.js";
+import { longestBrief, obligations, unitsOf } from "./units.js";
 import { runStagedReview } from "./stages.js";
 import { modelEvidence } from "./evidence.js";
 import { modelRecord, modelReport, reviewRender } from "./model-record.js";
@@ -115,6 +116,7 @@ import { redactStored } from "./redact.js";
 import { serverScope } from "./scoped.js";
 import type { ScopedParts } from "./scoped.js";
 import { admitted, withinScopes } from "./scopes.js";
+import { fragmentSnapshotText, snapshotByteLines } from "./line-fragments.js";
 import { clearLineIndexes, hashSnapshot, lineCounter, snapshotText } from "./snapshot.js";
 import { TOOL_NAMES } from "./tools/index.js";
 import type { ToolBox } from "./tools/index.js";
@@ -592,7 +594,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       }
       clock.enter("brief");
       lenses = selectLenses(change, undefined, ruleCoverage(p));
-      brief = buildReviewerBrief({ change, scan, lenses, config, secrets: p.secrets, impactBlock: [renderImpactBlock(impact), neighbourhoodBlock()].filter(Boolean).join("\n\n"), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown });
+      brief = buildReviewerBrief({ change, scan, lenses, config, secrets: p.secrets, impactBlock: [renderImpactBlock(impact), neighbourhoodBlock()].filter(Boolean).join("\n\n"), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown, byteLines: (path, from, to) => snapshotByteLines(prep.snapshot.tree, path, from, to) });
     }
     const manifest: RunManifest = {
       version: MANIFEST_VERSION,
@@ -636,10 +638,13 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       graphNote: graph === null ? `the graph is ${impact.status}${impact.reasons.length > 0 ? `: ${impact.reasons.join("; ")}` : ""}` : null,
       ...(deps.scoped?.folderScopes ? { admit: deps.scoped.admit } : {}),
     };
-    const inventory = config.stages && !prep.whole && refused === null ? obligations(change, snapshotText(prep.snapshot.tree), stagedDiffCache(change, p.secrets)) : [];
+    const inventory = config.stages && !prep.whole && refused === null ? obligations(change, fragmentSnapshotText(prep.snapshot.tree), stagedDiffCache(change, p.secrets)) : [];
+    // The single pass builds no inventory, but its pages still cut removed
+    // lines into fragments. They need the run's one secrets list on record.
+    if (inventory.length === 0) setFragmentSource(change, (path, from, to) => snapshotByteLines(prep.snapshot.tree, path, from, to), p.secrets);
     const briefArgs = { change, scan, lenses, config, secrets: p.secrets, impactBlock: renderImpactBlock(impact), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown };
     const findBrief = (unit: ReviewUnit, pass: import("@openqodex/core").FindPass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: neighbourhoodBlock(unit.files) }, unit, pass);
-    const units = unitsOf(change, inventory, (unit) => findBrief(unit, "local").text);
+    const units = unitsOf(change, inventory, (unit, both) => longestBrief(unit, findBrief, both));
     const unitCount = units.length;
     const staged = config.stages && !prep.whole && refused === null && inventory.length > 0;
     if (staged) {

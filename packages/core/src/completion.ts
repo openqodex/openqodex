@@ -7,6 +7,7 @@
 // only the diff in the brief or a correction round can show it. A reviewer
 // whose trace is not complete (Codex) reports no reads, so for it only the
 // brief and the correction rounds count.
+import { hunkFragmentLabel } from "./delivery.js";
 import type { Change, CompletionRecord, HunkRef, ModelAttempt, ModelCompletionRecord, ModelToolEntry, ReviewerRecord, ReviewerSessionRecord } from "./types.js";
 
 // One tool call of the reviewer. `path` is relative to the snapshot when
@@ -18,7 +19,9 @@ import type { Change, CompletionRecord, HunkRef, ModelAttempt, ModelCompletionRe
 // (Claude Code's tool-results folder), which reads no repository file.
 // `session`: in a staged review, the ReviewerRole of the session that made
 // the call (every session's calls are kept in one trace).
-export type TraceEntry = { tool: string; path: string | null; inside: boolean | null; range: [number, number] | null; ok: boolean; detail?: string; own?: true; session?: string };
+// `byteRanges`: the bytes a Read returned of each line of 2,000 bytes or more.
+// `whole`: the tool returns every line whole, as the model's read_file does.
+export type TraceEntry = { tool: string; path: string | null; inside: boolean | null; range: [number, number] | null; ok: boolean; byteRanges?: { line: number; from: number; to: number }[]; whole?: true; detail?: string; own?: true; session?: string };
 
 // Whether a call names anything outside the snapshot, except the
 // agent's own saved output of this session.
@@ -60,6 +63,23 @@ export function changedHunks(change: Change): Hunk[] {
   return hunks;
 }
 
+// `ranges` with the given lines taken out.
+function without(ranges: [number, number][], lines: number[]): [number, number][] {
+  if (!lines.length) return ranges;
+  const out: [number, number][] = [];
+  const sorted = [...lines].sort((a, b) => a - b);
+  for (const [a, b] of ranges) {
+    let at = a;
+    for (const line of sorted) {
+      if (line < at || line > b) continue;
+      if (line > at) out.push([at, line - 1]);
+      at = line + 1;
+    }
+    if (at <= b) out.push([at, b]);
+  }
+  return out;
+}
+
 // Whether the reads cover every line from `start` to `end`.
 function covers(ranges: [number, number][], start: number, end: number): boolean {
   let next = start;
@@ -84,9 +104,21 @@ export type CoverageArgs = {
   briefCarried?: Hunk[];
   digestCarried?: Hunk[];
   trace: TraceEntry[];
-  lineCount?: (path: string) => number | null;
+  lineCount?: LineCount;
   delivered?: Hunk[];
+  // A finder's own part checks only its assigned bytes. The final record
+  // instead joins every part of a line before crediting that line once.
+  fragmentParts?: boolean;
 };
+
+// A snapshot's line count, and where it can tell them, its lines of more
+// than DELIVERY_ROW_BYTES in a range with their byte lengths.
+// `text`: false for a file that is not valid UTF-8; a Read decodes such a
+// file, so the bytes it returns are not the file's bytes.
+export type LineCount = ((path: string) => number | null) & { longLines?: (path: string, start: number, end: number) => { line: number; bytes: number }[]; text?: (path: string) => boolean };
+
+// The obligation each unread entry came from, so one range's gaps list together.
+const unreadOwners = new WeakMap<Hunk, Hunk>();
 
 export function readCoverage(args: CoverageArgs): Coverage {
   const reads = new Map<string, [number, number][]>();
@@ -95,11 +127,33 @@ export function readCoverage(args: CoverageArgs): Coverage {
     reads.set(t.path, [...(reads.get(t.path) ?? []), t.range]);
   }
   const whole = (args.change.uncovered ?? []).map((path) => ({ path, start: 1, end: args.lineCount?.(path) ?? 0, deletion: false }));
-  const hunks: Hunk[] = args.obligations ?? [...changedHunks(args.change), ...whole];
+  const entries: Hunk[] = args.obligations ?? [...changedHunks(args.change), ...whole];
+  // The final record joins the parts of one line; it keeps every part's id,
+  // so a fragment is matched to the hunk that owns it, never by line alone.
+  const seen = new Map<string, Set<string>>();
+  const ownIds = new Map<Hunk, Set<string>>();
+  const hunks = entries.filter((h) => {
+    if (!h.fragment || args.fragmentParts) return true;
+    const key = `${h.path}:${h.deletion ? h.old?.[0] : h.start}:${Boolean(h.deletion)}`;
+    const ids = seen.get(key);
+    if (ids) { for (const id of [h.id, h.fragment.of]) if (id) ids.add(id); return false; }
+    seen.set(key, new Set([h.id, h.fragment.of].filter((id): id is string => Boolean(id))));
+    return true;
+  }).map((h) => {
+    const ids = h.fragment && !args.fragmentParts ? seen.get(`${h.path}:${h.deletion ? h.old?.[0] : h.start}:${Boolean(h.deletion)}`)! : new Set([h.id, h.fragment?.of].filter((id): id is string => Boolean(id)));
+    const out = h.fragment && !args.fragmentParts ? { ...h, part: undefined, fragment: { ...h.fragment, from: 1, to: h.lineBytes! } } : h;
+    ownIds.set(out, ids);
+    return out;
+  });
+  const longLines = args.lineCount?.longLines;
+  // Every id an obligation answers to, so a fragment names its one owner.
+  const owners = new Map<string, Hunk>();
+  for (const [h, ids] of ownIds) for (const id of ids) owners.set(id, h);
   const sources = [
     { by: "brief" as const, entries: args.briefCarried ?? [] },
     { by: "digest" as const, entries: args.digestCarried ?? [] },
     { by: "page" as const, entries: args.delivered ?? [] },
+    { by: "read" as const, entries: [] as Hunk[] },
   ];
   const given: NonNullable<Coverage["given"]> = [];
   const unread: Hunk[] = [];
@@ -107,12 +161,108 @@ export function readCoverage(args: CoverageArgs): Coverage {
   const inventory: NonNullable<Coverage["inventory"]> = hunks.map((h) => ({ path: h.path, start: h.start, end: h.end, ...(h.deletion ? { deletion: deletionId(h) } : {}) }));
   for (const [index, h] of hunks.entries()) {
     if (h.end < h.start && !h.deletion) { unread.push(h); continue; }
-    const matching = sources.map((source) => ({ ...source, entries: source.entries.filter((d) => d.path === h.path && Boolean(d.deletion) === Boolean(h.deletion) && (!h.deletion || deletionId(d) === deletionId(h))) }));
+    let matching = sources.map((source) => ({ ...source, entries: source.entries.filter((d) => d.path === h.path && Boolean(d.deletion) === Boolean(h.deletion) && (!h.deletion || deletionId(d) === deletionId(h))) }));
     const range = (d: Hunk): [number, number] => typeof d.deletion === "object" ? [d.deletion.oldStart, d.deletion.oldEnd] : [d.start, d.end];
     const [start, end] = range(h);
+    type ByteCredit = { by: "brief" | "digest" | "page" | "read"; fragment: { of?: string; from: number; to: number } };
+    const byteCredit = new Map<number, { total: number; pieces: ByteCredit[] }>();
+    const ids = ownIds.get(h)!;
+    const byteLine = (d: Hunk) => d.deletion ? d.old![0] : d.start;
+    // A fragment that names its hunk belongs to that hunk alone.
+    // A single-pass deletion's own byte pages name no old range; they count
+    // only through the whole deletion they complete.
+    const fragments = matching.flatMap((s) => s.entries).filter((d) => d.fragment && (!d.deletion || typeof d.deletion === "object") && (d.fragment.of !== undefined && ids.size
+      ? ids.has(d.fragment.of)
+      : byteLine(d) >= start && byteLine(d) <= end));
+    const partial: Hunk[] = [];
+    // Long lines the snapshot names: a Read can return them cut, so they are
+    // credited by bytes even when no fragment of them is on record yet.
+    const known = h.deletion ? [] : longLines?.(h.path, start, end) ?? [];
+    // A shared line whose fragments name another obligation is that one's to credit.
+    const mine = new Set(fragments);
+    const foreign = new Set(h.deletion ? [] : matching.flatMap((s) => s.entries).flatMap((d) => {
+      const owner = d.fragment?.of === undefined || ids.has(d.fragment.of) ? undefined : owners.get(d.fragment.of);
+      return owner && owner !== h && !owner.deletion && byteLine(d) >= Math.max(start, owner.start) && byteLine(d) <= Math.min(end, owner.end) ? [byteLine(d)] : [];
+    }));
+    for (const d of fragments) foreign.delete(byteLine(d));
+    if (h.fragment) foreign.delete(byteLine(h));
+    const elsewhere = [...foreign].map((line): [number, number] => [line, line]);
+    const lines = [...new Set(fragments.map(byteLine).concat(h.fragment ? [byteLine(h)] : [], known.map((l) => l.line)))].filter((line) => !foreign.has(line));
+    const plainOwn = (line: number) => matching.some((s) => s.by !== "read" && s.entries.some((d) => !d.fragment && range(d)[0] <= line && range(d)[1] >= line));
+    for (const line of lines) {
+      const pieces = fragments.filter((d) => byteLine(d) === line);
+      const total = h.fragment && byteLine(h) === line ? h.lineBytes! : Math.max(0, ...pieces.map((d) => d.lineBytes ?? 0), ...known.filter((l) => l.line === line).map((l) => l.bytes));
+      // A long line its own brief or page carried whole needs no byte credit.
+      if (!pieces.length && !h.fragment && plainOwn(line)) continue;
+      const first = args.fragmentParts && h.fragment ? h.fragment.from : 1;
+      const last = args.fragmentParts && h.fragment ? h.fragment.to : total;
+      const intervals: [number, number][] = [];
+      const credits: ByteCredit[] = [];
+      const of = h.fragment?.of ?? pieces[0]?.fragment?.of ?? h.id;
+      const add = (by: ByteCredit["by"], a: number, b: number, id = of) => {
+        let next = Math.max(first, a);
+        const end = Math.min(last, b);
+        for (const [from, to] of [...intervals].sort((x, y) => x[0] - y[0])) {
+          if (from > next && next <= end) credits.push({ by, fragment: { ...(id ? { of: id } : {}), from: next, to: Math.min(end, from - 1) } });
+          next = Math.max(next, to + 1);
+          if (next > end) break;
+        }
+        if (next <= end) credits.push({ by, fragment: { ...(id ? { of: id } : {}), from: next, to: end } });
+        if (a <= last && b >= first) intervals.push([Math.max(first, a), Math.min(last, b)]);
+      };
+      for (const source of matching) for (const d of source.entries) {
+        const [a, b] = range(d);
+        if (a > line || b < line) continue;
+        if (d.fragment) { if (mine.has(d)) add(source.by, d.fragment.from, d.fragment.to, d.fragment.of); }
+        else add(source.by, first, last);
+      }
+      // A Read credits a long line by the bytes it recorded for it. One with
+      // no recorded bytes credits none of it, unless it returns lines whole.
+      // A file that is not UTF-8 text is read decoded, so a Read credits none.
+      if (!h.deletion && args.lineCount?.text?.(h.path) !== false) for (const t of args.trace) {
+        if (t.tool !== "Read" || !t.ok || t.inside !== true || t.path !== h.path || t.range === null || line < t.range[0] || line > t.range[1]) continue;
+        if (t.whole) add("read", first, last);
+        else for (const row of (t.byteRanges ?? []).filter((row) => row.line === line)) add("read", row.from, row.to);
+      }
+      if (total > 0 && covers(intervals, first, last)) {
+        byteCredit.set(line, { total, pieces: credits });
+        // Only complete byte coverage credits the line itself.
+        const by = credits.at(-1)!.by;
+        matching = matching.map((s) => s.by === by ? { ...s, entries: [...s.entries, { ...h, fragment: undefined, ...(h.deletion ? { old: [line, line] as [number, number], deletion: { id: deletionId(h), oldStart: line, oldEnd: line } } : { start: line, end: line }) }] } : s);
+      } else {
+        let next = first;
+        const gap = (from: number, to: number) => partial.push({ ...h, ...(!h.deletion ? { start: line, end: line } : {}), lineBytes: total, fragment: { ...(of ? { of } : {}), from, to } });
+        for (const [a, b] of intervals.sort((x, y) => x[0] - y[0])) {
+          if (a > next) gap(next, Math.min(last, a - 1));
+          next = Math.max(next, b + 1);
+          if (next > last) break;
+        }
+        if (next <= last) gap(next, last);
+      }
+    }
+    matching = matching.map((s) => ({ ...s, entries: s.entries.filter((d) => !d.fragment) }));
     const own = matching.flatMap((s) => s.entries.map(range));
-    const read = h.deletion ? [] : reads.get(h.path) ?? [];
-    if ((h.deletion && end < start ? !matching.some((s) => s.entries.length) : !covers([...own, ...read], start, end))) { unread.push(h); continue; }
+    // A long line is never credited as a line by a Read; only its bytes count.
+    const read = h.deletion ? [] : without(reads.get(h.path) ?? [], lines);
+    if (partial.length || (h.deletion && end < start ? !matching.some((s) => s.entries.length) : !covers([...own, ...read, ...elsewhere], start, end))) {
+      const before = unread.length;
+      if (!partial.length) unread.push(h);
+      else {
+        unread.push(...partial);
+        // Byte gaps name their line precisely. Retain every other line
+        // gap too, so the next page cannot silently skip a neighbour.
+        let next = start;
+        const covered = [...own, ...read, ...elsewhere, ...partial.map(range)].sort((a, b) => a[0] - b[0]);
+        for (const [a, b] of covered) {
+          if (a > next) unread.push({ ...h, start: next, end: Math.min(end, a - 1), fragment: undefined });
+          next = Math.max(next, b + 1);
+          if (next > end) break;
+        }
+        if (next <= end) unread.push({ ...h, start: next, end, fragment: undefined });
+      }
+      for (const piece of unread.slice(before)) unreadOwners.set(piece, h);
+      continue;
+    }
     const firstCredit = given.length;
     // Own deliveries win over reads. Subtract earlier credit so overlapping
     // finder pairs and repeated reads never list a line twice.
@@ -130,7 +280,22 @@ export function readCoverage(args: CoverageArgs): Coverage {
           if (b < from || a > to) { next.push([from, to]); continue; }
           const first = Math.max(a, from);
           const last = Math.min(b, to);
-          given.push({ path: h.path, start: h.deletion ? h.start : first, end: h.deletion ? h.end : last, ...(h.deletion ? { deletion: deletionId(h), ...(typeof h.deletion === "object" ? { fragment: { of: deletionId(h), from: first, to: last } } : {}) } : {}), ...(h.part && h.part.of > 1 ? { part: h.part } : {}), by });
+          const plain = (a: number, b: number) => given.push({ path: h.path, start: h.deletion ? h.start : a, end: h.deletion ? h.end : b, ...(h.deletion ? { deletion: deletionId(h), ...(typeof h.deletion === "object" ? { old: [a, b] as [number, number] } : {}) } : {}), ...(h.part && h.part.of > 1 ? { part: h.part } : {}), by });
+          // A byte line inside a merged run keeps its own byte credits.
+          let at = first;
+          for (const line of [...byteCredit.keys()].filter((n) => n >= first && n <= last).sort((x, y) => x - y)) {
+            if (line > at) plain(at, line - 1);
+            const bytes = byteCredit.get(line)!;
+            const merged: ByteCredit[] = [];
+            for (const c of bytes.pieces.sort((a, b) => a.fragment.from - b.fragment.from)) {
+              const prior = merged.at(-1);
+              if (prior && prior.by === c.by && prior.fragment.to + 1 === c.fragment.from) prior.fragment.to = c.fragment.to;
+              else merged.push({ ...c, fragment: { ...c.fragment } });
+            }
+            for (const c of merged) given.push({ path: h.path, start: h.deletion ? h.start : line, end: h.deletion ? h.end : line, ...(h.deletion ? { deletion: deletionId(h), old: [line, line] as [number, number] } : {}), lineBytes: bytes.total, ...c });
+            at = line + 1;
+          }
+          if (at <= last) plain(at, last);
           if (from < first) next.push([from, first - 1]);
           if (last < to) next.push([last + 1, to]);
         }
@@ -143,13 +308,14 @@ export function readCoverage(args: CoverageArgs): Coverage {
       for (const source of matching) credit(source.by, source.entries.map(range));
       credit("read", read);
     }
-    inventory[index]!.by = given[firstCredit]!.by;
+    // A byte line names the source that finished it; other ranges the first.
+    inventory[index]!.by = (byteCredit.size ? given.slice(firstCredit).at(-1) : given[firstCredit])!.by;
 
   }
   const readable = args.change.files.filter((f) => f.status !== "deleted" && !f.binary).map((f) => f.path);
   return {
     hunks: hunks.length,
-    covered: hunks.length - unread.length,
+    covered: inventory.filter((h) => h.by !== undefined).length,
     unread,
     given,
     inventory,
@@ -167,13 +333,17 @@ function singlePassRanges(args: { change: Change; diffFiles: ReadonlySet<string>
 
 export function singlePassCoverage(args: CoverageArgs & { diffFiles: ReadonlySet<string> }): Coverage {
   const { diffFiles: _, ...rest } = args;
-  const { given: __, inventory: ___, files: ____, ...coverage } = readCoverage({ ...rest, briefCarried: singlePassRanges(args) });
+  const result = readCoverage({ ...rest, briefCarried: singlePassRanges(args) });
+  if (args.delivered?.some((h) => h.fragment) || result.unread.some((h) => h.fragment)) return result;
+  const { given: __, inventory: ___, files: ____, ...coverage } = result;
   return coverage;
 }
 
 export function singlePassModelCoverage(args: Omit<CoverageArgs, "trace"> & { diffFiles: ReadonlySet<string>; briefSent: boolean; toolLog: ModelToolEntry[] }): Coverage {
   const { diffFiles: _, ...rest } = args;
-  const { given: __, inventory: ___, files: ____, ...coverage } = modelCoverage({ ...rest, briefCarried: singlePassRanges(args) });
+  const result = modelCoverage({ ...rest, briefCarried: singlePassRanges(args) });
+  if (args.delivered?.some((h) => h.fragment) || result.unread.some((h) => h.fragment)) return result;
+  const { given: __, inventory: ___, files: ____, ...coverage } = result;
   return coverage;
 }
 
@@ -196,30 +366,64 @@ export function deletionLabel(h: Hunk, ids: ReadonlyMap<string, string>): string
   return ` (deletion${id ? ` ${id}` : ""})`;
 }
 
-function where(h: Hunk, ids: ReadonlyMap<string, string>): string {
+function where(h: Hunk, ids: ReadonlyMap<string, string>, files: readonly { path: string; oldPath?: string | null }[] = []): string {
   const deletion = deletionLabel(h, ids);
   const part = h.part ? ` (part ${h.part.n} of ${h.part.of})` : "";
+  if (h.fragment) return `${hunkFragmentLabel({ ...h, fragment: h.fragment }, files.find((f) => f.path === h.path)?.oldPath ?? h.path)}${deletion}${part}`;
   return `${h.path}:${h.start}${h.end > h.start ? `-${h.end}` : ""}${deletion}${part}`;
 }
 
-function unreadEntries(coverage: Coverage, change?: Pick<Change, "deletionPoints">): string[] {
-  const n = coverage.unread.length;
-  const ids = deletionLabels(coverage, change);
-  return n === 0 ? [] : [`${n} changed ${n === 1 ? "range was" : "ranges were"} not examined`, ...coverage.unread.map((h) => where(h, ids))];
+// The unread entries of each changed range, in order. One range split into
+// byte and line gaps is one group, however many gaps it has.
+function unreadGroups(coverage: Coverage): { owner: Hunk; entries: Hunk[] }[] {
+  const groups: { owner: Hunk; entries: Hunk[] }[] = [];
+  for (const h of coverage.unread) {
+    const owner = unreadOwners.get(h) ?? h;
+    const last = groups.at(-1);
+    if (last && last.owner === owner) last.entries.push(h);
+    else groups.push({ owner, entries: [h] });
+  }
+  return groups;
 }
 
+export function unreadRangeCount(coverage: Coverage): number {
+  return coverage.inventory ? coverage.hunks - coverage.covered : unreadGroups(coverage).length;
+}
+
+function unreadEntries(coverage: Coverage, change?: Pick<Change, "deletionPoints"> & { files?: Change["files"] }): string[] {
+  const n = unreadRangeCount(coverage);
+  const ids = deletionLabels(coverage, change);
+  const files = coverage.files ?? change?.files ?? [];
+  if (n === 0) return [];
+  // A split range is named once; its gaps are listed beneath it, indented.
+  const rows = unreadGroups(coverage).flatMap(({ owner, entries }) => entries.length === 1 && entries[0] === owner && !owner.fragment
+    ? [where(owner, ids, files)]
+    : [where({ ...owner, fragment: undefined, part: undefined }, ids, files), ...entries.map((h) => `  ${where(h, ids, files)}`)]);
+  return [`${n} changed ${n === 1 ? "range was" : "ranges were"} not examined`, ...rows];
+}
+
+// The shapes `where` writes: a line range or a fragment label, then an
+// optional deletion and part label. A gap row is the same, indented.
+// A path never holds ": ", which every other failure line does.
+const RANGE_ROW = /^(?: {2})?(?:(?:(?!: ).)+:\d+(?:-\d+)?|(?:(?!: ).)+: (?:old )?line \d+, bytes [\d,]+ to [\d,]+ of [\d,]+)(?: \(deletion(?: [^)]+)?\))?(?: \(part \d+ of \d+\))?$/;
+
 // Only the unread block is shortened. Other failures keep their own entries.
+// "and N more" counts ranges; a range keeps its indented gaps with it.
 export function shortenedMissing(missing: readonly string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < missing.length; i++) {
     const line = missing[i]!;
     out.push(line);
-    const heading = /^(\d+) changed (?:range was|ranges were) not examined$/.exec(line);
-    if (!heading) continue;
-    const n = Number(heading[1]);
-    out.push(...missing.slice(i + 1, i + 1 + Math.min(n, MAX_LISTED)));
-    if (n > MAX_LISTED) out.push(`and ${n - MAX_LISTED} more; the report names each one`);
-    i += n;
+    if (!/^(\d+) changed (?:range was|ranges were) not examined$/.test(line)) continue;
+    let end = i + 1;
+    let ranges = 0;
+    while (end < missing.length && RANGE_ROW.test(missing[end]!)) {
+      if (!missing[end]!.startsWith("  ")) ranges++;
+      if (ranges <= MAX_LISTED) out.push(missing[end]!);
+      end++;
+    }
+    if (ranges > MAX_LISTED) out.push(`and ${ranges - MAX_LISTED} more; the report names each one`);
+    i = end - 1;
   }
   return out;
 }
@@ -320,7 +524,7 @@ export function budgetRefusedLine(purpose: string, call: number): string {
 export function modelCoverage(args: Omit<CoverageArgs, "trace"> & { briefSent: boolean; toolLog: ModelToolEntry[] }): Coverage {
   const reads: TraceEntry[] = args.toolLog
     .filter((t) => t.tool === MODEL_READ_TOOL && t.delivered && t.in_scope !== false)
-    .map((t) => ({ tool: "Read", path: t.path, inside: t.inside, range: t.range, ok: t.ok }));
+    .map((t) => ({ tool: "Read", path: t.path, inside: t.inside, range: t.range, ok: t.ok, whole: true as const }));
   return readCoverage({ ...args, briefCarried: args.briefSent ? args.briefCarried : [], digestCarried: args.briefSent ? args.digestCarried : [], trace: reads });
 }
 

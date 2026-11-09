@@ -485,7 +485,7 @@ it("drops one unmatched evidence candidate and keeps the other with a complete r
 });
 it("reviews a 130 KB hunk in two parts without an indivisible note", async () => {
   const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["a.txt"]);
-  f.change.coverage.set("a.txt", makeLineSet([...Array.from({ length: 2000 }, (_, i) => i + 1)]));
+  f.change.coverage.set("a.txt", makeLineSet(Array.from({ length: 2000 }, (_, i) => i + 1)));
   const text = Array.from({ length: 2000 }, (_, i) => `line_${i}_${"x".repeat(61)}`).join("\n") + "\n";
   writeFileSync(join(f.dir, "a.txt"), text);
   f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1,2000 @@\n" + text.trimEnd().split("\n").map((row) => `+${row}`).join("\n") + "\n" }];
@@ -862,7 +862,7 @@ it("clips a snapshot-only file's delivery to its own measured part", async () =>
   const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["a.txt"]);
   const text = Array.from({ length: 9000 }, (_, i) => `distinct_${i + 1}`).join("\n") + "\n";
   writeFileSync(join(f.dir, "a.txt"), text);
-  f.change.coverage.set("a.txt", makeLineSet([...Array.from({ length: 9000 }, (_, i) => i + 1)]));
+  f.change.coverage.set("a.txt", makeLineSet(Array.from({ length: 9000 }, (_, i) => i + 1)));
   f.change.diffs = [];
   f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: [] });
   const r = await runStagedReview(f.args);
@@ -887,7 +887,7 @@ it("carries only nearby parts in a verifier brief for part three", async () => {
   const row = "unsafe operation".padEnd(28);
   const text = `${row}\n`.repeat(18000);
   writeFileSync(join(f.dir, "a.txt"), text);
-  f.change.coverage.set("a.txt", makeLineSet([...Array.from({ length: 18000 }, (_, i) => i + 1)]));
+  f.change.coverage.set("a.txt", makeLineSet(Array.from({ length: 18000 }, (_, i) => i + 1)));
   f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1,18000 @@\n" + `+${row}\n`.repeat(18000) }];
   // Only one of the five parts fits after these fixed convention blocks.
   const shared = { change: f.change, scan: f.scan, config: f.config, lenses: [], secrets: [], instructions: "Repository convention.\n".repeat(4600) };
@@ -929,11 +929,16 @@ function wideVerifier(lines: number[], instructions = "") {
   }, ["a.txt"]);
   const text = rows.join("\n") + "\n";
   writeFileSync(join(f.dir, "a.txt"), text);
-  f.change.coverage.set("a.txt", makeLineSet([...rows.map((_, i) => i + 1)]));
+  f.change.coverage.set("a.txt", makeLineSet(rows.map((_, i) => i + 1)));
   f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1,121 @@\n" + rows.map((row) => `+${row}`).join("\n") + "\n" }];
   const shared = { change: f.change, scan: f.scan, config: f.config, lenses: [], secrets: [], instructions };
   f.args.verifyBrief = (batch) => { const b = buildVerifyBrief(shared, batch); f.realBriefs.set(b.text, { batch }); return b; };
   return { ...f, rows };
+}
+
+// Reconstruct only labelled added bytes, independently of the renderer.
+function addedBytes(brief: string, line: number): string {
+  return brief.split("\n").filter((row) => row.startsWith(`+a.txt: line ${line}, bytes `)).map((row) => row.slice(row.indexOf("\t") + 1)).join("");
 }
 
 it("bounds wide verifier neighbours and names every part it cannot carry", async () => {
@@ -946,13 +951,13 @@ it("bounds wide verifier neighbours and names every part it cannot carry", async
   expect(briefs).toHaveLength(1);
   const brief = briefs[0]!;
   expect(Buffer.byteLength(brief)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
-  const shown = refs.filter((h) => brief.includes(`+${f.rows[h.start - 1]}\n`));
+  const shown = refs.filter((h) => addedBytes(brief, h.start) === f.rows[h.start - 1]);
   expect(shown.map((h) => h.part!.n)).toEqual([3, 4]);
   // Selection is nearest first; the brief still shows the parts in file order.
-  expect(brief.indexOf(`+${f.rows[38]}\n`)).toBeLessThan(brief.indexOf(`+${f.rows[57]}\n`));
+  expect(brief.indexOf("+a.txt: line 39, bytes ")).toBeLessThan(brief.indexOf("+a.txt: line 58, bytes "));
   for (const h of refs.filter((h) => !shown.includes(h))) {
     expect(brief).toContain(`part ${h.part!.n}, lines ${h.start} to ${h.end}, not shown; read with your tools`);
-    expect(brief).not.toContain(`+${f.rows[h.start - 1]}\n`);
+    expect(addedBytes(brief, h.start)).toBe("");
   }
 });
 
@@ -968,8 +973,8 @@ it("splits wide verifier candidates when their distance-zero parts cannot share 
   for (const [i, brief] of briefs.entries()) {
     expect(Buffer.byteLength(brief)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
     const own = r.obligations.find((h) => h.start <= [5, 115][i]! && h.end >= [5, 115][i]!)!;
-    expect(brief).toContain(`+${f.rows[own.start - 1]}\n`);
-    for (const h of r.obligations) if (!brief.includes(`+${f.rows[h.start - 1]}\n`)) expect(brief).toContain(`part ${h.part!.n}, lines ${h.start} to ${h.end}, not shown; read with your tools`);
+    expect(addedBytes(brief, own.start)).toBe(f.rows[own.start - 1]);
+    for (const h of r.obligations) if (addedBytes(brief, h.start) !== f.rows[h.start - 1]) expect(brief).toContain(`part ${h.part!.n}, lines ${h.start} to ${h.end}, not shown; read with your tools`);
   }
 });
 
@@ -995,7 +1000,7 @@ it("bounds a candidate's own part before its two cited 120 KB removal fragments"
   const briefs = f.requests.filter((r) => r.purpose === "verify").map((r) => r.messages[1]!.text);
   expect(briefs).toHaveLength(1);
   expect(Buffer.byteLength(briefs[0]!)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
-  expect(briefs[0]).toContain("+" + next);
+  expect(addedBytes(briefs[0]!, 1)).toBe(next);
   expect(briefs[0]).toContain("not shown; read with your tools");
   expect(completion(r, f).status).toBe("complete");
 });
@@ -1014,7 +1019,7 @@ it("renders a 300-part verifier batch a constant number of times", async () => {
   f.args.inventory = refs;
   f.args.units = [{ id: "u1", files: ["a.txt"], hunks: refs, diffBytes: 0 }];
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(600));
-  f.change.coverage.set("a.txt", makeLineSet([...refs.map((h) => h.start)]));
+  f.change.coverage.set("a.txt", makeLineSet(refs.map((h) => h.start)));
   f.change.diffs = [{ path: "a.txt", text: "diff --git a/a.txt b/a.txt\n" + refs.map((h) => `@@ -0,0 +${h.start} @@\n+unsafe operation\n`).join("") }];
   let renders = 0;
   f.args.verifyBrief = (batch) => {
@@ -1098,4 +1103,32 @@ it.each([false, true])("credits digest ranges only after a brief was sent, refus
   expect(coverage.unread).toHaveLength(refused ? 1 : 0);
   expect(r.rounds.flatMap((round) => round.delivered)).toEqual([]);
   if (!refused) expect(r.missing).toEqual([]);
+});
+
+
+it("R2.3 completes a fragmented one MB replacement in staged sessions", async () => {
+  const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["a.txt"]);
+  const text = "n".repeat(1024 * 1024);
+  writeFileSync(join(f.dir, "a.txt"), text + "\n");
+  f.change.diffs = [{ path: "a.txt", text: `@@ -1 +1 @@\n-${"o".repeat(text.length)}\n+${text}\n` }];
+  const shared = { ...f, lenses: [], secrets: [] };
+  f.args.findBrief = (unit, pass) => { const b = buildFindBrief(shared, unit, pass); f.realBriefs.set(b.text, { unit, pass }); return b; };
+  const result = await runStagedReview(f.args);
+  expect(result.missing).toEqual([]);
+  expect(result.obligations.filter((h) => h.deletion).every((h) => h.fragment)).toBe(true);
+  const coverage = readCoverage({ change: f.change, obligations: result.obligations, briefCarried: result.briefCarried, delivered: result.delivered, trace: [] });
+  expect(coverage.unread).toEqual([]);
+});
+
+
+it("R2.12 credits staged pages when briefs leave a long line for delivery", async () => {
+  const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["a.txt"]);
+  const text = "x".repeat(600000);
+  writeFileSync(join(f.dir, "a.txt"), text + "\n");
+  f.change.diffs = [{ path: "a.txt", text: `@@ -0,0 +1 @@\n+${text}\n` }];
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: [] });
+  const result = await runStagedReview(f.args);
+  const coverage = readCoverage({ change: f.change, obligations: result.obligations, briefCarried: result.briefCarried, delivered: result.delivered, trace: [] });
+  expect(coverage.unread).toEqual([]);
+  expect(coverage.given).toEqual([expect.objectContaining({ by: "page", fragment: expect.objectContaining({ from: 1, to: text.length }) })]);
 });

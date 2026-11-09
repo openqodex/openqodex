@@ -41,7 +41,7 @@ for (const repetitive of [false, true]) {
     for (const [, title] of plants) expect(saved.findings.some((f) => f.title === title)).toBe(true);
     const out = reportDir(dir);
     const refs = readJson<ReviewUnit[]>(join(out, "units.json")).flatMap((u) => u.hunks).filter((h) => h.path === path);
-    const change = { diffs: [{ path, text: "@@ -0,0 +1,9000 @@\n" + rows.map((r) => `+${r}`).join("\n") + "\n" }], deletionPoints: new Map() } as Change;
+    const change = { files: [], diffs: [{ path, text: "@@ -0,0 +1,9000 @@\n" + rows.map((r) => `+${r}`).join("\n") + "\n" }], deletionPoints: new Map() } as Change;
     for (const h of refs) {
       const rendered = hunkRows(change, h);
       expect(rendered.length).toBeLessThanOrEqual(4000);

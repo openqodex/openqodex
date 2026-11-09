@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
-import { REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
+import { DELIVERY_ROW_BYTES, REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
 import { checkoutsDir } from "../checkouts.js";
 import { claudeHome } from "./homes.js";
 import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, spawnGroup } from "./driver.js";
@@ -197,7 +197,12 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
         const path = str(file?.filePath);
         const start = num(file?.startLine);
         const lines = num(file?.numLines);
-        if (call.ok && call.tool === "Read" && path !== null && start !== null && lines !== null) call.read = { path, start, lines };
+        if (call.ok && call.tool === "Read" && path !== null && start !== null && lines !== null) {
+          // Claude Code cuts a line at 2,000 characters. Record what such a line returned.
+          const content = str(file?.content);
+          const bytes = content === null ? [] : content.replace(/\n$/, "").split("\n").map((text, i) => ({ line: start + i, from: 1, to: Buffer.byteLength(text) })).filter((row) => row.to >= DELIVERY_ROW_BYTES);
+          call.read = { path, start, lines, ...(bytes.length ? { byteRanges: bytes } : {}) };
+        }
       }
       return;
     }

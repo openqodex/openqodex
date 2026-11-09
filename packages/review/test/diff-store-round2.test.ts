@@ -8,7 +8,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
-import { cleanupDiffs, diffHunks, DiffStore, hunkRows, hunksBlock, LineSet } from "@openqodex/core";
+import { cleanupDiffs, diffHunks, DiffStore, hunkRows, hunksBlock, LineSet, setFragmentSource } from "@openqodex/core";
 import type { Change, DiffEntry } from "@openqodex/core";
 import { deliverRanges } from "../src/conversation.js";
 import { deltaChange } from "../src/incremental.js";
@@ -17,6 +17,8 @@ import { runTool } from "../src/tools/index.js";
 import { checkEvidence } from "../src/evidence-check.js";
 import { obligations } from "../src/units.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
+// Test 4 took 97 to 116 ms measured alone; its wall-clock bound is ten times 120.
+const ALONE_MS = 120;
 
 afterAll(removeTempDirs);
 function change(diffs: DiffEntry[]): Change {
@@ -78,16 +80,28 @@ it("3. inventories and cuts 20000 disk-backed hunks in under two seconds", () =>
   expect(elapsed).toBeLessThan(10_000);
   expect([...diffHunks(c, "a.ts", { start: 59_998, end: 59_998 })].join("")).toContain("@@ -59998");
 });
-it("4. accounts for 50000 kept files in under 200 ms", () => {
+it("4. accounts for 50000 kept files with linear lookups", () => {
   const c = change(Array.from({ length: 50_000 }, (_, i) => ({ path: `${i}.bin`, text: "" })));
   c.files.forEach((f) => { f.binary = true; });
+  // Count every row read from the file and diff lists, by any loop or
+  // method: a scan per file would visit 50,000 squared rows.
+  let visits = 0;
+  const counted = <T extends object>(list: T[]): T[] => new Proxy(list, {
+    get(target, key, receiver) {
+      if (typeof key === "string" && /^\d+$/.test(key)) visits++;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  c.files = counted(c.files);
+  c.diffs = counted(c.diffs!);
   const started = performance.now();
   const delta = deltaChange(c, c, tempDir("oq-round2-many-"));
   const elapsed = performance.now() - started;
-  console.log(`DELTA files=${delta.files.length} milliseconds=${elapsed.toFixed(2)}`);
+  console.log(`DELTA files=${delta.files.length} visits=${visits} milliseconds=${elapsed.toFixed(2)}`);
   expect(delta.files).toHaveLength(50_000);
   expect(delta.diffs).toHaveLength(50_000);
-  expect(elapsed).toBeLessThan(200);
+  expect(visits).toBeLessThan(20 * 50_000);
+  expect(elapsed).toBeLessThan(ALONE_MS * 10);
 });
 it("5. skips oversized pages with notes and still reads later neighbourhood hunks", async () => {
   const dir = tempDir("oq-round2-reader-");
@@ -146,16 +160,21 @@ it("5c. rejects oversized removed evidence as not checkable without throwing", (
   const c = change([disk(`@@ -1 +0,0 @@\n-${"x".repeat(600 * 1024)}needle\n`)]);
   expect(checkEvidence({ file_path: "a.ts", line_number: 1, quote: "needle", removed: true }, () => null, c)).toMatch(/cannot be checked.*byte budget/i);
 });
-it("5d. notes a skipped removed page and leaves its deletion unread", () => {
+it("5d. pages a removed line over the page budget by old-side fragments", () => {
   const dir = tempDir("oq-round3-delivery-");
   const c = change([disk(`@@ -1 +0,0 @@\n-${"x".repeat(600 * 1024)}\n`)]);
   c.files[0]!.status = "deleted";
   c.deletionPoints.set("a.ts", [{ after: 0, lines: 1, anchors: [1] }]);
   const ref = { path: "a.ts", start: 1, end: 1, deletion: { id: "a.ts#0", oldStart: 1, oldEnd: 1 } };
+  // The single pass registers the run's secrets list before it pages.
+  setFragmentSource(c, () => [], []);
   const page = deliverRanges({ snapshotDir: dir, change: c, unread: [ref], secrets: [] });
-  expect(page.delivered).toEqual([]);
   expect(page.left).toEqual([ref]);
-  expect(page.text).toMatch(/skipped.*byte budget/i);
+  expect(page.text.split("\n")[1]).toBe(`-a.ts: old line 1, bytes 1 to 2,000 of 614,400\t${"x".repeat(2000)}`);
+  const next = deliverRanges({ snapshotDir: dir, change: c, unread: page.left, earlier: page.delivered, secrets: [] });
+  expect(next.left).toEqual([]);
+  expect(next.delivered.at(-1)).toEqual(ref);
+  expect(next.text).toContain("-a.ts: old line 1, bytes 614,001 to 614,400 of 614,400\t");
 });
 it("7. asks for a file range when a hand-built change has no diff entry", async () => {
   const c = change([{ path: "a.ts", text: "" }]);

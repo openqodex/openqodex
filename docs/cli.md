@@ -144,6 +144,8 @@ A finding counts toward the verdict only on a line the change added or modified.
 ### Very long lines
 
 [Long lines](claude-code-review.md#long-lines) says how a long line reaches the reviewer.
+With `review.stages: false`, the record does not require a replaced line's old text.
+Pages still carry pure deletions in fragments.
 
 ### Reviewing a branch or a pull request
 

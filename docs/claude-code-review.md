@@ -57,15 +57,22 @@ A range too long for one page continues on the next page.
 
 ### Long lines
 
+A line of 2,000 bytes or fewer travels whole.
+A line over 2,000 bytes travels as fragments of at most 2,000 bytes each.
+A fragment never splits a UTF-8 character, so some fragments are shorter.
+Each fragment is labelled with its file, line number and bytes, such as `app.min.js: line 7, bytes 2,001 to 4,000 of 50,000,000`.
+A removed line is labelled with its old path and old line number, such as `app.min.js: old line 7, bytes 1 to 2,000 of 6,000`.
 A brief carries a long line whole when the line fits its part.
-On a delivery page, a line over 2,000 characters arrives in fragments.
-Each fragment is labelled with its file, line number and position, such as `app.min.js: line 7, part 2 of 5`.
-All fragments of one line travel on the same page.
-A line over 200 KB fits no delivery page.
-A changed line bigger than one part is carried by no brief.
-Such a line stays unread unless a delivery page or the reviewer's own read covers it.
-The record then names it as not examined.
-A context line over 200 KB is replaced by a marker saying it is not shown.
+A line bigger than one part is cut into smaller parts until each fits a brief.
+When the brief's fixed text alone exceeds its bound, the line stays unread and the record names it.
+No line is too long to review; only time and budget bound it.
+A line counts as given only when every fragment reached a reviewer.
+A long line's fragments may continue on the next delivery page.
+A reviewer's own read of a cut line credits only the bytes the read returned.
+A read with no recorded byte ranges credits none of a line over 2,000 bytes.
+A file that is not UTF-8 text is reviewed by bytes, and a read credits none of its long lines.
+Missing bytes are listed beneath their changed range.
+The receipt counts ranges, not gaps.
 
 ### Big patches
 

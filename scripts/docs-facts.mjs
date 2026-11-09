@@ -358,7 +358,7 @@ for (let i = 0; i < Math.max(actionSteps.length, gateSteps.length); i++) {
 // once; every page that states a budget states the code's value, and a
 // paragraph that names a budget holds no other KB or rendered-row number.
 const { MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, DELIVER_LINES, GROUP_DIFF_BYTES } = await import(join(root, "packages/review/dist/index.js"));
-const { DELIVERY_ROW_CHARS, DELIVERY_ROW_BYTES, MAX_DIFF_BYTES } = await import(join(root, "packages/core/dist/index.js"));
+const { DELIVERY_ROW_BYTES, MAX_DIFF_BYTES } = await import(join(root, "packages/core/dist/index.js"));
 const fmt = (n) => n.toLocaleString("en-US");
 const kb = (bytes) => fmt(bytes / 1024);
 const reviewPage = "docs/claude-code-review.md";
@@ -372,7 +372,7 @@ for (const { name, text } of BUDGETS) {
   if (!read(reviewPage).includes(`${text} (\`${name}\`)`)) fail(reviewPage, `must say ${text} (\`${name}\`)`);
 }
 // The other KB values a budget paragraph may hold: each is an exported constant.
-const KB_VALUES = new Set([MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, GROUP_DIFF_BYTES, DELIVERY_ROW_BYTES, MAX_DIFF_BYTES].map(kb));
+const KB_VALUES = new Set([MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, GROUP_DIFF_BYTES, MAX_DIFF_BYTES].map(kb));
 const BUDGET_NAME = /\b(?:DELIVER_LINES|MAX_UNIT_DIFF_BYTES|MAX_BRIEF_BYTES)\b|rendered rows|KB of rendered diff|brief bound/;
 for (const rel of BUDGET_PAGES) {
   const text = read(rel);
@@ -393,14 +393,13 @@ for (const rel of BUDGET_PAGES) {
     }
   }
 }
-// The long-line cut, the per-line byte bound and the single pass's diff cap.
+// The long-line byte cut and the single pass's diff cap.
 const LIMITS = [
-  [reviewPage, `line over ${fmt(DELIVERY_ROW_CHARS)} characters`, "DELIVERY_ROW_CHARS"],
-  [reviewPage, `line over ${kb(DELIVERY_ROW_BYTES)} KB`, "DELIVERY_ROW_BYTES"],
+  [reviewPage, `line over ${fmt(DELIVERY_ROW_BYTES)} bytes`, "DELIVERY_ROW_BYTES"],
+  [reviewPage, `bytes 2,001 to 4,000 of 50,000,000`, "fragmentLabel"],
   [reviewPage, `until their diff reaches ${kb(GROUP_DIFF_BYTES)} KB`, "GROUP_DIFF_BYTES"],
   ["docs/config.md", `at most ${kb(MAX_DIFF_BYTES)} KB of diff text`, "MAX_DIFF_BYTES"],
-  ["docs/config.md", `line over ${fmt(DELIVERY_ROW_CHARS)} characters`, "DELIVERY_ROW_CHARS"],
-  ["docs/config.md", `line over ${kb(DELIVERY_ROW_BYTES)} KB`, "DELIVERY_ROW_BYTES"],
+  ["docs/config.md", `line over ${fmt(DELIVERY_ROW_BYTES)} bytes`, "DELIVERY_ROW_BYTES"],
 ];
 for (const [rel, phrase, name] of LIMITS) if (!read(rel).includes(phrase)) fail(rel, `must say "${phrase}" (${name})`);
 // The longest --timeout, from the expression in the review command's source.

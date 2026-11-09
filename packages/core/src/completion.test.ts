@@ -28,6 +28,7 @@
 //     as a number instead of "not reported".
 // 13. Eleven unread ranges collapse to ten names, or parts and deletion
 //     fragments lose their identity in either completion record.
+// 16. Two of three byte fragments credit a line, or missing bytes lose their label.
 // 15. Plain unread deletions lose their id in missing and per-file labels.
 // 14. Overlapping delivery sources list one range twice or credit reads first.
 // 12. Partial brief ranges or deletion fragments credit a whole obligation.
@@ -481,4 +482,76 @@ it("C3 fix 2. unread plain deletion anchors name the deletion in missing and per
       expect(renderHtml({ report: r, display: null })).toContain(fileLabel + " not examined");
     }
   }
+});
+
+it("7m waits for every byte fragment and lists the missing bytes", () => {
+  const change = makeChange({ coverage: new Map([["app/search.py", makeLineSet([7])]]), deletionPoints: new Map() });
+  const base = { path: "app/search.py", start: 7, end: 7, deletion: false, lineBytes: 6000 };
+  const fragments = [1, 2001, 4001].map((from) => ({ ...base, fragment: { of: "h1", from, to: from + 1999 } }));
+  const partial = readCoverage({ change, delivered: fragments.slice(0, 2), trace: [] });
+  expect(partial.given).toEqual([]);
+  expect(partial.covered).toBe(0);
+  expect(partial.unread).toHaveLength(1);
+  const record = completionRecord({ change, coverage: partial, reviewer, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, trace: [], submissionErrors: [], wholeRepo: false });
+  expect(record.missing.join("\n")).toContain("bytes 4,001 to 6,000 of 6,000");
+  const full = readCoverage({ change, delivered: [...fragments, fragments[0]!], trace: [] });
+  expect(full.unread).toEqual([]);
+  expect(full.covered).toBe(1);
+  expect(full.given).toEqual([{ path: "app/search.py", start: 7, end: 7, lineBytes: 6000, by: "page", fragment: { of: "h1", from: 1, to: 6000 } }]);
+  // A Read credits a long line only by the bytes it recorded for it.
+  const plain = readCoverage({ change, delivered: fragments.slice(0, 2), trace: [{ tool: "Read", path: "app/search.py", range: [7, 7], ok: true, inside: true }] });
+  expect(plain.unread).toEqual([expect.objectContaining({ fragment: { of: "h1", from: 4001, to: 6000 } })]);
+  const read = readCoverage({ change, delivered: fragments.slice(0, 2), trace: [{ tool: "Read", path: "app/search.py", range: [7, 7], ok: true, inside: true, byteRanges: [{ line: 7, from: 1, to: 6000 }] }] });
+  expect(read.unread).toEqual([]);
+  expect(read.given).toEqual([
+    { path: "app/search.py", start: 7, end: 7, lineBytes: 6000, by: "page", fragment: { of: "h1", from: 1, to: 4000 } },
+    { path: "app/search.py", start: 7, end: 7, lineBytes: 6000, by: "read", fragment: { of: "h1", from: 4001, to: 6000 } },
+  ]);
+});
+
+it("does not lose uncarried neighbouring lines while naming missing bytes", () => {
+  const change = makeChange({ coverage: new Map([["app/search.py", makeLineSet([1, 2, 3])]]), deletionPoints: new Map() });
+  const coverage = readCoverage({ change, trace: [], delivered: [{ path: "app/search.py", start: 1, end: 1, deletion: false, lineBytes: 6000, fragment: { of: "h1", from: 1, to: 4000 } }] });
+  expect(coverage.unread).toEqual([
+    expect.objectContaining({ start: 1, end: 1, fragment: { of: "h1", from: 4001, to: 6000 } }),
+    expect.objectContaining({ start: 2, end: 3 }),
+  ]);
+});
+
+it("R2.15 keeps byte gaps under their own hunk", () => {
+  const change = makeChange();
+  const short = { id: "h1", path: "a.txt", start: 3, end: 3, deletion: false };
+  const long = { id: "h2", path: "a.txt", start: 10, end: 10, deletion: false, lineBytes: 5000, fragment: { of: "h2", from: 1, to: 5000 } };
+  const coverage = readCoverage({ change, obligations: [short, long], briefCarried: [short], delivered: [{ ...long, fragment: { ...long.fragment, to: 2500 } }], trace: [] });
+  expect(coverage.unread).toEqual([{ ...long, part: undefined, fragment: { of: "h2", from: 2501, to: 5000 } }]);
+});
+it("R2.9 credits only the byte intervals each source carried", () => {
+  const change = makeChange();
+  const h = { path: "a.txt", start: 10, end: 10, deletion: false, lineBytes: 6000, fragment: { of: "h1", from: 1, to: 6000 } };
+  const coverage = readCoverage({ change, obligations: [h], briefCarried: [{ ...h, fragment: { ...h.fragment, to: 2000 } }], delivered: [{ ...h, fragment: { ...h.fragment, from: 2001 } }], trace: [] });
+  expect(coverage.given).toEqual([
+    { path: "a.txt", start: 10, end: 10, lineBytes: 6000, by: "brief", fragment: { of: "h1", from: 1, to: 2000 } },
+    { path: "a.txt", start: 10, end: 10, lineBytes: 6000, by: "page", fragment: { of: "h1", from: 2001, to: 6000 } },
+  ]);
+  expect(coverage.inventory![0]!.by).toBe("page");
+});
+it("R2.8 and R2.10 count one range with two missing byte gaps", () => {
+  const change = makeChange();
+  const h = { path: "a.txt", start: 7, end: 7, deletion: false, lineBytes: 10000, fragment: { of: "h1", from: 1, to: 10000 } };
+  const coverage = readCoverage({ change, obligations: [h], delivered: [[1, 2000], [4001, 6000], [8001, 10000]].map(([from, to]) => ({ ...h, fragment: { of: "h1", from: from!, to: to! } })), trace: [] });
+  expect(coverage.given).toEqual([]);
+  const record = completionRecord({ change, reviewer, coverage, trace: [], snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, submissionErrors: [], wholeRepo: false });
+  expect(record.missing[0]).toBe("1 changed range was not examined");
+  expect(record.missing.join("\n")).toContain("line 7, bytes 2,001 to 4,000 of 10,000");
+  const rendered = renderReview({ ...checkedReport(), completion: record }, { format: "terminal" });
+  expect(rendered).toContain("line 7, bytes 6,001 to 8,000 of 10,000");
+  const receipt = renderReceipt({ ...checkedReport(), completion: record }, { html: "/r/report.html", md: "/r/report.md" }).split("\n");
+  expect(receipt.filter((l) => l.startsWith("Changed ranges"))).toEqual(["Changed ranges: 0 in a finder's brief, 0 structural summary, 0 by page, 0 read by the reviewer, 1 not examined"]);
+});
+it("R2.17 a cut Read credits only its returned bytes", () => {
+  const change = makeChange();
+  const h = { path: "a.txt", start: 10, end: 10, deletion: false, lineBytes: 5000, fragment: { of: "h1", from: 1, to: 5000 } };
+  const coverage = readCoverage({ change, obligations: [h], trace: [{ tool: "Read", path: "a.txt", range: [10, 10], inside: true, ok: true, byteRanges: [{ line: 10, from: 1, to: 2000 }] }] });
+  expect(coverage.covered).toBe(0);
+  expect(coverage.unread).toEqual([expect.objectContaining({ start: 10, fragment: { of: "h1", from: 2001, to: 5000 } })]);
 });

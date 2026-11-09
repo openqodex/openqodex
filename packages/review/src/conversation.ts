@@ -5,11 +5,12 @@
 import { closeSync, fchmodSync, fstatSync, openSync, readSync, renameSync, rmSync, writeSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { DELIVERY_ROW_BYTES, OpenQodexError, deliveryRow, diffHunks, diffIndex, leftSnapshot, redactSecrets, redactSecretsKeepingLines, removedRuns, secretTexts } from "@openqodex/core";
-import type { Change, Hunk, Report, TraceEntry } from "@openqodex/core";
+import { DELIVERY_ROW_BYTES, lineHeading, fragmentSources, lineFragments, fragmentLabel, OpenQodexError, deliveryRow, diffHunks, diffIndex, leftSnapshot, redactSecrets, redactSecretsKeepingLines, removedRuns, secretTexts } from "@openqodex/core";
+import type { ByteLine, Change, Hunk, HunkRef, Report, TraceEntry } from "@openqodex/core";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Turn } from "./agents/driver.js";
 import { classify } from "./agents/trace.js";
+import { snapshotByteLines } from "./line-fragments.js";
 import { lineIndex, readRows, snapshotFiles } from "./snapshot.js";
 import type { ReviewerRole } from "./usage.js";
 
@@ -184,17 +185,11 @@ const DELIVER_BYTES = 512 * 1024;
 const CONTEXT = 3;
 
 // Shared with the part cutter, including context, labels and the final blank.
-export function pageRows(path: string, start: number, end: number, lines: string[]): string[] | null {
+export function pageRows(path: string, start: number, end: number, lines: string[]): string[] {
   const from = Math.max(1, start - CONTEXT);
   const to = Math.min(lines.length, end + CONTEXT);
   const block = [`${path} lines ${start} to ${end} (with context ${from} to ${to}):`];
-  for (let i = from; i <= to; i++) {
-    const rows = deliveryRow(path, i, lines[i - 1] ?? "", `${i}\t`);
-    if (rows === null) {
-      if (i >= start && i <= end) return null;
-      block.push(`${i}\t(not shown: a context line over ${DELIVERY_ROW_BYTES / 1024} KB)`);
-    } else block.push(...rows);
-  }
+  for (let i = from; i <= to; i++) block.push(...deliveryRow(path, i, lines[i - 1] ?? "", `${i}\t`));
   return [...block, ""];
 }
 
@@ -202,7 +197,7 @@ export function pageRows(path: string, start: number, end: number, lines: string
 function gaps(h: Hunk, earlier: Hunk[]): [number, number][] {
   const out: [number, number][] = [];
   let at = h.start;
-  for (const d of earlier.filter((e) => e.path === h.path && !e.deletion).sort((x, y) => x.start - y.start)) {
+  for (const d of earlier.filter((e) => e.path === h.path && !e.deletion && !e.fragment).sort((x, y) => x.start - y.start)) {
     if (d.end < at) continue;
     if (d.start > h.end) break;
     if (d.start > at) out.push([at, d.start - 1]);
@@ -241,7 +236,7 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
     return {
       length: index.count,
       read: function* (from, to) {
-        for (const { line, text } of readRows(args.snapshotDir, path, from, to, DELIVERY_ROW_BYTES)) {
+        for (const { line, text } of readRows(args.snapshotDir, path, from, to, DELIVER_BYTES)) {
           // Check before chunk labels can split a secret. Oversized rows
           // are skipped as bytes, never materialised as strings.
           if (text !== null && usable.some((secret) => text.includes(secret))) {
@@ -254,10 +249,10 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
     };
   };
   // Oversized context cannot keep the changed lines beside it unsent.
-  const context = (path: string, i: number, text: string | null): string[] => (text === null ? null : deliveryRow(path, i, text, `${i}\t`)) ?? [`${i}\t(not shown: a context line over ${DELIVERY_ROW_BYTES / 1024} KB)`];
+  const context = (path: string, i: number, text: string | null): string[] => (text === null ? null : deliveryRow(path, i, text, `${i}\t`)) ?? [`${i}\t(not shown: a context line over ${DELIVER_BYTES / 1024} KB)`];
   // The lines that show deletion `h`, or null when the change does not hold
   // what it removed. A deleted file has no snapshot copy, so no context.
-  const removedBlock = (h: Hunk): string[] | null => {
+  const removedBlock = (h: Hunk): string[] | { first: number; last: number } | null => {
     const points = (args.change?.deletionPoints.get(h.path) ?? []).filter((p) => Math.min(...p.anchors) === h.start && Math.max(...p.anchors) === h.end);
     if (points.length === 0) return null;
     const file = args.change?.files.find((f) => f.path === h.path);
@@ -282,30 +277,89 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
       try { rows = [...lines.read(from, to)].map((row) => row.text); }
       catch { return null; }
       const where = gone ? "with the file, which was deleted" : count === 0 ? "and the file is now empty" : p.after === 0 ? "above line 1" : p.after < count ? `between lines ${p.after} and ${p.after + 1}` : `below line ${p.after}`;
-      block.push(`${h.path}: ${n} ${n === 1 ? "line" : "lines"} removed ${where}${typeof h.deletion === "object" ? ` (old lines ${h.deletion.oldStart} to ${h.deletion.oldEnd})` : ""}${to >= from ? ` (with context ${from} to ${to})` : ""}:`);
+      // A renamed file's old lines are named by its old path, as its rows are.
+      const renamed = file?.oldPath && file.oldPath !== h.path ? ` of ${file.oldPath}` : "";
+      block.push(`${h.path}: ${n} ${n === 1 ? "line" : "lines"} removed ${where}${typeof h.deletion === "object" ? ` (old lines ${h.deletion.oldStart} to ${h.deletion.oldEnd}${renamed})` : renamed ? ` (from ${file!.oldPath})` : ""}${to >= from ? ` (with context ${from} to ${to})` : ""}:`);
       for (let i = from; i <= Math.min(p.after, to); i++) block.push(...context(h.path, i, rows[i - from] ?? null));
       // Redacted as the brief redacts its diff: the snapshot never held these lines.
       const first = typeof h.deletion === "object" ? h.deletion.oldStart : run.oldStart;
       const last = typeof h.deletion === "object" ? h.deletion.oldEnd : run.oldStart + ("count" in run ? run.count : run.lines.length) - 1;
       let skipped = false;
       const removed = redactSecretsKeepingLines(args.change ? [...diffHunks(args.change, h.path, { start: first, end: last, side: "old" }, DELIVER_BYTES, { onLimit: () => { skipped = true; } })].flatMap((text) => removedRuns(text)).filter((r) => r.oldStart <= last && r.oldStart + r.lines.length - 1 >= first).flatMap((r) => r.lines.slice(Math.max(0, first - r.oldStart), last - r.oldStart + 1)).join("\n") : "", args.secrets).split("\n");
-      if (skipped) {
-        out.push(`${h.path}: skipped removed diff pages over the 512 KB byte budget; these lines remain unread.`, "");
-        return null;
-      }
+      if (skipped) return { first, last };
       for (let i = 0; i < removed.length; i++) {
-        const rows = deliveryRow(args.change?.files.find((f) => f.path === h.path)?.oldPath ?? h.path, first + i, removed[i]!, "-\t", true);
-        if (rows === null) return null;
-        block.push(...rows);
+        block.push(...deliveryRow(args.change?.files.find((f) => f.path === h.path)?.oldPath ?? h.path, first + i, removed[i]!, "-\t", true));
       }
       for (let i = Math.max(from, p.after + 1); i <= to; i++) block.push(...context(h.path, i, rows[i - from] ?? null));
     }
     return block;
   };
+  const oldPath = (path: string) => args.change?.files.find((f) => f.path === path)?.oldPath ?? path;
+  // Sends fragments of one line from `from` to `to`, skipping what an earlier
+  // round sent. Returns the first byte not sent, or past `to` when done.
+  const sendFragments = (source: ByteLine, from: number, to: number, label: (f: { from: number; to: number; total: number }) => string, sent: { from: number; to: number }[], record: (f: { from: number; to: number }) => void): number => {
+    const ranges: [number, number][] = [];
+    let cursor = from;
+    for (const d of [...sent].sort((a, b) => a.from - b.from)) {
+      if (d.from > cursor) ranges.push([cursor, Math.min(to, d.from - 1)]);
+      cursor = Math.max(cursor, d.to + 1);
+      if (cursor > to) break;
+    }
+    if (cursor <= to) ranges.push([cursor, to]);
+    for (const [a, b] of ranges) for (const f of lineFragments(source, a, b)) {
+      if (usable.some((secret) => f.text.includes(secret))) { leak = true; return a; }
+      const row = `${label(f)}\t${redactSecrets(f.text, args.secrets)}`;
+      const size = Buffer.byteLength(row) + 1;
+      if (size > bytes || room <= 1) return f.from;
+      out.push(row);
+      bytes -= size;
+      room--;
+      record(f);
+    }
+    return to + 1;
+  };
   for (const h of args.unread) {
+    if (h.deletion && h.fragment && args.change) {
+      let next = h.fragment.from;
+      for (const { line, source } of fragmentSources(args.change as Change, h as HunkRef, args.secrets)) {
+        const sent = (args.earlier ?? []).filter((d) => d.deletion && d.path === h.path && d.old?.[0] === h.old?.[0] && d.fragment).map((d) => d.fragment!);
+        next = sendFragments(source, next, h.fragment.to, (f) => `-${fragmentLabel(oldPath(h.path), line, f.from, f.to, f.total, "old")}`, sent, (f) => {
+          const previous = delivered.at(-1);
+          if (previous?.deletion && previous.path === h.path && previous.old?.[0] === h.old?.[0] && previous.fragment?.to === f.from - 1) previous.fragment.to = f.to;
+          else delivered.push({ ...h, fragment: { ...h.fragment!, from: f.from, to: f.to } });
+        });
+      }
+      if (next <= h.fragment.to) { left.push({ ...h, fragment: { ...h.fragment, from: next } }); later++; }
+      continue;
+    }
     if (h.deletion) {
-      if (args.earlier?.some((d) => d.deletion && d.path === h.path && d.start === h.start && d.end === h.end && (typeof h.deletion !== "object" || typeof d.deletion === "object" && d.deletion.id === h.deletion.id && d.deletion.oldStart <= h.deletion.oldStart && d.deletion.oldEnd >= h.deletion.oldEnd))) continue;
+      if (args.earlier?.some((d) => d.deletion && !d.fragment && d.path === h.path && d.start === h.start && d.end === h.end && (typeof h.deletion !== "object" || typeof d.deletion === "object" && d.deletion.id === h.deletion.id && d.deletion.oldStart <= h.deletion.oldStart && d.deletion.oldEnd >= h.deletion.oldEnd))) continue;
       const block = removedBlock(h);
+      if (block !== null && !Array.isArray(block)) {
+        // Removed lines over the page budget go as byte fragments of their
+        // old lines. The deletion counts as paged once every byte went.
+        const { first, last } = block;
+        const header = `${first === last ? lineHeading(oldPath(h.path), first, "old") : `${oldPath(h.path)}: old lines ${first} to ${last}`}, removed, in byte fragments:`;
+        const size = Buffer.byteLength(header) + 1;
+        if (size > bytes || room <= 2) { left.push(h); later++; continue; }
+        out.push(header);
+        bytes -= size;
+        room--;
+        let done = true;
+        const ref = { id: "", path: h.path, start: h.start, end: h.end, deletion: { id: "", oldStart: first, oldEnd: last }, old: [first, last] } as HunkRef;
+        for (const { line, source } of fragmentSources(args.change as Change, ref, args.secrets)) {
+          const mine = (d: Hunk) => d.deletion === h.deletion && d.path === h.path && d.start === h.start && d.end === h.end && d.fragment !== undefined && d.old?.[0] === line;
+          const sent = [...(args.earlier ?? []), ...delivered].filter(mine).map((d) => d.fragment!);
+          const next = sendFragments(source, 1, source.bytes, (f) => `-${fragmentLabel(oldPath(h.path), line, f.from, f.to, f.total, "old")}`, sent, (f) => delivered.push({ ...h, old: [line, line], lineBytes: source.bytes, fragment: { from: f.from, to: f.to } }));
+          if (next <= source.bytes) { done = false; break; }
+        }
+        out.push("");
+        bytes -= 1;
+        room--;
+        if (done) delivered.push(h);
+        else { left.push(h); later++; }
+        continue;
+      }
       if (block === null) {
         left.push(h);
         continue;
@@ -322,49 +376,134 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
       }
       continue;
     }
-    const lines = fileLines(h.path);
-    if (lines === null || h.end < h.start) {
+    const index = lineIndex(args.snapshotDir, h.path);
+    if (index === null || h.end < h.start) {
       left.push(h);
       continue;
     }
+    // A file that is not UTF-8 text is sent as bytes, line by line.
+    const lines = index.text ? fileLines(h.path) : null;
+    const long = new Map<number, number>();
+    for (let i = 0; i < index.long.length; i += 2) long.set(index.long[i]!, index.long[i + 1]!);
+    // At most the bytes a line's page takes with its context, labels aside.
+    const pageBytes = (line: number) => {
+      let n = 0;
+      for (let i = Math.max(1, line - CONTEXT); i <= Math.min(index.count, line + CONTEXT); i++) n += long.get(i) ?? DELIVERY_ROW_BYTES;
+      return n;
+    };
     for (const [first, last] of gaps(h, args.earlier ?? [])) {
       let at = first;
-      // A part no round can carry, such as a line over the byte budget, is never promised.
+      // A missing source is never promised as a future page.
       let never = false;
       while (at <= last && room > 2 * CONTEXT + 2) {
-        // Halved until it fits the bytes left, so a range of wide lines is
-        // sent in parts rather than promised for a round that cannot carry it.
-        let n = Math.min(last - at + 1, room - (h.part ? 2 : 2 * CONTEXT + 1));
-        let block: string[];
-        let size: number;
-        for (;;) {
+        const resumed = h.fragment !== undefined || h.fromByte !== undefined && at === first;
+        let page: { block: string[]; size: number; n: number } | "bytes" | null = resumed || lines === null ? "bytes" : null;
+        if (page === null) {
+          // One read from the first context row: each row's size is kept, so
+          // the largest page that fits is chosen without reading again.
+          const limit = Math.min(bytes, DELIVER_BYTES);
           const from = Math.max(1, at - CONTEXT);
-          const to = Math.min(lines.length, at + n - 1 + CONTEXT);
-          block = [`${h.path} lines ${at} to ${at + n - 1} (with context ${from} to ${to}):`];
-          size = Buffer.byteLength(block[0]!, "utf8") + 2;
+          const most = Math.min(last - at + 1, room - (h.part ? 2 : 2 * CONTEXT + 1));
+          const to = Math.min(lines!.length, at + most - 1 + CONTEXT);
+          const rows: { line: number; rows: string[]; size: number }[] = [];
+          let total = 0;
+          let open = last;
           try {
-            // Stop reading as soon as this candidate page cannot fit. Only
-            // the rows of a bounded page are ever kept together in memory.
-            for (const { line: i, text } of lines.read(from, to)) {
-              const rows = i < at || i >= at + n ? context(h.path, i, text) : text === null ? null : deliveryRow(h.path, i, text, `${i}\t`);
-              if (rows === null) { size = Infinity; break; }
-              block.push(...rows);
-              size += rows.reduce((k, row) => k + Buffer.byteLength(row, "utf8") + 1, 0);
-              if (size > DELIVER_BYTES || block.length + 1 > DELIVER_LINES) break;
+            for (const { line: i, text } of lines!.read(from, to)) {
+              const changed = i >= at && i <= last;
+              if (changed && text === null) {
+                // Over the row bound: sent by fragments when it comes first.
+                if (i === at) { page = "bytes"; break; }
+                open = i - 1;
+              }
+              const shown = changed && text !== null ? deliveryRow(h.path, i, text, `${i}\t`) : context(h.path, i, text);
+              const size = shown.reduce((k, row) => k + Buffer.byteLength(row, "utf8") + 1, 0);
+              rows.push({ line: i, rows: shown, size });
+              total += size;
+              if (total > limit + 1024 || rows.length > room) break;
             }
-          } catch { size = Infinity; }
-          if ((size <= bytes && block.length + 1 <= room) || n === 1) break;
-          n = Math.ceil(n / 2);
+          } catch { page = { block: [], size: Infinity, n: 1 }; }
+          if (page === null) {
+            let best: { block: string[]; size: number; n: number } | null = null;
+            for (let n = Math.min(most, open - at + 1); n >= 1; n--) {
+              const end = Math.min(lines!.length, at + n - 1 + CONTEXT);
+              const inside = rows.filter((r) => r.line <= end);
+              if (inside.at(-1)?.line !== end && end <= to) continue;
+              const head = `${h.path} lines ${at} to ${at + n - 1} (with context ${from} to ${end}):`;
+              const block = [head, ...inside.flatMap((r) => r.rows)];
+              const size = Buffer.byteLength(head, "utf8") + 2 + inside.reduce((k, r) => k + r.size, 0);
+              best = { block, size, n };
+              if (size <= bytes && block.length + 1 <= room) break;
+            }
+            // A read stopped at this round's bound only shows the page does not fit now.
+            page = best ?? { block: rows.flatMap((r) => r.rows), size: total, n: 1 };
+            // A long line whose page can never fit goes by fragments now; one
+            // that only misses this round's room waits for a whole page.
+            if (page.n === 1 && (page.size > bytes || page.block.length + 1 > room) && long.has(at) && pageBytes(at) > DELIVER_BYTES * 0.9) page = "bytes";
+          }
         }
-        if (size > bytes || block.length + 1 > room) {
-          never = size > DELIVER_BYTES || block.length + 1 > DELIVER_LINES;
+        if (page === "bytes") {
+          // One line by byte fragments, between its context rows.
+          let next = at === first ? h.fromByte ?? h.fragment?.from ?? 1 : 1;
+          let total = h.lineBytes ?? 0;
+          try {
+            for (const { source } of snapshotByteLines(args.snapshotDir, h.path, at, at)) {
+              total = source.bytes;
+              const end = h.fragment?.to ?? total;
+              // Context frames a line once: before its first byte and after its
+              // last. Each side is read on its own, never the long line itself.
+              // The first fragment row: its label, measured, and the most text a
+              // row holds. A byte that is not UTF-8 decodes to three.
+              const one = Buffer.byteLength(fragmentLabel(h.path, at, total, total, total)) + (index.text ? 1 : 3) * DELIVERY_ROW_BYTES + 2;
+              const rowsOf = (from: number, to: number) => lines && from <= to ? [...lines.read(from, to)].flatMap(({ line: i, text }) => context(h.path, i, text)) : [];
+              let before = next === 1 ? rowsOf(Math.max(1, at - CONTEXT), at - 1) : [];
+              const heading = (shown: boolean) => `${lineHeading(h.path, at)}, in byte fragments${shown ? ` (with context ${Math.max(1, at - CONTEXT)} to ${at - 1} before it)` : ""}:`;
+              const size = (rows: string[]) => rows.reduce((k, row) => k + Buffer.byteLength(row) + 1, 0);
+              // Context that leaves no room for a fragment is left out, and
+              // the heading says so by naming none.
+              if (before.length && size([heading(true), ...before]) + one > bytes) before = [];
+              const frame = [heading(before.length > 0), ...before];
+              const frameSize = size(frame);
+              // A page with no room for one fragment beside its heading waits.
+              if (frameSize + one > bytes || frame.length + 2 > room) break;
+              out.push(...frame);
+              bytes -= frameSize;
+              room -= frame.length;
+              const sent = (args.earlier ?? []).filter((d) => d.path === h.path && d.start === at && d.fragment).map((d) => d.fragment!);
+              next = sendFragments(source, next, end, (f) => fragmentLabel(h.path, at, f.from, f.to, f.total), sent, (f) => {
+                const previous = delivered.at(-1);
+                if (previous?.path === h.path && previous.start === at && previous.fragment?.to === f.from - 1) previous.fragment.to = f.to;
+                else delivered.push({ ...h, start: at, end: at, lineBytes: total, fromByte: undefined, fragment: { ...(h.fragment?.of ?? h.id ? { of: h.fragment?.of ?? h.id } : {}), from: f.from, to: f.to } });
+              });
+              // Only the line's last byte, not a part's, is followed by its context.
+              const after = next > total && at < index.count ? rowsOf(at + 1, Math.min(index.count, at + CONTEXT)) : [];
+              const framed = after.length ? [`${lineHeading(h.path, at)}, context after it (${at + 1} to ${Math.min(index.count, at + CONTEXT)}):`, ...after] : [];
+              const tail = framed.length && size([...framed, ""]) <= bytes && framed.length + 1 <= room ? [...framed, ""] : [""];
+              const tailSize = size(tail);
+              if (tailSize <= bytes && tail.length <= room) { out.push(...tail); bytes -= tailSize; room -= tail.length; }
+            }
+          } catch { /* Missing or invalid bytes keep this line unread. */ }
+          if (next <= (h.fragment?.to ?? total) || total === 0) {
+            // Only the line it names carries a byte position.
+            left.push({ ...h, start: at, end: at, fromByte: next, lineBytes: total });
+            if (at < last) left.push({ ...h, start: at + 1, end: last, fromByte: undefined, lineBytes: undefined });
+            later += at < last ? 2 : 1;
+            at = last + 1;
+            break;
+          }
+          at++;
+          continue;
+        }
+        if (page === null) break;
+        if (page.size > bytes || page.block.length + 1 > room) {
+          never = page.size > DELIVER_BYTES || page.block.length + 1 > DELIVER_LINES;
           break;
         }
-        out.push(...block, "");
-        room -= block.length + 1;
-        bytes -= size;
-        delivered.push({ ...h, start: at, end: at + n - 1, deletion: false });
-        at += n;
+        out.push(...page.block, "");
+        room -= page.block.length + 1;
+        bytes -= page.size;
+        delivered.push({ ...h, start: at, end: at + page.n - 1, deletion: false });
+        at += page.n;
       }
       if (at <= last) {
         left.push({ ...h, start: at, end: last });

@@ -1,5 +1,5 @@
-import { changedHunks, diffText, hunkRows, partHeading, stagedDiffCache } from "@openqodex/core";
-import type { Change, HunkRef, ReviewUnit } from "@openqodex/core";
+import { DELIVERY_ROW_BYTES, registeredSecrets, fragmentSizes, fragmentSources, oldPathOf, setFragmentSource, changedHunks, diffEntry, indexedLines, fragmentLabel, textByteLine, diffText, hunkRows, partHeading, stagedDiffCache } from "@openqodex/core";
+import type { ByteLines, Change, HunkRef, ReviewUnit } from "@openqodex/core";
 import { jsonSections, recognise, storeSections, storeRoot } from "./digest.js";
 import type { Digest, JsonEntry, JsonSections, StoreFile } from "./digest.js";
 import { DELIVER_LINES, pageRows } from "./conversation.js";
@@ -8,7 +8,7 @@ export const GROUP_DIFF_BYTES = 30 * 1024;
 export const MAX_UNIT_DIFF_BYTES = 120 * 1024;
 export const MAX_BRIEF_BYTES = 256 * 1024;
 
-type Read = (path: string) => string | null;
+type Read = ((path: string) => string | null) & { byteLines?: ByteLines };
 type JsonPage = { start: number; end: number; entries: JsonEntry[]; omitted: Digest["omitted"] };
 type DigestInput = { kind: "json" | "store"; root: string; text: string | null; previous?: string; secrets: string[]; oldUnavailable?: boolean; sections?: JsonSections; pages?: JsonPage[]; page?: number };
 type DigestDetails = { fixed: string; entries: { path: string; lines: [number, number]; text: string }[] };
@@ -41,7 +41,13 @@ function previousText(file: Change["files"][number], diff: string | undefined, t
 
 // One inventory owns scheduling and coverage. Its parts retain the whole
 // obligation's identity, and deletions retain their distinct old intervals.
-export function obligations(change: Change, read: Read, cache = stagedDiffCache(change)): HunkRef[] {
+// A change that already has a secrets list keeps it; see setFragmentSource.
+export function obligations(change: Change, read: Read, cache = stagedDiffCache(change, registeredSecrets(change) ?? [])): HunkRef[] {
+  return inventoryOf(change, read, cache, true);
+}
+
+// `register`: whether this inventory registers its byte source and secrets list.
+function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof stagedDiffCache>, register: boolean): HunkRef[] {
   let snapshotPath: string | null = null;
   let snapshotLines: string[] | null = null;
   const snapshotOf = (path: string) => {
@@ -52,6 +58,20 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
     }
     return snapshotLines;
   };
+  const byteRows = new Map<string, Map<number, ReturnType<typeof textByteLine>>>();
+  if (register) setFragmentSource(change, read.byteLines ?? function* (path, from, to) {
+    const rows = snapshotOf(path);
+    if (!rows) return;
+    let known = byteRows.get(path);
+    if (!known) { known = new Map(); byteRows.set(path, known); }
+    for (let line = from; line <= to; line++) {
+      const text = rows[line - 1];
+      if (text === undefined) break;
+      let source = known.get(line);
+      if (!source) { source = textByteLine(text); known.set(line, source); }
+      yield { line, source };
+    }
+  }, cache.secrets);
   const filesByPath = new Map(change.files.map((f) => [f.path, f]));
   const order = new Map(change.files.map((f, i) => [f.path, i]));
   const points = new Map<string, number>();
@@ -70,14 +90,17 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
     whole.push({ id: "", path, start: 1, end: lines, deletion: false, old: null });
   }
   whole.sort((a, b) => (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0) || a.start - b.start || Number(Boolean(a.deletion)) - Number(Boolean(b.deletion)));
+  whole.forEach((h, i) => { h.id = `h${i + 1}`; });
   const routes = new Map<string, DigestInput>();
   const measured = new Map<string, { rows: number; bytes: number }>();
   const candidates = new Map<string, DigestInput>();
   const over = new Set<string>();
   for (const h of whole) {
-    const snapshot = snapshotOf(h.path);
-    const rows = hunkRows(change, { ...h, old: undefined }, [], cache);
-    const rendered = rows.length ? rows : !h.deletion && snapshot ? pageRows(h.path, h.start, h.end, snapshot) : [];
+    const ref = { ...h, old: undefined };
+    const overflow = cache.file(h.path, ref).overflow;
+    const rows = overflow ? [] : hunkRows(change, ref, [], cache);
+    const snapshot = overflow ? null : snapshotOf(h.path);
+    const rendered = overflow ? null : rows.length ? rows : !h.deletion && snapshot ? pageRows(h.path, h.start, h.end, snapshot) : [];
     const size = { rows: rendered?.length ?? Infinity, bytes: rendered === null ? Infinity : Buffer.byteLength(rendered.join("\n"), "utf8") };
     const prior = measured.get(h.path) ?? { rows: 0, bytes: 0 };
     measured.set(h.path, { rows: prior.rows + size.rows, bytes: prior.bytes + size.bytes });
@@ -86,6 +109,17 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
   for (const path of measured.keys()) {
     const store = storeRoot(path);
     if (!store && !over.has(path)) continue;
+    const entry = diffEntry(change, path);
+    if (!store && entry) {
+      // A first source line is enough to reject a non-JSON prefix. Do not
+      // materialise a long code row merely to ask the JSON recogniser.
+      let nonJson = false;
+      for (const { source } of indexedLines(entry, { start: 1, end: 1 })) {
+        const first = source.read(0, Math.min(source.bytes, 2000)).toString("utf8").trimStart()[0];
+        nonJson = first !== undefined && !/[{["0-9tfn-]/.test(first);
+      }
+      if (nonJson) continue;
+    }
     const snapshot = snapshotOf(path);
     // JSON can start with any JSON value, regardless of the file extension.
     // Under-budget files never need recognition or old-side reconstruction.
@@ -238,12 +272,12 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
     }
     const replacements: typeof allReplacements = [];
     if (!h.deletion) for (let i = low; i < allReplacements.length && allReplacements[i]!.start <= h.end; i++) replacements.push(allReplacements[i]!);
-    const snapshot = snapshotOf(h.path);
+    const snapshot = diffEntry(change, h.path) && over.has(h.path) ? null : snapshotOf(h.path);
     const measure = (ref: HunkRef): HunkRef => {
       if (cache.file(ref.path, ref).overflow) return { ...ref, rows: Infinity, bytes: Infinity };
       const rows = hunkRows(change, ref, [], cache);
       const rendered = rows.length ? rows : !ref.deletion && snapshot ? pageRows(ref.path, ref.start, ref.end, snapshot) : [];
-      return { ...ref, rows: rendered?.length ?? Infinity, bytes: rendered === null ? Infinity : Buffer.byteLength(rendered.join("\n"), "utf8") + (rows.length ? 0 : 1) };
+      return { ...ref, rows: rendered.length, bytes: Buffer.byteLength(rendered.join("\n"), "utf8") + (rows.length ? 0 : 1) };
     };
     const fits = (ref: HunkRef) => ref.rows! <= DELIVER_LINES && ref.bytes! <= MAX_UNIT_DIFF_BYTES;
     const parts: HunkRef[] = [];
@@ -272,6 +306,38 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
           const ref = candidate(mid);
           if (fits(ref)) { best = ref; low = mid + 1; } else high = mid - 1;
         }
+        if (!fits(best)) {
+          const target = { ...best, ...(oldSide ? { old: [at, at] as [number, number] } : { start: at, end: at }) };
+          const sources = fragmentSources(change, target);
+          const path = oldSide ? oldPathOf(change, base.path) : base.path;
+          let fragmented = false;
+          for (const { source } of sources) {
+            if (source.bytes <= DELIVERY_ROW_BYTES) continue;
+            let from = 1;
+            let to = 0;
+            let bytes = 0;
+            let rows = 0;
+            const flush = () => {
+              if (!rows) return;
+              parts.push({ ...target, lineBytes: source.bytes,
+                fragment: { of: h.id, from, to }, rows, bytes });
+              from = to + 1;
+              bytes = 0;
+              rows = 0;
+            };
+            // Sizes come from the line's one measuring pass where it has one.
+            for (const fragment of fragmentSizes(source)) {
+              const size = Buffer.byteLength(`${oldSide ? "-" : "+"}${fragmentLabel(path, at, fragment.from, fragment.to, source.bytes, oldSide ? "old" : "new")}\t\n`) + fragment.size;
+              if (rows && (bytes + size > MAX_UNIT_DIFF_BYTES || rows + 1 > DELIVER_LINES)) flush();
+              to = fragment.to;
+              bytes += size;
+              rows++;
+            }
+            flush();
+            fragmented = true;
+          }
+          if (fragmented) { at++; continue; }
+        }
         if (!fits(best)) best.note = oldSide
           ? "This removed row exceeds a part's budget. It remains unread unless its full text is carried or read."
           : "This single line exceeds a part's budget. It remains unread unless its full text is carried or read.";
@@ -299,6 +365,7 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
   }
   const inventory = out.map((h, i) => {
     const ref = { ...h, id: `h${i + 1}` };
+    if (ref.fragment) ref.fragment = { ...ref.fragment, of: ref.id };
     const input = pagedInputs.get(h);
     if (input) digestInputs.set(ref, input);
     return ref;
@@ -307,20 +374,100 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
 }
 
 // Kept for callers without a snapshot. Staged review always supplies one.
+// It registers nothing, so an inventory with the review's secrets can follow.
 export function hunkRefs(change: Change): HunkRef[] {
-  return obligations(change, () => null);
+  return inventoryOf(change, () => null, stagedDiffCache(change, registeredSecrets(change) ?? []), false);
 }
 
-export function unitsOf(change: Change, hunks: HunkRef[], brief?: (unit: ReviewUnit) => string): ReviewUnit[] {
+// The finder brief a unit is measured by. A unit holding a fragment part, or
+// `both`, is measured over both passes, the longer brief; any other unit by
+// the local pass alone, so short units render one brief per measure.
+export function longestBrief(unit: ReviewUnit, find: (unit: ReviewUnit, pass: "local" | "contracts") => { text: string }, both = unit.hunks.some((h) => h.fragment)): string {
+  const local = find(unit, "local").text;
+  if (!both) return local;
+  const contracts = find(unit, "contracts").text;
+  return Buffer.byteLength(contracts) > Buffer.byteLength(local) ? contracts : local;
+}
+
+// `brief`: a unit's finder brief, with its real file list and every fixed
+// block; `both` asks for the longer of both passes, as longestBrief gives.
+export function unitsOf(change: Change, hunks: HunkRef[], brief?: (unit: ReviewUnit, both?: boolean) => string): ReviewUnit[] {
   const out: ReviewUnit[] = [];
   if (!hunks.length) return out;
-  const cache = stagedDiffCache(change);
-  const base = brief ? Buffer.byteLength(brief({ id: "u1", files: [], hunks: [], diffBytes: 0 }), "utf8") : 0;
+  const fragmented = hunks.some((h) => h.fragment);
+  const base = brief ? Buffer.byteLength(brief({ id: "u1", files: [], hunks: [], diffBytes: 0 }, fragmented), "utf8") : 0;
+  // A fragment part is cut down, never dropped: halved by fragments until
+  // its own real brief fits, or until it holds a single fragment.
+  const halves = (h: HunkRef): HunkRef[] => {
+    for (const { line, source } of fragmentSources(change, h)) {
+      const path = h.deletion ? oldPathOf(change, h.path) : h.path;
+      const sizes = [...fragmentSizes(source, h.fragment!.from, h.fragment!.to)].map((f) => ({ ...f, size: f.size + Buffer.byteLength(`${h.deletion ? "-" : "+"}${fragmentLabel(path, line, f.from, f.to, source.bytes, h.deletion ? "old" : "new")}\t\n`) }));
+      if (sizes.length < 2) return [h];
+      const mid = Math.ceil(sizes.length / 2);
+      return [sizes.slice(0, mid), sizes.slice(mid)].map((group) => ({ ...h, fragment: { ...h.fragment!, from: group[0]!.from, to: group.at(-1)!.to }, rows: group.length, bytes: group.reduce((n, f) => n + f.size, 0) }));
+    }
+    return [h];
+  };
+  // A path's fixed blocks, measured once; only a part near the bound is rendered.
+  const fixed = new Map<string, number>();
+  const fixedOf = (path: string): number => {
+    let around = fixed.get(path);
+    if (around === undefined) { around = brief ? Buffer.byteLength(brief({ id: "u1", files: [path], hunks: [], diffBytes: 0 }, true), "utf8") : 0; fixed.set(path, around); }
+    return around;
+  };
+  const fitted = (h: HunkRef): HunkRef[] => {
+    if (!h.fragment || !brief) return [h];
+    const around = fixedOf(h.path);
+    if (around + h.bytes! + Buffer.byteLength(partHeading(h, true, change), "utf8") + 1024 <= MAX_BRIEF_BYTES - 8 * 1024) return [h];
+    const alone: ReviewUnit = { id: "u1", files: [h.path], hunks: [h], diffBytes: h.bytes! };
+    if (Buffer.byteLength(brief(alone), "utf8") <= MAX_BRIEF_BYTES) return [h];
+    const parts = halves(h);
+    return parts.length === 1 ? parts : parts.flatMap(fitted);
+  };
+  const payload = Math.min(MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES - base - 8 * 1024);
+  // Whether a path's fixed blocks of both passes leave no room for even one
+  // fragment beside its heading. No halving can help such a line.
+  const blocked = (h: HunkRef): boolean => {
+    if (!brief) return false;
+    return fixedOf(h.path) + Buffer.byteLength(partHeading(h, true, change), "utf8") + DELIVERY_ROW_BYTES + 1024 > MAX_BRIEF_BYTES;
+  };
+  const FIXED_NOTE = "The fixed blocks of this file's finder briefs exceed MAX_BRIEF_BYTES alone, so no fragment of this line fits a brief. It remains unread unless paged or read.";
+  const sameLine = (a: HunkRef, b: HunkRef) => a.path === b.path && Boolean(a.deletion) === Boolean(b.deletion) && (a.deletion ? a.old?.[0] === b.old?.[0] : a.start === b.start);
+  const recut: HunkRef[] = [];
+  for (const h of hunks) {
+    if (!h.fragment) { recut.push(h); continue; }
+    if (blocked(h)) {
+      // One note for the whole line: its parts join into one entry.
+      const prior = recut.at(-1);
+      if (prior?.note === FIXED_NOTE && prior.fragment && sameLine(prior, h) && prior.fragment.to + 1 === h.fragment.from) {
+        prior.fragment = { ...prior.fragment, to: h.fragment.to };
+        prior.bytes = prior.bytes! + h.bytes!;
+        prior.rows = prior.rows! + h.rows!;
+      } else recut.push({ ...h, note: FIXED_NOTE });
+      continue;
+    }
+    let pieces = [h];
+    while (payload > 0 && pieces.some((p) => p.bytes! > payload && p.fragment!.to > p.fragment!.from)) {
+      const next = pieces.flatMap((p) => p.bytes! > payload ? halves(p) : [p]);
+      if (next.length === pieces.length) break;
+      pieces = next;
+    }
+    recut.push(...pieces.flatMap(fitted));
+  }
+  // A noted part replaces its ref even when the count stays the same.
+  if (recut.length !== hunks.length || recut.some((h, i) => h !== hunks[i])) {
+    const groups = new Map<string, HunkRef[]>();
+    for (const h of recut) { const key = h.part?.whole ?? h.id; const group = groups.get(key) ?? []; group.push(h); groups.set(key, group); }
+    for (const group of groups.values()) group.forEach((h, i) => { if (h.part) h.part = { ...h.part, n: i + 1, of: group.length }; });
+    // Fragment parts name the final id, set here after renumbering.
+    recut.forEach((h, i) => { h.id = `h${i + 1}`; if (h.fragment) h.fragment = { ...h.fragment, of: h.id }; });
+    hunks.splice(0, hunks.length, ...recut);
+  }
   let unit: ReviewUnit | null = null;
   let rows = 0;
   let estimate = base;
   // Include the per-entry answer example, file listing and diff framing.
-  const weight = (ref: HunkRef) => ref.bytes! + Buffer.byteLength(partHeading(ref), "utf8") + 220 + Buffer.byteLength(ref.path, "utf8");
+  const weight = (ref: HunkRef) => ref.bytes! + Buffer.byteLength(partHeading(ref, true, change), "utf8") + 220 + Buffer.byteLength(ref.path, "utf8");
   const close = () => {
     if (!unit) return;
     // Estimates avoid growing trial renders. Check the real serialization only
@@ -416,13 +563,15 @@ export function unitsOf(change: Change, hunks: HunkRef[], brief?: (unit: ReviewU
       }
       continue;
     }
+    // A noted entry starts no finder session; its note goes straight to the record.
+    if (ref.note) continue;
     if (ref.bytes === undefined || ref.rows === undefined) {
-      const rendered = hunkRows(change, ref, [], cache);
+      const rendered = hunkRows(change, ref);
       ref.bytes ??= Buffer.byteLength(rendered.join("\n"), "utf8");
       ref.rows ??= rendered.length;
     }
     const limit = unit?.files.includes(ref.path) ? MAX_UNIT_DIFF_BYTES : GROUP_DIFF_BYTES;
-    if (unit && (ref.note || unit.hunks[0]?.note || unit.diffBytes + ref.bytes > limit || rows + ref.rows > DELIVER_LINES || estimate + weight(ref) > MAX_BRIEF_BYTES)) close();
+    if (unit && (unit.diffBytes + ref.bytes > limit || rows + ref.rows > DELIVER_LINES || estimate + weight(ref) > MAX_BRIEF_BYTES)) close();
     if (!unit) {
       unit = { id: `u${out.length + 1}`, files: [], hunks: [], diffBytes: 0 };
       rows = 0;

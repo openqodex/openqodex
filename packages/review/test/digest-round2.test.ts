@@ -43,7 +43,8 @@ it.each([
   expect(units.every((u) => !u.digest)).toBe(true);
   expect(refs.some((h) => h.note?.includes("digest"))).toBe(false);
   // C1 owns long-line delivery; C2 must leave every changed line on parts.
-  expect(refs.reduce((sum, h) => sum + h.end - h.start + 1, 0)).toBe(text.split("\n").length);
+  const spans = new Map(refs.map((h) => [`${h.start}-${h.end}`, h.end - h.start + 1]));
+  expect([...spans.values()].reduce((sum, lines) => sum + lines, 0)).toBe(text.split("\n").length);
 });
 it("collapses 3000 keyed packages into a fixed block below 20 KB", () => {
   const text = JSON.stringify({ name: "fixture", packages: Object.fromEntries(Array.from({ length: 3000 }, (_, i) => [`node_modules/pkg${i}`, { version: "1.0.0", resolved: `https://example.test/${i}`, size: i }])) }, null, 2);
