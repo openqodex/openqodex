@@ -1,46 +1,78 @@
-// Failure case: a deleted binary hunk cannot be read and leaves coverage incomplete.
-import { readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+// Failure cases: a refused outside read, a refused tool and a single-pass
+// refusal discard valid answers. A served outside read must still fail.
+import { createHash } from "node:crypto";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, expect, it } from "vitest";
+import type { CompletionRecord, GateReceipt, TraceEntry } from "@openqodex/core";
 import "./global-setup.js";
-import { baseline, git, report, reportDir, run, stagedProviderEnv, writeConfig } from "./support.js";
-import { removeTempDirs } from "../temp-dirs.mjs";
+import { demo, readJson, report, reportDir, root, run, stagedProviderEnv, toolsHome, writeConfig } from "./support.js";
+import { fixDemoSecret } from "../golden/fixture-secret.mjs";
+import { removeTempDirs, tempDir } from "../temp-dirs.mjs";
 
 afterAll(removeTempDirs);
-
-describe("binary deletion coverage", () => {
-  for (const stages of [true, false]) {
-    // The single-pass case is green on step2-batch and gives the route an owner.
-    it(stages ? "a deleted binary file keeps the staged review incomplete" : "the single pass stops listing a deleted binary file", () => {
-      const dir = baseline();
-      const image = join(dir, "logo.png");
-      writeFileSync(image, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=", "base64"));
-      git(dir, "add", "logo.png");
-      git(dir, "commit", "-qm", "Add baseline image");
-      unlinkSync(image);
-      writeConfig(dir, `review:\n  stages: ${stages}\n`);
-      const env = stagedProviderEnv();
-      const submissionPath = join(env.PATH!.split(delimiter)[0]!, "submission.json");
-      const submission = JSON.parse(readFileSync(submissionPath, "utf8"));
-      submission.findings = [];
-      submission.dropped = [];
-      writeFileSync(submissionPath, JSON.stringify(submission));
-      const result = run(`binary-deletion-${stages}`, dir, ["review", "--reviewer", "claude", "--skip", "semgrep,osv-scanner", "--no-color"], { env });
-      const completion = report(dir).completion!;
-      expect(completion.status, JSON.stringify(completion.missing)).toBe("complete");
-      expect(completion.coverage.hunks).toBe(1);
-      expect(completion.coverage.covered).toBe(completion.coverage.hunks);
-      expect(result.status, result.stderr).toBe(0);
-      const out = reportDir(dir);
-      if (stages) {
-        const briefs = readdirSync(join(out, "briefs")).filter((name) => name.startsWith("finder-"));
-        expect(briefs.length).toBeGreaterThan(0);
-        for (const name of briefs) {
-          expect(readFileSync(join(out, "briefs", name), "utf8")).toContain("The file is binary and was deleted. There are no lines to read; the deletion is the change.");
-        }
-      } else {
-        expect(readFileSync(join(out, "brief.md"), "utf8")).toContain("logo.png was deleted");
-      }
-    });
-  }
+function review(label: string, session: string, tool: string, path: string, refused = true, stages = true) {
+  const dir = demo(label);
+  fixDemoSecret(dir);
+  writeConfig(dir, `review:\n  stages: ${stages}\n`);
+  const tools = toolsHome;
+  const env = stagedProviderEnv("claude", {
+    OPENQODEX_STANDIN_TOOL_SESSION: session,
+    OPENQODEX_STANDIN_TOOL_NAME: tool,
+    OPENQODEX_STANDIN_TOOL_PATH: path,
+    OPENQODEX_STANDIN_TOOL_ERROR: refused ? "1" : "0",
+  });
+  const result = run(label, dir, ["review", "--reviewer", "claude", "--skip", "semgrep,osv-scanner", "--no-color"], { tools, env });
+  const out = reportDir(dir);
+  const saved = report(dir);
+  const id = createHash("sha256").update(realpathSync(dir)).digest("hex");
+  const push = readJson<GateReceipt>(join(tools, "receipts", id, `${saved.change_id}.json`));
+  return { result, saved, out, push, completion: saved.completion as CompletionRecord, trace: readJson<TraceEntry[]>(join(out, "trace.json")) };
+}
+function planted(r: ReturnType<typeof review>) {
+  const expected = readJson<{ bugs: { id: string; file: string; lines: [number, number] }[] }>(join(root, "examples/demo-repo/expected.json"));
+  for (const bug of expected.bugs) expect(r.saved.findings.some((f) => f.file_path === bug.file && f.line_number <= bug.lines[1] && f.line_end >= bug.lines[0]), bug.id).toBe(true);
+}
+for (const [session, path] of [["verifier:app/config.py", "/dev/null"], ["finder:u1:local", "../openqodex-checkout.json"]]) {
+  it(`a refused read outside the snapshot discards the staged review: ${session}`, () => {
+    const r = review(`refused-${session}`, session, "Read", path);
+    expect(r.result.status, r.result.stderr).toBe(0);
+    expect(r.completion.status).toBe("complete");
+    expect(r.completion.refused).toEqual([path]);
+    expect(r.completion.outside_reads).toEqual([path]);
+    expect(r.trace).toContainEqual(expect.objectContaining({ tool: "Read", path, inside: false, ok: false }));
+    expect(r.result.stdout).toContain(`These requests were refused and were not served: ${path}`);
+    expect(readFileSync(join(r.out, "report.md"), "utf8")).toContain("These requests were refused and were not served:");
+    expect(r.completion.reviewer!.sessions!.some((s) => s.role.includes("retry"))).toBe(false);
+    expect(r.push.kind).toBe("complete");
+    planted(r);
+  });
+}
+it("one refused Bash call discards the whole staged review", () => {
+  const r = review("refused-bash", "finder:u1:local", "Bash", "");
+  expect(r.result.status, r.result.stderr).toBe(0);
+  expect(r.completion.status).toBe("complete");
+  expect(r.completion.refused).toEqual(["Bash"]);
+  expect(r.result.stdout).toContain("These requests were refused and were not served: Bash");
+  expect(r.push.kind).toBe("complete");
+  planted(r);
+});
+it("a read that left the snapshot completes the review", () => {
+  const path = join(tempDir("oq-served-outside-"), "outside.txt");
+  writeFileSync(path, "outside content");
+  const r = review("served-outside", "finder:u1:local", "Read", path, false);
+  expect(r.result.status).toBe(2);
+  expect(r.completion.status).toBe("incomplete");
+  expect(r.completion.missing.join(" ")).toContain(path);
+  expect(r.trace).toContainEqual(expect.objectContaining({ path, inside: false, ok: true }));
+  planted(r);
+  expect(r.push.kind).toBe("incomplete");
+});
+it("the single pass drops its answer after a refusal", () => {
+  const r = review("refused-single", "primary", "Read", "/dev/null", true, false);
+  expect(r.result.status, r.result.stderr).toBe(0);
+  expect(r.completion.status).toBe("complete");
+  expect(r.completion.refused).toEqual(["/dev/null"]);
+  expect(r.push.kind).toBe("complete");
+  expect(r.result.stdout).toContain("These requests were refused and were not served: /dev/null");
 });

@@ -595,7 +595,7 @@ describe("35. the reviewer's own saved tool output", () => {
   // The model provider stand-in, started by the real driver: answers detect,
   // then replays the recorded run with the answer replaced by a submission
   // for this brief. `session` is the folder the Read names, as recorded or another.
-  function standIn(readSession: string): string {
+  function standIn(readSession: string, served = false): string {
     const dir = tempDir("oq-spool-bin-");
     const template = submission("`change_id`: `000000000000`");
     writeFileSync(
@@ -626,6 +626,7 @@ describe("35. the reviewer's own saved tool output", () => {
         "  for (const line of text.split('\\n').filter((l) => l !== '')) {",
         "    const e = JSON.parse(line);",
         `    if (e.type === 'assistant') for (const c of e.message.content) if (c.type === 'tool_use' && c.input.file_path) c.input.file_path = c.input.file_path.split(${JSON.stringify(session)}).join(${JSON.stringify(readSession)});`,
+        `    if (${served} && e.type === 'user') for (const c of e.message.content) if (c.type === 'tool_result') { delete c.is_error; c.content = 'served output'; }`,
         `    if (e.type === 'result') e.result = stagedAnswer(brief, ${JSON.stringify(template)}.split('000000000000').join(id), (file, line) => require('node:fs').readFileSync(join(snapshot, file), 'utf8').split('\\n')[line - 1]);`,
         "    process.stdout.write(JSON.stringify(e) + '\\n');",
         "  }",
@@ -637,13 +638,13 @@ describe("35. the reviewer's own saved tool output", () => {
     chmodSync(join(dir, "claude"), 0o755);
     return dir;
   }
-  function claudeReview(readSession: string): Promise<number> {
-    vi.stubEnv("PATH", `${standIn(readSession)}:${process.env.PATH ?? ""}`);
+  function claudeReview(readSession: string, served = false): Promise<number> {
+    vi.stubEnv("PATH", `${standIn(readSession, served)}:${process.env.PATH ?? ""}`);
     const { global } = parseFlags(["--cwd", repo(), "--no-color", "--format", "json"], {});
     return runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer: "claude", timeoutMs: 60_000, drivers: [claudeDriver] });
   }
 
-  it("a read of the output Claude Code saved for this session keeps the run complete; one of another session's output, a transcript or the login does not", async () => {
+  it("a refused read of another session's output fails the review, while a served read must fail", async () => {
     const config = tempDir("oq-claude-config-");
     vi.stubEnv("CLAUDE_CONFIG_DIR", config);
     const code = await claudeReview(session);
@@ -653,9 +654,16 @@ describe("35. the reviewer's own saved tool output", () => {
     expect(code).toBe(0);
 
     out = "";
-    expect(await claudeReview("f0000000-0000-4000-8000-000000000000")).toBe(2);
+    expect(await claudeReview("f0000000-0000-4000-8000-000000000000")).toBe(0);
     const other = JSON.parse(out) as Report;
     expect(other.completion?.outside_reads).toEqual([expect.stringMatching(/\/f0000000-0000-4000-8000-000000000000\/tool-results\/toolu_01ReGzL1ywcwshVJvEbzxZyr\.txt$/)]);
+
+    expect(other.completion?.status).toBe("complete");
+    expect(other.completion?.refused).toEqual(other.completion?.outside_reads);
+    out = "";
+    expect(await claudeReview("f0000000-0000-4000-8000-000000000000", true)).toBe(2);
+    const served = JSON.parse(out) as Report;
+    expect(served.completion?.missing.join(" ")).toContain("the reviewer read outside the snapshot");
 
     const snapshot = tempDir("oq-spool-snap-");
     const own = { configDir: config, sessionId: session };

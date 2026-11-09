@@ -191,6 +191,7 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
         if (c.type !== "tool_result" || typeof c.tool_use_id !== "string") continue;
         const call = pending.get(c.tool_use_id);
         if (!call) continue;
+        pending.delete(c.tool_use_id);
         call.ok = c.is_error !== true;
         const file = ((e.tool_use_result as Record<string, unknown> | undefined)?.file ?? null) as Record<string, unknown> | null;
         const path = str(file?.filePath);
