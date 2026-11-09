@@ -113,7 +113,10 @@ export async function pinWorkTree(args: PinArgs): Promise<Pinned> {
     const lease = await leaseOf(store, graph, args.purpose);
     const scope = change ? `${change.baseSha}:${reference.digest}` : undefined;
     return { session: sessionOf(store, graph), lease, changes, change, scope, reference, release: () => lease?.release() };
-  } finally { if (change) cleanupDiffs(change); }
+  } finally {
+    // A leftover temporary patch never hides the graph answer.
+    if (change) try { cleanupDiffs(change); } catch { /* reported nowhere: the file is private to this user */ }
+  }
 }
 
 export type PinnedOrError = Pinned | { error: "generation-unavailable" | "unreadable"; message: string };

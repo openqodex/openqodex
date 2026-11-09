@@ -673,7 +673,7 @@ export async function getAdmittedTreeChange(args: {
     const env = await isolatedGit(tmp, format, objects, alternates);
     const base = await admittedTree(tmp, env, args.baseSha, admit, join(tmp, "index-base"));
     const head = await admittedTree(tmp, env, args.headSha, admit, join(tmp, "index-head"));
-    const change = await diffChange({ repoRoot, cwd: tmp, baseRef: args.baseRef, baseSha: args.baseSha, exclude: args.exclude, range: [base.tree, head.tree], env, tempRoot: args.tempRoot });
+    const change = await diffChange({ repoRoot, cwd: tmp, baseRef: args.baseRef, baseSha: args.baseSha, exclude: args.exclude, range: [base.tree, head.tree], env, tempRoot: args.tempRoot, idOnly: args.idOnly });
     // A file moved in from outside: one the change adds whose object is a
     // refused base file's, where that base path is gone from the head.
     const movedOut = new Set<string>();

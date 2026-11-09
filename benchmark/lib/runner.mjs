@@ -391,6 +391,7 @@ export function failureOf(result, report) {
 
 // Benchmarks also run from standalone copies without the core package.
 // Match the receipt's unread-block shortening, keeping other failures.
+const RANGE_ROW = /^(?: {2})?(?:(?:(?!: ).)+:\d+(?:-\d+)?|(?:(?!: ).)+: (?:old )?line \d+, bytes [\d,]+ to [\d,]+ of [\d,]+)(?: \(deletion(?: [^)]+)?\))?(?: \(part \d+ of \d+\))?$/;
 function shortenedMissing(missing) {
   const out = [];
   for (let i = 0; i < missing.length; i++) {
@@ -398,10 +399,17 @@ function shortenedMissing(missing) {
     out.push(line);
     const heading = /^(\d+) changed (?:range was|ranges were) not examined$/.exec(line);
     if (!heading) continue;
-    const n = Number(heading[1]);
-    out.push(...missing.slice(i + 1, i + 1 + Math.min(n, 10)));
-    if (n > 10) out.push(`and ${n - 10} more; the report names each one`);
-    i += n;
+    // A split range is one unindented row followed by indented gap rows;
+    // the heading's count names ranges, not rows.
+    let end = i + 1;
+    let ranges = 0;
+    while (end < missing.length && RANGE_ROW.test(missing[end])) {
+      if (!missing[end].startsWith("  ")) ranges++;
+      if (ranges <= 10) out.push(missing[end]);
+      end++;
+    }
+    if (ranges > 10) out.push(`and ${ranges - 10} more; the report names each one`);
+    i = end - 1;
   }
   return out;
 }

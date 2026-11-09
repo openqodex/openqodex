@@ -10,7 +10,8 @@
 // to FIRST_REVIEW_INSTALL_WAIT_MS, then names the ones still downloading;
 // it resolves only the scanners its own change calls for.
 import { isAbsolute, relative, resolve } from "node:path";
-import { cleanupDiffs, getChange, loadConfig } from "@openqodex/core";
+import { getChange, loadConfig } from "@openqodex/core";
+import { removeDiffs } from "../pipeline.js";
 import { parseFlags } from "../flags.js";
 import { ALL_TIMEOUT_SECONDS, CHANGE_TIMEOUT_SECONDS, runReview } from "../review-run.js";
 import type { ReviewEnd, ReviewOptions } from "../review-run.js";
@@ -111,7 +112,7 @@ async function firstReview(o: Parameters<typeof reviewAfterInit>[0]): Promise<{ 
       const choice = await (o.ask ?? askWhat)();
       if (choice === null) return { ended: "skipped", why: "not now" };
       return await review(choice.kind === "all" ? { all: true, timeoutMs: ALL_TIMEOUT_SECONDS * 1000 } : { target: choice.target });
-    } finally { cleanupDiffs(change); }
+    } finally { removeDiffs(change); }
   } catch (error) {
     process.stderr.write(`openqodex: the review after init did not run: ${error instanceof Error ? error.message : String(error)}\n`);
     return { ended: "incomplete", why: "the review stopped with an error, shown above" };

@@ -47,6 +47,12 @@ export function progress(flags: GlobalFlags): (line: string) => void {
   };
 }
 
+// A temporary patch that cannot be removed never replaces the run's result.
+export function removeDiffs(change: Parameters<typeof cleanupDiffs>[0]): void {
+  try { cleanupDiffs(change); }
+  catch (error) { warn(`openqodex: could not remove a temporary diff file: ${String((error as Error).message ?? error).split("\n")[0]}`); }
+}
+
 export function warn(line: string): void {
   process.stderr.write(`${line}\n`);
 }
@@ -81,7 +87,7 @@ export async function runPipeline(args: {
     args.clock?.enter(null);
     await use?.(p);
     return p;
-  } finally { cleanupDiffs(change); }
+  } finally { removeDiffs(change); }
 
 }
 

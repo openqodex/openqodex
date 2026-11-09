@@ -424,3 +424,15 @@ it("C3 fix 3. not examined ranges retain the coverage halt class", () => {
   expect(reasonClass("2 changed ranges were not examined; a.py:3-4; b.py:5-6")).toBe("coverage");
   expect(reasonClass("1 changed range was not examined; a.py:3-3")).toBe("coverage");
 });
+
+describe("the failure cause shortens split ranges as the receipt does", () => {
+  it("keeps a range's indented gap rows with it and counts ranges, not rows", () => {
+    const rows = ["a.js:7-7", "  a.js: line 7, bytes 2,001 to 4,000 of 6,000", "b.js:1-3"];
+    const report = { completion: { status: "incomplete", missing: ["2 changed ranges were not examined", ...rows, "the reviewer gave up"] } };
+    const { cause } = failureOf({ code: 2, signal: null, stderr: "" }, report);
+    expect(cause).toBe(["2 changed ranges were not examined", ...rows, "the reviewer gave up"].join("; "));
+    const many = Array.from({ length: 12 }, (_, i) => [`f${i}.js:1-1`, `  f${i}.js: line 1, bytes 1 to 2,000 of 9,000`]).flat();
+    const long = failureOf({ code: 2, signal: null, stderr: "" }, { completion: { status: "incomplete", missing: ["12 changed ranges were not examined", ...many] } });
+    expect(long.cause).toBe(["12 changed ranges were not examined", ...many.slice(0, 20), "and 2 more; the report names each one"].join("; "));
+  });
+});

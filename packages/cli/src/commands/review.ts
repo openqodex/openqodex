@@ -22,7 +22,6 @@ import {
   buildWholeRepoBrief,
   checkDisplay,
   configHash,
-  cleanupDiffs,
   displayJson,
   finalizeReview,
   gateReceipt,
@@ -73,6 +72,7 @@ import {
   runPipeline,
   scanChange,
   warn,
+  removeDiffs,
   writeReportHtml,
 } from "../pipeline.js";
 import { dropTempRef, resolveTarget, sweepTempRefs } from "../target.js";
@@ -377,7 +377,7 @@ async function reviewResolved(
     } finally {
       if (tree !== null && !keep) await removeTargetCheckout(repoRoot, tree);
     }
-  } finally { cleanupDiffs(change); }
+  } finally { removeDiffs(change); }
 }
 
 // The receipt of the newest whole-repo run, beside latest.json, which only
@@ -713,7 +713,7 @@ async function runFinalize(flags: GlobalFlags, path: string | undefined, all: bo
     await discard();
     emitReview(out.report, flags, repoRoot, paths);
     return exitFor(report);
-  } finally { cleanupDiffs(change); }
+  } finally { removeDiffs(change); }
 }
 
 // The code report.html shows for a two-step review whose run files the
