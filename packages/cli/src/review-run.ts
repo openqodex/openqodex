@@ -390,6 +390,20 @@ export async function runReview(o: ReviewOptions): Promise<number> {
             });
           } else if (e.type === "staged-units") {
             write({ "units.json": `${JSON.stringify(redactStored(e.units, secrets), null, 2)}\n` });
+            const digests = e.units.filter((unit) => unit.digest);
+            if (digests.length) {
+              const dir = join(folder!.dir, "digests");
+              const files = Object.fromEntries(digests.map((unit) => [`${unit.id}.md`, redact([
+                `# ${unit.id}: structural summary coverage (${unit.digest!.kind})`,
+                unit.digest!.text,
+                "Processed ranges:",
+                ...unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)).map((h) => `${h.id} ${h.path}:${h.start}-${h.end}`),
+                "Omissions:",
+                ...unit.digest!.omitted.map((o) => `${o.path}:${o.lines.join("-")}: ${o.why}`),
+              ].join("\n\n") + "\n")]));
+              if (reportWriter) reportFolderWriter(dir, repoRoot)(files);
+              else writeReportFiles(repoRoot, dir, files, PRIVATE);
+            }
           } else if (e.type === "staged-brief") {
             writeStagedBrief(e.role, e.brief);
           } else if (e.type === "started") {

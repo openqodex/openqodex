@@ -647,7 +647,10 @@ export type HunkRef = {
 // A find unit: one changed file, or a group of small files whose diffs stay
 // under the unit size bound, or one slice of a large file. Every hunk of the
 // change belongs to exactly one unit.
-export type ReviewUnit = { id: string; files: string[]; hunks: HunkRef[]; diffBytes: number };
+export type ReviewUnit = {
+  id: string; files: string[]; hunks: HunkRef[]; diffBytes: number;
+  digest?: { id: string; kind: "json" | "store"; text: string; processed: string[]; omitted: { path: string; lines: [number, number]; why: string }[] };
+};
 
 // The two finder passes run on every unit, each in a fresh session.
 export type FindPass = "local" | "contracts";
