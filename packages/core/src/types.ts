@@ -182,6 +182,11 @@ export type AdapterResult = {
   checked?: { token: string; files: string[] }[];
   // The rule packs the run consumed, kept on the scanner's summary.
   rules?: RulePack[];
+  // Set when `error` names a real failure (a module that could not
+  // type-check, a crashed run) rather than a note a clean run still leaves
+  // (a timeout, a cap): the runner keeps status "failed" even when other
+  // files of the same run produced findings (issue 307).
+  failure?: boolean;
 };
 
 // One row of `openqodex doctor`.
