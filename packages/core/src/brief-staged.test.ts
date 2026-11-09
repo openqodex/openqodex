@@ -15,10 +15,13 @@
 //     or the confidence floors used by assembly.
 // 13. A scanner-first batch gets a finder id in its answer example.
 // 14. A brief still asks for a missing-test finding.
+// 15. A binary deletion has no readable lines and is never counted as covered.
+// 16. Reviewer briefs leave masked values unexplained or permit placeholder claims.
 import { describe, expect, it } from "vitest";
 import { buildFindBrief, buildVerifyBrief, FINDER_CONFIDENCE_FLOOR } from "./brief-staged.js";
 import type { StagedBriefArgs, VerifyBatch } from "./brief-staged.js";
 import { buildReviewerBrief } from "./brief.js";
+import { readCoverage } from "./completion.js";
 import { checkSubmission } from "./finalize.js";
 import { redactSecrets } from "./redact.js";
 import { makeChange, makeConfig, makeManifest, makeScan, SECRET, SQL_CANDIDATE } from "./test-fixtures.js";
@@ -66,6 +69,42 @@ function answer(text: string): VerifyAnswer {
   expect(json).toBeDefined();
   return JSON.parse(json!) as VerifyAnswer;
 }
+
+it("a binary deletion stays unread when its diff has no text lines", () => {
+  const deleted = makeChange({
+    files: [{ path: "logo.png", status: "deleted", oldPath: null, binary: true }],
+    changedPaths: [], coverage: new Map(), diff: "", diffs: [],
+    deletionPoints: new Map([["logo.png", [{ after: 0, lines: 0, anchors: [1] }]]]),
+  });
+  const deletedUnit: ReviewUnit = {
+    id: "u1", files: ["logo.png"], diffBytes: 0,
+    hunks: [{ id: "h1", path: "logo.png", start: 1, end: 1, deletion: true }],
+  };
+  const input = args({ change: deleted, scan: makeScan({ candidates: [] }) });
+  const finder = buildFindBrief(input, deletedUnit, "local");
+  expect(finder.text).toContain("### h1 logo.png 1-1\n\nThe file is binary and was deleted. There are no lines to read; the deletion is the change.");
+  const single = buildReviewerBrief(input);
+  expect(single.text).toContain("| deleted, binary | logo.png |");
+  expect(single.text).toContain("logo.png was deleted (cite line 1)");
+  for (const brief of [finder, single]) {
+    expect(readCoverage({ change: deleted, briefFiles: brief.diffFiles, trace: [] })).toMatchObject({
+      hunks: 1, covered: 1, unread: [],
+    });
+  }
+});
+
+it("reviewer briefs leave masked values unexplained and allow placeholder claims", () => {
+  const verifier = buildVerifyBrief(args(), batch).text;
+  for (const text of [
+    buildFindBrief(args(), unit, "local").text, verifier,
+    buildReviewerBrief(args()).text,
+    buildReviewerBrief({ ...args(), whole: { hot: [], graphNote: null, inventory: [] } }).text,
+  ]) {
+    expect(text).toContain("The current folder holds a frozen copy of the code under review, with the change applied. Read it only through the tools you were given; it is the only place you can read, and you never run the repository's code.");
+    expect(text).toContain("OpenQodex replaced every value the secret scanner matched with `[redacted]`, in this copy and in the diff. Treat `[redacted]` as a real value you cannot see, never as a placeholder or a missing value; raise no finding about the masking itself.");
+  }
+  expect(verifier).toContain("A claim that a value is a placeholder, missing or redacted, where the copy reads `[redacted]`, is refuted.");
+});
 
 describe("find brief", () => {
   it("shows only this unit's hunks, including when another unit shares its file", () => {

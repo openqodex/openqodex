@@ -6,6 +6,9 @@
 - Scanners: 15 scanners ran, 5 had nothing to check
 - Block threshold: warn only, nothing blocks the push
 
+The current folder holds a frozen copy of the code under review, with the change applied. Read it only through the tools you were given; it is the only place you can read, and you never run the repository's code.
+OpenQodex replaced every value the secret scanner matched with `[redacted]`, in this copy and in the diff. Treat `[redacted]` as a real value you cannot see, never as a placeholder or a missing value; raise no finding about the masking itself.
+
 ## Your unit
 
 Unit: u1
