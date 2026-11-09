@@ -33,6 +33,7 @@ describe("binary deletion coverage", () => {
       expect(result.status, result.stderr).toBe(0);
       const out = reportDir(dir);
       if (stages) {
+        expect(completion.coverage.given).toContainEqual(expect.objectContaining({ path: "logo.png", deletion: "logo.png#0", by: "brief" }));
         const briefs = readdirSync(join(out, "briefs")).filter((name) => name.startsWith("finder-"));
         expect(briefs.length).toBeGreaterThan(0);
         for (const name of briefs) {

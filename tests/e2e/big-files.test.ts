@@ -41,8 +41,10 @@ it("7p pages a 6 MB file and accepts its evidence at line 100,000", async () => 
   const saved = report(dir);
   expect((saved.completion as CompletionRecord).status).toBe("complete");
   expect(saved.findings).toContainEqual(expect.objectContaining({ file_path: "big.txt", line_number: 100_000 }));
-  const rounds = readJson<{ delivered: { path: string; start: number; end: number }[] }[]>(join(reportDir(dir), "rounds.json"));
-  expect(rounds.some((r) => r.delivered.some((h) => h.path === "big.txt" && h.start <= 100_000 && h.end >= 100_000))).toBe(true);
+  // The 4,000 changed rows reach the reviewer as measured parts in briefs
+  // (Fix C1) or as pages; either way the record names how line 100,000 got there.
+  const given = (saved.completion as CompletionRecord).coverage.given ?? [];
+  expect(given.some((g) => g.path === "big.txt" && g.start <= 100_000 && g.end >= 100_000 && (g.by === "brief" || g.by === "page"))).toBe(true);
   const { change } = fixture();
   const reportedSnapshot = readFileSync(join(provider, "snapshot-path"), "utf8").trim();
   expect(reportedSnapshot).not.toBe(dir);

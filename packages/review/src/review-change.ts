@@ -44,8 +44,11 @@ import {
   getTreeChange,
   getWholeRepo,
   modelCoverage,
+  singlePassModelCoverage,
   phaseClock,
   readCoverage,
+  singlePassCoverage,
+  stagedDiffCache,
   redactSecrets,
   requiredCandidates,
   outsideFromScan,
@@ -62,6 +65,7 @@ import type {
   Config,
   Display,
   ImpactSummary,
+  ReviewUnit,
   InstructionFile,
   InstructionProvenance,
   PhaseClock,
@@ -92,7 +96,7 @@ import { modelSession, modelToolEntry } from "./model-loop.js";
 import type { ModelSession } from "./model-loop.js";
 import { buildNeighbourhood, renderNeighbourhoodBlock } from "./neighbourhood.js";
 import type { Neighbourhood } from "./neighbourhood.js";
-import { hunkRefs, unitsOf } from "./units.js";
+import { obligations, unitsOf } from "./units.js";
 import { runStagedReview } from "./stages.js";
 import { modelEvidence } from "./evidence.js";
 import { modelRecord, modelReport, reviewRender } from "./model-record.js";
@@ -200,6 +204,7 @@ export type ReviewEvent =
   | { type: "prepared"; change: Change; scan: ScanResult; secrets: string[] }
   // The brief and what goes with it, before the reviewer starts.
   | { type: "brief"; manifest: RunManifest; scan: ScanResult; brief: string; impact: ImpactSummary }
+  | { type: "staged-units"; units: ReviewUnit[] }
   | { type: "staged-brief"; role: ReviewerRole; brief: string }
   // The reviewer started.
   | { type: "started"; driver: string; version: string; pid: number | null; role?: ReviewerRole }
@@ -621,20 +626,24 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       graphNote: graph === null ? `the graph is ${impact.status}${impact.reasons.length > 0 ? `: ${impact.reasons.join("; ")}` : ""}` : null,
       ...(deps.scoped?.folderScopes ? { admit: deps.scoped.admit } : {}),
     };
-    const unitCount = config.stages && !prep.whole && refused === null ? unitsOf(change, hunkRefs(change)).length : 0;
-    const staged = config.stages && !prep.whole && refused === null && unitCount > 0;
+    const inventory = config.stages && !prep.whole && refused === null ? obligations(change, snapshotText(prep.snapshot.tree), stagedDiffCache(change, p.secrets)) : [];
+    const briefArgs = { change, scan, lenses, config, secrets: p.secrets, impactBlock: renderImpactBlock(impact), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown };
+    const findBrief = (unit: ReviewUnit, pass: import("@openqodex/core").FindPass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: neighbourhoodBlock(unit.files) }, unit, pass);
+    const units = unitsOf(change, inventory, (unit) => findBrief(unit, "local").text);
+    const unitCount = units.length;
+    const staged = config.stages && !prep.whole && refused === null && inventory.length > 0;
     if (staged) {
       const startedIso = new Date(deps.now()).toISOString();
       const started = deps.now();
       const shared: CallRecord[] = [];
       const budgetState = { pending: Promise.resolve(), refused: false };
       const modelSessions: ModelSession[] = [];
-      const briefArgs = { change, scan, lenses, config, secrets: p.secrets, impactBlock: renderImpactBlock(impact), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown };
       clock.enter("reviewer");
       say(`Reviewer: ${agent ? `${agent.driver.name} ${agent.version}` : `model ${model!.reviewer.model}`}; staged review, ${unitCount} units, ${unitCount * 2} finder sessions, then verifiers; this takes several minutes`);
       const stagedRun = await runStagedReview({
         snapshotDir: prep.snapshot.tree, change, citationChange: full, scan, config, manifest, secrets: p.secrets, deadline, now: deps.now, traced, model: model !== null, timedOut: inputs.timedOut, confidenceFloor: inputs.confidenceFloor, say, stopped: () => stopped,
-        findBrief: (unit, pass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: neighbourhoodBlock(unit.files) }, unit, pass),
+        inventory, units, findBrief,
+        onUnits: (units) => deps.onEvent({ type: "staged-units", units }),
         verifyBrief: (batch) => buildVerifyBrief({ ...briefArgs, neighbourhoodBlock: neighbourhoodBlock([batch.file]) }, batch),
         openSession: (role) => {
           if (stopped) throw new Error("the review stopped");
@@ -664,8 +673,8 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       const sessionOrder = new Map(stagedRun.sessions.map((s, i) => [s.role, i]));
       const modelLog = modelSessions.flatMap((s) => s.log).sort((a, b) => (sessionOrder.get(a.session ?? "") ?? 0) - (sessionOrder.get(b.session ?? "") ?? 0));
       const coverage = model
-        ? modelCoverage({ change, briefSent: modelSessions.some((s) => s.sentRounds > 0), briefFiles: stagedRun.briefFiles, toolLog: modelLog.map(modelToolEntry), delivered: stagedRun.delivered, lineCount })
-        : readCoverage({ change, briefFiles: stagedRun.briefFiles, trace: traced ? stagedRun.trace : [], lineCount, delivered: stagedRun.delivered });
+        ? modelCoverage({ change, briefSent: true, obligations: stagedRun.obligations, briefCarried: stagedRun.briefCarried, digestCarried: stagedRun.digestCarried, toolLog: modelLog.map(modelToolEntry), delivered: stagedRun.delivered, lineCount })
+        : readCoverage({ change, obligations: stagedRun.obligations, briefCarried: stagedRun.briefCarried, digestCarried: stagedRun.digestCarried, trace: traced ? stagedRun.trace : [], lineCount, delivered: stagedRun.delivered });
       const notes = [...(stagedRun.report.notes ?? []), ...(instructions.notes ?? []), ...(neighbourhood.partial ? [`Code around the change is partial: ${neighbourhood.partial}`] : [])];
       const report = redactStored({ ...stagedRun.report, impact, ...(notes.length ? { notes } : {}), timings: clock.timings() }, p.secrets);
       if (model) {
@@ -681,12 +690,12 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
             converse: (s) => converse({ session: s, snapshotDir: prep.snapshot.tree, brief: brief.text, deadline, traced: true, say, now: deps.now,
               check: (submission, trace, delivered) => {
                 const checked = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, confidenceFloor: inputs.confidenceFloor });
-                return { report: checked.ok ? checked.report : null, errors: checked.ok ? [] : checked.errors, unread: modelCoverage({ change, briefSent: true, briefFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread, required: checked.required, disposed: checked.disposed };
+                return { report: checked.ok ? checked.report : null, errors: checked.ok ? [] : checked.errors, unread: singlePassModelCoverage({ change, briefSent: true, diffFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread, required: checked.required, disposed: checked.disposed };
               },
               deliver: (unread, earlier) => deliverRanges({ snapshotDir: prep.snapshot.tree, unread, earlier, secrets: p.secrets, change }),
               onRound: (round) => { const kept = redactStored({ ...round, by: "second" as const }, p.secrets); stagedRun.rounds.push(kept); deps.onEvent({ type: "round", round: kept }); },
             }),
-            evidence: (s, t, startedAt) => modelEvidence({ role: "second", model: deps.model!.second!.model, session: s, talk: t, change, snapshot: { tree: prep.tree, before: after, after: hashSnapshot(prep.snapshot.tree) }, briefFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt }),
+            evidence: (s, t, startedAt) => modelEvidence({ role: "second", model: deps.model!.second!.model, session: s, talk: t, change, snapshot: { tree: prep.tree, before: after, after: hashSnapshot(prep.snapshot.tree) }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt }),
           });
           clock.enter("finalize");
         }
@@ -736,8 +745,8 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       const unread = prep.whole
         ? []
         : model
-          ? modelCoverage({ change, briefSent: true, briefFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread
-          : readCoverage({ change, briefFiles: brief.diffFiles, trace: traced ? trace : [], lineCount, delivered }).unread;
+          ? singlePassModelCoverage({ change, briefSent: true, diffFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread
+          : singlePassCoverage({ change, diffFiles: brief.diffFiles, trace: traced ? trace : [], lineCount, delivered }).unread;
       return { report: r.ok ? r.report : null, errors: r.ok ? [] : r.errors, unread, required: r.required, disposed: r.disposed };
     };
     const deliver: Parameters<typeof converse>[0]["deliver"] = (unread, earlier) => deliverRanges({ snapshotDir: prep.snapshot.tree, unread, earlier, secrets: p.secrets, change });
@@ -768,7 +777,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
           say(`Second reviewer: model ${reviewer.model} started`);
         },
         converse: (s) => converse({ session: s, snapshotDir: prep.snapshot.tree, brief: brief.text, deadline, traced: true, say, now: deps.now, check, deliver, onRound: onRound("second"), timedOut: inputs.timedOut }),
-        evidence: (s, t, startedAt) => modelEvidence({ role: "second", model: reviewer.model, session: s, talk: t, change, snapshot: { tree: prep.tree, before: first.snapshot.after ?? first.snapshot.before, after: hashSnapshot(prep.snapshot.tree) }, briefFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt }),
+        evidence: (s, t, startedAt) => modelEvidence({ role: "second", model: reviewer.model, session: s, talk: t, change, snapshot: { tree: prep.tree, before: first.snapshot.after ?? first.snapshot.before, after: hashSnapshot(prep.snapshot.tree) }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt }),
       });
     };
     const talk: Conversation = session === null ? { rounds: 0, trace: [], usage: { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null }, report: null, checked: null, errors: [], required: 0, disposed: 0, failure: notStarted, submission: null, delivered: [], carried: [], startedAt: now, endedAt: now } : await converse({
@@ -791,7 +800,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     const after = hashSnapshot(prep.snapshot.tree);
 
     if ("model" in chosen) {
-      const evidence = modelEvidence({ role: "primary", model: chosen.model.reviewer.model, session: modelTalk, talk, change, snapshot: { tree: prep.tree, before, after }, briefFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt: startedIso });
+      const evidence = modelEvidence({ role: "primary", model: chosen.model.reviewer.model, session: modelTalk, talk, change, snapshot: { tree: prep.tree, before, after }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt: startedIso });
       clock.enter("reviewer");
       const second = await secondReview(chosen.model, modelTalk, evidence);
       clock.enter("finalize");
@@ -813,7 +822,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       rounds: talk.rounds,
       usage: talk.usage,
     };
-    const coverage = readCoverage({ change, briefFiles: brief.diffFiles, trace: traced ? talk.trace : [], lineCount, delivered: talk.delivered });
+    const coverage = singlePassCoverage({ change, diffFiles: brief.diffFiles, trace: traced ? talk.trace : [], lineCount, delivered: talk.delivered });
     // Redacted like the report: a path or a tool input may hold a secret.
     const completion = redactStored(completionRecord({
       change,

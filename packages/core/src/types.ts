@@ -615,7 +615,8 @@ export type ReviewerRecord = {
 // One reviewer session of a staged review, as the tool measured it. `role`
 // is the ReviewerRole the session's call ids carry (`finder:<unit>:<pass>`
 // or `verifier:<n>`); `unit` names the find unit for a finder; `examined`
-// the hunk ids the finder's accepted answer listed; `failure` one plain
+// the distinct hunk or part ids the finder's answer listed, without path
+// or range labels; `failure` one plain
 // line when the session did not complete, else null.
 export type ReviewerSessionRecord = {
   role: string;
@@ -630,7 +631,18 @@ export type ReviewerSessionRecord = {
 
 // A changed hunk with the id the tool gave it (`h1`, `h2`, ...). `start` and
 // `end` are lines of the new file; a deletion's are its anchors.
-export type HunkRef = { id: string; path: string; start: number; end: number; deletion: boolean; point?: number };
+export type DeletionRef = { id: string; oldStart: number; oldEnd: number };
+export type HunkRef = {
+  id: string; path: string; start: number; end: number;
+  deletion: boolean | DeletionRef;
+  point?: number;
+  part?: { n: number; of: number; whole: string };
+  old?: [number, number] | null;
+  removedIn?: number | number[];
+  rows?: number;
+  bytes?: number;
+  note?: string;
+};
 
 // A find unit: one changed file, or a group of small files whose diffs stay
 // under the unit size bound, or one slice of a large file. Every hunk of the
@@ -727,7 +739,8 @@ export type CompletionRecord = {
   coverage: {
     hunks: number;
     covered: number;
-    unread: { path: string; start: number; end: number; deletion: boolean }[];
+    unread: (Pick<HunkRef, "path" | "start" | "end" | "deletion"> & Partial<Omit<HunkRef, "path" | "start" | "end" | "deletion">>)[];
+    given?: { path: string; start: number; end: number; deletion?: string; by: "brief" | "page" | "digest" | "read"; fragment?: { of: string; from: number; to: number } }[];
     files_read: string[];
     files_not_read: string[];
   };

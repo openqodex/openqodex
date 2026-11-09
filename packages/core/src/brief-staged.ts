@@ -31,13 +31,15 @@ export type StagedBriefArgs = {
 export const FINDER_CONFIDENCE_FLOOR = POSSIBLE_CONFIDENCE_FLOOR;
 
 // One verifier batch: the candidates of one file, at most VERIFY_BATCH_SIZE.
-export type VerifyBatch = { file: string; hunks: HunkRef[]; candidates: VerifyCandidate[] };
+// The scheduler measures the full rendered brief and sets `shown` to the ids
+// it can carry. Other parts retain their tool-read headings.
+export type VerifyBatch = { file: string; hunks: HunkRef[]; candidates: VerifyCandidate[]; shown?: string[] };
 export const VERIFY_BATCH_SIZE = 6;
 
 // The brief of one finder session: the unit's hunks with their ids, the
 // code around its files, the matched lenses, the pass's questions and the
 // find answer shape (FindAnswer).
-export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: FindPass): { text: string; diffFiles: Set<string> } {
+export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: FindPass): { text: string; diffFiles: Set<string>; carried: HunkRef[]; bytes: number } {
   const hunks = hunksBlock(args.change, unit.hunks, args.secrets);
   const blocks = [
     header(args.change, args.scan, args.config, args.target, "# OpenQodex review brief: find pass"),
@@ -55,7 +57,8 @@ export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: Fi
     FIND_WORK,
     findAnswerBlock(args.change, unit),
   ];
-  return { text: render(blocks, args.secrets), diffFiles: hunks.diffFiles };
+  const text = render(blocks, args.secrets);
+  return { text, diffFiles: hunks.diffFiles, carried: hunks.carried, bytes: Buffer.byteLength(text, "utf8") };
 }
 
 // The brief of one verifier session: that file's hunks with their ids, the
@@ -63,6 +66,8 @@ export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: Fi
 // passes that raised it, the scanner candidates of the file, and the verdict
 // shape (VerifyAnswer).
 export function buildVerifyBrief(args: StagedBriefArgs, batch: VerifyBatch): { text: string } {
+  const shown = batch.hunks.filter((h) => batch.shown ? batch.shown.includes(h.id) : verifyPartDistance(h, batch.candidates) <= 50);
+  const omitted = batch.hunks.filter((h) => !shown.includes(h));
   const blocks = [
     header(args.change, args.scan, args.config, args.target, "# OpenQodex review brief: verify pass"),
     copyBlock,
@@ -70,7 +75,8 @@ export function buildVerifyBrief(args: StagedBriefArgs, batch: VerifyBatch): { t
     instructionsBlock(args.instructions ?? "", args.instructionsFrom, "verify"),
     conventionsBlock(args.instructionFiles ?? [], "verify"),
     `## The file\n\n${batch.file}`,
-    hunksBlock(args.change, batch.hunks, args.secrets).text,
+    hunksBlock(args.change, shown, args.secrets).text,
+    omittedHeadings(omitted),
     args.impactBlock ?? "",
     args.neighbourhoodBlock ?? "",
     verifyCandidatesBlock(batch, args.lenses),
@@ -80,12 +86,38 @@ export function buildVerifyBrief(args: StagedBriefArgs, batch: VerifyBatch): { t
   return { text: render(blocks, args.secrets) };
 }
 
+function omittedHeadings(hunks: HunkRef[]): string {
+  const blocks: string[] = [];
+  let ranges: HunkRef[] = [];
+  const flush = () => {
+    if (!ranges.length) return;
+    const labels: string[] = [];
+    let length = 0;
+    for (const h of ranges) {
+      const label = `${h.start}-${h.end}`;
+      if (length + label.length > 160) break;
+      labels.push(label);
+      length += label.length + 2;
+    }
+    blocks.push(`other changed ranges in this file, not shown: ${labels.join(", ")}${labels.length < ranges.length ? `, and ${ranges.length - labels.length} more` : ""}; read with your tools`);
+    ranges = [];
+  };
+  for (const h of hunks) {
+    if (!h.part || h.part.of === 1) { ranges.push(h); continue; }
+    flush();
+    const heading = partHeading(h, false);
+    blocks.push(`${heading} (part ${h.part.n}, lines ${h.start} to ${h.end}, not shown; read with your tools)`);
+  }
+  flush();
+  return blocks.join("\n\n");
+}
+
 function render(blocks: string[], secrets: string[]): string {
   return redactSecrets(`${blocks.filter((block) => block !== "").join("\n\n")}\n`, secrets);
 }
 
 type DiffRow = { text: string; old: number; next: number };
-type DiffHunk = { rows: DiffRow[] };
+type DiffHunk = { rows: DiffRow[]; oldEnd: number; nextEnd: number };
 
 // Track both sides so removed lines stay with replacements, and deletion
 // text can be selected by its old line numbers without reading the snapshot.
@@ -101,7 +133,7 @@ function splitDiff(text: string): { header: string[]; hunks: DiffHunk[] } {
       // Empty sides name the preceding line; cursors name the next line.
       old = Number(match[1]) + (match[2] === "0" ? 1 : 0);
       next = Number(match[3]) + (match[4] === "0" ? 1 : 0);
-      hunk = { rows: [] };
+      hunk = { rows: [], oldEnd: old, nextEnd: next };
       hunks.push(hunk);
     } else if (!hunk) {
       header.push(row);
@@ -111,6 +143,8 @@ function splitDiff(text: string): { header: string[]; hunks: DiffHunk[] } {
       hunk.rows.push({ text: row, old, next });
       if (!added) old++;
       if (!removed) next++;
+      hunk.oldEnd = old;
+      hunk.nextEnd = next;
     } else if (row.startsWith("\\")) {
       hunk.rows.push({ text: row, old, next });
     }
@@ -128,24 +162,56 @@ function renderRun(rows: DiffRow[]): string[] {
   return [`@@ -${old},${oldCount} +${next},${newCount} @@`, ...rows.map((row) => row.text)];
 }
 
-function hunkRows(ref: HunkRef, diff: ReturnType<typeof splitDiff>, removed: ReturnType<typeof removedRuns>, point?: DeletionPoint): string[] {
+function selectedRows(ref: HunkRef, diff: ReturnType<typeof splitDiff>, removed: ReturnType<typeof removedRuns>, point?: DeletionPoint): string[] {
   const out: string[] = [];
   const run = point && removed.find((run) => point.after === run.after && point.lines === run.lines.length);
-  for (const hunk of diff.hunks) {
+  // Unified hunks are ordered on both sides. Skip unrelated hunks without
+  // walking all the rows of a file for each inventory entry.
+  const interval = ref.deletion ? ref.old ?? (run ? [run.oldStart, run.oldStart + run.lines.length - 1] : null) : [ref.start, ref.end];
+  if (!interval) return [];
+  const side = ref.deletion ? "old" : "next";
+  const endSide = ref.deletion ? "oldEnd" : "nextEnd";
+  let low = 0;
+  let high = diff.hunks.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (diff.hunks[mid]![endSide] < interval[0]!) low = mid + 1; else high = mid;
+  }
+  for (let at = low; at < diff.hunks.length; at++) {
+    const hunk = diff.hunks[at]!;
+    if ((hunk.rows[0]?.[side] ?? 0) > interval[1]!) break;
     const selected = new Set<number>();
     hunk.rows.forEach((row, i) => {
       if (ref.deletion) {
-        if (row.text.startsWith("-") && run && row.old >= run.oldStart && row.old < run.oldStart + run.lines.length) selected.add(i);
+        const interval = ref.old ?? (run ? [run.oldStart, run.oldStart + run.lines.length - 1] : null);
+        if (row.text.startsWith("-") && interval && row.old >= interval[0]! && row.old <= interval[1]!) selected.add(i);
       } else if (/^[ +]/.test(row.text) && row.next >= ref.start && row.next <= ref.end) selected.add(i);
     });
+    if (!ref.deletion && ref.old) {
+      // An interval can span pure deletions between replacements. Only the
+      // replacement runs whose first added row this part owns contribute old rows.
+      for (let first = 0; first < hunk.rows.length;) {
+        if (!/^[+\\-]/.test(hunk.rows[first]!.text)) { first++; continue; }
+        let end = first + 1;
+        while (end < hunk.rows.length && /^[+\\-]/.test(hunk.rows[end]!.text)) end++;
+        const added = hunk.rows.slice(first, end).find((row) => row.text.startsWith("+"));
+        if (added && added.next >= ref.start && added.next <= ref.end) {
+          for (let i = first; i < end; i++) {
+            const row = hunk.rows[i]!;
+            if (row.text.startsWith("-") && row.old >= ref.old[0] && row.old <= ref.old[1]) selected.add(i);
+          }
+        }
+        first = end;
+      }
+    }
     if (selected.size === 0) continue;
-    if (ref.deletion) {
+    if (ref.deletion && !(typeof ref.deletion === "object" && ref.deletion.id.includes("#replacement"))) {
       // Only anchors present in this diff can be shown without a file read.
       hunk.rows.forEach((row, i) => {
         if (/^[ +]/.test(row.text) && row.next >= ref.start && row.next <= ref.end) selected.add(i);
       });
-    } else {
-      // Old lines in a replacement belong to the same run as its new lines.
+    } else if (ref.old === undefined) {
+      // Legacy callers have not assigned old rows. Old lines in a replacement belong to the same run as its new lines.
       for (let first = 0; first < hunk.rows.length;) {
         if (!/^[+-]/.test(hunk.rows[first]!.text)) { first++; continue; }
         let end = first + 1;
@@ -169,51 +235,137 @@ function hunkRows(ref: HunkRef, diff: ReturnType<typeof splitDiff>, removed: Ret
   return out;
 }
 
-function hunksBlock(change: Change, hunks: HunkRef[], secrets: string[]): { text: string; diffFiles: Set<string> } {
+type ParsedFile = { diff: ReturnType<typeof splitDiff>; removed: ReturnType<typeof removedRuns>; replacements: ReturnType<typeof replacementRuns> };
+export type StagedDiffCache = { file(path: string): ParsedFile };
+const stagedCaches = new WeakMap<Change, { sources: Change["diffs"]; variants: Map<string, StagedDiffCache> }>();
+
+// A review shares parsed, redacted paths across inventory, packing and batches.
+// Source checks also keep hand-built, mutable Changes safe between test runs.
+export function stagedDiffCache(change: Change, secrets: string[] = []): StagedDiffCache {
+  let cached = stagedCaches.get(change);
+  if (!cached || cached.sources !== change.diffs) {
+    cached = { sources: change.diffs, variants: new Map() };
+    stagedCaches.set(change, cached);
+  }
+  const key = JSON.stringify(secrets);
+  let cache = cached.variants.get(key);
+  if (!cache) {
+    const sources = new Map(change.diffs?.map((d) => [d.path, d]));
+    const files = new Map<string, { source: string; parsed: ParsedFile }>();
+    cache = { file(path) {
+      const source = sources.get(path)?.text ?? "";
+      let file = files.get(path);
+      if (!file || file.source !== source) {
+        const text = redactSecretsKeepingLines(source, secrets);
+        const diff = splitDiff(text);
+        file = { source, parsed: { diff, removed: removedRuns(text), replacements: replacementRuns(text, diff) } };
+        files.set(path, file);
+      }
+      return file.parsed;
+    } };
+    cached.variants.set(key, cache);
+  }
+  return cache;
+}
+
+// The same rows are measured by the cutter and carried by a staged brief.
+export function hunkRows(change: Change, ref: HunkRef, secrets: string[] = [], cache = stagedDiffCache(change, secrets)): string[] {
+  const { diff, removed } = cache.file(ref.path);
+  const points = change.deletionPoints.get(ref.path) ?? [];
+  const point = ref.deletion ? ref.point !== undefined ? points[ref.point] : points.find((p) => Math.min(...p.anchors) === ref.start && Math.max(...p.anchors) === ref.end) : undefined;
+  const rows = selectedRows(ref, diff, removed, point);
+  return rows.length ? [...diff.header, ...rows] : [];
+}
+
+// Replacements have no deletion point. Their old rows still need one owner.
+export function replacementRuns(text: string, diff = splitDiff(text)): { start: number; end: number; oldStart: number; oldEnd: number }[] {
+  const out: { start: number; end: number; oldStart: number; oldEnd: number }[] = [];
+  for (const hunk of diff.hunks) for (let at = 0; at < hunk.rows.length;) {
+    if (!/^[+\\-]/.test(hunk.rows[at]!.text)) { at++; continue; }
+    let end = at + 1;
+    while (end < hunk.rows.length && /^[+\\-]/.test(hunk.rows[end]!.text)) end++;
+    const rows = hunk.rows.slice(at, end);
+    const old = rows.filter((r) => r.text.startsWith("-"));
+    const added = rows.filter((r) => r.text.startsWith("+"));
+    if (old.length && added.length) out.push({ start: added[0]!.next, end: added.at(-1)!.next, oldStart: old[0]!.old, oldEnd: old.at(-1)!.old });
+    at = end;
+  }
+  return out;
+}
+
+export function partHeading(ref: HunkRef, includePart = true): string {
+  const split = includePart && ref.part && ref.part.of > 1;
+  return `### ${ref.id} ${ref.path} ${ref.start}-${ref.end}${split ? ` (part ${ref.part!.n} of ${ref.part!.of})` : ""}${typeof ref.deletion === "object" && ref.deletion.oldEnd >= ref.deletion.oldStart ? ` (old lines ${ref.deletion.oldStart}-${ref.deletion.oldEnd})` : ""}`;
+}
+
+export function verifyPartDistance(h: HunkRef, candidates: VerifyCandidate[]): number {
+  return Math.min(Infinity, ...candidates.map((item) => {
+    const line = item.kind === "finder" ? item.candidate.line_number : item.candidate.lineStart;
+    const deletion = h.deletion;
+    if (typeof deletion === "object") return item.kind === "finder" && item.candidate.evidence.some((e) => e.removed && e.file_path === h.path && e.line_number >= deletion.oldStart && e.line_number <= deletion.oldEnd) ? -1 : Infinity;
+    return Math.max(h.start - line, line - h.end, 0);
+  }));
+}
+
+// A retained diff can be partial for a hand-built Change. Credit the rows
+// actually present, never the enclosing heading alone.
+function carriedRows(ref: HunkRef, rows: string[]): HunkRef[] {
+  const positions = splitDiff(rows.join("\n")).hunks.flatMap((h) => h.rows)
+    .filter((r) => ref.deletion ? r.text.startsWith("-") : /^[ +]/.test(r.text))
+    .map((r) => ref.deletion ? r.old : r.next).sort((a, b) => a - b);
+  const intervals: [number, number][] = [];
+  for (const n of positions) {
+    const prior = intervals.at(-1);
+    if (prior && n <= prior[1] + 1) prior[1] = Math.max(n, prior[1]);
+    else intervals.push([n, n]);
+  }
+  return intervals.map(([start, end]) => ref.deletion
+    ? typeof ref.deletion === "object" ? { ...ref, old: [start, end], deletion: { ...ref.deletion, oldStart: start, oldEnd: end } } : ref
+    : { ...ref, start: Math.max(start, ref.start), end: Math.min(end, ref.end) });
+}
+
+export function hunksBlock(change: Change, hunks: HunkRef[], secrets: string[]): { text: string; diffFiles: Set<string>; carried: HunkRef[] } {
   const blocks: string[] = [];
-  const files = new Map<string, { diff: ReturnType<typeof splitDiff>; removed: ReturnType<typeof removedRuns> }>();
+  const carried: HunkRef[] = [];
+  const cache = stagedDiffCache(change, secrets);
   const shown = new Set<string>();
   const missing = new Set<string>();
-  // A unit holds at most MAX_UNIT_DIFF_BYTES of diff unless one hunk alone is
-  // larger. A hunk over the brief's diff budget is read through the tools
-  // instead, and its file must then be read to count.
+  // Credit only the exact ranges whose rows reached this brief.
   for (const ref of hunks) {
     if (ref.deletion && change.files.some((file) => file.path === ref.path && file.binary && file.status === "deleted")) {
       blocks.push([
-        `### ${ref.id} ${ref.path} ${ref.start}-${ref.end}`,
+        partHeading(ref),
         "",
         "The file is binary and was deleted. There are no lines to read; the deletion is the change.",
       ].join("\n"));
       shown.add(ref.path);
+      carried.push(ref);
       continue;
     }
-    let file = files.get(ref.path);
-    if (!file) {
-      const text = redactSecretsKeepingLines(change.diffs?.find((diff) => diff.path === ref.path)?.text ?? "", secrets);
-      file = { diff: splitDiff(text), removed: removedRuns(text) };
-      files.set(ref.path, file);
-    }
+    const file = cache.file(ref.path);
     let point: DeletionPoint | undefined;
     if (ref.deletion) {
       const points = change.deletionPoints.get(ref.path) ?? [];
       point = ref.point !== undefined ? points[ref.point] : points.find((p) => Math.min(...p.anchors) === ref.start && Math.max(...p.anchors) === ref.end);
     }
-    const rows = hunkRows(ref, file.diff, file.removed, point);
+    const rows = selectedRows(ref, file.diff, file.removed, point);
     const body = [...(shown.has(ref.path) ? [] : file.diff.header), ...rows].join("\n");
     const size = Buffer.byteLength(body, "utf8");
-    const over = rows.length > 0 && size > MAX_DIFF_BYTES;
-    if (rows.length > 0 && !over) shown.add(ref.path); else missing.add(ref.path);
+    const over = rows.length > 0 && (size > MAX_DIFF_BYTES || ref.note !== undefined);
+    if (rows.length > 0 && !over && !ref.note) { shown.add(ref.path); carried.push(...carriedRows(ref, rows)); } else missing.add(ref.path);
     const fence = fenceFor(body);
     blocks.push([
-      `### ${ref.id} ${ref.path} ${ref.start}-${ref.end}`,
+      partHeading(ref),
       "",
+      ...(ref.removedIn ? [`The removed lines of this replacement are in ${Array.isArray(ref.removedIn) ? `parts ${ref.removedIn.join(", ")}` : `part ${ref.removedIn}`}.`, ""] : []),
+      ...(ref.note ? [ref.note, ""] : []),
       ...(ref.deletion ? [`Removed lines use the old file's line numbers. Cite deletion anchor ${ref.start}${ref.end === ref.start ? "" : ` or ${ref.end}`}.`, ""] : []),
       ...(over
         ? [`This hunk is ${Math.ceil(size / 1024)} KB, more than the ${MAX_DIFF_BYTES / 1024} KB a brief carries for one hunk. Read its lines with your tools.`]
         : rows.length > 0 ? [`${fence}diff`, body, fence] : ["The change holds no diff lines for this hunk. Read its code with your tools."]),
     ].join("\n"));
   }
-  return { text: blocks.join("\n\n"), diffFiles: new Set([...shown].filter((path) => !missing.has(path))) };
+  return { text: blocks.join("\n\n"), diffFiles: new Set([...shown].filter((path) => !missing.has(path))), carried };
 }
 
 function passBlock(pass: FindPass): string {

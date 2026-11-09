@@ -17,7 +17,7 @@
 //  7. The result's markdown, SARIF or JSON lose the model record or print the
 //     agent's reviewer line.
 import { makeLineSet } from "../../../tests/line-set.mjs";
-import { modelCoverage } from "@openqodex/core";
+import { singlePassModelCoverage } from "@openqodex/core";
 import type { Change, Report } from "@openqodex/core";
 import { describe, expect, it } from "vitest";
 import { modelRecord, modelReport, reviewRender } from "../src/model-record.js";
@@ -51,7 +51,7 @@ function evidence(over: Partial<ModelReviewEvidence> = {}): ModelReviewEvidence 
     changeId: change.id,
     snapshot: { tree: null, before: "h", after: "h" },
     candidates: { total: 0, disposed: 0 },
-    coverage: modelCoverage({ change, briefSent: true, briefFiles: new Set(), toolLog: toolLog.map((t) => ({ ...t, in_scope: t.inScope })) }),
+    coverage: singlePassModelCoverage({ change, briefSent: true, diffFiles: new Set(), toolLog: toolLog.map((t) => ({ ...t, in_scope: t.inScope })) }),
     briefSent: true,
     toolLog,
     attempts: [call(1), call(2)],

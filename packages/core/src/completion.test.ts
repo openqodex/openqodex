@@ -26,11 +26,13 @@
 //     snapshot leaves the model record complete.
 // 10. The model record's reviewer line prints an unknown cost or token count
 //     as a number instead of "not reported".
+// 12. Partial brief ranges or deletion fragments credit a whole obligation.
 // 11. The markdown, HTML or SARIF of a model review loses the model record
 //     or prints the agent's reviewer line instead of the model's.
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { budgetRefusedLine, completionRecord, modelCompletionRecord, modelCoverage, readCoverage } from "./completion.js";
+import { makeLineSet } from "../../../tests/line-set.mjs";
+import { budgetRefusedLine, completionRecord, modelCompletionRecord, singlePassModelCoverage, readCoverage, singlePassCoverage } from "./completion.js";
 import type { Hunk } from "./completion.js";
 import { checkSubmission } from "./finalize.js";
 import { buildDisplay } from "./render/display.js";
@@ -112,14 +114,14 @@ describe("1, 2. the agent record and its report", () => {
     { tool: "Read", path: "app/search.py", inside: true, range: [1, 40] as [number, number], ok: true },
     { tool: "Grep", path: null, inside: true, range: null, ok: true },
   ];
-  const coverage = readCoverage({ change, briefFiles: new Set(["app/settings.py"]), trace, lineCount });
+  const coverage = singlePassCoverage({ change, diffFiles: new Set(["app/settings.py"]), trace, lineCount });
   const traced = completionRecord({ change, reviewer, snapshot: { tree: "a".repeat(40), before: "b".repeat(64), after: "b".repeat(64) }, candidates: { total: 3, disposed: 3 }, coverage, trace, submissionErrors: [], wholeRepo: false });
   const untraced = completionRecord({
     change,
     reviewer: { ...reviewer, driver: "codex", version: "0.160.0", usage: { turns: 2, input_tokens: 2000, output_tokens: 1000, cost_usd: null } },
     snapshot: { tree: null, before: "b".repeat(64), after: "c".repeat(64) },
     candidates: { total: 3, disposed: 2 },
-    coverage: readCoverage({ change, briefFiles: new Set(), trace: [], lineCount }),
+    coverage: singlePassCoverage({ change, diffFiles: new Set(), trace: [], lineCount }),
     trace: [{ tool: "exec", path: null, inside: null, range: null, ok: true, detail: "cat x" }],
     submissionErrors: ["1. a problem"],
     wholeRepo: false,
@@ -206,20 +208,20 @@ function refused(callId: string, purpose: string): ModelAttempt {
   return { callId, purpose, attempt: 1, authorized: false, outcome: "refused", usage: null, durationMs: 0 };
 }
 
-type Log = { briefSent?: boolean; briefFiles?: Set<string>; delivered?: Hunk[]; toolLog?: ModelToolEntry[] };
+type Log = { briefSent?: boolean; diffFiles?: Set<string>; delivered?: Hunk[]; toolLog?: ModelToolEntry[] };
 
 // A model review that read both changed files with read_file in its first
 // reply; the second request carried both results and got the answer. The
 // brief carried no diff, so coverage comes from the reads alone.
 function modelArgs(over: Partial<Parameters<typeof modelCompletionRecord>[0]> & Log = {}): Parameters<typeof modelCompletionRecord>[0] {
-  const { briefSent = true, briefFiles = new Set<string>(), delivered = [], toolLog = [read("app/search.py", [1, 40]), read("app/settings.py", [1, 3])], ...rest } = over;
+  const { briefSent = true, diffFiles = new Set<string>(), delivered = [], toolLog = [read("app/search.py", [1, 40]), read("app/settings.py", [1, 3])], ...rest } = over;
   const change = makeChange();
   return {
     changeId: change.id,
     model: "m-1",
     snapshot: { tree: "a".repeat(40), before: "b".repeat(64), after: "b".repeat(64) },
     candidates: { total: 3, disposed: 3 },
-    coverage: modelCoverage({ change, briefSent, briefFiles, toolLog, delivered, lineCount }),
+    coverage: singlePassModelCoverage({ change, briefSent, diffFiles, toolLog, delivered, lineCount }),
     toolLog,
     attempts: [answered("call-1", "brief", 2000, 100, 0.01), answered("call-2", "brief", 3000, 500, 0.01)],
     tools: TOOLS,
@@ -248,7 +250,7 @@ describe("the model record", () => {
   });
 
   it("counts the brief, a correction round and a sent read alike", () => {
-    const r = modelCompletionRecord(modelArgs({ briefFiles: new Set(["app/settings.py"]), delivered: [{ path: "app/search.py", start: 14, end: 15, deletion: false }], toolLog: [] }));
+    const r = modelCompletionRecord(modelArgs({ diffFiles: new Set(["app/settings.py"]), delivered: [{ path: "app/search.py", start: 14, end: 15, deletion: false }], toolLog: [] }));
     expect(r.status).toBe("complete");
     expect(r.coverage.covered).toBe(2);
   });
@@ -268,9 +270,9 @@ describe("the model record", () => {
   });
 
   it("5. the brief's diff does not count when the request carrying it was never sent", () => {
-    const sent = modelCompletionRecord(modelArgs({ briefFiles: new Set(["app/search.py", "app/settings.py"]), toolLog: [] }));
+    const sent = modelCompletionRecord(modelArgs({ diffFiles: new Set(["app/search.py", "app/settings.py"]), toolLog: [] }));
     expect(sent.coverage.covered).toBe(2);
-    const r = modelCompletionRecord(modelArgs({ briefSent: false, briefFiles: new Set(["app/search.py", "app/settings.py"]), toolLog: [], attempts: [refused("call-1", "brief")] }));
+    const r = modelCompletionRecord(modelArgs({ briefSent: false, diffFiles: new Set(["app/search.py", "app/settings.py"]), toolLog: [], attempts: [refused("call-1", "brief")] }));
     expect(r.status).toBe("incomplete");
     expect(r.coverage.covered).toBe(0);
     expect(r.reviewer.calls).toBe(0);
@@ -385,4 +387,36 @@ describe("the model review's report", () => {
     expect(failed.invocations[0].executionSuccessful).toBe(false);
     expect(failed.invocations[0].toolExecutionNotifications[0].message.text).toContain("budget refused before brief call 1");
   });
+});
+
+it("credits exact intervals once and leaves the rest of a file unread", () => {
+  const change = makeChange({ coverage: new Map([["app/search.py", makeLineSet([1, 2, 8, 9])]]) });
+  const first = { path: "app/search.py", start: 1, end: 2, deletion: false };
+  const coverage = readCoverage({ change, briefCarried: [first, first], trace: [] });
+  expect(coverage.covered).toBe(1);
+  expect(coverage.unread).toEqual([{ ...first, start: 8, end: 9 }]);
+  expect(coverage.given).toEqual([{ path: first.path, start: 1, end: 2, by: "brief" }]);
+});
+it("does not credit a deletion parent for only one old-side fragment", () => {
+  const change = makeChange({ coverage: new Map(), deletionPoints: new Map([["app/search.py", [{ after: 1, anchors: [1, 2], lines: 4 }]]]) });
+  const base = { path: "app/search.py", start: 1, end: 2, deletion: { id: "app/search.py#0", oldStart: 1, oldEnd: 4 } };
+  const refs = [1, 3].map((from, i) => ({ ...base, id: `h${i + 1}`, old: [from, from + 1] as [number, number], deletion: { ...base.deletion, oldStart: from, oldEnd: from + 1 } }));
+  const partial = readCoverage({ change, obligations: refs, briefCarried: [refs[0]!], trace: [] });
+  expect(partial.unread).toHaveLength(1);
+  expect(partial.covered).toBe(1);
+  const full = readCoverage({ change, obligations: refs, briefCarried: refs, delivered: refs, trace: [] });
+  expect(full.unread).toEqual([]);
+  expect(full.given).toHaveLength(2);
+  expect(full.given!.every((g) => g.by === "brief")).toBe(true);
+});
+
+it("records each source's exact interval before fallback reads", () => {
+  const change = makeChange({ coverage: new Map([["app/search.py", makeLineSet(Array.from({ length: 10 }, (_, i) => i + 1))]]) });
+  const coverage = readCoverage({ change, briefCarried: [{ path: "app/search.py", start: 1, end: 4, deletion: false }], delivered: [{ path: "app/search.py", start: 5, end: 6, deletion: false }], trace: [{ tool: "Read", path: "app/search.py", range: [1, 10], inside: true, ok: true }] });
+  expect(coverage.unread).toEqual([]);
+  expect(coverage.given).toEqual([
+    { path: "app/search.py", start: 1, end: 4, by: "brief" },
+    { path: "app/search.py", start: 5, end: 6, by: "page" },
+    { path: "app/search.py", start: 7, end: 10, by: "read" },
+  ]);
 });

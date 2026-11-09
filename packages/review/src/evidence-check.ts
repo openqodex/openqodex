@@ -83,8 +83,8 @@ export function checkFindAnswer(value: unknown, unit: ReviewUnit, change: Change
   if (!sameChange(answer.change_id, change)) errors.push(`change_id: use ${change.shortId}`);
   if (answer.unit !== unit.id) errors.push(`unit: use ${unit.id}`);
   for (const h of unit.hunks) {
-    if (!answer.examined.includes(h.id)) errors.push(`hunk ${h.id} of ${h.path} was not examined`);
-    if (!answer.analysis.some((a) => a.hunk === h.id)) errors.push(`analysis: hunk ${h.id} of ${h.path} needs its analysis`);
+    if (!answer.examined.includes(h.id)) errors.push(`hunk ${h.id} of ${h.path}:${h.start}-${h.end} was not examined`);
+    if (!answer.analysis.some((a) => a.hunk === h.id)) errors.push(`analysis: hunk ${h.id} of ${h.path}:${h.start}-${h.end} needs its analysis`);
   }
   for (const id of [...answer.examined, ...answer.analysis.map((a) => a.hunk)]) if (!unit.hunks.some((h) => h.id === id)) errors.push(`hunk ${id} is not in unit ${unit.id}`);
   const rejected: RejectedEvidence[] = [];

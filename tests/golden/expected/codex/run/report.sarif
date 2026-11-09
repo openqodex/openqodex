@@ -988,6 +988,122 @@
             "hunks": 18,
             "covered": 18,
             "unread": [],
+            "given": [
+              {
+                "path": ".github/workflows/ci.yml",
+                "start": 16,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 1,
+                "end": 1,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 3,
+                "end": 3,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 5,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 9,
+                "end": 10,
+                "deletion": "Dockerfile#0",
+                "fragment": {
+                  "of": "Dockerfile#0",
+                  "from": 10,
+                  "to": 10
+                },
+                "by": "brief"
+              },
+              {
+                "path": "app/config.py",
+                "start": 1,
+                "end": 3,
+                "by": "brief"
+              },
+              {
+                "path": "app/search.py",
+                "start": 1,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 5,
+                "end": 6,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 8,
+                "end": 8,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 23,
+                "end": 23,
+                "by": "brief"
+              },
+              {
+                "path": "db/migrations/002_index_item_names.sql",
+                "start": 1,
+                "end": 2,
+                "by": "brief"
+              },
+              {
+                "path": "deploy/deployment.yaml",
+                "start": 41,
+                "end": 43,
+                "by": "brief"
+              },
+              {
+                "path": "infra/main.tf",
+                "start": 27,
+                "end": 28,
+                "by": "brief"
+              },
+              {
+                "path": "package-lock.json",
+                "start": 11,
+                "end": 11,
+                "by": "brief"
+              },
+              {
+                "path": "package-lock.json",
+                "start": 15,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "package.json",
+                "start": 7,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "scripts/deploy.sh",
+                "start": 7,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "scripts/deploy.sh",
+                "start": 11,
+                "end": 11,
+                "by": "brief"
+              }
+            ],
             "files_read": [],
             "files_not_read": []
           },

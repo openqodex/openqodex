@@ -351,6 +351,17 @@ for (let i = 0; i < Math.max(actionSteps.length, gateSteps.length); i++) {
   }
 }
 
+// 8. Staged payload and brief budgets are named with their code values.
+const { MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, DELIVER_LINES } = await import(join(root, "packages/review/dist/index.js"));
+for (const [name, value, label] of [
+  ["MAX_UNIT_DIFF_BYTES", MAX_UNIT_DIFF_BYTES, "120 KB"],
+  ["DELIVER_LINES", DELIVER_LINES, "4,000"],
+  ["MAX_BRIEF_BYTES", MAX_BRIEF_BYTES, "256 KB"],
+]) {
+  if (value !== ({ MAX_UNIT_DIFF_BYTES: 120 * 1024, DELIVER_LINES: 4000, MAX_BRIEF_BYTES: 256 * 1024 })[name]) fail("docs/claude-code-review.md", `${name} changed; update the documented budget`);
+  if (!read("docs/claude-code-review.md").includes(`\`${name}\``) || !read("docs/claude-code-review.md").includes(label)) fail("docs/claude-code-review.md", `must name ${name} and ${label}`);
+}
+
 if (errors.length) {
   for (const error of errors) console.error(`docs-facts: ${error}`);
   process.exit(1);

@@ -1,0 +1,332 @@
+[
+  {
+    "id": "u1",
+    "files": [
+      ".github/workflows/ci.yml",
+      "Dockerfile",
+      "app/config.py",
+      "app/search.py",
+      "app/server.py",
+      "db/migrations/002_index_item_names.sql",
+      "deploy/deployment.yaml",
+      "infra/main.tf",
+      "package-lock.json",
+      "package.json",
+      "scripts/deploy.sh"
+    ],
+    "hunks": [
+      {
+        "path": ".github/workflows/ci.yml",
+        "start": 16,
+        "end": 17,
+        "deletion": false,
+        "id": "h1",
+        "old": null,
+        "rows": 7,
+        "bytes": 279,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": ".github/workflows/ci.yml:16-17"
+        }
+      },
+      {
+        "path": "Dockerfile",
+        "start": 1,
+        "end": 1,
+        "deletion": false,
+        "id": "h2",
+        "old": [
+          1,
+          1
+        ],
+        "rows": 7,
+        "bytes": 170,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "Dockerfile:1-1"
+        }
+      },
+      {
+        "path": "Dockerfile",
+        "start": 3,
+        "end": 3,
+        "deletion": false,
+        "id": "h3",
+        "old": [
+          3,
+          4
+        ],
+        "rows": 8,
+        "bytes": 222,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "Dockerfile:3-3"
+        }
+      },
+      {
+        "path": "Dockerfile",
+        "start": 5,
+        "end": 7,
+        "deletion": false,
+        "id": "h4",
+        "old": [
+          6,
+          7
+        ],
+        "rows": 10,
+        "bytes": 268,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "Dockerfile:5-7"
+        }
+      },
+      {
+        "path": "Dockerfile",
+        "start": 9,
+        "end": 10,
+        "deletion": {
+          "id": "Dockerfile#0",
+          "oldStart": 10,
+          "oldEnd": 10
+        },
+        "id": "h5",
+        "point": 0,
+        "old": [
+          10,
+          10
+        ],
+        "rows": 8,
+        "bytes": 143,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "Dockerfile#0"
+        }
+      },
+      {
+        "path": "app/config.py",
+        "start": 1,
+        "end": 3,
+        "deletion": false,
+        "id": "h6",
+        "old": null,
+        "rows": 9,
+        "bytes": 220,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "app/config.py:1-3"
+        }
+      },
+      {
+        "path": "app/search.py",
+        "start": 1,
+        "end": 17,
+        "deletion": false,
+        "id": "h7",
+        "old": null,
+        "rows": 23,
+        "bytes": 597,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "app/search.py:1-17"
+        }
+      },
+      {
+        "path": "app/server.py",
+        "start": 5,
+        "end": 6,
+        "deletion": false,
+        "id": "h8",
+        "old": null,
+        "rows": 7,
+        "bytes": 161,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "app/server.py:5-6"
+        }
+      },
+      {
+        "path": "app/server.py",
+        "start": 8,
+        "end": 8,
+        "deletion": false,
+        "id": "h9",
+        "old": null,
+        "rows": 6,
+        "bytes": 160,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "app/server.py:8-8"
+        }
+      },
+      {
+        "path": "app/server.py",
+        "start": 23,
+        "end": 23,
+        "deletion": false,
+        "id": "h10",
+        "old": [
+          20,
+          20
+        ],
+        "rows": 7,
+        "bytes": 198,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "app/server.py:23-23"
+        }
+      },
+      {
+        "path": "db/migrations/002_index_item_names.sql",
+        "start": 1,
+        "end": 2,
+        "deletion": false,
+        "id": "h11",
+        "old": null,
+        "rows": 8,
+        "bytes": 304,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "db/migrations/002_index_item_names.sql:1-2"
+        }
+      },
+      {
+        "path": "deploy/deployment.yaml",
+        "start": 41,
+        "end": 43,
+        "deletion": false,
+        "id": "h12",
+        "old": [
+          41,
+          41
+        ],
+        "rows": 9,
+        "bytes": 359,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "deploy/deployment.yaml:41-43"
+        }
+      },
+      {
+        "path": "infra/main.tf",
+        "start": 27,
+        "end": 28,
+        "deletion": false,
+        "id": "h13",
+        "old": [
+          27,
+          27
+        ],
+        "rows": 8,
+        "bytes": 243,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "infra/main.tf:27-28"
+        }
+      },
+      {
+        "path": "package-lock.json",
+        "start": 11,
+        "end": 11,
+        "deletion": false,
+        "id": "h14",
+        "old": [
+          11,
+          11
+        ],
+        "rows": 7,
+        "bytes": 203,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "package-lock.json:11-11"
+        }
+      },
+      {
+        "path": "package-lock.json",
+        "start": 15,
+        "end": 17,
+        "deletion": false,
+        "id": "h15",
+        "old": [
+          15,
+          17
+        ],
+        "rows": 11,
+        "bytes": 594,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "package-lock.json:15-17"
+        }
+      },
+      {
+        "path": "package.json",
+        "start": 7,
+        "end": 7,
+        "deletion": false,
+        "id": "h16",
+        "old": [
+          7,
+          7
+        ],
+        "rows": 7,
+        "bytes": 173,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "package.json:7-7"
+        }
+      },
+      {
+        "path": "scripts/deploy.sh",
+        "start": 7,
+        "end": 7,
+        "deletion": false,
+        "id": "h17",
+        "old": [
+          7,
+          7
+        ],
+        "rows": 7,
+        "bytes": 192,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "scripts/deploy.sh:7-7"
+        }
+      },
+      {
+        "path": "scripts/deploy.sh",
+        "start": 11,
+        "end": 11,
+        "deletion": false,
+        "id": "h18",
+        "old": [
+          11,
+          11
+        ],
+        "rows": 7,
+        "bytes": 214,
+        "part": {
+          "n": 1,
+          "of": 1,
+          "whole": "scripts/deploy.sh:11-11"
+        }
+      }
+    ],
+    "diffBytes": 4700
+  }
+]

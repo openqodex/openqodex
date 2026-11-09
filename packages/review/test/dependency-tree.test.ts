@@ -1,3 +1,4 @@
+// 3. An unsendable staged inventory falls back to an oversized single pass.
 // Failure cases: scanChange tries git or scans beyond the supplied inventory;
 // a server review reads the snapshot inventory with its tree scanner disabled.
 import { makeLineSet } from "../../../tests/line-set.mjs";
@@ -57,4 +58,36 @@ it("a server review never reads the inventory when osv-scanner is disabled", asy
   if (result.ended !== "unavailable") throw new Error(`review ended ${result.ended}`);
   expect(result.scan.scanners[0]).toMatchObject({ scanner: "osv-scanner", status: "disabled" });
   expect(calls).toBe(0);
+});
+
+it("does not send an oversized fixed-block brief when no staged entry fits", async () => {
+  const dir = tempDir("oq-fixed-block-repo-");
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@openqodex.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  writeFileSync(join(dir, "readme.txt"), "before\n");
+  git("add", "."); git("commit", "-qm", "Base");
+  const base = git("rev-parse", "HEAD");
+  writeFileSync(join(dir, "readme.txt"), "after\n");
+  git("add", "."); git("commit", "-qm", "Edit");
+  const head = git("rev-parse", "HEAD");
+  const decision = await decideIncremental({ clonePath: dir, mergeBaseSha: base, headSha: head });
+  if (!decision.ok) throw new Error(decision.reason);
+  const server = serverScope({ clonePath: dir, workDir: tempDir("oq-fixed-block-work-"), exclude: [], decision });
+  let calls = 0;
+  const result = await runReviewCore(
+    { repoRoot: dir, config: makeConfig({ stages: true }), scope: {}, target: head, only: ["osv-scanner"], noGraph: true, reviewer: "auto", web: false, timeoutMs: 30_000, runtimeVersion: "test" },
+    {
+      drivers: [], snapshots: server.snapshots, scoped: server.scoped,
+      resolveTool: async () => { throw new Error("no matching scanner"); },
+      resolveTarget: async () => ({ headSha: head, baseRef: "main", baseSource: "the host", baseSha: base, mergeBase: base, notes: [], release: async () => {} }),
+      instructions: () => ({ text: "convention\n".repeat(30000), hash: null }),
+      model: { reviewer: { kind: "model", model: "fixture", maxOutputTokens: 100, async complete() { calls++; throw new Error("oversized brief sent"); } } },
+      onEvent: () => {}, now: Date.now,
+    },
+  );
+  expect(calls).toBe(0);
+  expect(result.ended).toBe("model-reviewed");
+  if (result.ended !== "model-reviewed") throw new Error(result.ended);
+  expect(result.evidence.coverage.unread).toContainEqual(expect.objectContaining({ path: "readme.txt", start: 1, end: 1 }));
+  expect(result.report.notes?.join(" ")).toContain("MAX_BRIEF_BYTES");
 });

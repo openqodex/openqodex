@@ -388,6 +388,8 @@ export async function runReview(o: ReviewOptions): Promise<number> {
               "brief.md": e.brief,
               "impact.json": `${JSON.stringify(e.impact, null, 2)}\n`,
             });
+          } else if (e.type === "staged-units") {
+            write({ "units.json": `${JSON.stringify(redactStored(e.units, secrets), null, 2)}\n` });
           } else if (e.type === "staged-brief") {
             writeStagedBrief(e.role, e.brief);
           } else if (e.type === "started") {

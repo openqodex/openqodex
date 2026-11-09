@@ -7,7 +7,7 @@
 // only the diff in the brief or a correction round can show it. A reviewer
 // whose trace is not complete (Codex) reports no reads, so for it only the
 // brief and the correction rounds count.
-import type { Change, CompletionRecord, ModelAttempt, ModelCompletionRecord, ModelToolEntry, ReviewerRecord, ReviewerSessionRecord } from "./types.js";
+import type { Change, CompletionRecord, HunkRef, ModelAttempt, ModelCompletionRecord, ModelToolEntry, ReviewerRecord, ReviewerSessionRecord } from "./types.js";
 
 // One tool call of the reviewer. `path` is relative to the snapshot when
 // `inside`, else as the agent named it. `range` is the first and last line a
@@ -35,7 +35,7 @@ export function refusedOutside(t: TraceEntry): boolean {
   return outsideSnapshot(t) && !t.ok;
 }
 
-export type Hunk = { path: string; start: number; end: number; deletion: boolean };
+export type Hunk = Pick<HunkRef, "path" | "start" | "end" | "deletion"> & Partial<Omit<HunkRef, "path" | "start" | "end" | "deletion">>;
 
 export type Coverage = CompletionRecord["coverage"];
 
@@ -78,34 +78,98 @@ function covers(ranges: [number, number][], start: number, end: number): boolean
 // `delivered`: ranges the tool itself put in front of the reviewer in a
 // correction round; a line range counts like a read, a deletion when the
 // same deletion was delivered.
-export function readCoverage(args: { change: Change; briefFiles: ReadonlySet<string>; trace: TraceEntry[]; lineCount?: (path: string) => number | null; delivered?: Hunk[] }): Coverage {
+export type CoverageArgs = {
+  change: Change;
+  obligations?: Hunk[];
+  briefCarried?: Hunk[];
+  digestCarried?: Hunk[];
+  trace: TraceEntry[];
+  lineCount?: (path: string) => number | null;
+  delivered?: Hunk[];
+};
+
+export function readCoverage(args: CoverageArgs): Coverage {
   const reads = new Map<string, [number, number][]>();
   for (const t of args.trace) {
     if (t.tool !== "Read" || !t.ok || t.inside !== true || t.path === null || t.range === null) continue;
     reads.set(t.path, [...(reads.get(t.path) ?? []), t.range]);
   }
-  const given = new Map<string, [number, number][]>();
-  const deletions = new Set<string>();
-  for (const d of args.delivered ?? []) {
-    if (d.deletion) deletions.add(`${d.path}\0${d.start}\0${d.end}`);
-    else given.set(d.path, [...(given.get(d.path) ?? []), [d.start, d.end]]);
-  }
   const whole = (args.change.uncovered ?? []).map((path) => ({ path, start: 1, end: args.lineCount?.(path) ?? 0, deletion: false }));
-  const hunks = [...changedHunks(args.change), ...whole];
-  const unread = hunks.filter((h) => {
-    if (args.briefFiles.has(h.path)) return false;
-    if (h.deletion) return !deletions.has(`${h.path}\0${h.start}\0${h.end}`);
-    if (h.end < h.start) return true;
-    return !covers([...(reads.get(h.path) ?? []), ...(given.get(h.path) ?? [])], h.start, h.end);
-  });
+  const hunks = args.obligations ?? [...changedHunks(args.change), ...whole];
+  const sources = [
+    { by: "brief" as const, entries: args.briefCarried ?? [] },
+    { by: "digest" as const, entries: args.digestCarried ?? [] },
+    { by: "page" as const, entries: args.delivered ?? [] },
+  ];
+  const given: NonNullable<Coverage["given"]> = [];
+  const unread: Hunk[] = [];
+  const deletionId = (h: Hunk) => typeof h.deletion === "object" ? h.deletion.id : `${h.path}#${h.point ?? (args.change.deletionPoints.get(h.path) ?? []).findIndex((p) => Math.min(...p.anchors) === h.start && Math.max(...p.anchors) === h.end)}`;
+  for (const h of hunks) {
+    if (h.end < h.start && !h.deletion) { unread.push(h); continue; }
+    const matching = sources.map((source) => ({ ...source, entries: source.entries.filter((d) => d.path === h.path && Boolean(d.deletion) === Boolean(h.deletion) && (!h.deletion || deletionId(d) === deletionId(h))) }));
+    const range = (d: Hunk): [number, number] => typeof d.deletion === "object" ? [d.deletion.oldStart, d.deletion.oldEnd] : [d.start, d.end];
+    const [start, end] = range(h);
+    const own = matching.flatMap((s) => s.entries.map(range));
+    const read = h.deletion ? [] : reads.get(h.path) ?? [];
+    if ((h.deletion && end < start ? !matching.some((s) => s.entries.length) : !covers([...own, ...read], start, end))) { unread.push(h); continue; }
+    // Own deliveries win over reads. Subtract earlier credit so overlapping
+    // finder pairs and repeated reads never list a line twice.
+    let left: [number, number][] = [[start, end]];
+    const credit = (by: "brief" | "page" | "digest" | "read", ranges: [number, number][]) => {
+      const merged: [number, number][] = [];
+      for (const [a, b] of [...ranges].sort((x, y) => x[0] - y[0])) {
+        const prior = merged.at(-1);
+        if (prior && a <= prior[1] + 1) prior[1] = Math.max(prior[1], b);
+        else merged.push([a, b]);
+      }
+      for (const [a, b] of merged) {
+        const next: [number, number][] = [];
+        for (const [from, to] of left) {
+          if (b < from || a > to) { next.push([from, to]); continue; }
+          const first = Math.max(a, from);
+          const last = Math.min(b, to);
+          given.push({ path: h.path, start: h.deletion ? h.start : first, end: h.deletion ? h.end : last, ...(h.deletion ? { deletion: deletionId(h), ...(typeof h.deletion === "object" ? { fragment: { of: deletionId(h), from: first, to: last } } : {}) } : {}), by });
+          if (from < first) next.push([from, first - 1]);
+          if (last < to) next.push([last + 1, to]);
+        }
+        left = next;
+      }
+    };
+    if (h.deletion && end < start) {
+      given.push({ path: h.path, start: h.start, end: h.end, deletion: deletionId(h), by: matching.find((s) => s.entries.length > 0)!.by });
+    } else {
+      for (const source of matching) credit(source.by, source.entries.map(range));
+      credit("read", read);
+    }
+
+  }
   const readable = args.change.files.filter((f) => f.status !== "deleted" && !f.binary).map((f) => f.path);
   return {
     hunks: hunks.length,
     covered: hunks.length - unread.length,
     unread,
+    given,
     files_read: [...reads.keys()].sort(),
     files_not_read: readable.filter((p) => !reads.has(p)).sort(),
   };
+}
+
+// The legacy single pass still has a file-diff renderer. Translate that
+// renderer's receipt to intervals before it enters the coverage engine.
+function singlePassRanges(args: { change: Change; diffFiles: ReadonlySet<string>; lineCount?: (path: string) => number | null }): Hunk[] {
+  return [...changedHunks(args.change), ...(args.change.uncovered ?? []).map((path) => ({ path, start: 1, end: args.lineCount?.(path) ?? 0, deletion: false }))].filter((h) => args.diffFiles.has(h.path));
+}
+
+export function singlePassCoverage(args: CoverageArgs & { diffFiles: ReadonlySet<string> }): Coverage {
+  const { diffFiles: _, ...rest } = args;
+  const { given: __, ...coverage } = readCoverage({ ...rest, briefCarried: singlePassRanges(args) });
+  return coverage;
+}
+
+export function singlePassModelCoverage(args: Omit<CoverageArgs, "trace"> & { diffFiles: ReadonlySet<string>; briefSent: boolean; toolLog: ModelToolEntry[] }): Coverage {
+  const { diffFiles: _, ...rest } = args;
+  const { given: __, ...coverage } = modelCoverage({ ...rest, briefCarried: singlePassRanges(args) });
+  return coverage;
 }
 
 const where = (h: Hunk) => (h.end > h.start ? `${h.path}:${h.start}-${h.end}` : `${h.path}:${h.start}`);
@@ -204,18 +268,11 @@ export function budgetRefusedLine(purpose: string, call: number): string {
 // lines it carried, and only once `delivered`. A refused result carries
 // nothing, and neither does one for a path outside the snapshot or outside
 // the review's scopes.
-export function modelCoverage(args: {
-  change: Change;
-  briefSent: boolean;
-  briefFiles: ReadonlySet<string>;
-  toolLog: ModelToolEntry[];
-  delivered?: Hunk[];
-  lineCount?: (path: string) => number | null;
-}): Coverage {
+export function modelCoverage(args: Omit<CoverageArgs, "trace"> & { briefSent: boolean; toolLog: ModelToolEntry[] }): Coverage {
   const reads: TraceEntry[] = args.toolLog
     .filter((t) => t.tool === MODEL_READ_TOOL && t.delivered && t.in_scope !== false)
     .map((t) => ({ tool: "Read", path: t.path, inside: t.inside, range: t.range, ok: t.ok }));
-  return readCoverage({ change: args.change, briefFiles: args.briefSent ? args.briefFiles : new Set(), trace: reads, lineCount: args.lineCount, delivered: args.delivered });
+  return readCoverage({ ...args, briefCarried: args.briefSent ? args.briefCarried : [], digestCarried: args.briefSent ? args.digestCarried : [], trace: reads });
 }
 
 export function modelCompletionRecord(args: {
