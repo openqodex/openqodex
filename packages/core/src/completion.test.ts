@@ -1,12 +1,12 @@
-// The two completion records. Today's record of an agent review stays byte
-// for byte what it was; a review by a model reviewer gets its own record,
+// The two completion records. The agent record keeps its existing fields
+// and adds refused requests; a model reviewer gets its own record,
 // built from the brain's logs (what each request carried, every tool call
 // served, every model attempt and its authorization), never from the
 // reviewer's word. Also the reviewer line each prints.
 //
 // Ways it could fail, written before the code:
-//  1. The agent record changes for the same inputs: a field added, renamed,
-//     moved or given another value. The push hooks, the Action and the
+//  1. The agent record changes beyond the added refused field: a field is
+//     renamed, moved or given another value. The push hooks, the Action and the
 //     golden run read it.
 //  2. The agent review's markdown, terminal text, receipt, SARIF or HTML
 //     changes.
@@ -15,8 +15,8 @@
 //  4. A read cut by the 32 KB bound counts its whole file as shown.
 //  5. The brief counts as shown when its request was never sent (the budget
 //     refused the first call).
-//  6. A tool call outside the snapshot or outside the review's scopes leaves
-//     the record complete.
+//  6. A refused call fails the review, hides a served outside read or is not
+//     shown on the receipt. A served outside or unscoped read leaves it complete.
 //  7. A budget refusal leaves the record complete, or the record loses the
 //     usage of the attempts made before it.
 //  8. A tool name the brain never defined, returned by the model, is not
@@ -45,8 +45,8 @@ import type { ModelAttempt, ModelCompletionRecord, ModelToolEntry, Report, Revie
 // verdict's count of scanners that did not run was added on 2026-10-12
 // (issue 166): the fixture scan has one scanner not installed.
 const FROZEN = {
-  traced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"complete\",\"missing\":[],\"reviewer\":{\"driver\":\"claude\",\"version\":\"2.1.289\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":10,\"input_tokens\":45000,\"output_tokens\":3000,\"cost_usd\":0.31}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"candidates\":{\"total\":3,\"disposed\":3},\"coverage\":{\"hunks\":2,\"covered\":2,\"unread\":[],\"files_read\":[\"app/search.py\"],\"files_not_read\":[\"app/settings.py\"]},\"outside_reads\":[],\"trace_complete\":true}",
-  untraced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"incomplete\",\"missing\":[\"the reviewer timed out and was stopped\",\"the snapshot changed while the reviewer read it\",\"1 scanner candidate has no disposition\",\"the reviewer's answer still failed 1 check after the correction rounds\",\"1. a problem\",\"2 changed ranges were not given to the reviewer: app/search.py:14-15, app/settings.py:1-3\"],\"reviewer\":{\"driver\":\"codex\",\"version\":\"0.160.0\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":2,\"input_tokens\":2000,\"output_tokens\":1000,\"cost_usd\":null}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":null,\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"candidates\":{\"total\":3,\"disposed\":2},\"coverage\":{\"hunks\":2,\"covered\":0,\"unread\":[{\"path\":\"app/search.py\",\"start\":14,\"end\":15,\"deletion\":false},{\"path\":\"app/settings.py\",\"start\":1,\"end\":3,\"deletion\":false}],\"files_read\":[],\"files_not_read\":[]},\"outside_reads\":[],\"trace_complete\":false}",
+  traced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"complete\",\"missing\":[],\"refused\":[],\"reviewer\":{\"driver\":\"claude\",\"version\":\"2.1.289\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":10,\"input_tokens\":45000,\"output_tokens\":3000,\"cost_usd\":0.31}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"candidates\":{\"total\":3,\"disposed\":3},\"coverage\":{\"hunks\":2,\"covered\":2,\"unread\":[],\"files_read\":[\"app/search.py\"],\"files_not_read\":[\"app/settings.py\"]},\"outside_reads\":[],\"trace_complete\":true}",
+  untraced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"incomplete\",\"missing\":[\"the reviewer timed out and was stopped\",\"the snapshot changed while the reviewer read it\",\"1 scanner candidate has no disposition\",\"the reviewer's answer still failed 1 check after the correction rounds\",\"1. a problem\",\"2 changed ranges were not given to the reviewer: app/search.py:14-15, app/settings.py:1-3\"],\"refused\":[],\"reviewer\":{\"driver\":\"codex\",\"version\":\"0.160.0\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":2,\"input_tokens\":2000,\"output_tokens\":1000,\"cost_usd\":null}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":null,\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"candidates\":{\"total\":3,\"disposed\":2},\"coverage\":{\"hunks\":2,\"covered\":0,\"unread\":[{\"path\":\"app/search.py\",\"start\":14,\"end\":15,\"deletion\":false},{\"path\":\"app/settings.py\",\"start\":1,\"end\":3,\"deletion\":false}],\"files_read\":[],\"files_not_read\":[]},\"outside_reads\":[],\"trace_complete\":false}",
   md: "# Blocked: 1 finding at or above major \\(1 critical\\); 1 of 4 scanners did not run\n\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\n\nSummary: Builds the search query from request input and adds a settings module.\n\nCounts: 1 finding \\(1 critical\\), 2 scanner candidates dropped\n\n## Findings \\(1\\)\n\n### 1. Critical security: Query built from request input\n\n- **Where:** app/search.py:14\n- **Problem:** The search query puts q from the request straight into the SQL text.\n- **Why it matters:** Anyone who can call search can read or change every row.\n- **Fix:** Pass q as a bound parameter to cur.execute.\n- **Source:** semgrep:python.lang.security.audit.formatted-sql-query\n\n## Dropped scanner candidates \\(2\\)\n\n### c2 at app/settings.py:3: The key is a documented local sample. \\(see app/settings.py:3\\)\n\n- **Source:** gitleaks:generic-api-key\n\n### c3 at app/settings.py:1: The import is used by the next change. \\(see app/settings.py:1\\)\n\n- **Source:** ruff:F401\n\n## Coverage\n\n- **Files the reviewer opened:** app/search.py\n- **Files not opened (their changed lines were in the brief):** app/settings.py\n- **Changed ranges given to the reviewer:** 2 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included \\(brakeman: needs Ruby 2.7 or newer\\)\n\nReviewer: claude 2.1.289, 72 s, 10 turns, 1 correction round, 45,000 tokens in, 3,000 out, $0.31\n\nMade by Qodex: review on every pull request at https://qodex.ai\n",
   term: "Blocked: 1 finding at or above major (1 critical); 1 of 4 scanners did not run\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\nSummary: Builds the search query from request input and adds a settings module.\nCounts: 1 finding (1 critical), 2 scanner candidates dropped\n\nFindings (1)\n1. Critical security: Query built from request input\n   Where: app/search.py:14\n   Problem: The search query puts q from the request straight into the SQL text.\n   Why it matters: Anyone who can call search can read or change every row.\n   Fix: Pass q as a bound parameter to cur.execute.\n   Source: semgrep:python.lang.security.audit.formatted-sql-query\n\nDropped scanner candidates (2)\nc2 at app/settings.py:3: The key is a documented local sample. (see app/settings.py:3)\n   Source: gitleaks:generic-api-key\nc3 at app/settings.py:1: The import is used by the next change. (see app/settings.py:1)\n   Source: ruff:F401\n\nCoverage\n   Files the reviewer opened: app/search.py\n   Files not opened (their changed lines were in the brief): app/settings.py\n   Changed ranges given to the reviewer: 2 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included (brakeman: needs Ruby 2.7 or newer)\nReviewer: claude 2.1.289, 72 s, 10 turns, 1 correction round, 45,000 tokens in, 3,000 out, $0.31\nMade by Qodex: review on every pull request at https://qodex.ai\n",
   mdIncomplete: "# Review incomplete: this is not a review of the change\n\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\n\nSummary: Builds the search query from request input and adds a settings module.\n\n## Missing\n\n### the reviewer timed out and was stopped\n\n### the snapshot changed while the reviewer read it\n\n### 1 scanner candidate has no disposition\n\n### the reviewer's answer still failed 1 check after the correction rounds\n\n### 1. a problem\n\n### 2 changed ranges were not given to the reviewer: app/search.py:14-15, app/settings.py:1-3\n\n## Findings so far \\(the change was not fully reviewed\\) \\(1\\)\n\n### 1. Critical security: Query built from request input\n\n- **Where:** app/search.py:14\n- **Problem:** The search query puts q from the request straight into the SQL text.\n- **Why it matters:** Anyone who can call search can read or change every row.\n- **Fix:** Pass q as a bound parameter to cur.execute.\n- **Source:** semgrep:python.lang.security.audit.formatted-sql-query\n\n## Dropped scanner candidates \\(2\\)\n\n### c2 at app/settings.py:3: The key is a documented local sample. \\(see app/settings.py:3\\)\n\n- **Source:** gitleaks:generic-api-key\n\n### c3 at app/settings.py:1: The import is used by the next change. \\(see app/settings.py:1\\)\n\n- **Source:** ruff:F401\n\n## Coverage\n\n- **Files the reviewer opened:** not recorded by Codex\n- **Reads outside the snapshot:** not recorded by Codex\n- **Changed ranges given to the reviewer:** 0 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included \\(brakeman: needs Ruby 2.7 or newer\\)\n\nReviewer: codex 0.160.0, 72 s, 2 turns, 1 correction round, 2,000 tokens in, 1,000 out\n\nMade by Qodex: review on every pull request at https://qodex.ai\n",
@@ -105,7 +105,7 @@ function checkedReport(): Report {
   return { ...r.report, generated_at: "2026-10-03T10:01:13.000Z" };
 }
 
-describe("1, 2. the agent record and its report, unchanged", () => {
+describe("1, 2. the agent record and its report", () => {
   const change = makeChange();
   const trace = [
     { tool: "Read", path: "app/search.py", inside: true, range: [1, 40] as [number, number], ok: true },
@@ -129,9 +129,28 @@ describe("1, 2. the agent record and its report, unchanged", () => {
   const incomplete: Report = { ...checkedReport(), verdict: "incomplete", completion: untraced };
   const display = buildDisplay({ change, secrets: [] });
 
-  it("1. a traced and an untraced record are byte for byte as recorded", () => {
+  it("6. a refused outside read fails the agent record or hides a served read", () => {
+    const refused = { tool: "Read", path: "/dev/null", inside: false, range: null, ok: false };
+    const r = completionRecord({ change, reviewer, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, coverage, trace: [refused], submissionErrors: [], wholeRepo: false });
+    expect(r.status).toBe("complete");
+    expect(r.refused).toEqual(["/dev/null"]);
+    expect(r.outside_reads).toEqual(["/dev/null"]);
+    const served = completionRecord({ change, reviewer, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, coverage, trace: [refused, { ...refused, path: "/outside", ok: true }], submissionErrors: [], wholeRepo: false });
+    expect(served.status).toBe("incomplete");
+    expect(served.missing).toEqual(["the reviewer read outside the snapshot: /outside"]);
+    const mixed = { ...checkedReport(), verdict: "incomplete" as const, completion: served };
+    for (const text of [renderReceipt(mixed, { html: "/r/report.html", md: "/r/report.md" }), renderReview(mixed, { format: "terminal", color: false })]) {
+      expect(text).toContain("These requests were refused by the reviewer's own rules: /dev/null");
+      expect(text).toContain("the reviewer read outside the snapshot: /outside");
+      expect(text).not.toContain("nothing outside");
+    }
+  });
+
+  it("1. the agent records change only by the added refused field", () => {
     expect(JSON.stringify(traced)).toBe(FROZEN.traced);
+    expect(traced.refused).toEqual([]);
     expect(JSON.stringify(untraced)).toBe(FROZEN.untraced);
+    expect(untraced.refused).toEqual([]);
   });
   it("2. the markdown, terminal text and receipt of a complete and an incomplete agent review are as recorded", () => {
     expect(renderReview(report, { format: "markdown" })).toBe(FROZEN.md);
@@ -140,8 +159,12 @@ describe("1, 2. the agent record and its report, unchanged", () => {
     expect(renderReceipt(report, { html: "/r/report.html", md: "/r/report.md" })).toBe(FROZEN.receipt);
   });
   it("2. the SARIF and the HTML of a complete and an incomplete agent review are as recorded", () => {
-    expect(sha(renderSarif(report))).toBe(FROZEN.sarif);
-    expect(sha(renderSarif(incomplete))).toBe(FROZEN.sarifIncomplete);
+    for (const [r, hash] of [[report, FROZEN.sarif], [incomplete, FROZEN.sarifIncomplete]] as const) {
+      const sarif = JSON.parse(renderSarif(r));
+      expect(sarif.runs[0].properties.completion.refused).toEqual([]);
+      delete sarif.runs[0].properties.completion.refused;
+      expect(sha(`${JSON.stringify(sarif, null, 2)}\n`)).toBe(hash);
+    }
     expect(sha(renderHtml({ report, display, version: "0.0.0", reportMd: "/r/report.md" }))).toBe(FROZEN.html);
     expect(sha(renderHtml({ report: incomplete, display, version: "0.0.0", reportMd: "/r/report.md" }))).toBe(FROZEN.htmlIncomplete);
   });
@@ -241,12 +264,21 @@ describe("the model record", () => {
     expect(r.missing).toContain("budget refused before brief call 1");
   });
 
-  it("6. a tool call outside the snapshot or outside the scopes makes it incomplete, refused or not", () => {
-    const outside = read("/etc/passwd", [1, 1], { inside: false, ok: false, delivered: false, range: null, reason: "outside the snapshot" });
+  it("6. a refused outside or unscoped read makes the review incomplete", () => {
+    for (const entry of [read("/etc/passwd", [1, 1], { inside: false, ok: false }), read("vendor/lib.py", [1, 1], { in_scope: false, ok: false })]) {
+      const r = modelCompletionRecord(modelArgs({ toolLog: [...modelArgs().toolLog, entry] }));
+      expect(r.status).toBe("complete");
+      expect(r.refused).toEqual([entry.path]);
+      expect(r.missing).toEqual([]);
+    }
+  });
+
+  it("6. a served result outside the snapshot or scopes leaves the review complete", () => {
+    const outside = read("/etc/passwd", [1, 1], { inside: false });
     const r = modelCompletionRecord(modelArgs({ toolLog: [...modelArgs().toolLog, outside] }));
     expect(r.status).toBe("incomplete");
-    expect(r.missing).toContain("the reviewer tried to read outside the snapshot: /etc/passwd");
-    const unscoped = read("vendor/lib.py", [1, 1], { in_scope: false, ok: false, delivered: false, range: null, reason: "outside the review's scopes" });
+    expect(r.missing).toContain("the reviewer read outside the snapshot: /etc/passwd");
+    const unscoped = read("vendor/lib.py", [1, 1], { in_scope: false });
     const s = modelCompletionRecord(modelArgs({ toolLog: [...modelArgs().toolLog, unscoped] }));
     expect(s.status).toBe("incomplete");
     expect(s.missing).toContain("the reviewer asked for a path outside the review's scopes: vendor/lib.py");
@@ -268,11 +300,15 @@ describe("the model record", () => {
     expect(r.reviewer.calls).toBe(1);
   });
 
-  it("8. a tool call the brain did not define is named", () => {
+  it("8. a refused tool the brain did not define fails the review", () => {
     const unknown: ModelToolEntry = { tool: "run_shell", path: null, range: null, inside: null, in_scope: null, ok: false, served: true, delivered: false, reason: "not a tool the brain defined" };
     const r = modelCompletionRecord(modelArgs({ toolLog: [...modelArgs().toolLog, unknown] }));
-    expect(r.status).toBe("incomplete");
-    expect(r.missing).toContain("the reviewer returned a tool call the brain did not define: run_shell");
+    expect(r.status).toBe("complete");
+    expect(r.refused).toEqual(["run_shell"]);
+    expect(r.missing).toEqual([]);
+    const served = modelCompletionRecord(modelArgs({ toolLog: [...modelArgs().toolLog, { ...unknown, ok: true }] }));
+    expect(served.status).toBe("incomplete");
+    expect(served.missing).toContain("the reviewer returned a tool call the brain did not define: run_shell");
   });
 
   it("9. an undisposed candidate, a failed check or a changed snapshot makes it incomplete", () => {
@@ -291,7 +327,8 @@ describe("the model record", () => {
   it("8. a call to an undefined tool, which has no place to check, counts as undefined and never as outside", () => {
     const unknown: ModelToolEntry = { tool: "run_shell", path: null, range: null, inside: null, in_scope: null, ok: false, served: true, delivered: true, reason: "not a tool the brain defined" };
     const r = modelCompletionRecord(modelArgs({ toolLog: [...modelArgs().toolLog, unknown] }));
-    expect(r.missing).toEqual(["the reviewer returned a tool call the brain did not define: run_shell"]);
+    expect(r.missing).toEqual([]);
+    expect(r.refused).toEqual(["run_shell"]);
   });
 });
 

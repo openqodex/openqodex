@@ -54,7 +54,7 @@ The reviewer is a fresh Claude Code process (`claude -p`) with no memory of your
 - loads none of your Claude Code settings, hooks, plugins, memory or `CLAUDE.md` files as agent instructions. Repository files chosen in `review.instructions_files` are quoted as convention data in the brief. See [Convention files](config.md#convention-files).
 - gets only the environment variables Claude Code needs to run and find its login. Other tokens in your shell, such as `GITHUB_TOKEN` or `NPM_TOKEN`, never reach it.
 
-Claude Code's own permission rules refuse a read outside the frozen copy. OpenQodex also checks every tool call the reviewer makes. It marks the review incomplete when a call names a path outside the copy. The report lists the files the reviewer read.
+Claude Code's own permission rules refuse a read outside the frozen copy. OpenQodex also checks every tool call the reviewer makes. A refused attempt outside the copy, or on a tool the reviewer was not given, is listed on the receipt and does not fail the review. A read outside the copy or a successful call to a tool it was not given makes the review incomplete. A call with no result recorded still counts as a read. The report lists the files the reviewer read.
 
 Web search is on by default. A reviewer that reads private code and untrusted text from the change, and can open web addresses, can be talked into putting that code into a web address. Set this in `~/.openqodex/config.yaml` to remove the web tools:
 

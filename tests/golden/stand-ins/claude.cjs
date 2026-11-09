@@ -93,5 +93,17 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   emit({ type: "system", subtype: "init", session_id, tools: ["Read", "Grep", "Glob"], mcp_servers: [] });
   emit({ type: "assistant", session_id, message: { content: [{ type: "tool_use", id: "golden-read", name: "Read", input: { file_path: path } }] } });
   emit({ type: "user", session_id, message: { content: [{ type: "tool_result", tool_use_id: "golden-read", content }] }, tool_use_result: { type: "text", file: { filePath: path, content, startLine: 1, numLines: content.split("\n").length, totalLines: content.split("\n").length } } });
+  const brief = initialBrief;
+  const first = brief.split("\n")[0];
+  const selected = /verif/i.test(first) ? `verifier:${/^## The file\n\n(.+)$/m.exec(brief)?.[1]}`
+    : /find/i.test(first) ? `finder:${/^Unit: (u\d+)$/m.exec(brief)?.[1]}:${/^Pass: (local|contracts)$/m.exec(brief)?.[1]}` : "primary";
+  if (answerRound === 1 && process.env.OPENQODEX_STANDIN_TOOL_SESSION === selected) {
+    const name = process.env.OPENQODEX_STANDIN_TOOL_NAME;
+    const extraPath = process.env.OPENQODEX_STANDIN_TOOL_PATH;
+    const is_error = process.env.OPENQODEX_STANDIN_TOOL_ERROR === "1";
+    const input = name === "Bash" ? { command: "pwd" } : { file_path: extraPath };
+    emit({ type: "assistant", session_id, message: { content: [{ type: "tool_use", id: "extra-call", name, input }] } });
+    emit({ type: "user", session_id, message: { content: [{ type: "tool_result", tool_use_id: "extra-call", content: is_error ? "Permission denied" : "outside content", ...(is_error ? { is_error: true } : {}) }] } });
+  }
   emit({ type: "result", subtype: "success", is_error: false, session_id, result: answer, num_turns: 1, total_cost_usd: 0.01, usage: { input_tokens: 1000, output_tokens: 500, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } });
 });

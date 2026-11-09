@@ -162,7 +162,7 @@ describe("renderMarkdown", () => {
 
 describe("renderSarif", () => {
   it("8. marks an incomplete review as a failed run that names what is missing and carries the completion record", () => {
-    const completion: CompletionRecord = { version: 1, contract: "openqodex-review-2", status: "incomplete", missing: ["the reviewer timed out and was stopped"], reviewer: null, snapshot: { change_id: "x", tree: null, before: "b", after: "b" }, candidates: { total: 1, disposed: 0 }, coverage: { hunks: 1, covered: 0, unread: [], files_read: [], files_not_read: [] }, outside_reads: [], trace_complete: true };
+    const completion: CompletionRecord = { version: 1, contract: "openqodex-review-2", status: "incomplete", missing: ["the reviewer timed out and was stopped"], refused: [], reviewer: null, snapshot: { change_id: "x", tree: null, before: "b", after: "b" }, candidates: { total: 1, disposed: 0 }, coverage: { hunks: 1, covered: 0, unread: [], files_read: [], files_not_read: [] }, outside_reads: [], trace_complete: true };
     const report: Report = { ...review(), findings: [], verdict: "incomplete", completion };
     const run = JSON.parse(renderSarif(report)).runs[0];
     expect(run.tool.driver.name).toBe("openqodex");

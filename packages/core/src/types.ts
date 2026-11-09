@@ -715,6 +715,8 @@ export type CompletionRecord = {
   contract: "openqodex-review-2";
   status: "complete" | "incomplete";
   missing: string[];
+  // Outside paths and tools not given whose calls were refused.
+  refused: string[];
   reviewer: ReviewerRecord | null;
   // The change id, the git tree the change and the snapshot were made from
   // (null for a target, whose head commit is in the change), and a hash of
@@ -790,6 +792,8 @@ export type ModelCompletionRecord = {
   contract: "openqodex-model-review-1";
   status: "complete" | "incomplete";
   missing: string[];
+  // Outside paths and tools not given whose calls were refused.
+  refused: string[];
   reviewer: { kind: "model"; model: string; servedModels: string[]; calls: number };
   snapshot: { change_id: string; tree: string | null; before: string; after: string | null };
   candidates: { total: number; disposed: number };
