@@ -311,7 +311,7 @@ import { pathToFileURL } from "node:url";
 import { benchRoot, casesRoot, buildCase, caseHash, caseIdFromHash, generatedValue, git, listCases, loadRunLock, lockPath, lockRefusals, readCase, repoRoot, snapshotCases } from "./lib/cases.mjs";
 import { estimateRun, loadPrices, manifestBudget, readLedger, runBudget, startRefusals } from "./lib/budget.mjs";
 import { externalOf, toolchainOf } from "./lib/external.mjs";
-import { haltRules, rateLimitRetry, smokeCap } from "./lib/halts.mjs";
+import { haltRules, reasonClass, retryOnce, smokeCap } from "./lib/halts.mjs";
 import { comparePasses } from "./lib/identical.mjs";
 import { heldOutAccessPath } from "./lib/index.mjs";
 import { controlCaseData, controlEnv, controlSample, probeControl } from "./lib/claude-control.mjs";
@@ -1486,33 +1486,47 @@ async function main() {
     return { rec, ownUsd: meter.spentUsd ?? 0 };
   };
 
-  // A model job (failure 32): its attempt, and when the provider rate
-  // limited it (a 429 that is not a quota or billing refusal), one more
-  // after a bounded wait, in its next attempt folder with a meter of its
+  // A model job (failure 32): its attempt, and after a transport failure or
+  // rate limit, one shared retry, after a bounded wait for a rate limit,
+  // in its next attempt folder with a meter of its
   // own; then the halt rules, once per job, with what its attempts spent.
   // A smoke run counts every attempt against its cap (failure 33).
-  const modelJob = async (job, k, ticket) => {
+  const modelJob = async (job, k, ticket, retriesUsed) => {
     let meter = ticket;
     let attemptNo = k;
     let ownUsd = 0;
+    let first = null;
+    // A crash can leave rows.jsonl behind, so read the saved attempt itself.
+    for (let n = k - 1; n >= 1; n--) {
+      const sample = join(attemptDir(out, job, n), "sample.json");
+      if (existsSync(sample)) {
+        first = JSON.parse(readFileSync(sample, "utf8"));
+        break;
+      }
+    }
     try {
-      for (let retries = 0; ; retries++) {
-        const capped = cap?.take(job.config, { retry: retries > 0 });
+      for (let retries = retriesUsed; ;) {
+        const capped = cap?.take(job.config, { retry: first !== null || retries > 0 });
         if (capped) return halt(capped.why, capped.rule);
         const done = await serverJob(job, attemptNo, meter);
         ownUsd += done.ownUsd;
-        const again = stop === null ? rateLimitRetry(done.rec, retries) : null;
+        // Live and resumed retries use the same allowance from saved samples.
+        retries = jobState(out, job).retriesUsed;
+        const same = first !== null && done.rec.status !== "complete" && reasonClass(first.failure) === reasonClass(done.rec.failure);
+        const again = stop === null && !same ? retryOnce(done.rec, retries) : null;
         const next = again ? budget.openReview(job) : null;
         if (next?.ok) {
-          console.log(`  ${job.case} ${job.config} #${job.repeat}: rate limited; waiting ${again.waitMs / 1000} s, then once more`);
+          console.log(`  ${job.case} ${job.config} #${job.repeat}: ${reasonClass(done.rec.failure)}; waiting ${again.waitMs / 1000} s, then once more`);
           const until = Date.now() + again.waitMs;
           while (stop === null && Date.now() < until) await new Promise((wake) => setTimeout(wake, Math.min(500, until - Date.now())));
           meter = next.review;
           if (stop !== null) return;
           attemptNo = jobState(out, job).next;
+          first = done.rec;
           continue;
         }
         const h = rules.after(done.rec, { ownUsd, reservedUsd: budget.summary().reservedUsd });
+        if (same) halt(`${job.case} ${job.config} #${job.repeat}: the same reason twice (${reasonClass(done.rec.failure)}): attempt ${first.attempt}: ${first.failure}; attempt ${done.rec.attempt}: ${done.rec.failure}`, "same-reason-twice");
         if (h) halt(`${job.case} ${job.config} #${job.repeat}: ${h.why}`, h.rule);
         return;
       }
@@ -1565,12 +1579,12 @@ async function main() {
   // One job's reviews: its next free attempt (a first attempt that started
   // and never saved is kept, and the work goes to the next folder), and one
   // more after a reviewer failure. A model review's ticket is its meter,
-  // which holds its cap; it gets one more attempt only when rate limited
+  // which holds its cap; transport failures and rate limits share one retry
   // (modelJob).
-  const runJob = async (job, k, ticket) => {
+  const runJob = async (job, k, ticket, retriesUsed) => {
     if (server) {
       try {
-        await modelJob(job, k, ticket);
+        await modelJob(job, k, ticket, retriesUsed);
       } catch (error) {
         halt(`${job.case} ${job.config} #${job.repeat}: the benchmark itself failed: ${error.message}`, "benchmark-failed");
       }

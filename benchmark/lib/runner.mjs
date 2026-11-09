@@ -63,6 +63,7 @@ import { REVIEWER_FAILED } from "./reviewers.mjs";
 import { SCAN_CONFIG } from "./scan-score.mjs";
 import { RULES_VERSION, jobIdOf, shownFindings } from "./score.mjs";
 import { controlArgs, controlInput } from "./claude-control.mjs";
+import { retryOnce } from "./halts.mjs";
 
 // The arguments of one laptop review (Claude Code or Codex through
 // `openqodex review`), the same for planted and pull request cases.
@@ -116,16 +117,24 @@ export function runManifest({ startedAt, settings, jobs }) {
 }
 
 // One job in a run folder: whether its first attempt folder exists (it
-// started), whether any attempt was saved with its sample.json (it is done),
-// and the next free attempt number (failure 10).
+// started), the next free attempt number, and whether the last saved sample
+// leaves a retry pending. Unsaved folders use a number but no retry (failure 10).
 export function jobState(out, job) {
   let next = 1;
-  let done = false;
+  let last = null;
+  let retryFailures = 0;
   while (existsSync(attemptDir(out, job, next))) {
-    if (existsSync(join(attemptDir(out, job, next), "sample.json"))) done = true;
+    const sample = join(attemptDir(out, job, next), "sample.json");
+    if (existsSync(sample)) {
+      last = JSON.parse(readFileSync(sample, "utf8"));
+      if (retryOnce(last, 0) !== null) retryFailures++;
+    }
     next++;
   }
-  return { started: next > 1, done, next };
+  // The first failure asks for a retry; only later saved failures consume it.
+  const retriesUsed = Math.max(0, retryFailures - 1);
+  const retryPending = job.reviewer?.startsWith("model:") === true && last !== null && retryOnce(last, retriesUsed) !== null;
+  return { started: next > 1, done: last !== null && !retryPending, retryPending, retriesUsed, next };
 }
 
 export const LOCK_FILE = ".run.lock";
@@ -285,7 +294,8 @@ export async function executeRun({ out, manifest, resume = false, checkResume = 
         running++;
         try {
           // Read again now: the attempt number is the next free folder at the time the job starts.
-          await runJob(job, jobState(out, job).next, ticket);
+          const state = jobState(out, job);
+          await runJob(job, state.next, ticket, state.retriesUsed);
         } finally {
           running--;
           ticket?.close?.();

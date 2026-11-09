@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { git } from "../lib/cases.mjs";
-import { redactRowReasons, saveSampleRow, attemptDir, codexModelFrom, executeRun, failureOf, lockRun, planJobs, provenanceProblems, resumeProblems, runManifest, sampleRecord, claudeModels, claudeRunModels, takeOverStale, treeState } from "../lib/runner.mjs";
+import { redactRowReasons, saveSampleRow, jobState, attemptDir, codexModelFrom, executeRun, failureOf, lockRun, planJobs, provenanceProblems, resumeProblems, runManifest, sampleRecord, claudeModels, claudeRunModels, takeOverStale, treeState } from "../lib/runner.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
@@ -349,4 +349,56 @@ it("redacts run and home paths in every saved reason and keeps null reasons", ()
   expect(redactRowReasons({ reason: `${nestedRun}/a ${homedir()}/b` }, nestedRun).row.reason).toBe("<run>/a <home>/b");
   const other = { reason: `${homedir()}-other/a and ${run}2/b` };
   expect(redactRowReasons(other, run)).toMatchObject({ row: other, count: 0 });
+});
+
+// Resume failures: a saved retryable failure is skipped, saved retry failures
+// get another retry, an unsaved folder spends a retry, or a saved laptop
+// failure leaves a model retry pending.
+describe("retry state on disk", () => {
+  it("resume keeps one shared retry for saved model failures and skips unsaved folders without spending it", () => {
+    const out = tempDir("oq-retry-state-");
+    const model = { ...job, reviewer: "model:test", config: "model-test-graph-on" };
+    const save = (attempt, failure, status = "incomplete") => {
+      const dir = attemptDir(out, model, attempt);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "sample.json"), JSON.stringify({ status, failure }));
+    };
+    expect(jobState(out, model)).toMatchObject({ done: false, retryPending: false, next: 1, retriesUsed: 0 });
+    save(1, "the model call failed: ECONNRESET");
+    expect(jobState(out, model)).toMatchObject({ done: false, retryPending: true, next: 2, retriesUsed: 0 });
+    mkdirSync(attemptDir(out, model, 2));
+    expect(jobState(out, model)).toMatchObject({ done: false, retryPending: true, next: 3, retriesUsed: 0 });
+    save(3, "the model call failed: HTTP 429: retry after 2 seconds");
+    expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false, next: 4, retriesUsed: 1 });
+    save(4, null, "complete");
+    expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false, next: 5, retriesUsed: 1 });
+    save(5, "the model endpoint's answer is not JSON");
+    expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false });
+  });
+
+  it("resume keeps a saved laptop failure done when stderr contains a transport error", () => {
+    const out = tempDir("oq-laptop-retry-state-");
+    const dir = attemptDir(out, job, 1);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "sample.json"), JSON.stringify({ status: "failed", failure: "Claude Code failed: TypeError: fetch failed" }));
+    expect(jobState(out, job)).toMatchObject({ done: true, retryPending: false, next: 2, retriesUsed: 0 });
+  });
+
+  it("resume drops the saved retry count or retries a complete or nonretryable sample", async () => {
+    const { out, jobs, manifest, copies } = runInputs();
+    const model = { ...jobs[0], reviewer: "model:test" };
+    const dir = attemptDir(out, model, 1);
+    const save = (status, failure) => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "sample.json"), JSON.stringify({ status, failure }));
+    };
+    await executeRun({ out, manifest, jobs: [model], copies, runJob: async () => save("incomplete", "the model call failed: ECONNRESET") });
+    const calls = [];
+    await executeRun({ out, manifest: null, jobs: [model], resume: true, runJob: async (_job, next, _ticket, retriesUsed) => calls.push({ next, retriesUsed }) });
+    expect(calls).toEqual([{ next: 2, retriesUsed: 0 }]);
+    for (const [status, failure] of [["complete", "ECONNRESET"], ["incomplete", "the model endpoint's answer is not JSON"], ["incomplete", "HTTP 429 (insufficient_quota)"]]) {
+      save(status, failure);
+      expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false, retriesUsed: 0 });
+    }
+  });
 });

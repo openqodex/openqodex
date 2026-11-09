@@ -37,16 +37,20 @@
 //    invalid evidence, or verify the wrong candidate. Check the saved
 //    finding and the find/verify protocol fields, including scanner refutations.
 // 10. A non-null reply stops being the answer in a staged or correction call.
-import { execFileSync, spawnSync } from "node:child_process";
+// 11. A transport failure is final, two failures of one job do not halt,
+//     a killed run loses its pending retry, or repeated resumes retry again.
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { benchRoot, git, readLock, repoRoot } from "../lib/cases.mjs";
-import { runBudget } from "../lib/budget.mjs";
+import { readLedger, runBudget } from "../lib/budget.mjs";
 import { loadModelEnv } from "../lib/model-env.mjs";
-import { executeRun, planJobs, resumeProblems, runManifest } from "../lib/runner.mjs";
+import { attemptDir, executeRun, jobState, planJobs, resumeProblems, runManifest } from "../lib/runner.mjs";
+import { newWave, settle } from "../lib/wave.mjs";
 import { materialise } from "../lib/suites.mjs";
 import { createModelReviewer, LEAK_REFUSED, recordServed, resolveModelReviewer, serverAttempt } from "../lib/server-review.mjs";
 import { createScriptedReviewer, SCRIPTED_PRICES } from "../lib/scripted-model.mjs";
@@ -482,5 +486,124 @@ describe("the scripted model", () => {
       messages.push({ role: "user", text: "Fix the previous answer." });
       expect((await reviewer.complete({ messages, maxOutputTokens: 1000 })).message.text).toBe(reply);
     }
+  });
+});
+
+// A real run.mjs process on the packed build and a loopback provider. The
+// provider resets every call of a failed attempt, including fresh finder
+// sessions, so the library cannot turn that attempt into a success.
+describe("the model path saves a transport failure as a final incomplete sample", () => {
+  let tarball;
+  beforeAll(() => {
+    const dir = tempDir("oq-transport-pack-");
+    const packed = execFileSync("npm", ["pack", "--json", "--pack-destination", dir], { cwd: join(repoRoot, "packages/cli"), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    tarball = join(dir, JSON.parse(packed)[0].filename);
+  }, 120_000);
+
+  async function fixture({ failures = 2, repeat = 1 } = {}) {
+    const root = tempDir("oq-transport-run-");
+    const out = join(root, "run");
+    const config = "model-gpt-6.1-sol-graph-on";
+    const job = { case: CASE, config, repeat: 1 };
+    const sample = (n) => join(attemptDir(out, job, n), "sample.json");
+    let requests = 0;
+    let killing = false;
+    const scripted = createScriptedReviewer(script());
+    const server = createServer(async (req, res) => {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      requests++;
+      // Hold any retry in flight until the parent kills the first run.
+      if (killing && existsSync(sample(1))) return;
+      const savedFailures = Array.from({ length: failures }, (_, i) => sample(i + 1)).filter(existsSync).length;
+      if (savedFailures < failures) return req.socket.destroy();
+      const body = JSON.parse(raw);
+      const answer = await scripted.complete({ messages: body.input.filter((m) => m.type === "message").map((m) => ({ role: m.role, text: m.content })), tools: [], maxOutputTokens: body.max_output_tokens });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ status: "completed", model: "gpt-6.1-sol", output: [{ type: "message", content: [{ type: "output_text", text: answer.message.text }] }], usage: { input_tokens: 10, output_tokens: 10 } }));
+    });
+    await new Promise((done) => server.listen(0, "127.0.0.1", done));
+    const settings = endpointSettings(root, `http://127.0.0.1:${server.address().port}/openai/v1/`);
+    mkdirSync(join(root, "tools"));
+    const wave = newWave("transport", { root });
+    const env = { ...process.env, ...settings.env, OPENQODEX_BENCH_CACHE: join(root, "cache"), OPENQODEX_BENCH_WAVES: join(root, "index/waves"), TMPDIR: root, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+    const args = [join(benchRoot, "run.mjs"), "--package", `file:${tarball}`, "--reviewers", "model:gpt-6.1-sol", "--install-root", join(root, "tools"), "--allow-missing-scanners", "--cases", CASE, "--repeat", String(repeat), "--concurrency", "1", "--max-usd", "2", "--review-max-usd", "0.5", "--max-minutes", "30", "--max-output-tokens", "1000", "--allow-over", "--wave", wave.id, "--out", out];
+    const run = ({ resume = false, kill = false } = {}) => new Promise((done, reject) => {
+      killing = kill;
+      const child = spawn(process.execPath, [...args, ...(resume ? ["--resume"] : [])], { cwd: repoRoot, env });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+        if (kill && stdout.includes(": incomplete") && existsSync(sample(1))) child.kill("SIGKILL");
+      });
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      child.on("error", reject);
+      child.on("close", (status, signal) => done({ status, signal, stdout, stderr }));
+    });
+    const read = (path) => JSON.parse(readFileSync(path, "utf8"));
+    const ended = () => existsSync(join(out, "resumes.jsonl")) ? readFileSync(join(out, "resumes.jsonl"), "utf8").trim().split("\n").map(JSON.parse).at(-1) : read(join(out, "manifest.json")).ended;
+    const close = async () => {
+      server.closeAllConnections();
+      await new Promise((done) => server.close(done));
+    };
+    return { out, job, sample, run, read, ended, close, requests: () => requests, settleKilled: () => settle(wave, "run", readLedger(out).spentUsd) };
+  }
+
+  it("one reset leaves the model sample permanently incomplete", { timeout: 180_000 }, async () => {
+    const f = await fixture({ failures: 1 });
+    try {
+      const r = await f.run();
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      expect(existsSync(f.sample(2))).toBe(true);
+      expect(f.read(f.sample(1)).status).toBe("incomplete");
+      expect(f.read(f.sample(2)).status).toBe("complete");
+      expect(existsSync(f.sample(3))).toBe(false);
+      expect(f.ended()).toMatchObject({ how: "finished" });
+      expect(f.ended().halt).toBeUndefined();
+      expect(readLedger(f.out).events.filter((e) => e.op === "reserve" && e.kind === "review")).toHaveLength(2);
+      expect(scoreRun(loadRun(f.out)).score.byConfig[f.job.config].population).toMatchObject({ complete: 0, incomplete: 0, failed: 1, retries: 1 });
+    } finally { await f.close(); }
+  });
+
+  it("two resets of one job let the next job start", { timeout: 180_000 }, async () => {
+    const f = await fixture({ repeat: 2 });
+    try {
+      const r = await f.run();
+      expect(r.status, r.stdout + r.stderr).toBe(1);
+      expect(existsSync(f.sample(2))).toBe(true);
+      expect(existsSync(f.sample(3))).toBe(false);
+      expect(readLedger(f.out).events.filter((e) => e.op === "reserve" && e.kind === "review")).toHaveLength(2);
+      expect(f.ended().halt).toMatchObject({ rule: "same-reason-twice" });
+      expect(f.ended().halt.why).toContain(f.read(f.sample(1)).failure);
+      expect(f.ended().halt.why).toContain(f.read(f.sample(2)).failure);
+      expect(existsSync(attemptDir(f.out, { ...f.job, repeat: 2 }, 1))).toBe(false);
+    } finally { await f.close(); }
+  });
+
+  for (const resumes of [1, 3]) it(resumes === 1 ? "a killed run skips the saved transport failure's pending retry" : "resuming an exhausted transport retry twice more sends new calls", { timeout: 180_000 }, async () => {
+    const f = await fixture();
+    try {
+      const killed = await f.run({ kill: true });
+      expect(killed.signal, killed.stdout + killed.stderr).toBe("SIGKILL");
+      expect(f.read(f.sample(1)).status).toBe("incomplete");
+      f.settleKilled();
+      const next = jobState(f.out, f.job).next;
+      const resumed = await f.run({ resume: true });
+      expect(existsSync(f.sample(next)), resumed.stdout + resumed.stderr).toBe(true);
+      expect(resumed.status, resumed.stdout + resumed.stderr).toBe(1);
+      expect(f.read(f.sample(next)).status).toBe("incomplete");
+      expect(f.ended().halt).toMatchObject({ rule: "same-reason-twice" });
+      expect(f.ended().halt.why).toContain(f.read(f.sample(1)).failure);
+      expect(f.ended().halt.why).toContain(f.read(f.sample(next)).failure);
+      expect(existsSync(f.sample(next + 1))).toBe(false);
+      const requests = f.requests();
+      for (let i = 1; i < resumes; i++) {
+        const r = await f.run({ resume: true });
+        expect(r.status, r.stdout + r.stderr).toBe(0);
+        expect(f.requests()).toBe(requests);
+        expect(existsSync(f.sample(next + 1))).toBe(false);
+      }
+    } finally { await f.close(); }
   });
 });
