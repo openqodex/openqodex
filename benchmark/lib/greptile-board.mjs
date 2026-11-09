@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { greptileInput } from "./board-reviews.mjs";
 import { hashFolder, sha256 } from "./index.mjs";
 import { boardConfigOf, boardToolName } from "./martian-board.mjs";
+import { repeatRange } from "./noise.mjs";
 import { canonical, value } from "./score.mjs";
-import { readSuite } from "./suites.mjs";
+import { purposeHalf, readCase, readSuite } from "./suites.mjs";
 
 const PINS = JSON.parse(readFileSync(new URL("../outside/boards.json", import.meta.url), "utf8"));
 
@@ -29,8 +30,9 @@ export function readGreptileOutside(folder, jobs, _specs, options = {}) {
   need(manifest.suite === "greptile" && input.splitHash === manifest.splitHash && evaluation.splitHash === manifest.splitHash, "suite or split hash differs from this run");
   need(["greptile", "augment"].includes(input.truthSet) && input.truthSet === evaluation.truthSet, "truth set differs from the saved input");
   const suite = readSuite("greptile", options);
-  const ids = suite.file.cases.map((c) => c.id);
-  need(input.suite?.name === "greptile" && canonical(input.suite.cases) === canonical(ids), "input does not cover the frozen suite");
+  // The half the run's purpose reads is the denominator (lib/suites.mjs purposeHalf).
+  const ids = purposeHalf(manifest.purpose ?? null, suite.file.cases.map((e) => readCase(e.id, options)), new Set((manifest.jobs ?? []).map((j) => j.caseId))).cases.map((c) => c.id);
+  need(input.suite?.name === "greptile" && canonical(input.suite.cases) === canonical(ids), "input does not cover the frozen suite's half the run's purpose reads");
   need(Array.isArray(input.tools) && input.tools.length > 0 && Array.isArray(input.cases), "input needs tools and cases");
   const names = input.tools.map((t) => t.tool);
   need(new Set(names).size === names.length && names.every((name) => /^[a-z0-9-]+$/.test(name)), "input repeats or misnames a tool");
@@ -67,5 +69,10 @@ export function readGreptileOutside(folder, jobs, _specs, options = {}) {
     // A judge reason keeps its words; an em dash becomes a comma, so the score and the index entry pass the scrub.
     perTool[t.tool] = { ...summary, labels: labels.map((v) => (typeof v.reason === "string" ? { ...v, reason: v.reason.replace(/\s*\u2014\s*/g, ", ") } : v)) };
   }
-  return { board, truthSet: evaluation.truthSet, judgeModel: evaluation.judgeModel, promptHash: evaluation.promptHash, perTool, evidenceHash: hashFolder(folder, paths).listHash };
+  // A run that names a purpose says which half its numbers are over, and its size.
+  const half = input.suite.subset ? { half: { purpose: input.suite.purpose, subset: input.suite.subset, cases: input.suite.size } } : {};
+  // The range comes from the checked summaries; an eval.json written before it existed has none.
+  const range = repeatRange("greptile", perTool);
+  need(evaluation.range === undefined || canonical(evaluation.range) === canonical(range), "eval.json range differs from its verdicts");
+  return { board, truthSet: evaluation.truthSet, judgeModel: evaluation.judgeModel, promptHash: evaluation.promptHash, ...half, perTool, range, evidenceHash: hashFolder(folder, paths).listHash };
 }

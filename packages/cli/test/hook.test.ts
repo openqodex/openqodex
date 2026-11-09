@@ -60,6 +60,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, cli, env, git, sandbox, type Sandbox } from "./init-helpers.js";
 import { gateReceipt } from "@openqodex/core";
 import { readHomeReceipt, writeHomeReceipt } from "../src/receipts.js";
+import { pushFolders } from "../src/agents/push-command.js";
+import { aliasOf, plainPush } from "../src/commands/hook.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -85,8 +87,9 @@ describe("hook check: which commands are pushes", () => {
     writeFileSync(join(s.repo, "README.md"), "changed\n");
   });
 
+  // Every line but a plain `git push`, which the hook checks as the current
+  // work; these the hook cannot tell, so it says so.
   const pushes = [
-    "git push",
     "git -C sub push",
     "git -Csub push",
     "FOO=1 git push",
@@ -115,14 +118,28 @@ describe("hook check: which commands are pushes", () => {
     "git -c alias.publish=status publish",
   ];
 
-  // A plain `git push` asks for a review of the current work; every other
-  // line is one the agent hook cannot tell.
-  it.each(pushes)("treats %j as a push", (command) => {
-    expect(check(s, command).stdout).toContain(command === "git push" ? UNREVIEWED : COULD_NOT);
+  // The parser alone, in process (`pushFolders` finds the pushes, with git's
+  // real alias lookup; `plainPush` tells a plain one). The three CLI runs
+  // after the tables prove `hook check` answers by them.
+  it.each(pushes)("treats %j as a push it cannot tell", async (command) => {
+    expect(await pushFolders(command, s.repo, aliasOf)).not.toEqual([]);
+    expect(plainPush(command)).toBeNull();
   });
 
-  it.each(notPushes)("treats %j as not a push and prints nothing", (command) => {
-    expect(check(s, command).stdout).toBe("");
+  it.each(notPushes)("treats %j as not a push", async (command) => {
+    expect(await pushFolders(command, s.repo, aliasOf)).toEqual([]);
+  });
+
+  it("asks for a review of the current work on a plain git push", () => {
+    expect(check(s, "git push").stdout).toContain(UNREVIEWED);
+  });
+
+  it("says it cannot tell what a push inside a compound line sends", () => {
+    expect(check(s, "cd sub && git push").stdout).toContain(COULD_NOT);
+  });
+
+  it("prints nothing for a line that only names git push", () => {
+    expect(check(s, "echo git push").stdout).toBe("");
   });
 
   it("garbage on stdin prints nothing and exits 0", () => {
@@ -135,12 +152,16 @@ describe("hook check: which commands are pushes", () => {
     const child = spawn(process.execPath, [BIN, "hook", "check"], { cwd: s.repo, env: env(s) });
     child.stdin.write(JSON.stringify({ tool_name: "Bash", tool_input: { command: "git push" }, cwd: s.repo }));
     let stdout = "";
+    let stderr = "";
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
     const started = Date.now();
     const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
     child.stdin.destroy();
     expect(code).toBe(0);
     expect(stdout).toBe("");
+    // A crash also exits 0 with nothing on stdout; it names itself on stderr.
+    expect(stderr).toBe("");
     expect(Date.now() - started).toBeLessThan(8000);
   });
 
@@ -217,17 +238,7 @@ function decision(stdout: string): string | undefined {
 }
 
 describe("hook check: decisions", () => {
-  it("12. an incomplete record of this change never blocks, even in block mode", async () => {
-    const s = sandbox({ "README.md": "hello\n", [BLOCK]: BLOCK_YAML });
-    writeFileSync(join(s.repo, "README.md"), "changed\n");
-    published(s);
-    await finalizedPassingReview(s.oqHome, s.repo, "incomplete");
-    const r = check(s, "git push");
-    expect(decision(r.stdout)).toBeUndefined();
-    expect(r.stdout).toContain("incomplete");
-  });
-
-  it("a finalized passing review of the same change prints nothing, and stops covering it once the change moves", async () => {
+  it("12. a finalized passing review of the same change prints nothing, stops covering it once the change moves, and an incomplete record of the moved change never blocks, even in block mode", async () => {
     const s = sandbox({ "README.md": "hello\n", [BLOCK]: BLOCK_YAML });
     writeFileSync(join(s.repo, "README.md"), "changed\n");
     published(s);
@@ -236,6 +247,10 @@ describe("hook check: decisions", () => {
     writeFileSync(join(s.repo, "README.md"), "changed again\n");
     commitAll(s.repo);
     expect(decision(check(s, "git push").stdout)).toBe("deny");
+    await finalizedPassingReview(s.oqHome, s.repo, "incomplete");
+    const r = check(s, "git push");
+    expect(decision(r.stdout)).toBeUndefined();
+    expect(r.stdout).toContain("incomplete");
   });
 
   it("checks a plain push in the folder it runs in, and treats any other form as unresolved", async () => {
@@ -291,12 +306,22 @@ describe("hook install and uninstall", () => {
   });
 
   it("a scan that fails to run never blocks the push", () => {
-    const s = sandbox();
+    // A blocking repository and an unreviewed commit: the hook blocks this
+    // push while it can start, so the pass below is the failed start's.
+    const s = sandbox({ "README.md": "hello\n", [BLOCK]: BLOCK_YAML });
+    writeFileSync(join(s.repo, "README.md"), "changed\n");
+    published(s);
     expect(cli(s, ["hook", "install"]).status).toBe(0);
+    const branch = git(s.repo, "symbolic-ref", "--short", "HEAD").trim();
+    const line = `refs/heads/${branch} ${git(s.repo, "rev-parse", "HEAD").trim()} refs/heads/${branch} ${git(s.repo, "rev-parse", "@{upstream}").trim()}\n`;
+    const remote = git(s.repo, "remote", "get-url", "origin").trim();
+    const prePush = () => spawnSync(join(s.repo, ".git/hooks/pre-push"), ["origin", remote], { cwd: s.repo, env: env(s), input: line, encoding: "utf8" });
+    const blocked = prePush();
+    expect(blocked.status, blocked.stderr).toBe(1);
+    expect(blocked.stderr).toContain(UNREVIEWED);
     // The runtime copy is gone: the scan cannot start at all.
     rmSync(join(s.oqHome, "runtime"), { recursive: true });
-    const r = spawnSync(join(s.repo, ".git/hooks/pre-push"), [], { cwd: s.repo, env: env(s), input: "" });
-    expect(r.status).toBe(0);
+    expect(prePush().status).toBe(0);
   });
 
   it("refuses a foreign hook without --force; --force twice keeps both earlier hooks", () => {
@@ -336,15 +361,6 @@ describe("hook install and uninstall", () => {
     expect(cli(s, ["hook", "install"]).status).toBe(0);
     expect(existsSync(join(s.repo, "my-hooks/pre-push"))).toBe(true);
   });
-
-  it("prints the line to add for husky and writes nothing", () => {
-    const s = sandbox();
-    mkdirSync(join(s.repo, ".husky"));
-    const r = cli(s, ["hook", "install"]);
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("husky");
-    expect(existsSync(join(s.repo, ".git/hooks/pre-push"))).toBe(false);
-  });
 });
 
 // A real review through the CLI: the brief, an empty submission, finalize.
@@ -375,7 +391,7 @@ describe("the record the hooks trust", () => {
 });
 
 describe("the review receipt", () => {
-  it("9, 14. a legacy review lets the push through with one line, and a later scan does not make it forget the review", () => {
+  it("9, 14. a legacy review lets a blocking repo push with one line, through the agent hook and the pre-push hook, and a later scan does not make either forget the review", () => {
     const s = sandbox({ "README.md": "hello\n", [BLOCK]: BLOCK_YAML });
     writeFileSync(join(s.repo, "README.md"), "changed\n");
     published(s);
@@ -385,7 +401,11 @@ describe("the review receipt", () => {
     expect(first).toContain(LEGACY);
     expect(cli(s, ["scan", "--no-install"]).status).toBe(0);
     expect(check(s, "git push").stdout).toBe(first);
-  });
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    const r = push(s);
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toContain(LEGACY);
+  }, 60_000);
 });
 
 function withRemote(s: Sandbox): void {
@@ -415,19 +435,6 @@ describe("the pre-push hook looks up the review of what the push sends", () => {
     expect(existsSync(join(s.repo, ".openqodex/reviews"))).toBe(false);
   }, 60_000);
 
-  it("14. a legacy review of the pushed commit lets a blocking repo push, with one line", () => {
-    const s = sandbox({ "README.md": "hello\n", [BLOCK]: BLOCK_YAML });
-    withRemote(s);
-    writeFileSync(join(s.repo, "notes.txt"), "one\n");
-    reviewAndFinalize(s);
-    git(s.repo, "add", "-A");
-    git(s.repo, "commit", "-q", "-m", "notes");
-    expect(cli(s, ["hook", "install"]).status).toBe(0);
-    const r = push(s, "origin", "main");
-    expect(r.status, r.out).toBe(0);
-    expect(r.out).toContain(LEGACY);
-  }, 60_000);
-
   // A branch the remote already has, reviewed with no upstream set: the
   // review measured from the merge base with the default branch, the push
   // from the remote branch's tip.
@@ -444,15 +451,7 @@ describe("the pre-push hook looks up the review of what the push sends", () => {
     expect(cli(s, ["hook", "install"]).status).toBe(0);
   }
 
-  it("17. a review of a branch with no upstream covers a push of that branch over its remote tip", async () => {
-    const s = sandbox({ "README.md": "hello\n", [BLOCK]: BLOCK_YAML });
-    await reviewedFeature(s);
-    const r = push(s, "origin", "feature");
-    expect(r.status, r.out).toBe(0);
-    expect(r.out).not.toContain(UNREVIEWED);
-  }, 60_000);
-
-  it("18. a later incomplete review of other work does not hide the complete review that contains the push", async () => {
+  it("17, 18. a review of a branch with no upstream covers a push of that branch over its remote tip, and a later incomplete review of other work does not hide it", async () => {
     const s = sandbox({ "README.md": "hello\n", [BLOCK]: BLOCK_YAML });
     await reviewedFeature(s);
     writeFileSync(join(s.repo, "other.txt"), "other work\n");
@@ -513,9 +512,11 @@ describe("the line printed for a hook manager", () => {
 
   // The printed line, with the built CLI in place of the published one,
   // written as the repo's pre-push hook the way husky runs it (sh -e).
+  // Install itself writes no hook beside a hook manager.
   function installLine(s: Sandbox, toHook: (line: string) => string): void {
     const r = cli(s, ["hook", "install"]);
     expect(r.status).toBe(0);
+    expect(existsSync(join(s.repo, ".git/hooks/pre-push"))).toBe(false);
     const line = r.stdout.split("\n").map((l) => l.trim()).find((l) => l.startsWith("npx -y openqodex@"));
     expect(line).toBeDefined();
     const local = line!.replace(/^npx -y openqodex@\S+/, `${JSON.stringify(process.execPath)} ${JSON.stringify(BIN)}`);
@@ -530,7 +531,7 @@ describe("the line printed for a hook manager", () => {
   }, 60_000);
 
   it("20. the lefthook line carries no git argument, so no remote name or URL reaches a shell line", () => {
-    const s = upstreamFeature("lefthook.yml");
+    const s = sandbox({ "README.md": "hello\n", "lefthook.yml": "pre-push:\n  commands: {}\n" });
     const r = cli(s, ["hook", "install"]);
     expect(r.status).toBe(0);
     const line = r.stdout.split("\n").map((l) => l.trim()).find((l) => l.startsWith("npx -y openqodex@"));

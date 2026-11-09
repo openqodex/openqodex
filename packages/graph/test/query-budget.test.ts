@@ -33,7 +33,7 @@ import { buildGraph, laterEdits, pinWorkTree } from "../src/index.js";
 import { query, querySliced } from "../src/query/engine.js";
 import type { Answer, Item, Request, Session } from "../src/query/engine.js";
 import { checksBudget } from "../src/query/traverse.js";
-import { cpuMs, expectLinear } from "../src/test-timing.js";
+import { cpuMs, expectLinear, growthTests } from "../src/test-timing.js";
 import { commitAll, makeRepo } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -228,8 +228,8 @@ describe("edits since the held build", () => {
 });
 
 describe("work that resumes where a slice stopped it", () => {
-  it("outlines a folder of 301 files in slices of 100 checks, each symbol once, well inside its budget (9)", async () => {
-    const req: Request = { apiVersion: 1, kind: "outline", target: { file: "src" }, limit: 500, budget: { ms: 10_000 } };
+  const req: Request = { apiVersion: 1, kind: "outline", target: { file: "src" }, limit: 500, budget: { ms: 10_000 } };
+  it("outlines a folder of 301 files in slices of 100 checks, each symbol once (9)", async () => {
     const sliced = await querySliced(s, req, {}, 100);
     const whole = ask({ kind: "outline", target: { file: "src" }, limit: 500 });
     expect(whole.truncated.by).toBe("limit");
@@ -238,9 +238,14 @@ describe("work that resumes where a slice stopped it", () => {
     expect(new Set(ids(sliced)).size).toBe(ids(sliced).length);
     expect(ids(sliced)).toEqual(ids(whole));
     expect(sliced.truncated.omitted).toBe(whole.truncated.omitted);
-    // A slice that started over would redo every slice before it, so its
-    // time would grow with the square of the folder, up to the deadline.
-    expectLinear("a sliced outline of folders of 76 and of 301 files", await cpuMs(() => querySliced(quarter, req, {}, 100)), await cpuMs(() => querySliced(s, req, {}, 100)));
+  });
+
+  growthTests("well inside its budget", () => {
+    it("outlines a folder of 301 files in slices in time that grows with the folder (9)", async () => {
+      // A slice that started over would redo every slice before it, so its
+      // time would grow with the square of the folder, up to the deadline.
+      expectLinear("a sliced outline of folders of 76 and of 301 files", await cpuMs(() => querySliced(quarter, req, {}, 100)), await cpuMs(() => querySliced(s, req, {}, 100)));
+    });
   });
 });
 
@@ -276,14 +281,21 @@ describe("work with a budget check inside each element (10)", () => {
     tq = await wide(SUBCLASSES / 4, CALLEES / 4);
   }, 180_000);
 
+  const overrides = (): Request => ({ apiVersion: 1, kind: "implementers", target: { id: idOf("Base.run") }, depth: 1, limit: 500, budget: { ms: 100 } });
+  growthTests("in time that grows with the subclasses", () => {
+    it("lists the overrides of 6,000 subclasses of one file in time that grows with them", async () => {
+      const req = overrides();
+      // A listing that scans the file once per subclass grows with the square
+      // of the subclasses: the whole listing of 1,500 and of 6,000.
+      const all = (in_: Session) => () => query(in_, { ...req, target: { id: idOf("Base.run", in_) }, budget: { ms: 60_000 } });
+      expectLinear("listing the overrides of 1,500 and of 6,000 subclasses", await cpuMs(all(tq)), await cpuMs(all(t)));
+    });
+  });
+
   it("lists the overrides of 6,000 subclasses of one file inside a small time budget, and in full when it has time", async () => {
-    const req: Request = { apiVersion: 1, kind: "implementers", target: { id: idOf("Base.run") }, depth: 1, limit: 500, budget: { ms: 100 } };
+    const req = overrides();
     const a = query(t, req);
     if (a.truncated.by === "budget") expect(a.unknown.floor).toBe(true);
-    // A listing that scans the file once per subclass grows with the square
-    // of the subclasses: the whole listing of 1,500 and of 6,000.
-    const all = (in_: Session) => () => query(in_, { ...req, target: { id: idOf("Base.run", in_) }, budget: { ms: 60_000 } });
-    expectLinear("listing the overrides of 1,500 and of 6,000 subclasses", await cpuMs(all(tq)), await cpuMs(all(t)));
     const full = query(t, { ...req, budget: { ms: 60_000 } });
     expect(full.truncated.by).toBe("limit");
     // Each override is bound in the same file as its base: certain.

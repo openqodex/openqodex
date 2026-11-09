@@ -145,7 +145,7 @@ describe("observations in reports", () => {
 
   it("keeps observations before coverage in a completed review", () => {
     const r: Report = { ...report(), observations: [observation()], completion: {
-      version: 1, contract: "openqodex-review-2", status: "complete", missing: [], reviewer: null,
+      version: 1, contract: "openqodex-review-2", status: "complete", missing: [], refused: [], reviewer: null,
       snapshot: { change_id: "x", tree: null, before: "a", after: "a" }, candidates: { total: 0, disposed: 0 },
       coverage: { hunks: 0, covered: 0, unread: [], files_read: [], files_not_read: [] }, outside_reads: [], trace_complete: true,
     } };

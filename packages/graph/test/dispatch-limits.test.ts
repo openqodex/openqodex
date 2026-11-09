@@ -18,7 +18,7 @@ import { extract } from "../src/extract.js";
 import { parserFor } from "../src/parser.js";
 import { createWorld } from "../src/resolve.js";
 import { RepoReader } from "../src/safe-fs.js";
-import { cpuMs, expectLinear } from "../src/test-timing.js";
+import { cpuMs, expectLinear, growthTests } from "../src/test-timing.js";
 import { makeRepo } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -53,28 +53,34 @@ function bigTable(n: number): string {
 }
 
 describe("the limits of dispatch and function values", () => {
-  it("looks a member up through a lattice of interfaces in linear time, absent or present (1)", async () => {
-    const latticeRepo = (width: number) =>
-      repo({
-        "src/layers.ts": lattice(width),
-        "src/use.ts": 'import type { L9_0 } from "./layers";\nexport function use(x: L9_0) {\n  return x.absent() + x.base();\n}\n',
-      });
-    const root = latticeRepo(10);
-    const build = (at: string) => () => buildGraph({ repoRoot: at, store: null, budgetMs: 60_000 });
-    const g = await build(root)();
-    // Five interfaces a layer are a quarter of the extends and 1/512 of the paths.
-    expectLinear("a build of lattices five and ten interfaces wide", await cpuMs(build(latticeRepo(5))), await cpuMs(build(root)));
+  const latticeRepo = (width: number) =>
+    repo({
+      "src/layers.ts": lattice(width),
+      "src/use.ts": 'import type { L9_0 } from "./layers";\nexport function use(x: L9_0) {\n  return x.absent() + x.base();\n}\n',
+    });
+  const build = (at: string) => () => buildGraph({ repoRoot: at, store: null, budgetMs: 60_000 });
+  const n = 4_000;
+
+  growthTests("in linear time", () => {
+    it("looks a member up through a lattice of interfaces in linear time (1)", async () => {
+      // Five interfaces a layer are a quarter of the extends and 1/512 of the paths.
+      expectLinear("a build of lattices five and ten interfaces wide", await cpuMs(build(latticeRepo(5))), await cpuMs(build(latticeRepo(10))));
+    });
+
+    it("builds a large table in time that grows with it (2)", async () => {
+      expectLinear("a build of tables of 1,000 and of 4,000 functions", await cpuMs(build(repo({ "src/table.ts": bigTable(n / 4) }))), await cpuMs(build(repo({ "src/table.ts": bigTable(n) }))));
+    });
+  });
+
+  it("looks a member up through a lattice of interfaces, absent or present (1)", async () => {
+    const g = await build(latticeRepo(10))();
     const base = [...g.nodes.values()].find((n) => n.id.includes("#L0_0.base@"));
     expect(base).toBeDefined();
     expect((g.in.get(base?.id ?? "") ?? []).flatMap((e) => e.sites.map((s) => `${s.file}:${s.line} ${s.tier}`))).toEqual(["src/use.ts:3 certain"]);
   });
 
-  it("keeps at most 32 entries of a large table per call, says how many it left out, and stays fast (2)", async () => {
-    const n = 4_000;
-    const root = repo({ "src/table.ts": bigTable(n) });
-    const build = (at: string) => () => buildGraph({ repoRoot: at, store: null, budgetMs: 60_000 });
-    const g = await build(root)();
-    expectLinear("a build of tables of 1,000 and of 4,000 functions", await cpuMs(build(repo({ "src/table.ts": bigTable(n / 4) }))), await cpuMs(build(root)));
+  it("keeps at most 32 entries of a large table per call and says how many it left out (2)", async () => {
+    const g = await build(repo({ "src/table.ts": bigTable(n) }))();
     const sites = g.edges.filter((e) => e.kind === "may_invoke").reduce((k, e) => k + e.sites.length, 0);
     expect(sites).toBe(n * 32);
     const gaps = g.unknowns.filter((u) => u.cause === "dynamic" && u.file === "src/table.ts");

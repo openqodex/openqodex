@@ -1093,6 +1093,7 @@
     "contract": "openqodex-review-2",
     "status": "complete",
     "missing": [],
+    "refused": [],
     "reviewer": {
       "driver": "codex",
       "version": "0.160.0",

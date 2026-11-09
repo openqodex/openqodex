@@ -603,7 +603,17 @@ export function regressions(oldSamples, newSamples) {
 //     export sees it like a finding. A report without the field, or with an
 //     empty list, scores exactly as under version 9.
 // Rules version 12: possible issues are shown and judged with tier possible.
-export const RULES_VERSION = 12;
+// Failure list, written before the code (issue 284):
+// 45. A review whose only output is a network error scores as a review and
+//     its error text reaches a judge: reviewHealth() reads each first
+//     attempt's saved evidence once (reviewPopulation), and an unhealthy one
+//     (an "API Error" body, a run stopped before it completed, a missing or
+//     mixed model identity, a model review with zero tokens) credits no
+//     finding, builds no board comment and counts as failed. It stays in the
+//     denominator as a miss. A scanner-only sample has no model and no tokens
+//     to check.
+// Rules version 13: a health result on every review, gated at every scorer.
+export const RULES_VERSION = 13;
 export const AACR_LINE_K = 1;
 // The order classify() tries the rules in; the first that holds decides.
 export const OUTCOME_ORDER = ["test-gap", "accepted", "hit", "wrong-kind", "near", "false"];
@@ -934,11 +944,47 @@ export function population(manifest, attempts) {
   return { from, jobs: out, retries: attempts.filter((a) => a.attempt > 1), unplanned: attempts.filter((a) => a.attempt === 1 && !planned.has(key(a))), problems };
 }
 
+// Whether a saved review is evidence of a review, from its sample record
+// (`row`) and report: { ok: true } or { ok: false, reason }. Identity counts
+// only where the reviewer records it (modelStatus, or a model review's
+// servedModels); a reviewer whose record names no model (codex, older
+// samples) is not judged on it. A scanner-only sample (no reviewer) is
+// never judged on tokens. A stopped run marks only a review that did not
+// complete: a model review that finished before the halt is whole.
+// The "API Error" body check is Claude Code's: only the native control
+// (lib/claude-control.mjs) saves a nativeBody, and Claude Code prints
+// "API Error:" there when its call fails. Codex, the model reviewers and
+// the OpenQodex CLI save no body; a failed call of theirs shows as a
+// failed sample or a record that names no model.
+export function reviewHealth(row, report = null) {
+  if (row === null || typeof row !== "object") return { ok: true };
+  const body = typeof row.nativeBody === "string" ? row.nativeBody.trimStart() : "";
+  // The reason may reach an index entry, so an em dash becomes a comma there (the scrub).
+  if (body.startsWith("API Error")) return { ok: false, reason: `its body is an API error: ${body.split("\n")[0].slice(0, 200).replace(/\s*\u2014\s*/g, ", ")}` };
+  if (typeof row.stopped === "string" && row.stopped !== "" && row.status !== "complete") return { ok: false, reason: `the run stopped while it ran: ${row.stopped}` };
+  const served = Array.isArray(row.servedModels) ? row.servedModels : null;
+  if (row.modelStatus === "none" || (row.modelStatus === undefined && served?.length === 0)) return { ok: false, reason: "its record names no model" };
+  if (row.modelStatus === "mixed" || (row.modelStatus === undefined && served?.length > 1)) return { ok: false, reason: `its record names more than one model: ${(row.models ?? served ?? []).join(", ")}` };
+  const usage = row.usage ?? report?.completion?.reviewer?.usage ?? null;
+  const tokens = [usage?.input_tokens, usage?.output_tokens];
+  if (typeof row.reviewer === "string" && row.reviewer !== "" && tokens.every((n) => typeof n === "number" && Number.isFinite(n)) && tokens[0] + tokens[1] === 0) return { ok: false, reason: "its usage record has zero tokens" };
+  return { ok: true };
+}
+
+// The population the review scorers read: population() with each job's
+// health computed once. A job with no attempt has no review to judge.
+export function reviewPopulation(manifest, attempts) {
+  const pop = population(manifest, attempts);
+  return { ...pop, jobs: pop.jobs.map((j) => ({ ...j, health: j.first === null ? { ok: false, reason: "it never started" } : reviewHealth(j.first.row, j.first.report) })) };
+}
+
 // One planned job, scored from its first attempt: `report`, `brief` and
 // `scan` are that attempt's (null when it wrote none), and `started` is
 // false for a job with no attempt. `origin` is the kind of case (originOf),
-// and `rulings` the rulings in force (lib/rulings.mjs resolveRulings).
-export function scoreJob({ job, spec, report = null, brief = null, scan = null, row = {}, origin = "planted", started = true, rulings = resolveRulings([]) }) {
+// and `rulings` the rulings in force (lib/rulings.mjs resolveRulings). An
+// unhealthy review (job.health) is scored as one that wrote no report.
+export function scoreJob({ job, spec, report: saved = null, brief = null, scan = null, row = {}, origin = "planted", started = true, rulings = resolveRulings([]) }) {
+  const report = started && job.health?.ok === false ? null : saved;
   const planted = origin === "planted";
   const base = scoreSample({ spec, report, brief, row: { ...row, config: job.config, repeat: job.repeat, attempt: 1 }, testOnly: planted });
   const shown = shownFindings(report);
@@ -1090,7 +1136,7 @@ export function scoreAttempts({ manifest, attempts, specs, decisions = [], peopl
   const suite = manifest.suite ?? "planted";
   const origin = originOf(suite);
   if (origin === null) throw new Error(`the run names the suite ${suite}, which the scorer does not know`);
-  const pop = population(manifest, attempts);
+  const pop = reviewPopulation(manifest, attempts);
   if (pop.problems.length > 0) throw new Error(`the run's samples do not match its plan:\n${pop.problems.join("\n")}`);
   const rulings = resolveRulings(decisions, people);
   // The version of each case's spec, which a ruling on one of its truth items names.
@@ -1325,6 +1371,8 @@ const RULES_BLOCK = {
   usage: "A review's cost and tokens are its laptop completion record's usage; a model review's, whose completion record holds none, are its sample record's usage, the library's totals over every model call. No rule reads them.",
   // Version 8.
   specVersion: "A bug ruling and a match ruling (same-issue, different-issue) name the spec version they judged as specHash, the sha256 of the spec's JSON with every object's keys sorted, and apply only to a job whose case is scored against a spec with that hash, the run's own copy or the one --specs names; a line that names none applies to no version and is listed as ignored. A same-issue ruling may name a truth item the finding does not sit on by the location rule: queue.mjs decide records it only when the finding is on a line the change added in a file of that item, and it scores as any same-issue ruling.",
+  // Version 13.
+  health: "Each first attempt has a health result from its saved evidence: unhealthy when its body starts with API Error, when the run stopped before it completed, when its record names no model or more than one (only where the reviewer records the model), or when a model review's usage has zero tokens. An unhealthy review is failed: it credits no finding and misses every truth item of its case.",
   code: ruleCodeHash(),
 };
 export const RULES = Object.freeze({ ...RULES_BLOCK, hash: rulesHash(RULES_BLOCK) });

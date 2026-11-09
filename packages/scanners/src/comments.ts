@@ -24,6 +24,19 @@ export type Family = "python" | "shell" | "dockerfile" | "ruby" | "js" | "go" | 
 export type Comment = { start: number; text: string };
 
 export function comments(text: string, family: Family): Comment[] {
+  return read(text, family).out;
+}
+
+// How many characters the searches for closers covered while reading `text`:
+// each search from its opener to its closer, or to the end of the file when
+// there is none. The second rule above keeps it in proportion to the file;
+// a reader that searched again from every later opener of a kind left open
+// would cover the rest of the file once per opener. For the tests.
+export function closerSearchSpan(text: string, family: Family): number {
+  return read(text, family).searched;
+}
+
+function read(text: string, family: Family): Reader {
   const r = new Reader(text);
   switch (family) {
     case "python":
@@ -52,7 +65,7 @@ export function comments(text: string, family: Family): Comment[] {
       hclCode(r, 0, false, 0);
       break;
   }
-  return r.out;
+  return r;
 }
 
 const MAX_DEPTH = 64;
@@ -73,6 +86,8 @@ const MAX_WORD = 1024;
 
 class Reader {
   readonly out: Comment[] = [];
+  // The characters every search for a closer covered (closerSearchSpan).
+  searched = 0;
   // For each kind of closer, the earliest offset from which a search for it
   // reached the end of the file.
   private readonly unclosed = new Map<string, number>();
@@ -223,6 +238,7 @@ class Reader {
     const failed = this.unclosed.get(kind);
     if (failed !== undefined && from >= failed) return -1;
     const end = find();
+    this.searched += (end < 0 ? this.s.length : end) - from;
     if (end < 0 && (failed === undefined || from < failed)) this.unclosed.set(kind, from);
     return end;
   }

@@ -10,6 +10,7 @@
 // 8. An admitted scanner-only run loses permission to materialise test cases.
 // 9. The runner reads truth or logs access before refusing a changed build.
 // 10. A signed comparison release pins an entry that differs from HEAD.
+// 11. A Greptile score run is admitted off the release build.
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,19 +25,19 @@ import { releaseGate } from "../lib/martian-board.mjs";
 import { caseRepo } from "../lib/materialise.mjs";
 import { bundleHash } from "../lib/runner.mjs";
 import { caseSetHash } from "../lib/score.mjs";
-import { aacrTruth, entryHash, readCase, selectCases, sha256, truthHashOf, truthOf } from "../lib/suites.mjs";
+import { SUITES, aacrTruth, entryHash, readCase, selectCases, sha256, truthHashOf, truthOf } from "../lib/suites.mjs";
 
 const dirs = [];
 afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
 afterEach(() => vi.unstubAllEnvs());
 const read = (file) => JSON.parse(readFileSync(file, "utf8"));
 const write = (file, value) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); };
-function fixture({ accepted = true, committed = true, runner = false } = {}) {
+function fixture({ accepted = true, committed = true, runner = false, greptile = false } = {}) {
   const repo = mkdtempSync(join(tmpdir(), "oq-comparison-release-")); dirs.push(repo);
   const root = join(repo, "benchmark");
   const cache = mkdtempSync(join(tmpdir(), "oq-comparison-cache-")); dirs.push(cache);
   vi.stubEnv("OPENQODEX_BENCH_CACHE", cache);
-  for (const file of ["outside/boards.json", "suites/aacr/cases.json", "splits/aacr-v1.json", "review-queue/people.json"]) {
+  for (const file of ["outside/boards.json", "suites/aacr/cases.json", "splits/aacr-v1.json", "review-queue/people.json", ...(greptile ? ["suites/greptile/cases.json", SUITES.greptile.split] : [])]) {
     mkdirSync(dirname(join(root, file)), { recursive: true }); cpSync(join(benchRoot, file), join(root, file));
   }
   writeFileSync(join(repo, ".gitignore"), "benchmark/.build/\nbenchmark/results/\n");
@@ -75,7 +76,8 @@ function fixture({ accepted = true, committed = true, runner = false } = {}) {
   git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "Build fixture");
   const build = { commit: git(repo, "rev-parse", "HEAD").trim(), tree: git(repo, "rev-parse", "HEAD^{tree}").trim(), bundleHash: bundleHash(join(repo, "packages/cli")), version: read(join(repo, "packages/cli/package.json")).version };
   write(join(root, ".build/provenance.json"), { ...build, commitTree: build.tree, dirty: false });
-  const record = freezeComparison({ release: "test-release", suites: ["aacr"], boards: ["aacr"], reviewers: { control: { path: "laptop", reviewer: "control", model: "claude-opus-5-5", graph: "off", web: "off", effort: null, maxOutputTokens: null } }, capUsd: 1 }, { root, build });
+  // The fixture runs have one repeat, so the fixture record pins one.
+  const record = freezeComparison({ release: "test-release", suites: ["aacr", ...(greptile ? ["greptile"] : [])], boards: ["aacr", ...(greptile ? ["greptile"] : [])], reviewers: { control: { path: "laptop", reviewer: "control", model: "claude-opus-5-5", graph: "off", web: "off", effort: null, maxOutputTokens: null } }, capUsd: 1, repeats: 1 }, { root, build });
   if (accepted) { record.acceptance = { person: "Sid", date: "2026-10-14", hash: "" }; record.acceptance.hash = comparisonHash(record); }
   const file = join(root, "index/comparisons/test-release.json"); write(file, record);
   if (committed) { git(repo, "add", "."); git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "Freeze comparison"); }
@@ -143,6 +145,20 @@ it("a conversion on a later checkout accepts the record on its pinned build, and
   write(join(f.root, ".build/provenance.json"), { ...f.build, ...later, commitTree: later.tree, dirty: false });
   expect(() => comparisonRelease(f.manifest, { root: f.root, admit: true })).toThrow("comparison release requires the pinned build checked out and built");
   expect(comparisonRelease(f.manifest, { root: f.root }).buildLabel).toBe(`local build ${f.build.commit}`);
+});
+
+it("admits a Greptile score run only on the release build, and logs its purpose", () => {
+  // The fixture's record pins the Greptile split it reads, so the release gate decides, not a stale pin.
+  const f = fixture({ greptile: true });
+  const score = { ...f.options, suite: "greptile", purpose: "score", accessLog: f.log };
+  const other = { ...f.manifest.build, bundleHash: "0".repeat(64) };
+  expect(() => selectCases({ ...score, build: other }), "a score run off the release build was admitted").toThrow("comparison build fingerprint differs from the run's build");
+  expect(existsSync(f.log), "a refused score run logged access").toBe(false);
+  const cases = selectCases(score);
+  const split = read(join(f.root, SUITES.greptile.split));
+  expect(cases.map((c) => c.name).sort()).toEqual([...split.subsets.score].sort());
+  const line = JSON.parse(readFileSync(f.log, "utf8").trim());
+  expect(line, "the score run's access line does not name its purpose").toMatchObject({ suite: "greptile", caseCount: 20, purpose: "release-run", runPurpose: "score" });
 });
 
 it("refuses a development run on a held-out split", () => {

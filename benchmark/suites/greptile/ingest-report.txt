@@ -11,7 +11,7 @@ https://github.com/ai-code-review-evaluation/sentry-greptile/pull/8: page title 
 https://github.com/ai-code-review-evaluation/sentry-greptile/pull/9: page title "Add ability to use queues to manage parallelism" maps to corrected title "feat(uptime): Add ability to use queues to manage parallelism"
 https://github.com/ai-code-review-evaluation/sentry-greptile/pull/10: page title "Add hook for producing occurrences from the stateful detector" maps to corrected title "feat(workflow_engine): Add in hook for producing occurrences from the stateful detector"
 https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/2: page title "Add caching support for IdentityProviderStorageProvider .getForLogin operations" maps to corrected title "Add caching support for IdentityProviderStorageProvider.getForLogin operations"
-Suite hash: 0a4ba736cee010825ec2adbca880b028b0070849c19b405fa910a2ca07017f4d. Split greptile-v1: dev 50, test 0.
+Suite hash: 0a4ba736cee010825ec2adbca880b028b0070849c19b405fa910a2ca07017f4d. Split greptile-v2: tune 30, score 20; 26 exposed, 24 clean, exposure on record in the split file.
 This suite overlaps Martian's public cases and repository groups. Materialisation is not a held-out model evaluation.
 Materialisation reservation: Sentry #3 introduces a gitlink at sentry-repo that the laptop shape cannot preserve. Use --reviewers model:scripted with --materialise-only to select the server shape. No model runs.
 greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b: greptile 1, augment 5; usable; unverified

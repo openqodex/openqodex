@@ -248,7 +248,7 @@ async function savedRun({ parent, runId, commit, n = 12, repeat = 3, found, cost
       const shown = !job.case.startsWith("clean") && found(c, job.repeat) ? [{ origin: "agent", severity: "minor", category: "bug", confidence: 0.9, file_path: "app.py", line_number: 10, line_end: 10, title: "A flaw here", problem: "p", consequence: "c", fix: "f", candidate: null, source: null }] : [];
       const report = { findings: shown, outside_change: [], dropped: [], completion: { status: "complete", missing: [], reviewer: { usage: { cost_usd: cost(c, job.repeat) } } } };
       const dir = join(out, "samples", job.case, job.config, String(job.repeat));
-      write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: 1, result: { code: 0, signal: null, wallMs: 20_000 }, report, who: null, startedAt: "t", failure: null, stopped: null })));
+      write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, signal: null, wallMs: 20_000 }, report, who: null, startedAt: "t", failure: null, stopped: null })));
       write(join(dir, "report", "report.json"), JSON.stringify(report));
     },
   });

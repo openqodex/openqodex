@@ -2,7 +2,7 @@
 // Failure cases are listed in test/comparison.test.mjs before this code.
 // This module reads local fingerprints only. It never runs a reviewer or
 // accepts a comparison on someone's behalf.
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { benchRoot, caseHash, git, readLock } from "./cases.mjs";
@@ -10,10 +10,13 @@ import { entryProblems, hashFolder, hashReviewedFolder, sha256 } from "./index.m
 import { toolName } from "./aacr-board.mjs";
 import { boardConfigOf, boardToolName } from "./martian-board.mjs";
 import { boardRefusal } from "./board-readback.mjs";
+import { readAttempts } from "./board-reviews.mjs";
+import { reviewPopulation } from "./score.mjs";
 import { bundleHash } from "./runner.mjs";
 import { isPersonName, readPeople } from "./rulings.mjs";
 import { canonicalJson, entryHash, readSuite, SUITES } from "./suites.mjs";
 import { agreementPercentages, validateCalibration } from "./calibration.mjs";
+import { BOARD_REPEATS } from "./noise.mjs";
 
 const HEX40 = /^[a-f0-9]{40}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -78,12 +81,14 @@ export function suiteFingerprint(suite, { root = benchRoot } = {}) {
 }
 
 // Freeze the repository's current pins, never an inferred signer or run.
-export function freezeComparison({ release, boards, suites, reviewers, capUsd }, { root = benchRoot, build = buildFingerprint({ root }) } = {}) {
+// The record pins the repeats a board run attaches with (BOARD_REPEATS
+// unless told otherwise); O10 adds the purpose pin beside it.
+export function freezeComparison({ release, boards, suites, reviewers, capUsd, repeats = BOARD_REPEATS }, { root = benchRoot, build = buildFingerprint({ root }) } = {}) {
   const record = {
     version: 1, release,
     boards: Object.fromEntries(boards.map((name) => [name, boardFingerprint(name, { root })])),
     suites: Object.fromEntries(suites.map((name) => [name, suiteFingerprint(name, { root })])),
-    build, reviewers, calibrations: [], calibrationRulings: [], capUsd, runs: [],
+    build, reviewers, calibrations: [], calibrationRulings: [], capUsd, repeats, runs: [],
     acceptance: { person: "", date: "", hash: "" },
   };
   validateComparison(record, { root, build });
@@ -109,6 +114,28 @@ function committedRunEntry(root, runId) {
   } catch { throw new Error(message); }
   need(bytes.equals(Buffer.from(committed, "utf8")), message);
   return bytes;
+}
+// The split hashes a run of `suite` may name as the split it was made on:
+// the sha256 of each of the suite's split files under splits/ (as readSuite
+// hashes them), and the split hash of each of the suite's groups in
+// index/accepted.json (Martian's split before its file was edited).
+function knownSplitHashes(root, suite) {
+  const known = new Set();
+  const dir = join(root, "splits");
+  if (existsSync(dir)) for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".json")) continue;
+    const bytes = readFileSync(join(dir, f));
+    let split;
+    try { split = JSON.parse(bytes.toString("utf8")); } catch { continue; }
+    // The file's own suite field, not its name: a copy of another suite's split renamed is not this suite's.
+    if (split?.suite === suite) known.add(sha256(bytes));
+  }
+  const accepted = join(root, "index/accepted.json");
+  if (existsSync(accepted)) for (const key of Object.keys(json(accepted).groups ?? {})) {
+    const [s, , h] = key.split("|");
+    if (s === suite && HEX64.test(h ?? "")) known.add(h);
+  }
+  return known;
 }
 const buildProblems = (b) => object(b) && HEX40.test(b.commit ?? "") && HEX40.test(b.tree ?? "") && HEX64.test(b.bundleHash ?? "") && text(b.version);
 const suiteCaseIds = (name, suite) => Object.entries(suite.caseHashes).map(([c, h]) => `${name}/${c}@${h.slice(0, 8)}`);
@@ -163,6 +190,33 @@ function validateRunBoard(entry, folder, ids, casesNotRun, pin, options) {
   need(refusal === null, refusal);
 }
 
+// The saved reviews of a run folder whose health result is not ok (issue
+// 284), each by its job id and why. A job that never started has no review.
+export function unhealthyReviews(folder) {
+  const pop = reviewPopulation(json(join(folder, "manifest.json")), readAttempts(folder));
+  return pop.jobs.filter((j) => j.first !== null && !j.health.ok).map((j) => ({ jobId: j.jobId, reason: j.health.reason }));
+}
+
+// Attaching refuses a run with an unhealthy review unless the record's
+// exceptions block names each one, so none is counted as a miss silently.
+export function attachRefusal(record, runId, folder) {
+  const excused = new Set((Array.isArray(record.exceptions) ? record.exceptions : []).filter((x) => object(x) && x.runId === runId).map((x) => x.jobId));
+  const left = unhealthyReviews(folder).filter((u) => !excused.has(u.jobId));
+  if (left.length === 0) return null;
+  return `run ${runId} has ${left.length} unhealthy review${left.length === 1 ? "" : "s"}; name each in the record's exceptions block as { runId, jobId, why } to attach it as a miss:\n${left.map((u) => `${u.jobId}: ${u.reason}`).join("\n")}`;
+}
+
+// A board review run with fewer repeats than the record pins is refused, at
+// attach time and by validateComparison for every run the record holds: a
+// record frozen before the pin existed holds BOARD_REPEATS. A run the
+// record's exceptions block names with jobId "*" and a why is let through.
+export function repeatRefusal(record, entry) {
+  if (!SUITES[entry.suite]?.board || entry.mode === "scan") return null;
+  const pin = record.repeats ?? BOARD_REPEATS;
+  if (entry.repeat >= pin) return null;
+  return `run ${entry.runId} has ${entry.repeat} repeat${entry.repeat === 1 ? "" : "s"}, and the record pins ${pin} for a board run: run the board suite again with --repeat ${pin}`;
+}
+
 // Both judges check compatibility before forecasting or contacting a provider.
 export function validateRunManifest(manifest, record) {
   const need = (ok, why) => { if (!ok) throw new Error(`the run's ${why}`); };
@@ -202,6 +256,7 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
   }
   for (const [name, r] of Object.entries(record.reviewers)) need(object(r) && ["server", "laptop"].includes(r.path) && text(r.reviewer) && text(r.model) && ["on", "off"].includes(r.graph) && ["on", "off"].includes(r.web) && (r.effort === null || text(r.effort)) && ((r.path === "laptop" && r.maxOutputTokens === null) || (Number.isInteger(r.maxOutputTokens) && r.maxOutputTokens > 0)), `comparison reviewers.${name} must pin path, reviewer, model, graph, web, effort and maxOutputTokens`);
   need(Number.isFinite(record.capUsd) && record.capUsd > 0, "comparison capUsd must be positive dollars");
+  need(record.repeats === undefined || (Number.isInteger(record.repeats) && record.repeats >= 1), "comparison repeats must be a whole number of at least 1");
   need(Array.isArray(record.calibrations), "comparison calibrations must be an array");
   need(record.calibrationRulings === undefined || Array.isArray(record.calibrationRulings), "comparison calibrationRulings must be an array");
   const rulings = new Map();
@@ -237,6 +292,8 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     boards[name].judgeAgreement = judgeAgreement;
   }
   for (const name of rulings.keys()) need(calibrationBoards.has(name), `calibration ruling ${name} has no calibration record`);
+  // The exceptions shape is checked before the run loop, which reads it.
+  need(record.exceptions === undefined || (Array.isArray(record.exceptions) && record.exceptions.every((x) => object(x) && text(x.runId) && text(x.jobId) && text(x.why))), "comparison exceptions must each name runId, jobId and why");
   need(Array.isArray(record.runs), "comparison runs must be an array");
   const runs = new Set();
   for (const r of record.runs) {
@@ -247,11 +304,23 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     need(sha256(bytes) === r.sha256, `run ${r.runId} no longer matches its hash`);
     const e = JSON.parse(bytes.toString("utf8"));
     need(e.runId === r.runId && entryProblems(e).length === 0, `run ${r.runId} has an invalid index entry`);
+    need(e.purpose !== "diagnostic", `run ${r.runId} is a diagnostic run, which never counts in a comparison`);
     const suite = record.suites[e.suite];
-    need(suite && e.splitHash === suite.splitHash && Array.isArray(e.caseIds) && e.caseIds.length > 0 && e.caseIds.every((id) => Object.entries(suite.caseHashes).some(([name, h]) => id === `${e.suite}/${name}@${h.slice(0, 8)}`)), `run ${r.runId} differs from the comparison suite`);
+    // A run made before its suite's split file changed keeps the split hash
+    // it was made on; the run reference names that hash, or the run must
+    // match the split the record pins.
+    need(r.splitHash === undefined || HEX64.test(r.splitHash), `run ${r.runId} splitHash must be a sha256 when given`);
+    need(r.splitHash === undefined || knownSplitHashes(root, e.suite).has(r.splitHash), `run ${r.runId} splitHash ${r.splitHash} is not the hash of a ${e.suite} split file under splits/, nor a ${e.suite} group's split hash in index/accepted.json`);
+    need(suite && e.splitHash === (r.splitHash ?? suite.splitHash) && Array.isArray(e.caseIds) && e.caseIds.length > 0 && e.caseIds.every((id) => Object.entries(suite.caseHashes).some(([name, h]) => id === `${e.suite}/${name}@${h.slice(0, 8)}`)), `run ${r.runId} differs from the comparison suite`);
     const ids = suiteCaseIds(e.suite, suite);
     need(Array.isArray(r.casesNotRun) && sameIds([...e.caseIds, ...r.casesNotRun], ids), `run ${r.runId} caseIds and casesNotRun must account for every frozen suite case exactly once`);
+    // The guards attach applies, applied again to every run the record
+    // holds: a stopped run lists the cases it planned, and an unhealthy
+    // review counts as a miss only when the exceptions block names it.
+    need(e.ended?.how === "finished", `run ${r.runId} ended ${e.ended?.how ?? "unknown"}; only a finished run counts in a comparison`);
     const folder = reference(root, `results/${r.runId}`, "run folder");
+    const unhealthy = attachRefusal(record, r.runId, folder);
+    need(unhealthy === null, unhealthy);
     const { listHash } = hashReviewedFolder(folder);
     need(listHash === e.asset.listHash || listHash === e.privateListHash, `run ${r.runId} folder differs from its asset or private list hash`);
     const manifest = json(reference(root, `results/${r.runId}/manifest.json`, "run manifest"));
@@ -268,6 +337,9 @@ export function validateComparison(record, { root = benchRoot, build } = {}) {
     const settings = manifest.reviewers?.[reviewer.reviewer]?.settings;
     need((settings?.effort ?? null) === reviewer.effort && (settings?.maxOutputTokens ?? null) === reviewer.maxOutputTokens, `run ${r.runId} differs from its reviewer settings`);
     validateRunBoard(e, folder, ids, r.casesNotRun, record.boards[SUITES[e.suite]?.board], { root });
+    const repeats = repeatRefusal(record, e);
+    const excused = (record.exceptions ?? []).some((x) => object(x) && x.runId === r.runId && x.jobId === "*" && text(x.why));
+    need(repeats === null || excused, `${repeats}; or name the run in the record's exceptions block as { runId, jobId: "*", why }`);
   }
   const a = record.acceptance;
   need(object(a) && ["person", "date", "hash"].every((f) => typeof a[f] === "string"), "comparison acceptance must give person, date and hash");
@@ -357,7 +429,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       // A stopped run lists the cases it planned, not the ones it reviewed, so
       // its unreviewed cases would count as misses under a full case list.
       need(entry.ended?.how === "finished", `run ${runId} ended ${entry.ended?.how ?? "unknown"}; only a finished run attaches`);
+      need(entry.purpose !== "diagnostic", `run ${runId} is a diagnostic run, which never attaches`);
       need(record.suites?.[entry.suite], `run ${runId} differs from the comparison suite`);
+      const repeats = repeatRefusal(record, entry);
+      need(repeats === null, repeats);
+      const unhealthy = attachRefusal(record, runId, reference(benchRoot, `results/${runId}`, "run folder"));
+      need(unhealthy === null, unhealthy);
       const casesNotRun = suiteCaseIds(entry.suite, record.suites[entry.suite]).filter((id) => !entry.caseIds?.includes(id));
       record.acceptance = { person: "", date: "", hash: "" };
       record.runs.push({ runId, sha256: sha256(bytes), reviewer, casesNotRun });

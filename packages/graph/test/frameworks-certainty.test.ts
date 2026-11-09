@@ -22,7 +22,7 @@ import { getChange } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, detectImpact, renderImpactBlock } from "../src/index.js";
 import type { Graph, Registration } from "../src/index.js";
-import { expectLinear, stageCpuMs } from "../src/test-timing.js";
+import { expectLinear, growthTests, stageCpuMs } from "../src/test-timing.js";
 import { commitAll, makeRepo, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -82,24 +82,30 @@ describe("what the graph states as certain or served", () => {
     expect(row).not.toMatch(/no handler now/);
   }, 60_000);
 
+  // Nine layers of `width` classes, each inheriting every class of the layer
+  // below: twelve wide is 12^8 paths to the depth cut, six wide a quarter of
+  // the bases and 1/256 of the paths.
+  const lattice = (width: number) => {
+    const layers: string[] = ["class L0_0(models.IntegerField):\n    pass\n"];
+    for (let l = 1; l <= 9; l++) {
+      const prev = l === 1 ? ["L0_0"] : Array.from({ length: width }, (_, i) => `L${l - 1}_${i}`);
+      for (let i = 0; i < width; i++) layers.push(`class L${l}_${i}(${prev.join(", ")}):\n    pass\n`);
+    }
+    return { ...DJANGO, "mysite/models.py": `from django.db import models\n\n\n${layers.join("\n\n")}\n\nclass Thing(models.Model):\n    value = L9_0()\n` };
+  };
+
+  growthTests("in time that grows with the lattice", () => {
+    it("walks a lattice of Django field classes in time that grows with its bases, not its paths (4)", async () => {
+      const build = (files: Record<string, string>) => {
+        const root = makeRepo(files);
+        return () => buildGraph({ repoRoot: root, store: null, budgetMs: 60_000 });
+      };
+      expectLinear("the frameworks stage on lattices six and twelve classes wide", await stageCpuMs(build(lattice(6)), "frameworks"), await stageCpuMs(build(lattice(12)), "frameworks"));
+    }, 120_000);
+  });
+
   it("walks a lattice of Django field classes within its budget (4)", async () => {
-    // Nine layers of `width` classes, each inheriting every class of the layer
-    // below: twelve wide is 12^8 paths to the depth cut, six wide a quarter of
-    // the bases and 1/256 of the paths.
-    const lattice = (width: number) => {
-      const layers: string[] = ["class L0_0(models.IntegerField):\n    pass\n"];
-      for (let l = 1; l <= 9; l++) {
-        const prev = l === 1 ? ["L0_0"] : Array.from({ length: width }, (_, i) => `L${l - 1}_${i}`);
-        for (let i = 0; i < width; i++) layers.push(`class L${l}_${i}(${prev.join(", ")}):\n    pass\n`);
-      }
-      return { ...DJANGO, "mysite/models.py": `from django.db import models\n\n\n${layers.join("\n\n")}\n\nclass Thing(models.Model):\n    value = L9_0()\n` };
-    };
     const g = await built(lattice(12));
-    const build = (files: Record<string, string>) => {
-      const root = makeRepo(files);
-      return () => buildGraph({ repoRoot: root, store: null, budgetMs: 60_000 });
-    };
-    expectLinear("the frameworks stage on lattices six and twelve classes wide", await stageCpuMs(build(lattice(6)), "frameworks"), await stageCpuMs(build(lattice(12)), "frameworks"));
     expect((g.frameworks?.plugins ?? []).find((p) => p.id === "django")?.status).toBe("ok");
     expect((g.frameworks?.unknowns ?? []).some((u) => u.plugin === "django" && u.affects.includes("declares_field"))).toBe(true);
   }, 120_000);
