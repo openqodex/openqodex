@@ -53,7 +53,7 @@ import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { benchRoot, casesRoot, git, gitEnv, listCases, repoRoot } from "../lib/cases.mjs";
 import { readLedger } from "../lib/budget.mjs";
-import { haltRules, rateLimitRetry, reasonClass, smokeCap } from "../lib/halts.mjs";
+import { haltRules, retryOnce, reasonClass, smokeCap } from "../lib/halts.mjs";
 import { materialiseOnly } from "../lib/materialise-only.mjs";
 import { preparePackage, tarballOf } from "../lib/package.mjs";
 import { readSuite } from "../lib/suites.mjs";
@@ -205,13 +205,13 @@ describe("a provider refusal, a served-model change, a share of incomplete revie
     expect(haltRules({ maxUsd: 10, toRun: 20 }).after(perMinute, own())).toBeNull();
     expect(reasonClass(perMinute.failure)).toBe("provider-rate-limit");
     // One retry per review, after the wait the provider names, or a fixed one, never past a minute.
-    expect(rateLimitRetry(perMinute, 0)).toEqual({ waitMs: 2000 });
-    expect(rateLimitRetry(limited, 0)).toEqual({ waitMs: 10_000 });
-    expect(rateLimitRetry(incomplete("the model call failed: HTTP 429: Please retry after 900 seconds"), 0)).toEqual({ waitMs: 60_000 });
-    expect(rateLimitRetry(perMinute, 1)).toBeNull();
-    expect(rateLimitRetry(incomplete("the model call failed: HTTP 429 (insufficient_quota): You exceeded your current quota"), 0)).toBeNull();
-    expect(rateLimitRetry(incomplete("budget refused before correction call 3"), 0)).toBeNull();
-    expect(rateLimitRetry(complete(), 0)).toBeNull();
+    expect(retryOnce(perMinute, 0)).toEqual({ waitMs: 2000 });
+    expect(retryOnce(limited, 0)).toEqual({ waitMs: 10_000 });
+    expect(retryOnce(incomplete("the model call failed: HTTP 429: Please retry after 900 seconds"), 0)).toEqual({ waitMs: 60_000 });
+    expect(retryOnce(perMinute, 1)).toBeNull();
+    expect(retryOnce(incomplete("the model call failed: HTTP 429 (insufficient_quota): You exceeded your current quota"), 0)).toBeNull();
+    expect(retryOnce(incomplete("budget refused before correction call 3"), 0)).toBeNull();
+    expect(retryOnce(complete(), 0)).toBeNull();
     // A rate limit that outlasts its retry, twice in a row, halts.
     const rules = haltRules({ maxUsd: 10, toRun: 20 });
     expect(rules.after(limited, own())).toBeNull();

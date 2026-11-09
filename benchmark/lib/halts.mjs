@@ -8,7 +8,7 @@
 // - provider-blocked: the endpoint refused the key (HTTP 401 or 403), the
 //   quota (insufficient_quota) or the billing. At once: every later call
 //   would get the same answer. Any other 429 is a rate limit: run.mjs waits
-//   and tries that review once more (rateLimitRetry), and a rate limit that
+//   and tries that review once more (retryOnce), and a rate limit that
 //   outlasts its retry counts like any other reason below.
 // - served-model-changed: a review names a served model the earlier reviews
 //   of its configuration did not, or names two. The deployment changed
@@ -52,7 +52,7 @@ export const HALT_AFTER = 10;
 export const MAX_NOT_COMPLETE_SHARE = 0.2;
 /** How far the mean cost per review may pass the run's estimate. */
 export const COST_OVER_ESTIMATE = 1.5;
-/** Retries of one rate-limited review, the wait when the provider names none, and the longest wait. */
+/** Shared retries for rate limits and transport failures, and the rate-limit waits. */
 export const RATE_LIMIT_RETRIES = 1;
 export const RATE_LIMIT_WAIT_S = 10;
 export const RATE_LIMIT_MAX_WAIT_S = 60;
@@ -62,6 +62,7 @@ const CLASSES = [
   ["provider-auth", /\bHTTP 40[13]\b/],
   ["provider-quota", /insufficient_quota|\bHTTP \d{3}\b[^;]*\bbilling\b/i],
   ["provider-rate-limit", /\bHTTP 429\b/],
+  ["provider-transport", /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN)\b|socket hang up|fetch failed|\bUND_ERR_/i],
   ["provider", /the model call failed|the model endpoint|reply could not be read/],
   ["budget", /budget refused/],
   ["deadline", /timed out|deadline|time ran out|did not finish in time/],
@@ -90,11 +91,14 @@ export function providerBlock(failure) {
 }
 
 /**
- * Whether a finished attempt was rate limited and may be tried once more
+ * Whether a finished attempt failed on transport or was rate limited and may be tried once more
  * (failure 2): { waitMs } after `retries` retries of its review, or null.
  */
-export function rateLimitRetry(rec, retries) {
-  if (rec.status === "complete" || retries >= RATE_LIMIT_RETRIES || reasonClass(rec.failure) !== "provider-rate-limit") return null;
+export function retryOnce(rec, retries) {
+  if (rec.status === "complete" || retries >= RATE_LIMIT_RETRIES) return null;
+  const cls = reasonClass(rec.failure);
+  if (cls === "provider-transport") return { waitMs: 0 };
+  if (cls !== "provider-rate-limit") return null;
   const named = /(?:retry after|try again in)\s+(\d+(?:\.\d+)?)\s*(?:seconds?|s)\b/i.exec(String(rec.failure));
   const seconds = Math.min(RATE_LIMIT_MAX_WAIT_S, named ? Number(named[1]) : RATE_LIMIT_WAIT_S);
   return { waitMs: Math.round(seconds * 1000) };
