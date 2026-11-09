@@ -288,7 +288,7 @@ async function savedRun({ repeat, attempts, caseSpec = spec }) {
   await executeRun({ out, manifest: handManifest(jobs, repeat), jobs, copies: [[join(root, "hand.json"), "cases/hand.json"]], runJob: async (job) => {
     for (const a of attempts.filter((x) => x.repeat === job.repeat)) {
       const dir = attemptDir(out, job, a.attempt);
-      const rec = sampleRecord({ job, attempt: a.attempt, result: { code: a.report ? 0 : 2, signal: null, wallMs: 30_000 }, report: a.report, who: null, startedAt: "t", failure: a.report ? null : { cause: "no report.json" }, stopped: null });
+      const rec = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: a.attempt, result: { code: a.report ? 0 : 2, signal: null, wallMs: 30_000 }, report: a.report, who: null, startedAt: "t", failure: a.report ? null : { cause: "no report.json" }, stopped: null });
       write(join(dir, "sample.json"), JSON.stringify(rec));
       if (a.report) write(join(dir, "report", "report.json"), JSON.stringify(a.report));
       if (a.scan) write(join(dir, "report", "scan.json"), JSON.stringify(a.scan));
@@ -327,8 +327,10 @@ describe("a rule constant changes without a version bump, and old and new scores
     11: "2b889794bb039585e502a3221d25890da2d1e2adf015a4be4462973de502da3e",
     // Possible issues are judged after observations with their own tier.
     12: "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
+    // Issue 284: a health result on every review; an unhealthy one credits nothing and is failed.
+    13: "157a833899f0edcb185874b856d1303c0532b22c05006ea1f6e939b7047e8e91",
     // A finding with no line number (null or undefined) reads as the whole file, issue 153.
-    13: "889cea163a22bb7c660ad0d2dc00e188d07a2dbdf26e9d8beb80c6be344fef66",
+    14: "4c7ea0ae3cfb28974338782ee53965005bebc0e41633d85506f399a86cd3d234",
   };
 
   it("pins the hash of the rules block, constants and matching code included, to its version", () => {
@@ -393,7 +395,7 @@ describe("a job that never started leaves the denominator", () => {
     expect(seen).toHaveLength(8);
     expect(seen[0]).toMatchObject({ version: 3, rulesVersion: RULES_VERSION, planned: 8, ended: null });
     expect(seen[0].jobs).toEqual(jobs.map(({ jobId, caseId, config, repeat }) => ({ jobId, caseId, config, repeat })));
-    const retry = sampleRecord({ job: jobs[0], attempt: 2, result: { code: 0, signal: null, wallMs: 1 }, report: null, who: null, startedAt: "t", failure: null, stopped: null });
+    const retry = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job: jobs[0], attempt: 2, result: { code: 0, signal: null, wallMs: 1 }, report: null, who: null, startedAt: "t", failure: null, stopped: null });
     expect(retry).toMatchObject({ jobId: jobs[0].jobId, caseId: CASE_ID, firstAttempt: false });
   });
 

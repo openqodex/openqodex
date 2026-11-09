@@ -63,6 +63,7 @@ import { REVIEWER_FAILED } from "./reviewers.mjs";
 import { SCAN_CONFIG } from "./scan-score.mjs";
 import { RULES_VERSION, jobIdOf, shownFindings } from "./score.mjs";
 import { controlArgs, controlInput } from "./claude-control.mjs";
+import { retryOnce } from "./halts.mjs";
 
 // The arguments of one laptop review (Claude Code or Codex through
 // `openqodex review`), the same for planted and pull request cases.
@@ -116,16 +117,36 @@ export function runManifest({ startedAt, settings, jobs }) {
 }
 
 // One job in a run folder: whether its first attempt folder exists (it
-// started), whether any attempt was saved with its sample.json (it is done),
-// and the next free attempt number (failure 10).
+// started), the next free attempt number, and whether the last saved sample
+// leaves a retry pending. Unsaved folders use a number but no retry (failure 10).
 export function jobState(out, job) {
   let next = 1;
-  let done = false;
+  let last = null;
+  let retryFailures = 0;
   while (existsSync(attemptDir(out, job, next))) {
-    if (existsSync(join(attemptDir(out, job, next), "sample.json"))) done = true;
+    const sample = join(attemptDir(out, job, next), "sample.json");
+    // A sample cut short by a crash mid-write reads as not saved.
+    const saved = existsSync(sample) ? readSample(sample) : null;
+    if (saved !== null) {
+      last = saved;
+      if (retryOnce(last, 0) !== null) retryFailures++;
+    }
     next++;
   }
-  return { started: next > 1, done, next };
+  // The first failure asks for a retry; only later saved failures consume it.
+  const retriesUsed = Math.max(0, retryFailures - 1);
+  // A manifest job carries no reviewer; its saved sample does.
+  const reviewer = job.reviewer ?? last?.reviewer ?? null;
+  const retryPending = typeof reviewer === "string" && reviewer.startsWith("model:") && last !== null && retryOnce(last, retriesUsed) !== null;
+  return { started: next > 1, saved: last !== null, done: last !== null && !retryPending, retryPending, retriesUsed, next };
+}
+
+function readSample(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 export const LOCK_FILE = ".run.lock";
@@ -285,7 +306,8 @@ export async function executeRun({ out, manifest, resume = false, checkResume = 
         running++;
         try {
           // Read again now: the attempt number is the next free folder at the time the job starts.
-          await runJob(job, jobState(out, job).next, ticket);
+          const state = jobState(out, job);
+          await runJob(job, state.next, ticket, state.retriesUsed);
         } finally {
           running--;
           ticket?.close?.();
@@ -307,7 +329,7 @@ export async function executeRun({ out, manifest, resume = false, checkResume = 
       ...(halt ? { halt } : {}),
       ...(how === "budget" ? { limit: spent.limit, limitKind: spent.limitKind } : {}),
       ...(budget ? budget.summary() : {}),
-      reviewsWithAnAttempt: jobs.filter((j) => jobState(out, j).done).length,
+      reviewsWithAnAttempt: jobs.filter((j) => jobState(out, j).saved).length,
       planned: jobs.length,
       elapsedMin: Math.round((Date.now() - started) / 600) / 100,
     };
@@ -517,6 +539,7 @@ export function resumeProblems(earlier, now) {
   same("split file hash", earlier.splitHash ?? null, now.splitHash ?? null);
   same("comparison release", earlier.release, now.release);
   same("subset", earlier.subset ?? null, now.subset ?? null);
+  same("purpose", earlier.purpose ?? null, now.purpose ?? null);
   if (earlier.cases !== undefined || now.cases !== undefined) same("cases", earlier.cases, now.cases);
   if (earlier.configs !== undefined || now.configs !== undefined) same("configurations", earlier.configs, now.configs);
   if (earlier.repeat !== undefined || now.repeat !== undefined) same("repeats", earlier.repeat, now.repeat);

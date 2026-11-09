@@ -73,7 +73,7 @@ describe("a laptop run of pull request cases", () => {
     writeFileSync(join(out, "manifest.json"), JSON.stringify(runManifest({ startedAt: "t", settings, jobs })));
     // On the first accepted comment's lines, and elsewhere.
     const report = { version: 1, kind: "review", verdict: "passed", findings: [finding("src/app.ts", 11, "An off-by-one in the loop"), finding("src/other.ts", 3, "Unrelated")], outside_change: [], dropped: [], scanners: [], impact: { status: "ok", build: { durationMs: 100 } }, completion: { status: "complete", missing: [], reviewer: { duration_ms: 1000, rounds: 1, usage: { turns: 1, input_tokens: 10, output_tokens: 10, cost_usd: 0.25 } } } };
-    const sample = sampleRecord({ job, attempt: 1, result: { code: 0, wallMs: 1000 }, report, who: null, startedAt: "t", failure: null, stopped: null });
+    const sample = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, wallMs: 1000 }, report, who: null, startedAt: "t", failure: null, stopped: null });
     writeFileSync(join(dir, "sample.json"), JSON.stringify(sample));
     writeFileSync(join(dir, "report", "report.json"), JSON.stringify(report));
     expect(sample).toMatchObject({ caseId: c.id, jobId: job.jobId, firstAttempt: true, reviewer: "claude", graph: "on", status: "complete", usage: { cost_usd: 0.25 } });

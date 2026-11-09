@@ -48,7 +48,7 @@
 // 26. A gem lock line in any other shape (a path in the name, no sha256)
 //     is installed.
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -367,14 +367,28 @@ describe("downloadVerified and extractArchive", () => {
     }
   });
 
+  // Served from this machine, as the cases below are: a real release asset
+  // from GitHub failed this test on a connect timeout (issue 215).
   it("returns the sha256 of what it downloaded and refuses a wrong one", async () => {
+    const bytes = randomBytes(64 * 1024);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const server = createServer((_req, res) => {
+      res.writeHead(200);
+      res.end(bytes);
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/asset.tar.gz`;
     const dir = tempDir("oq-dl-");
-    const asset = table.tools.actionlint.assets["linux-arm64"];
-    const got = await tc.downloadVerified(asset.url, null, join(dir, "a"));
-    expect(got.sha256).toBe(asset.sha256);
-    expect(createHash("sha256").update(readFileSync(join(dir, "a"))).digest("hex")).toBe(asset.sha256);
-    await expect(tc.downloadVerified(asset.url, "f".repeat(64), join(dir, "b"))).rejects.toThrow("checksum mismatch");
-    expect(existsSync(join(dir, "b"))).toBe(false);
+    try {
+      const got = await tc.downloadVerified(url, null, join(dir, "a"));
+      expect(got.sha256).toBe(sha256);
+      expect(readFileSync(join(dir, "a")).equals(bytes)).toBe(true);
+      await expect(tc.downloadVerified(url, "f".repeat(64), join(dir, "b"))).rejects.toThrow("checksum mismatch");
+      expect(existsSync(join(dir, "b"))).toBe(false);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
   }, 60_000);
 
   it("stops a download that trickles past its deadline or grows past its cap", async () => {

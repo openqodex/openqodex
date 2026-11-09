@@ -12,15 +12,17 @@
 //   Claude Code is on PATH or can be installed: here, and in CI, where the
 //   script installs the pinned Claude Code from npm (the real install on a
 //   Linux runner). Skipped with OPENQODEX_E2E_OFFLINE=1.
-// - With a real review, it needs Claude Code installed and logged in, so it
-//   skips with a printed reason in CI, which has no login, and offline.
+// - With a real review, it needs Claude Code installed and logged in, and it
+//   runs only in the model tier (pnpm gate:model, which sets
+//   OPENQODEX_MODEL_TESTS=1); anywhere else the group skips with a printed
+//   reason. In the model tier a missing login fails it.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Report } from "@openqodex/core";
 import "./global-setup.js";
-import { bin, demo, generatedSecret, git, offline, receipt, reviewerMissing, root, toolsHome } from "./support.js";
+import { bin, demo, generatedSecret, git, modelTestsOff, offline, receipt, requireReviewer, reviewerMissing, root, toolsHome } from "./support.js";
 import { removeTempDirs, tempDir } from "../temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -389,11 +391,12 @@ describe("an incomplete review and the scanner findings", () => {
   }, 900_000);
 });
 
-describe("the Action's review mode with the real Claude Code", () => {
-  const missing = process.env.CI ? "CI has no Claude Code login" : reviewerMissing();
+describe.skipIf(modelTestsOff("action review with claude"))("the Action's review mode with the real Claude Code", () => {
+  beforeAll(() => requireReviewer(reviewerMissing()));
+  // Each case's allowance exceeds the 900 s the Action's step gets in
+  // runAction, so a slow review fails with the step's own output (issue 283).
 
   it("R2, R3, R18, R20, R27, R30. review: required with a logged-in Claude Code: a complete review of the planted secret and SQL injection, blocking at the workflow's severity, whatever links the pull request put at .openqodex/latest.json and .openqodex/reviews", () => {
-    if (missing !== null) return void process.stdout.write(`action review with claude: skipped, ${missing}\n`);
     const outside = join(tempDir("oq-e2e-latest-"), "latest.json");
     writeFileSync(outside, "{}\n");
     const elsewhere = tempDir("oq-e2e-reviews-");
@@ -436,10 +439,9 @@ describe("the Action's review mode with the real Claude Code", () => {
     expect(r.stdout).not.toContain("is a symbolic link");
     expect(readFileSync(outside, "utf8")).toBe("{}\n");
     expect(readdirSync(elsewhere)).toEqual([]);
-  }, 900_000);
+  }, 1_000_000);
 
   it("R6, R7, R11, R12. a review stopped at its timeout keeps its partial report; the job passes by default and fails with fail-on-tool-error or review: required", () => {
-    if (missing !== null) return void process.stdout.write(`action review stopped at its timeout: skipped, ${missing}\n`);
     const { dir, base } = pullRequest("action-timeout", {}, {});
     const r = runAction("action-timeout", dir, { OQ_REVIEW_TIMEOUT: "1", REVIEW: "required", BASE_SHA: base, BASE_REF: "main" });
     expect(r.status, r.stderr).toBe(0);
@@ -455,5 +457,5 @@ describe("the Action's review mode with the real Claude Code", () => {
     expect(jobFails(r.outputs)).toBe(false);
     expect(jobFails(r.outputs, { failOnToolError: true })).toBe(true);
     expect(jobFails(r.outputs, { review: "required" })).toBe(true);
-  }, 900_000);
+  }, 1_000_000);
 });

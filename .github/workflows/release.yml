@@ -10,7 +10,21 @@ name: Release
 # Before either, the release-check job compares the build about to be
 # published with the published package (benchmark/release-check.mjs); on a
 # push that publishes, a loss, or a check that could not run, stops the
-# publish.
+# publish. The ci-passed job waits for this commit's own CI run on main and
+# stops the release unless that run passed.
+# The release job pushes the version branch and the tags with the release
+# token (secret RELEASE_TOKEN: a fine-grained personal access token limited
+# to this repository, with Contents and Pull requests read and write), not
+# with the workflow's own token: GitHub starts no workflow run for a push made
+# with that token, so the version pull request's checks would wait for a
+# click. The token is never stored while dependencies install or the
+# packages build (issue 304): the checkout keeps no credentials, the install
+# runs no dependency script, and the build step gets no repository secret.
+# The version and publish commands still run with the token: changesets/action
+# writes it to ~/.netrc and passes it in their env, and ~/.netrc stays for
+# the rest of the job. When the token expires, this job fails at
+# the "Release token still valid" check, before anything is published, until
+# a maintainer makes a new one and replaces the secret.
 # Nothing else runs this workflow: not pull requests, not other branches.
 
 on:
@@ -41,10 +55,14 @@ jobs:
     # and the release job then does not run: a loss refuses the publish, and
     # so does a check that could not run, which shows nothing either way.
     # Run the workflow again when the report says the Semgrep rule packs
-    # moved between the two runs.
+    # moved between the two runs. Before the comparison, it preinstalls
+    # every scanner of this build into a clean install root and runs each
+    # on its check case (the clean-root preinstall test), so a failure
+    # there stops the publish instead of following it (issue 224).
     if: github.repository == 'openqodex/openqodex'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The clean-root preinstall takes up to 30 minutes of the total.
+    timeout-minutes: 75
     permissions:
       contents: read
     steps:
@@ -103,6 +121,12 @@ jobs:
           pnpm install --frozen-lockfile
           node benchmark/build-cli.mjs
           node packages/cli/dist/bin.js doctor --install --all-scanners --require-all
+      # The same test check-self-update runs after the publish, on this build.
+      - name: Preinstall every scanner into a clean install root
+        if: steps.publish.outputs.publish == 'true'
+        env:
+          OPENQODEX_PREINSTALL_FULL: "1"
+        run: pnpm exec vitest run --config vitest.e2e.config.ts tests/e2e/preinstall-full.test.ts
       # --install-scanners adds every scanner the published package pins at
       # another version, so both builds run the same scanners.
       - name: Compare this build with the published package
@@ -116,9 +140,33 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  ci-passed:
+    name: CI passed on this commit
+    # A red main run blocks the version pull request and the publish: this
+    # job finds the CI workflow's push run for this commit, waits up to 90
+    # minutes while it is queued or running, and fails unless it ended with
+    # success; a run that does not show up within 3 minutes fails it too. A
+    # job of its own, not a step of the release job, so the wait holds no
+    # write permission and no secret.
+    if: github.repository == 'openqodex/openqodex'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Wait for this commit's CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release-ci-check.mjs "$GITHUB_SHA"
+
   release:
     name: Version or publish
-    needs: release-check
+    needs: [release-check, ci-passed]
     if: github.repository == 'openqodex/openqodex'
     runs-on: ubuntu-latest
     permissions:
@@ -129,14 +177,32 @@ jobs:
       # The version published in this run, empty when none was.
       version: ${{ steps.version.outputs.version }}
     steps:
+      # The checkout keeps no credentials, so nothing in the git config holds
+      # a token while dependencies install or the packages build. The token
+      # reaches the job first at the "Release token still valid" check, then
+      # at the changesets step, which leaves it in ~/.netrc for the rest of
+      # the job.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
-      - run: pnpm install --frozen-lockfile
+      # No dependency's install script runs. The only one in the tree is
+      # esbuild's postinstall, which the build does not need.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # The build runs here, with no secret in its env, not inside the
+      # changesets step, where the token is readable.
+      - run: pnpm build
+      # An expired or revoked token fails here, before npm gets a version that
+      # could then not be tagged or released.
+      - name: Release token still valid
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: gh api "repos/$GITHUB_REPOSITORY" >/dev/null
       - name: Version pull request or publish
         id: changesets
         # v1 of the action works with Changesets CLI 2, which this repo uses.
@@ -146,12 +212,17 @@ jobs:
           # openqodex@<version> in the skill, the plugin, the Action and the
           # pre-commit hook, so the gate's version check passes.
           version: pnpm version-packages
-          # Builds, then publishes through changeset publish.
-          publish: pnpm release
+          # Publishes the build made above. pnpm release would build again
+          # here, with the token readable.
+          publish: pnpm exec changeset publish
           commit: Version packages
           title: Version packages
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The action writes this token to ~/.netrc before it runs anything,
+          # and the file stays for the rest of the job. Its git-cli pushes
+          # (the version branch, the package tags) go out with it, so the
+          # version pull request's pull_request run starts on its own.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
       - name: Tag v<version> and move v<major>
@@ -161,9 +232,18 @@ jobs:
         if: steps.changesets.outputs.published == 'true'
         env:
           PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           version=$(node -e 'const p = JSON.parse(process.env.PUBLISHED).find((x) => x.name === "openqodex"); if (p) process.stdout.write(p.version)')
           if [ -z "$version" ]; then echo "openqodex was not published in this run"; exit 0; fi
+          # The pushes below carry the release token in an auth header set
+          # through git's environment, never written to the git config, so
+          # they do not depend on the ~/.netrc changesets/action wrote.
+          auth=$(printf 'x-access-token:%s' "$RELEASE_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
           # The registry can take a moment to show a new version.
           # Up to ten minutes: on 0.3.0 two minutes was not enough.
           for attempt in $(seq 1 30); do

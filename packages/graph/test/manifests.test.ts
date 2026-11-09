@@ -38,7 +38,7 @@ import {
 } from "../src/discovery/manifests.js";
 import { query } from "../src/query/engine.js";
 import { RepoReader } from "../src/safe-fs.js";
-import { cpuMs, expectLinear, expectLinearRepeated, repeatedCpuMs } from "../src/test-timing.js";
+import { cpuMs, expectLinear, expectLinearRepeated, growthTests, repeatedCpuMs } from "../src/test-timing.js";
 import { makeRepo } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -62,7 +62,7 @@ async function linear(shapes: ((size: number) => string)[], read: (text: string)
   }
 }
 
-describe("each reader of a repository file is linear (1)", () => {
+growthTests("each reader of a repository file is linear (1)", () => {
   it("pnpm-workspace.yaml", async () => {
     await linear([shape("packages:\n  - a", " ", "x"), shape("packages: ", " ", "x"), shape("packages:\n", "  - a #\n")], pnpmPackages);
   });
@@ -167,23 +167,36 @@ describe("the extractor's body hash (6)", () => {
   // The comment openers sit in a string, so the parser reads the file at
   // once and only the hash would be slow (an unclosed comment in code is the
   // parser's case: caps.test.ts, case 6).
-  it("hashes a definition holding many comment openers in time that grows with them", async () => {
-    const openers = (n: number) => makeRepo({ "a.ts": `export function f() {\n  return \`${"/* x ".repeat(n)}\`;\n}\n`, "b.py": `def f():\n    return 1 ${"# x ".repeat(n)}\n` });
-    const root = openers(100_000);
-    const build = (at: string) => () => buildGraph({ repoRoot: at, store: null, maxFileBytes: 2 * MiB });
-    const g = await build(root)();
+  const openers = (n: number) => makeRepo({ "a.ts": `export function f() {\n  return \`${"/* x ".repeat(n)}\`;\n}\n`, "b.py": `def f():\n    return 1 ${"# x ".repeat(n)}\n` });
+  const build = (at: string) => () => buildGraph({ repoRoot: at, store: null, maxFileBytes: 2 * MiB });
+  it("hashes a definition holding many comment openers", async () => {
+    const g = await build(openers(100_000))();
     expect(g.status.filesParsed).toBe(2);
-    expectLinear("a build of 25,000 and of 100,000 comment openers", await cpuMs(build(openers(25_000))), await cpuMs(build(root)));
+  });
+
+  growthTests("in time that grows with them", () => {
+    it("hashes a definition holding many comment openers in time that grows with them", async () => {
+      expectLinear("a build of 25,000 and of 100,000 comment openers", await cpuMs(build(openers(25_000))), await cpuMs(build(openers(100_000))));
+    });
   });
 });
 
 describe("edge ids (7)", () => {
-  it("refuses a hostile edge id quickly", async () => {
+  const explainer = async () => {
     const root = makeRepo({ "a.ts": "export function f() {\n  return 1;\n}\n" });
     const graph = await buildGraph({ repoRoot: root, store: null });
     const session = { graph, generation: null, treeSha: null, builtAt: null, laterEditsKnown: false };
-    const explain = (separators: number) => () => query(session, { apiVersion: 1, kind: "explain", target: { id: `calls:${"->@:1".repeat(separators)}` } });
+    return (separators: number) => () => query(session, { apiVersion: 1, kind: "explain", target: { id: `calls:${"->@:1".repeat(separators)}` } });
+  };
+  it("refuses a hostile edge id", async () => {
+    const explain = await explainer();
     expect(explain(200_000)().error).not.toBeNull();
-    expectLinear("explaining edge ids of 50,000 and of 200,000 separators", await cpuMs(explain(50_000)), await cpuMs(explain(200_000)));
+  });
+
+  growthTests("quickly", () => {
+    it("refuses a hostile edge id in time that grows with it", async () => {
+      const explain = await explainer();
+      expectLinear("explaining edge ids of 50,000 and of 200,000 separators", await cpuMs(explain(50_000)), await cpuMs(explain(200_000)));
+    });
   });
 });

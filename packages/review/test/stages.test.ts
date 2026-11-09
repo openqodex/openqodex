@@ -5,7 +5,7 @@
 // Failure cases: invalid evidence reaches verification, refutations become
 // findings, scanners stay unresolved, failed sessions erase other findings,
 // same-line defects collapse, retry call ids collide, stop leaves sessions
-// open, and finders use the verifier's reserved time.
+// open, verifier abandon reasons lose either attempt, and finders use the verifier's reserved time.
 // Round 2 failures: a missing file or inverted range discards a good answer,
 // a line tie splits duplicate candidates, and refutation prose waits for assembly.
 import { writeFileSync } from "node:fs";
@@ -104,6 +104,24 @@ it("leaves failed verifier scanners not reviewed and preserves other findings", 
   expect(r.report.low_confidence).toContainEqual(expect.objectContaining({ file_path: "a.txt", reason: "not verified" }));
   expect(completion(r, f).status).toBe("incomplete");
   expect(r.report.findings.some((f) => f.file_path === "b.txt")).toBe(true);
+});
+it("a verifier that cannot start loses both attempt failures in its abandon reason", async () => {
+  const f = setup(undefined, ["a.txt"]);
+  const open = f.args.openSession;
+  f.args.openSession = (role) => {
+    if (role.startsWith("verifier:")) throw new Error(role.endsWith(":retry1") ? "second start failed" : "first start failed");
+    return open(role);
+  };
+  const r = await runStagedReview(f.args);
+  expect(r.missing.join(" ")).toContain("the verifier session failed twice (attempt 1: first start failed; attempt 2: second start failed)");
+});
+it("a verifier that fails after starting loses both attempt failures in its abandon reason", async () => {
+  const f = setup((_answer, request) => {
+    if (request.callId.startsWith("verifier:")) throw new Error(request.callId.startsWith("verifier:1:retry1-") ? "second call failed" : "first call failed");
+    return _answer;
+  }, ["a.txt"]);
+  const r = await runStagedReview(f.args);
+  expect(r.missing.join(" ")).toContain("the verifier session failed twice (attempt 1: the model call failed: first call failed; attempt 2: the model call failed: second call failed)");
 });
 it("delivers two distinct same-line candidates to the same verifier", async () => {
   const f = setup((answer) => { if (answer.version === "find-1" && answer.candidates.length) answer.candidates.push(candidate(answer.candidates[0]!.file_path, "A different defect")); return answer; });

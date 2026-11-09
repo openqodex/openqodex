@@ -187,6 +187,7 @@ function lines(report: Report): Line[] {
   }
   if (c) {
     out.push({ kind: "heading", text: "Coverage" });
+    if (c.refused?.length) out.push({ kind: "text", text: `These requests were refused and were not served: ${c.refused.join(", ")}` });
     if (c.trace_complete === false) {
       // Reads were not measured: say so, never "Files not read".
       const by = `not recorded by ${c.reviewer ? product(c.reviewer.driver) : "the reviewer"}`;
@@ -259,6 +260,7 @@ export function renderReceipt(report: Report, opts: { html: string; md: string; 
   } else if (report.not_reviewed.length > 0) {
     out.push(`${plural(report.not_reviewed.length, "scanner candidate was", "scanner candidates were")} not checked by the reviewer and count toward the verdict; the report lists them.`);
   }
+  if (record?.refused?.length) out.push(display(`These requests were refused and were not served: ${record.refused.join(", ")}`));
   for (const note of report.notes ?? []) if (/^Convention(?:s supplied| omitted| transformed):/.test(note)) out.push(display(note));
   out.push(`Report: ${opts.html}`, `Markdown: ${opts.md}`);
   return `${out.join("\n")}\n`;

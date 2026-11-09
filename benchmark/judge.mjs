@@ -7,7 +7,7 @@
 // exit code or accept reads, and this script exits 0 whatever the verdicts
 // are.
 //
-//   node benchmark/judge.mjs <results folder> [--configs a,b] [--limit <reviews>]
+//   node benchmark/judge.mjs <results folder> --wave <id> [--configs a,b] [--limit <reviews>]
 //                            [--resume] [--specs <folder of <case>.json>]
 //
 // The judge is the deployment benchmark/outside/boards.json gives the
@@ -16,6 +16,10 @@
 // Every call is held to the run's hard cap in the run's budget ledger
 // (lib/budget.mjs meteredComplete): its worst case is reserved before it is
 // sent, and the pass stops when the cap has no room for the next call.
+// The pass is also held to the wave cap (lib/wave.mjs): before the first
+// call it reserves the smaller of every planned call's worst case and the
+// room the run's cap leaves, and at its end it settles with what the run's
+// ledger says the pass spent.
 //
 // The findings judged are those the scorer matches to a planted bug, by the
 // run's own specs unless --specs names others, in the first attempt of each
@@ -77,9 +81,10 @@
 //    lock goes back on exit.
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BudgetRefused, meteredComplete, openRunLedger } from "./lib/budget.mjs";
+import { BudgetRefused, loadPrices, MAX_UTF8_BYTES_PER_CHAR, meteredComplete, openRunLedger, readLedger, requestChars, worstCaseUsd } from "./lib/budget.mjs";
+import { openWave, reserve, settle } from "./lib/wave.mjs";
 import { repoRoot } from "./lib/cases.mjs";
 import { loadModelEnv } from "./lib/model-env.mjs";
 import { createOpenAIReviewer } from "./lib/openai-reviewer.mjs";
@@ -153,16 +158,18 @@ async function main() {
   let limit = Infinity;
   let resumeRun = false;
   let specsDir = null;
+  let waveId = null;
   const pos = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--configs") configs = args[++i].split(",");
+    else if (args[i] === "--wave") waveId = args[++i] ?? null;
     else if (args[i] === "--limit") limit = Number(args[++i]);
     else if (args[i] === "--resume") resumeRun = true;
     else if (args[i] === "--specs") specsDir = resolve(args[++i]);
     else pos.push(args[i]);
   }
-  if (pos.length !== 1 || !(limit > 0)) {
-    console.error("usage: node benchmark/judge.mjs <results folder> [--configs a,b] [--limit <reviews>] [--resume] [--specs <folder of <case>.json>]");
+  if (pos.length !== 1 || !(limit > 0) || waveId === null) {
+    console.error(`${waveId === null && pos.length === 1 ? "--wave <id> is required: the pass pays a model, so its forecast is reserved in the wave's journal first\n" : ""}usage: node benchmark/judge.mjs <results folder> --wave <id> [--configs a,b] [--limit <reviews>] [--resume] [--specs <folder of <case>.json>]`);
     return 2;
   }
   // A refusal before any call: one line on stderr.
@@ -212,8 +219,10 @@ async function main() {
   }
   // The run's own ledger and caps, which every call is held to.
   let ledger;
+  let wave;
   try {
     ledger = openRunLedger(folder);
+    wave = openWave(waveId);
   } catch (error) {
     return refuse(error.message);
   }
@@ -279,66 +288,88 @@ async function main() {
   }
   const todo = work.slice(0, limit);
   console.log(`Wording pass with ${reviewer.model}: ${todo.length} reviews, ${todo.reduce((n, w) => n + w.items.length, 0)} findings matched to planted bugs. Each call is held to the run's cap (budget.jsonl). The verdict is reported and never blocks.`);
+  const requestOf = (w) => ({ callId: `judge-${w.case}-${w.config}-${w.repeat}`, attempt: 1, purpose: "judge", messages: [{ role: "user", text: prompt(w.items) }], tools: [], maxOutputTokens: MAX_OUTPUT_TOKENS });
 
-  const write = () => {
-    doc.servedModels = [...new Set(doc.samples.map((s) => s.servedModel).filter((m) => typeof m === "string" && m !== ""))].sort();
-    doc.totals = wordingTotals(doc.samples);
-    return saved(outPath, `${JSON.stringify(doc, null, 2)}\n`);
-  };
-  let stopped = null;
-  // A file that could not be written stops the pass, and is not tried again.
-  let unwritten = false;
-  const saved = (path, text) => {
-    try {
-      save(path, text);
-      return true;
-    } catch (error) {
-      stopped = `could not write ${path}: ${error.message}`;
-      unwritten = true;
-      return false;
-    }
-  };
-  for (const w of todo) {
-    const name = `${w.case}-${w.config}-${w.repeat}`;
-    let answer = resumeRun ? savedAnswer(name, w.items) : null;
-    if (answer === null) {
-      const request = { callId: `judge-${name}`, attempt: 1, purpose: "judge", messages: [{ role: "user", text: prompt(w.items) }], tools: [], maxOutputTokens: MAX_OUTPUT_TOKENS };
+  // The wave's reservation: no call can spend past the run's cap, nor past
+  // the planned calls' worst cases (when the judge's prices are known).
+  const before = ledger.state();
+  const room = Math.max(0, ledger.caps.maxUsd - before.spentUsd - before.reservedUsd);
+  const rates = loadPrices()[reviewer.model];
+  const worst = rates ? todo.reduce((n, w) => n + worstCaseUsd({ requestBytes: MAX_UTF8_BYTES_PER_CHAR * requestChars(requestOf(w)), maxOutputTokens: MAX_OUTPUT_TOKENS, rates }), 0) : Infinity;
+  const waveRun = `${manifest.runId ?? basename(folder)}:judge-wording`;
+  try {
+    reserve(wave, { id: waveRun, path: "judge-wording", forecastUsd: Math.min(room, worst) });
+  } catch (error) {
+    return refuse(error.message);
+  }
+  try {
+    return await judgeAll();
+  } finally {
+    settle(wave, waveRun, Math.max(0, readLedger(folder).spentUsd - before.spentUsd));
+  }
+
+  async function judgeAll() {
+
+    const write = () => {
+      doc.servedModels = [...new Set(doc.samples.map((s) => s.servedModel).filter((m) => typeof m === "string" && m !== ""))].sort();
+      doc.totals = wordingTotals(doc.samples);
+      return saved(outPath, `${JSON.stringify(doc, null, 2)}\n`);
+    };
+    let stopped = null;
+    // A file that could not be written stops the pass, and is not tried again.
+    let unwritten = false;
+    const saved = (path, text) => {
       try {
-        answer = await meteredComplete(ledger, reviewer, request, { what: `wording judge ${w.case}/${w.config}/${w.repeat}` });
+        save(path, text);
+        return true;
       } catch (error) {
-        // Nothing was sent when the budget refused; a call that failed is kept as its error.
-        if (!(error instanceof BudgetRefused)) saved(rawPath(name), `${JSON.stringify({ asked: askedHash(w.items), error: error.message }, null, 2)}\n`);
-        stopped = error.message;
-        break;
+        stopped = `could not write ${path}: ${error.message}`;
+        unwritten = true;
+        return false;
       }
-      // The answer is kept before its verdict reaches judge.json, so a pass cut off between the two never pays for it again.
-      if (!saved(rawPath(name), `${JSON.stringify({ asked: askedHash(w.items), message: answer.message, usage: answer.usage }, null, 2)}\n`)) break;
+    };
+    for (const w of todo) {
+      const name = `${w.case}-${w.config}-${w.repeat}`;
+      let answer = resumeRun ? savedAnswer(name, w.items) : null;
+      if (answer === null) {
+        const request = requestOf(w);
+        try {
+          answer = await meteredComplete(ledger, reviewer, request, { what: `wording judge ${w.case}/${w.config}/${w.repeat}` });
+        } catch (error) {
+          // Nothing was sent when the budget refused; a call that failed is kept as its error.
+          if (!(error instanceof BudgetRefused)) saved(rawPath(name), `${JSON.stringify({ asked: askedHash(w.items), error: error.message }, null, 2)}\n`);
+          stopped = error.message;
+          break;
+        }
+        // The answer is kept before its verdict reaches judge.json, so a pass cut off between the two never pays for it again.
+        if (!saved(rawPath(name), `${JSON.stringify({ asked: askedHash(w.items), message: answer.message, usage: answer.usage }, null, 2)}\n`)) break;
+      }
+      const verdicts = parseVerdicts(answer.message.text, w.items.map((i) => i.id));
+      doc.samples.push({
+        case: w.case,
+        config: w.config,
+        repeat: w.repeat,
+        costUsd: answer.usage.costUsd,
+        servedModel: answer.usage.servedModel ?? null,
+        parsed: verdicts !== null,
+        findings: w.items.map((i) => ({ bug: i.bug, title: i.finding.title, verdict: verdicts?.[i.id] ?? null })),
+      });
+      if (!write()) break;
     }
-    const verdicts = parseVerdicts(answer.message.text, w.items.map((i) => i.id));
-    doc.samples.push({
-      case: w.case,
-      config: w.config,
-      repeat: w.repeat,
-      costUsd: answer.usage.costUsd,
-      servedModel: answer.usage.servedModel ?? null,
-      parsed: verdicts !== null,
-      findings: w.items.map((i) => ({ bug: i.bug, title: i.finding.title, verdict: verdicts?.[i.id] ?? null })),
-    });
-    if (!write()) break;
-  }
 
-  // A pass stopped before its first verdict leaves no judge.json behind, and
-  // one whose write failed keeps the last whole file.
-  if (!unwritten && (doc.samples.length > 0 || stopped === null) && write()) {
-    const table = renderWording(Object.fromEntries(Object.keys(doc.totals).map((config) => [config, wordingBlock(doc, config)])));
-    if (table !== null) console.log(`\n${table}`);
-    console.log(`\nSaved: ${outPath} (judged by ${reviewer.model}; the reviewers were ${JSON.stringify(doc.reviewers)}). This verdict never blocks.`);
+    // A pass stopped before its first verdict leaves no judge.json behind, and
+    // one whose write failed keeps the last whole file.
+    if (!unwritten && (doc.samples.length > 0 || stopped === null) && write()) {
+      const table = renderWording(Object.fromEntries(Object.keys(doc.totals).map((config) => [config, wordingBlock(doc, config)])));
+      if (table !== null) console.log(`\n${table}`);
+      console.log(`\nSaved: ${outPath} (judged by ${reviewer.model}; the reviewers were ${JSON.stringify(doc.reviewers)}). This verdict never blocks.`);
+    }
+    if (stopped !== null) {
+      console.error(`Stopped: ${stopped.split("\n")[0]}`);
+      return 1;
+    }
+    return 0;
   }
-  if (stopped !== null) {
-    console.error(`Stopped: ${stopped.split("\n")[0]}`);
-    return 1;
-  }
-  return 0;
 }
 
 // Run as a script, not imported: Node gives import.meta.url the real path, so argv[1] is compared by its real path.

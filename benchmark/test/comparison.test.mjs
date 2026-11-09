@@ -32,6 +32,10 @@
 // 31. Greptile names a different not-run case with the same count.
 // 32. Attachment pins entry bytes that are not committed at HEAD.
 // 33. A later checkout's build prevents attaching the record's own build.
+// 34. A diagnostic run attaches to a comparison.
+// 35. A board run with fewer repeats than the record pins attaches (step 2, O9).
+// 36. A record keeps a board run with fewer repeats than it pins, unnamed in its exceptions.
+// 37. A run reference names a split hash that is no split file's, nor an accepted group's.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -92,7 +96,8 @@ function fixture(suite = "aacr", cli = false) {
   if (cli) git(join(root, ".."), "init", "-q");
   const truth = suite === "aacr" ? {} : boardSuiteFixture(suite, root);
   const options = { root, build };
-  const record = freezeComparison({ release: "compare-2026-10", suites: [suite], boards: [suite], reviewers: structuredClone(reviewers), capUsd: 100 }, options);
+  // The fixture runs have one repeat, so the fixture record pins one.
+  const record = freezeComparison({ release: "compare-2026-10", suites: [suite], boards: [suite], reviewers: structuredClone(reviewers), capUsd: 100, repeats: 1 }, options);
   return { root, build, options, record, cache: truth.cache };
 }
 const sign = (record) => { record.acceptance = { person: "Sid", date: "2026-10-14", hash: "" }; record.acceptance.hash = comparisonHash(record); return record; };
@@ -216,6 +221,16 @@ describe("frozen comparisons", () => {
     expect(result.status).toBe(1); expect(result.stderr).toContain("ended stopped; only a finished run attaches");
     expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
   });
+  it("a diagnostic run is refused by attach and by the record: it never counts in a comparison", () => {
+    const f = fixture("greptile", true); const run = runFixture(f);
+    run.entry.purpose = "diagnostic"; run.save();
+    commitEntry(f, run);
+    f.record.runs = []; write(join(f.root, "comparison.json"), sign(f.record));
+    const before = readFileSync(join(f.root, "comparison.json"), "utf8");
+    const result = attach(f, run.entry.runId);
+    expect(result.status, "a diagnostic run attached").toBe(1); expect(result.stderr).toContain("is a diagnostic run, which never attaches");
+    expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
+  });
   it("a run that covers 49 of 50 cases is refused unless it names the case it did not run", () => {
     const f = fixture("greptile"); const run = runFixture(f);
     const missing = run.entry.caseIds.at(-1);
@@ -226,6 +241,44 @@ describe("frozen comparisons", () => {
       expect(() => validateComparison(f.record, f.options)).toThrow(/casesNotRun/);
     }
     f.record.runs[0].casesNotRun = [missing];
+    expect(validateComparison(f.record, f.options).accepted).toBe(false);
+  });
+  // Guards O12: a run made on a split file since replaced (wave 9 on greptile-v1)
+  // stays in the record only when its run reference names that split hash.
+  it("a run made on an earlier split is refused unless its run reference names that split hash", () => {
+    const f = fixture("aacr"); const run = runFixture(f);
+    // An earlier split file of the suite, committed beside the current one.
+    write(join(f.root, "splits/aacr-v0.json"), { version: 0, suite: "aacr", cases: { dev: [], test: [] } });
+    const earlier = sha256(readFileSync(join(f.root, "splits/aacr-v0.json")));
+    run.entry.splitHash = earlier; run.save();
+    expect(() => validateComparison(f.record, f.options), "a run on an unnamed split hash was kept").toThrow(/differs from the comparison suite/);
+    f.record.runs[0].splitHash = sha256(readFileSync(join(f.root, "splits/aacr-v1.json")));
+    expect(() => validateComparison(f.record, f.options), "a run named under another split hash was kept").toThrow(/differs from the comparison suite/);
+    f.record.runs[0].splitHash = "not a hash";
+    expect(() => validateComparison(f.record, f.options)).toThrow(/splitHash must be a sha256/);
+    f.record.runs[0].splitHash = earlier;
+    expect(validateComparison(f.record, f.options).accepted).toBe(false);
+  });
+  it("a run reference naming a split hash of no split file is refused, and a committed split file's hash is accepted (failure 37)", () => {
+    const f = fixture("aacr"); const run = runFixture(f);
+    const name = (splitHash) => { run.entry.splitHash = splitHash; run.save(); f.record.runs[0].splitHash = splitHash; };
+    for (const [splitHash, why] of [[sha256("a split nobody committed"), "a random sha256"], [sha256(readFileSync(join(benchRoot, "splits/greptile-v1.json"))), "another suite's split"]]) {
+      name(splitHash);
+      expect(() => validateComparison(f.record, f.options), `${why} was kept`).toThrow(`splitHash ${splitHash} is not the hash of a aacr split file under splits/, nor a aacr group's split hash in index/accepted.json`);
+    }
+    // Another suite's split copied under this suite's name is still another
+    // suite's: the file's own suite field decides, not its name.
+    cpSync(join(benchRoot, "splits/greptile-v1.json"), join(f.root, "splits/aacr-v0.json"));
+    name(sha256(readFileSync(join(benchRoot, "splits/greptile-v1.json"))));
+    expect(() => validateComparison(f.record, f.options), "a renamed copy of another suite's split was kept").toThrow(/is not the hash of a aacr split file/);
+    // An earlier split file of this suite, committed beside the current one.
+    write(join(f.root, "splits/aacr-v0.json"), { version: 0, suite: "aacr", cases: { dev: [], test: [] } });
+    name(sha256(readFileSync(join(f.root, "splits/aacr-v0.json"))));
+    expect(validateComparison(f.record, f.options).accepted).toBe(false);
+    // A split hash an accepted group was made on is known too, with no file left.
+    const gone = sha256("an edited split file");
+    write(join(f.root, "index/accepted.json"), { version: 1, groups: { [`aacr|test|${gone}|review|server|model:gpt-6.1-sol|gpt-6.1-sol|model-gpt-6.1-sol-graph-on|12`]: {} } });
+    name(gone);
     expect(validateComparison(f.record, f.options).accepted).toBe(false);
   });
   it("a judged run (with outside/) attaches", () => {
@@ -245,6 +298,61 @@ describe("frozen comparisons", () => {
     const duplicate = attach(f, run.entry.runId);
     expect(duplicate.status).toBe(1); expect(duplicate.stderr).toContain(`duplicate run ${run.entry.runId}`);
     expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
+  });
+  it("a board run with one repeat does not attach to a record that pins three, and a record without the pin holds three (O9)", () => {
+    const f = fixture("greptile", true); const run = runFixture(f);
+    commitEntry(f, run);
+    for (const pin of [3, undefined]) {
+      f.record.runs = [];
+      if (pin === undefined) delete f.record.repeats; else f.record.repeats = pin;
+      write(join(f.root, "comparison.json"), sign(f.record));
+      const before = readFileSync(join(f.root, "comparison.json"), "utf8");
+      const refused = attach(f, run.entry.runId);
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain(`run ${run.entry.runId} has 1 repeat, and the record pins 3 for a board run`);
+      expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
+    }
+    f.record.repeats = 1; f.record.runs = []; write(join(f.root, "comparison.json"), sign(f.record));
+    const attached = attach(f, run.entry.runId);
+    expect(attached.status, attached.stderr).toBe(0);
+    for (const repeats of [0, 1.5, "3"]) expect(() => validateComparison({ ...f.record, repeats }, f.options)).toThrow(/repeats must be a whole number/);
+  });
+  it("a record pinning three repeats refuses a one repeat run it holds, unless its exceptions block names the run with jobId * (failure 36)", () => {
+    const f = fixture("aacr"); const run = runFixture(f);
+    expect(run.entry.repeat).toBe(1);
+    f.record.repeats = 3;
+    expect(() => validateComparison(f.record, f.options), "a one repeat run was kept under a pin of three").toThrow(`run ${run.entry.runId} has 1 repeat, and the record pins 3 for a board run`);
+    // An exception for one review is not an exception for the run's repeats.
+    f.record.exceptions = [{ runId: run.entry.runId, jobId: `${run.entry.caseIds[0]}/${run.entry.configs[0]}/1`, why: "an unhealthy review" }];
+    expect(() => validateComparison(f.record, f.options)).toThrow(/has 1 repeat/);
+    f.record.exceptions.push({ runId: run.entry.runId, jobId: "*", why: "run before the repeats pin existed; one repeat, wave 9" });
+    expect(validateComparison(f.record, f.options).accepted).toBe(false);
+  });
+  it("a run with an unhealthy review is refused, naming it, and attaches once the record's exceptions block names it (issue 284)", () => {
+    const f = fixture("greptile", true); const run = runFixture(f);
+    const job = run.manifest.jobs[0];
+    const name = job.caseId.slice(job.caseId.indexOf("/") + 1, job.caseId.indexOf("@"));
+    // A model review no model answered: the record names no served model.
+    write(join(run.folder, "samples", name, job.config, "1", "sample.json"), { jobId: job.jobId, caseId: job.caseId, case: name, config: job.config, reviewer: "model:gpt-6.1-sol", path: "server", repeat: 1, attempt: 1, status: "failed", stopped: null, failure: "the review threw", servedModels: [], usage: null });
+    run.save();
+    commitEntry(f, run);
+    f.record.runs = []; write(join(f.root, "comparison.json"), sign(f.record));
+    const before = readFileSync(join(f.root, "comparison.json"), "utf8");
+    const refused = attach(f, run.entry.runId);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain(`run ${run.entry.runId} has 1 unhealthy review`);
+    expect(refused.stderr).toContain(`${job.jobId}: its record names no model`);
+    expect(readFileSync(join(f.root, "comparison.json"), "utf8")).toBe(before);
+    // An exception for another job does not excuse this one.
+    f.record.exceptions = [{ runId: run.entry.runId, jobId: `${job.jobId}x`, why: "another review" }]; write(join(f.root, "comparison.json"), sign(f.record));
+    expect(attach(f, run.entry.runId).status).toBe(1);
+    f.record.exceptions = [{ runId: run.entry.runId, jobId: job.jobId, why: "the provider refused every call; counted as a miss" }]; write(join(f.root, "comparison.json"), sign(f.record));
+    const attached = attach(f, run.entry.runId);
+    expect(attached.status, attached.stderr).toBe(0);
+    expect(read(join(f.root, "comparison.json")).runs.map((r) => r.runId)).toEqual([run.entry.runId]);
+    // A malformed exceptions block gets the shape message, not a TypeError, while the record holds a run.
+    const held = read(join(f.root, "comparison.json"));
+    for (const exceptions of [{}, [null], [{ runId: run.entry.runId, jobId: job.jobId }]]) expect(() => validateComparison({ ...held, exceptions }, f.options)).toThrow(/exceptions must each name runId, jobId and why/);
   });
   it("a run with a null board block does not attach", () => {
     const f = fixture("greptile", true); const run = runFixture(f);
