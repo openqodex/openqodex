@@ -104,6 +104,18 @@ export function retryOnce(rec, retries) {
   return { waitMs: Math.round(seconds * 1000) };
 }
 
+/**
+ * The wait still owed to a saved attempt's pending retry, in ms: the wait
+ * retryOnce names, less the time gone since the attempt was saved, never
+ * below 0. A resumed run applies it before the retry so a 429's wait is kept
+ * when the run was killed and restarted within it (failure 2).
+ */
+export function resumeWaitMs(rec, retries, savedAtMs, nowMs = Date.now()) {
+  const again = retryOnce(rec, retries);
+  if (again === null) return 0;
+  return Math.max(0, again.waitMs - Math.max(0, nowMs - savedAtMs));
+}
+
 const money = (usd) => `$${usd.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}`;
 
 /**

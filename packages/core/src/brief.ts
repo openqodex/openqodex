@@ -700,9 +700,11 @@ function diffBlockV2(change: Change, secrets: string[]): { text: string; files: 
   let bytes = 0;
   for (const p of parts) {
     const text = deliveryDiff(p.text, secrets);
-    const size = text === null ? Infinity : p.paths.every((path) => deletedBinaries.has(path)) ? 0 : Buffer.byteLength(text, "utf8");
+    const size = text === null ? Infinity : Buffer.byteLength(text, "utf8");
     if (text === null || bytes + size > MAX_DIFF_BYTES) {
-      left.push(...p.paths);
+      // A deleted binary has no lines to read: the files table and the
+      // deletion line name it, so it is never "not in this brief".
+      left.push(...p.paths.filter((path) => !deletedBinaries.has(path)));
       continue;
     }
     bytes += size;

@@ -248,7 +248,8 @@ describe("10. the reviewer brief's diff section", () => {
     const { text, diffFiles } = buildReviewerBrief({ change, scan: makeScan(), lenses: [], config: makeConfig(), secrets: [] });
     expect([...diffFiles]).toEqual(["app/big.py", "logo.png"]);
     expect(text).toContain("| deleted, binary | logo.png |");
-    expect(text).toContain("Binary files a/logo.png and /dev/null differ");
+    // The deletion's diff text did not fit; the files table names it and it is never "not in this brief".
+    expect(text).not.toContain("Binary files a/logo.png and /dev/null differ");
     expect(text).not.toContain("These files changed but their diff is not in this brief");
   });
 

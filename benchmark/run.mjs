@@ -303,7 +303,7 @@
 //    release run's held-out access is logged in the index's access log.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { cpus, homedir, totalmem, tmpdir, platform, arch, release } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -311,7 +311,7 @@ import { pathToFileURL } from "node:url";
 import { benchRoot, casesRoot, buildCase, caseHash, caseIdFromHash, generatedValue, git, listCases, loadRunLock, lockPath, lockRefusals, readCase, repoRoot, snapshotCases } from "./lib/cases.mjs";
 import { estimateRun, loadPrices, manifestBudget, readLedger, runBudget, startRefusals } from "./lib/budget.mjs";
 import { externalOf, toolchainOf } from "./lib/external.mjs";
-import { haltRules, reasonClass, retryOnce, smokeCap } from "./lib/halts.mjs";
+import { haltRules, reasonClass, resumeWaitMs, retryOnce, smokeCap } from "./lib/halts.mjs";
 import { comparePasses } from "./lib/identical.mjs";
 import { heldOutAccessPath } from "./lib/index.mjs";
 import { controlCaseData, controlEnv, controlSample, probeControl } from "./lib/claude-control.mjs";
@@ -1496,15 +1496,26 @@ async function main() {
     let attemptNo = k;
     let ownUsd = 0;
     let first = null;
+    let savedAt = 0;
     // A crash can leave rows.jsonl behind, so read the saved attempt itself.
     for (let n = k - 1; n >= 1; n--) {
       const sample = join(attemptDir(out, job, n), "sample.json");
       if (existsSync(sample)) {
         first = JSON.parse(readFileSync(sample, "utf8"));
+        savedAt = statSync(sample).mtimeMs;
         break;
       }
     }
     try {
+      // A resumed rate-limit retry keeps the provider's wait, less the time
+      // already gone since the attempt was saved.
+      const owed = first === null ? 0 : resumeWaitMs(first, retriesUsed, savedAt);
+      if (owed > 0) {
+        console.log(`  ${job.case} ${job.config} #${job.repeat}: ${reasonClass(first.failure)} saved ${Math.round((Date.now() - savedAt) / 1000)} s ago; waiting ${Math.round(owed / 1000)} s more, then once more`);
+        const until = Date.now() + owed;
+        while (stop === null && Date.now() < until) await new Promise((wake) => setTimeout(wake, Math.min(500, until - Date.now())));
+        if (stop !== null) return;
+      }
       for (let retries = retriesUsed; ;) {
         const capped = cap?.take(job.config, { retry: first !== null || retries > 0 });
         if (capped) return halt(capped.why, capped.rule);
