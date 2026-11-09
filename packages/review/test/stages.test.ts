@@ -1,3 +1,4 @@
+// 7n. An over-cap change loses removed rows from its last file.
 // 5. Thousands of unsplit hunks abandon a verifiable candidate.
 // 1. Part sessions receive other parts; verifier briefs grow to a whole file.
 // 2. Wide neighbouring parts overflow a single-candidate verifier brief.
@@ -14,11 +15,13 @@
 // Round 2 failures: a missing file or inverted range discards a good answer,
 // a line tie splits duplicate candidates, and refutation prose waits for assembly.
 import { makeLineSet } from "../../../tests/line-set.mjs";
-import { writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
-import { buildFindBrief, buildVerifyBrief, completionRecord, readCoverage } from "@openqodex/core";
+import { buildFindBrief, buildVerifyBrief, completionRecord, getChange, readCoverage } from "@openqodex/core";
 import type { FindAnswer, ReviewUnit, VerifyAnswer, VerifyBatch } from "@openqodex/core";
+import { deliverRanges } from "../src/conversation.js";
 import { runStagedReview } from "../src/stages.js";
 import { TIMED_OUT } from "../src/agents/driver.js";
 import type { StagedArgs } from "../src/stages.js";
@@ -1005,4 +1008,32 @@ it("verifies one candidate among 3000 single-part hunks without abandoning its b
   const briefs = f.requests.filter((r) => r.purpose === "verify");
   expect(briefs).toHaveLength(1);
   expect(Buffer.byteLength(briefs[0]!.messages[1]!.text)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
+});
+
+it("7n. delivers the removed rows in the last file of a 6 MB change", async () => {
+  const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["zz-last.txt"]);
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@openqodex.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: f.dir });
+  git("init", "-q");
+  writeFileSync(join(f.dir, "zz-last.txt"), "before\nremoved tail\nafter\n");
+  git("add", "zz-last.txt");
+  git("commit", "-qm", "Base");
+  const content = `${"x".repeat(1049)}\n`.repeat(3000);
+  writeFileSync(join(f.dir, "b-large.txt"), content);
+  writeFileSync(join(f.dir, "zz-last.txt"), "before\nafter\n" + content);
+  Object.assign(f.change, await getChange({ repoRoot: f.dir, scope: {}, exclude: [], tempRoot: join(f.dir, ".openqodex/tmp") }));
+  const deletion = { path: "zz-last.txt", start: 1, end: 2, deletion: true };
+  const page = deliverRanges({ change: f.change, snapshotDir: f.dir, unread: [deletion], secrets: [] });
+  expect(page.delivered).toEqual([deletion]);
+  expect(page.text).toContain("-\tremoved tail");
+  expect(f.change.diffs!.at(-1)!.file).toBeDefined();
+  expect(f.change.notReviewed).toEqual([]);
+  const refs = obligations(f.change, (path) => readFileSync(join(f.dir, path), "utf8"));
+  f.args.inventory = refs;
+  f.args.units = unitsOf(f.change, refs);
+  // Omit this deletion from the brief to exercise the correction's removedBlock.
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: unit.hunks.filter((h) => !h.deletion) });
+  const result = await runStagedReview(f.args);
+  expect(result.delivered).toContainEqual(expect.objectContaining({ path: "zz-last.txt", deletion: expect.any(Object) }));
+  expect(f.requests.some((r) => r.messages.some((m) => m.text.includes("-\tremoved tail")))).toBe(true);
+  expect(result.missing).toEqual([]);
 });

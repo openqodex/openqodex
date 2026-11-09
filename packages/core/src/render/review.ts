@@ -199,7 +199,7 @@ function lines(report: Report): Line[] {
     }
     out.push({ kind: "field", label: "Changed ranges given to the reviewer", text: `${c.coverage.covered} of ${c.coverage.hunks}` });
   }
-  if (report.not_reviewed_paths.length > 0) out.push({ kind: "field", label: "Left out, change too large", text: report.not_reviewed_paths.join(", ") });
+  if (report.base.ref === "all" && report.not_reviewed_paths.length > 0) out.push({ kind: "field", label: `Not reviewed: ${report.not_reviewed_paths.length} ${report.not_reviewed_paths.length === 1 ? "file" : "files"}, over 5 MB, links or unreadable`, text: report.not_reviewed_paths.join(", ") });
   out.push({ kind: "text", text: `Scanners: ${coverageLine(report.scanners)}` });
   out.push({ kind: "text", text: c?.contract === "openqodex-model-review-1" ? modelReviewerLine(c) : reviewerLine(c?.reviewer ?? null) });
   out.push({ kind: "text", text: CLOSING });

@@ -135,6 +135,7 @@ export function laptopParts(o: ReviewOptions, repoRoot: string, config: Config):
   return {
     drivers: o.drivers ?? DRIVERS,
     snapshots: laptopSnapshots,
+    diffTempRoot: join(openqodexHomeDir(), "tmp"),
     resolveTool: createToolResolver({ allowInstall: !o.flags.noInstall, installBudgetMs: o.installBudgetMs ?? INSTALL_BUDGET_MS, onProgress: progress(o.flags) }),
     resolveTarget: async (spec) => {
       const t = await resolveTarget({ repoRoot, spec, offline: o.flags.offline, base: o.base, defaultBase: config.defaultBase });

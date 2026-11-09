@@ -99,6 +99,7 @@
 // 38. --timeout no longer wins over the default, for a change or for --all;
 //     or a --timeout longer than a timer holds stops the reviewer at once
 //     and reports a cap it never reached.
+// 40. Temporary streamed patches survive review cleanup.
 // 39. A review stopped at its cap does not say which cap it hit and which
 //     flag raises it, on the terminal or in the report; or a reviewer that
 //     never answers is not stopped at the cap it was given.
@@ -1354,4 +1355,22 @@ describe("37, 38, 39. the review's time cap", () => {
     expect(report.completion?.missing).toContain(capLine("1 second"));
     expect(out).toContain(`Missing: ${capLine("1 second")}`);
   });
+});
+
+it("40. removes streamed patches after the review ends or the reviewer fails", async () => {
+  for (const failed of [false, true]) {
+    const dir = repo();
+    writeFileSync(join(dir, "big.txt"), `${"x".repeat(6299)}\n`.repeat(1000));
+    let patches: string[] = [];
+    const answer: Answer = (text) => {
+      const root = join(home, "tmp");
+      patches = existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((p) => p.endsWith(".patch")) : [];
+      if (failed) throw new Error("reviewer failed");
+      return { finalText: submission(text) };
+    };
+    expect(await review(dir, fake([answer]))).toBe(failed ? 2 : 0);
+    expect(patches.length).toBeGreaterThan(0);
+    const root = join(home, "tmp");
+    expect(existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((p) => p.endsWith(".patch") || p.endsWith("/diff")) : []).toEqual([]);
+  }
 });

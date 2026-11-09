@@ -37,13 +37,16 @@
 // 23. A file rewritten at the same size in the same second the index was
 //     written is missed, because the temp copy of the index carries a later
 //     time and git then trusts the file's stat over its content.
+// 24. An over-cap diff loses its last deletion or spills beside repository files.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DIFF_CAP_BYTES, findRepoRoot, getChange } from "../src/change.js";
+import { findRepoRoot, getChange } from "../src/change.js";
+import { diffText } from "../src/diff.js";
+import { cleanupDiffs } from "../src/diff-store.js";
 import { OpenQodexError } from "../src/types.js";
 
 const roots: string[] = [];
@@ -352,22 +355,35 @@ describe("getChange", () => {
     expect(three.id).not.toBe(one.id);
   });
 
-  it("leaves files past the diff cap out whole, and still moves the id when they change", async () => {
+  it("7n. keeps over-cap patches on disk and retains the last file's deletion", async () => {
     const repo = seeded();
+    write(repo, "zz-last.txt", "before\nremoved tail\nafter\n");
+    commitAll(repo, "deletion baseline");
+    const tempRoot = tempDir();
     write(repo, "a.ts", lines(10).replace("line 1\n", "line one\n"));
-    const big = "x".repeat(99) + "\n";
-    const bigContent = big.repeat(Math.ceil(DIFF_CAP_BYTES / big.length) + 10);
-    write(repo, "zz-big.txt", bigContent);
-    const first = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
-    expect(first.notReviewed).toEqual(["zz-big.txt"]);
+    const content = `${"x".repeat(1049)}\n`.repeat(6000);
+    write(repo, "b-large.txt", content);
+    write(repo, "zz-last.txt", "before\nafter\n" + content);
+    const first = await getChange({ repoRoot: repo, scope: {}, exclude: [], tempRoot });
     expect(first.diff).toContain("line one");
-    expect(first.diff).not.toContain("zz-big.txt");
-    expect(Buffer.byteLength(first.diff)).toBeLessThanOrEqual(DIFF_CAP_BYTES);
-    expect(first.changedPaths).toContain("zz-big.txt");
-    write(repo, "zz-big.txt", bigContent + "one more line\n");
-    const second = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
-    expect(second.diff).toBe(first.diff);
+    expect(first.changedPaths).toContain("b-large.txt");
+    expect(first.diffs!.find((d) => d.path === "b-large.txt")!.file).toBeDefined();
+    expect(first.notReviewed).toEqual([]);
+    expect(first.diffs?.map((d) => d.path)).toEqual(["a.ts", "b-large.txt", "zz-last.txt"]);
+    for (const path of ["zz-last.txt"]) {
+      const entry = first.diffs!.find((d) => d.path === path)!;
+      expect(entry.text).toBeUndefined();
+      expect(entry.file).toMatch(new RegExp(`${first.id}/diff/\\d+\\.patch$`));
+      expect(relative(tempRoot, entry.file!)).not.toMatch(/^\.\./);
+    }
+    expect(readFileSync(first.diffs!.at(-1)!.file!, "utf8")).toContain("-removed tail\n");
+    expect(first.deletionPoints.get("zz-last.txt")).toEqual([{ after: 1, lines: 1, anchors: [1, 2] }]);
+    write(repo, "zz-last.txt", "before\nafter\n" + content + "one more line\n");
+    const second = await getChange({ repoRoot: repo, scope: {}, exclude: [], tempRoot });
     expect(second.id).not.toBe(first.id);
+    expect(second.diff).toBe(first.diff);
+    cleanupDiffs(first);
+    cleanupDiffs(second);
   });
 
   it("writes nothing inside .git", async () => {
@@ -416,14 +432,17 @@ describe("getChange", () => {
     expect(c.stats.additions).toBe(500_003);
   });
 
-  it("leaves out a single line too long for the brief without holding it", async () => {
+  it("streams a single over-cap line without losing any bytes", async () => {
     const repo = seeded();
-    write(repo, "app.min.js", "y".repeat(DIFF_CAP_BYTES + 10) + "\n");
+    write(repo, "app.min.js", "y".repeat(5 * 1024 * 1024 + 10) + "\n");
     write(repo, "b.ts", "b\n");
-    const c = await getChange({ repoRoot: repo, scope: {}, exclude: [] });
-    expect(c.notReviewed).toEqual(["app.min.js"]);
+    const c = await getChange({ repoRoot: repo, scope: {}, exclude: [], tempRoot: tempDir() });
+    expect(c.notReviewed).toEqual([]);
+    const entry = c.diffs!.find((d) => d.path === "app.min.js")!;
+    expect(entry.text).toBeUndefined();
+    expect(readFileSync(entry.file!, "utf8")).toContain("+" + "y".repeat(5 * 1024 * 1024 + 10) + "\n");
     expect(Array.from(c.coverage.get("app.min.js") ?? [])).toEqual(Array.from([1]));
-    expect(c.diff).toContain("+b");
+    expect(diffText(c, "b.ts")).toContain("+b");
     expect(c.diff).not.toContain("yyyy");
   });
 

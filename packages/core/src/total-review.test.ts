@@ -37,7 +37,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { DIFF_CAP_BYTES, getChange } from "./change.js";
+import { getChange } from "./change.js";
 import { changedHunks, completionRecord, singlePassCoverage } from "./completion.js";
 import type { TraceEntry } from "./completion.js";
 import { checkSubmission } from "./finalize.js";
@@ -216,7 +216,7 @@ describe("14. files the change could not map or brief", () => {
     const lines = 500_001;
     writeFileSync(join(dir, "big.txt"), "x\n".repeat(lines));
     writeFileSync(join(dir, "small.py"), "x = 1\n");
-    const change = await getChange({ repoRoot: dir, scope: { uncommitted: true }, exclude: [] });
+    const change = await getChange({ repoRoot: dir, scope: { uncommitted: true }, exclude: [], tempRoot: join(dir, ".openqodex/tmp") });
     expect(change.uncovered).toEqual([]);
     expect(change.coverage.get("big.txt")?.ranges()).toEqual([[1, 500_001]]);
     const lineCount = (path: string) => (path === "big.txt" ? lines : 1);
@@ -227,12 +227,13 @@ describe("14. files the change could not map or brief", () => {
   }, 60_000);
 
   it("a file past the diff budget still has its changed lines mapped, so a deletion no brief carried stays unread", async () => {
-    const lines = Math.ceil(DIFF_CAP_BYTES / 2) + 1;
-    const dir = repo({ "gone.txt": "x\n".repeat(lines), "keep.py": "a = 1\n" });
+    const lines = 63_000;
+    const dir = repo({ "gone.txt": `${"x".repeat(99)}\n`.repeat(lines), "keep.py": "a = 1\n" });
     writeFileSync(join(dir, "gone.txt"), "");
     writeFileSync(join(dir, "keep.py"), "a = 2\n");
-    const change = await getChange({ repoRoot: dir, scope: { uncommitted: true }, exclude: [] });
-    expect(change.notReviewed).toEqual(["gone.txt"]);
+    const change = await getChange({ repoRoot: dir, scope: { uncommitted: true }, exclude: [], tempRoot: join(dir, ".openqodex/tmp") });
+    expect(change.notReviewed).toEqual([]);
+    expect(change.diffs!.find((d) => d.path === "gone.txt")!.file).toBeDefined();
     const c = singlePassCoverage({ change, diffFiles: new Set(["keep.py"]), trace: [], lineCount: () => 1 });
     expect(c.unread.map((h) => h.path)).toEqual(["gone.txt"]);
   }, 120_000);

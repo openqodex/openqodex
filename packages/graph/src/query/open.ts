@@ -10,7 +10,7 @@
 // file and followed config with its content or its absence. A later
 // question computes the digest of the work tree again, with no parse, and
 // says that files changed since (`laterEditsKnown`) when the two differ.
-import { getChange } from "@openqodex/core";
+import { cleanupDiffs, getChange } from "@openqodex/core";
 import type { Change } from "@openqodex/core";
 import { buildGraph, workTreeDigest } from "../build.js";
 import { detectImpact } from "../impact.js";
@@ -88,30 +88,32 @@ export async function pinWorkTree(args: PinArgs): Promise<Pinned> {
   const reference: Reference = { digest: await workTreeDigest(repoRoot, settings.maxFileBytes) };
   let change: Change | undefined;
   if (args.compare) change = await getChange({ repoRoot, scope: args.compare.base !== undefined ? { base: args.compare.base } : {}, exclude: args.compare.exclude, defaultBase: args.compare.defaultBase });
-  const graph = await buildGraph({
-    repoRoot,
-    store,
-    storeRefused: args.storeRefused,
-    capture: "working-tree",
-    files: change?.changedPaths,
-    base: change ? { sha: change.baseSha, files: change.files } : undefined,
-    budgetMs: args.whole ? BUILD_ALL_MS : settings.budgetMs,
-    maxFiles: args.whole ? Number.MAX_SAFE_INTEGER : settings.maxFiles,
-    maxFileBytes: settings.maxFileBytes,
-    maxHeapMb: settings.maxHeapMb,
-    mode: args.full ? "fresh" : undefined,
-    onProgress: args.onProgress,
-  });
-  let changes: ChangesExtra | undefined;
-  if (change) {
-    const impact = detectImpact(graph, change);
-    const removed = impact.symbols.filter((s) => impact.removed.includes(s.id));
-    // Every consumer of each changed public name: the summary's cap is for the brief only.
-    changes = { exports: graph.exportChanges, removed: removed.filter((s) => !s.movedTo), moved: removed.filter((s) => s.movedTo) };
-  }
-  const lease = await leaseOf(store, graph, args.purpose);
-  const scope = change ? `${change.baseSha}:${reference.digest}` : undefined;
-  return { session: sessionOf(store, graph), lease, changes, change, scope, reference, release: () => lease?.release() };
+  try {
+    const graph = await buildGraph({
+      repoRoot,
+      store,
+      storeRefused: args.storeRefused,
+      capture: "working-tree",
+      files: change?.changedPaths,
+      base: change ? { sha: change.baseSha, files: change.files } : undefined,
+      budgetMs: args.whole ? BUILD_ALL_MS : settings.budgetMs,
+      maxFiles: args.whole ? Number.MAX_SAFE_INTEGER : settings.maxFiles,
+      maxFileBytes: settings.maxFileBytes,
+      maxHeapMb: settings.maxHeapMb,
+      mode: args.full ? "fresh" : undefined,
+      onProgress: args.onProgress,
+    });
+    let changes: ChangesExtra | undefined;
+    if (change) {
+      const impact = detectImpact(graph, change);
+      const removed = impact.symbols.filter((s) => impact.removed.includes(s.id));
+      // Every consumer of each changed public name: the summary's cap is for the brief only.
+      changes = { exports: graph.exportChanges, removed: removed.filter((s) => !s.movedTo), moved: removed.filter((s) => s.movedTo) };
+    }
+    const lease = await leaseOf(store, graph, args.purpose);
+    const scope = change ? `${change.baseSha}:${reference.digest}` : undefined;
+    return { session: sessionOf(store, graph), lease, changes, change, scope, reference, release: () => lease?.release() };
+  } finally { if (change) cleanupDiffs(change); }
 }
 
 export type PinnedOrError = Pinned | { error: "generation-unavailable" | "unreadable"; message: string };

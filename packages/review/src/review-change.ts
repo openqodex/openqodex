@@ -37,6 +37,7 @@ import {
   checkSubmission,
   REVIEWER_TOOLS,
   REVIEWER_WEB_TOOLS,
+  cleanupDiffs,
   completionRecord,
   configHash,
   findingKey,
@@ -255,6 +256,8 @@ export type ReviewDeps = {
   // Where the scanners write (pipeline.ts ScanHost): left out, the laptop's
   // places; given, only under it.
   scratchRoot?: string;
+  // The host state directory's tmp folder for retained patches.
+  diffTempRoot?: string;
   // The run's phase clock (core's timings.ts), started when the host began
   // the run; left out, one started as the core starts, on `now`. The core
   // enters each phase as it runs it, and the report it makes carries the
@@ -385,7 +388,7 @@ async function headOf(repoRoot: string): Promise<string> {
 // The change and its snapshot, then the scan, each timed on `clock`. `keep`
 // receives the snapshot as soon as it exists, so the caller removes it
 // whatever fails later.
-async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHost, clock: PhaseClock, keep: (s: Snapshot) => void): Promise<Prepared | null> {
+async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHost, clock: PhaseClock, keep: (s: Snapshot) => void, keepChange: (c: Change) => void): Promise<Prepared | null> {
   const { repoRoot, config, only, skip } = inputs;
   const say = (line: string) => deps.onEvent({ type: "progress", line });
   const warn = (line: string) => deps.onEvent({ type: "warning", line });
@@ -395,9 +398,11 @@ async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHos
     try {
       for (const note of t.notes) warn(note);
       say(`Reviewing ${inputs.target} at ${t.headSha.slice(0, 12)}: base ${t.baseRef} (from ${t.baseSource}), merge base ${t.mergeBase.slice(0, 12)}`);
-      const target = { repoRoot, baseRef: t.baseRef, baseSha: t.mergeBase, headSha: t.headSha, exclude: config.exclude };
+      const target = { repoRoot, baseRef: t.baseRef, baseSha: t.mergeBase, headSha: t.headSha, exclude: config.exclude, tempRoot: deps.diffTempRoot };
       const scoped = deps.scoped ? await deps.scoped.change(target) : null;
       const change = scoped?.obligation ?? (await getTreeChange(target));
+      keepChange(change);
+      if (scoped) keepChange(scoped.full);
       if (change.files.length === 0) {
         warn(nothingToReviewLine(change));
         return null;
@@ -437,12 +442,14 @@ async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHos
     exclude: config.exclude,
     defaultBase: config.defaultBase,
     overlay: inputs.overlay,
+    tempRoot: deps.diffTempRoot,
     onTree: async (tree) => {
       treeSha = tree.sha;
       snapshot = await deps.snapshots.make(repoRoot, head, "work-", tree);
       keep(snapshot);
     },
   });
+  keepChange(change);
   if (snapshot === null) throw new OpenQodexError("the snapshot of the change was not made");
   const snap: Snapshot = snapshot;
   if (inputs.all) {
@@ -475,6 +482,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
   const chosen: Chosen = deps.model ? { model: deps.model } : await chooseReviewer(inputs.reviewer, deps.drivers, repoRoot);
   const deadline = inputs.deadlineAt ?? deps.now() + inputs.timeoutMs;
 
+  const changes = new Set<Change>();
   let snapshot: Snapshot | null = null;
   let session: (Speaker & { close(): Promise<void>; kill?(): void }) | null = null;
   // The graph build this review read, held until the review ends.
@@ -509,6 +517,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       try { live.kill?.(); } catch { /* Stop the remaining reviewers too. */ }
       void Promise.resolve().then(() => live.close()).catch(() => {});
     }
+    for (const change of changes) cleanupDiffs(change);
     if (snapshot !== null) deps.snapshots.removeNow(repoRoot, snapshot as Snapshot);
   });
   const scanHost: ScanHost = { resolveTool: deps.resolveTool, onProgress: say, onScan: (scan) => deps.onEvent({ type: "scan", scan }), ...(deps.scratchRoot !== undefined ? { scratchRoot: deps.scratchRoot } : {}) };
@@ -519,7 +528,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
   };
   const graphHost: GraphHost = { store: deps.graphStore, onProgress: say, warn, ...(deps.scoped ? { inventory: deps.scoped.inventory, readBase: deps.scoped.readBase } : {}) };
   try {
-    const prep = await prepare(inputs, deps, scanHost, clock, (s) => (snapshot = s));
+    const prep = await prepare(inputs, deps, scanHost, clock, (s) => (snapshot = s), (c) => { changes.add(c); });
     if (prep === null) {
       if (inputs.all) warn("Nothing to review: the repository has no files");
       return await finish({ ended: "nothing" });
@@ -576,7 +585,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
         }
       }
       try {
-        neighbourhood = buildNeighbourhood({ change: { ...change, diffs: (change.diffs ?? []).map((d) => ({ ...d, text: redact(d.text) })) }, snapshotDir: prep.snapshot.tree, impact, secrets: p.secrets, now: deps.now });
+        neighbourhood = buildNeighbourhood({ change, snapshotDir: prep.snapshot.tree, impact, secrets: p.secrets, now: deps.now });
       } catch (error) {
         neighbourhood.partial = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
       }
@@ -867,11 +876,14 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
   } finally {
     over = true;
     for (const live of liveSessions) { try { await live.close(); } catch { /* Other cleanup must still run. */ } }
-    try { graphLease?.release(); }
+    try { for (const change of changes) cleanupDiffs(change); }
     finally {
-      if (snapshot !== null) {
-        clearLineIndexes((snapshot as Snapshot).tree);
-        await deps.snapshots.remove(repoRoot, snapshot as Snapshot);
+      try { graphLease?.release(); }
+      finally {
+        if (snapshot !== null) {
+          clearLineIndexes((snapshot as Snapshot).tree);
+          await deps.snapshots.remove(repoRoot, snapshot as Snapshot);
+        }
       }
     }
   }

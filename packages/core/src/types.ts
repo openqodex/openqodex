@@ -238,20 +238,23 @@ export type ChangedFile = {
   binary: boolean;
 };
 
+// Exactly one representation of a file's retained patch. Read through diffText.
+export type DiffEntry = { path: string } & ({ text: string; file?: never } | { text?: never; file: string });
+
 export type Change = {
   repoRoot: string;
   baseRef: string; // what the base was resolved from, for display
   baseSha: string;
-  id: string; // sha256 hex of baseSha + "\n" + `git diff --cached --raw -z --no-abbrev <base>`; covers binary files and anything past the diff cap
+  id: string; // sha256 hex of baseSha + "\n" + `git diff --cached --raw -z --no-abbrev <base>`; covers binary files and every patch size
   shortId: string;
   files: ChangedFile[]; // everything in the change, exclusions already applied
   changedPaths: string[]; // files that still exist (not deleted), what scanners receive
   coverage: DiffCoverage; // from the zero-context diff
   deletionPoints: Map<string, DeletionPoint[]>; // from the same diff, per file that still exists
-  diff: string; // the three-lines-of-context diff, capped
+  diff: string; // the in-memory portion of the three-lines-of-context diff
   // The same diff split per file, in the same order; absent where a caller built a Change by hand.
-  diffs?: { path: string; text: string }[];
-  notReviewed: string[]; // paths left out because the change was too large
+  diffs?: DiffEntry[];
+  notReviewed: string[]; // empty for changes; whole-repo scope keeps its listing rule
   // Hand-built changes may name text files whose changed lines are not
   // known: a review counts one as read only when the reviewer read all of it.
   // Absent where a caller built a Change by hand.
@@ -897,7 +900,7 @@ export type Report = {
   // The code graph's view of the change. Always present: status "off",
   // "skipped" or "failed" says why there is nothing in it.
   impact: ImpactSummary | null;
-  not_reviewed_paths: string[]; // Change.notReviewed
+  not_reviewed_paths: string[]; // Change.notReviewed, empty for a change review
   stats: { files: number; additions: number; deletions: number };
   // A review run by `review` itself: its completion record (a model
   // reviewer's has its own contract). Absent in a scan and in a review from

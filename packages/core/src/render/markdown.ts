@@ -110,8 +110,8 @@ export function renderMarkdown(report: Report): string {
       out.push(`| ${code(l.file_path)} | ${cell(l.title + lowConfidenceReason(l))} | ${l.confidence} | ${l.floor} |`);
     }
   }
-  if (report.not_reviewed_paths.length > 0) {
-    out.push("", "## Not reviewed, change too large", "");
+  if (report.base.ref === "all" && report.not_reviewed_paths.length > 0) {
+    out.push("", `## Not reviewed: ${report.not_reviewed_paths.length} ${report.not_reviewed_paths.length === 1 ? "file" : "files"}, over 5 MB, links or unreadable`, "");
     for (const p of report.not_reviewed_paths) out.push(`- ${code(p)}`);
   }
 

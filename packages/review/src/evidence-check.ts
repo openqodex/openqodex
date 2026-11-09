@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DELIVERY_ROW_BYTES, FIELD_SENTENCE_LIMITS, FINDER_CONFIDENCE_FLOOR, proseErrors, scannerTerms } from "@openqodex/core";
+import { DELIVERY_ROW_BYTES, FIELD_SENTENCE_LIMITS, FINDER_CONFIDENCE_FLOOR, diffEntry, diffHunks, proseErrors, scannerTerms } from "@openqodex/core";
 import type { Change, EvidenceCitation, FindAnswer, FindCandidate, ReviewUnit, ScanResult, VerifyAnswer, VerifyBatch } from "@openqodex/core";
 
 import type { SnapshotText } from "./snapshot.js";
@@ -45,10 +45,11 @@ export function checkEvidence(c: EvidenceCitation, snapshotText: SnapshotText, c
   const quote = normal(c.quote);
   if (quote === "") return `evidence ${at}: the quote is empty`;
   if (c.removed) {
-    const diff = change.diffs?.find((d) => d.path === c.file_path || change.files.some((f) => f.path === d.path && f.oldPath === c.file_path));
+    const path = diffEntry(change, c.file_path)?.path ?? change.files.find((f) => f.oldPath === c.file_path)?.path;
     let oldLine = 0;
     const removed: string[] = [];
-    for (const row of diff?.text.split("\n") ?? []) {
+    let skipped = false;
+    for (const hunk of path ? diffHunks(change, path, { start: Math.max(1, c.line_number - 2), end: c.line_number + 2, side: "old" }, 512 * 1024, { onLimit: () => { skipped = true; } }) : []) for (const row of hunk.split("\n")) {
       const header = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(row);
       if (header) { oldLine = Number(header[1]); continue; }
       if (oldLine === 0) continue;
@@ -58,6 +59,7 @@ export function checkEvidence(c: EvidenceCitation, snapshotText: SnapshotText, c
       } else if (row.startsWith(" ")) oldLine++;
       else if (!row.startsWith("+") && !row.startsWith("\\")) oldLine = 0;
     }
+    if (skipped) return `evidence ${at}: the removed lines cannot be checked within the 512 KB byte budget; cite evidence from another line`;
     return normal(removed.join(" ")).includes(quote) ? null : `evidence ${at}: the quote is not in the removed lines of this file's diff`;
   }
   const from = Math.max(1, c.line_number - 2);
