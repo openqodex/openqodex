@@ -56,6 +56,7 @@ import {
   selectLenses,
   verdictFor,
   resolveInstructionFiles,
+  shortenedMissing,
 } from "@openqodex/core";
 import type {
   BaseSource,
@@ -1145,7 +1146,7 @@ async function reviewInScope(
   const answered = r.report.summary !== null;
   const dispositions = answered ? dispositionsOf(r.report, r.submission, r.scan) : [];
   const second = r.second ?? null;
-  let completion = modelRecord(r.evidence, { second: second?.evidence ?? null, secrets: r.secrets });
+  let completion = modelRecord(r.evidence, { second: second?.evidence ?? null, secrets: r.secrets, change: r.change });
   let checked = r.report;
   let foundBy = r.report.findings.map((f) => f.found_by ?? [model.model]);
   let disagreements: ReviewResult["disagreements"] = [];
@@ -1190,7 +1191,7 @@ async function reviewInScope(
   const complete = completion.status === "complete";
   const result: Untimed = {
     status: complete ? (report.verdict === "blocked" ? "complete_blocking" : "complete") : "incomplete",
-    ...(complete ? {} : { reason: completion.missing.join("; ") }),
+    ...(complete ? {} : { reason: shortenedMissing(completion.missing).join("; ") }),
     scope: decision.scope,
     findings: resultFindings(report.findings, foundBy),
     possible: resultFindings(report.possible, report.possible.map((f) => f.found_by ?? [model.model])),

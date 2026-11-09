@@ -98,7 +98,7 @@ describe("the model record from the brain's evidence", () => {
   it("1. a read served but never sent is not shown, and the record says so", () => {
     const r = modelRecord(evidence({ toolLog: [read({ delivered: false })] }));
     expect(r.status).toBe("incomplete");
-    expect(r.missing).toContain("1 changed range was not sent to the reviewer: app/a.py:3-5");
+    expect(r.missing).toEqual(["1 changed range was not examined", "app/a.py:3-5"]);
   });
 
   it("2, 3. a refused second call: incomplete, the first call's usage kept, the refused one unauthorized with no usage", () => {

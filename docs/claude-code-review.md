@@ -118,6 +118,8 @@ Claude Code shows you the receipt OpenQodex printed: the verdict (`passed` or `b
 
 Open `report.html` in a browser to read the review. It shows each changed file as a diff with each finding under its line: where it is, the problem, why it matters, the fix and its source. Below are the coverage, the scanners and the blast radius. The page runs no script and loads nothing. Then tell Claude Code which findings to fix, by number, or say "fix all".
 
+Coverage lists every changed file and how its ranges reached the reviewer. `brief` means the lines were in a finder's brief, `page` means OpenQodex delivered the lines in a later request, and `read` means the reviewer's successful tool reads covered the range. `structural summary` means a format parser supplied a summary instead of the original lines. When coverage overlaps, OpenQodex credits its own brief, summary or page before reads and lists each interval once. Every unexamined range has its own entry in the reports; the receipt names the first ten and says how many remain. Every receipt includes a Changed ranges line, including zero counts.
+
 The same review is in `.openqodex/reviews/<time>-<id>/` in your repository, as `report.html`, `report.md`, `report.json` and `report.sarif`. For staged reviews, `units.json` records the obligation inventory and its measured parts. `.openqodex/.gitignore` keeps the reports out of git.
 
 Changed-line coverage is stored as intervals, so no file loses its coverage because a change has too many lines.

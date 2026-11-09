@@ -147,7 +147,7 @@ Observed with codex-cli 0.160.0 (2026-10-04):
 
 What `traced: false` changes in the run (`packages/review/src/review-change.ts`, `packages/review/src/conversation.ts`, `packages/core/src/completion.ts`):
 
-- No read in the stream counts as coverage. A changed range counts only when its diff is in the brief or the run sent it in a correction round. A range still not sent after two rounds makes the review incomplete ("not given to the reviewer"). A changed line over 2,000 characters is given in numbered parts; a line too large for the byte budget keeps the review incomplete.
+- No read in the stream counts as coverage. A changed range counts only when its diff is in the brief or the run sent it in a correction round. A range still not sent after two rounds makes the review incomplete ("not examined"). A changed line over 2,000 characters is given in numbered parts; a line too large for the byte budget keeps the review incomplete.
 - The commands and searches the stream shows are kept in `trace.json` with `inside: null` and their input under `detail`. They never pass or fail a review: there is no "read outside the snapshot" alarm and no "tool it was not given" check. The sandbox is the boundary.
 - The completion record holds `trace_complete: false`, and empty `files_read` and `files_not_read`. The report prints "Files the reviewer opened: not recorded by Codex" and "Reads outside the snapshot: not recorded by Codex".
 

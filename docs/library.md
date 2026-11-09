@@ -67,7 +67,7 @@ const result = await reviewChange(
 ### Result
 
 - `status`: `complete`, `complete_blocking` (complete, with a finding at or above `block_on_severity`) or `incomplete`.
-- `reason`: why the review is incomplete, one line per missing proof. A complete review has a reason only when there was nothing to review.
+- `reason`: why the review is incomplete. Unexamined ranges are shortened to their heading, the first ten entries and a count pointing to the report for the rest. A complete review has a reason only when there was nothing to review.
 - `findings`: counted findings that passed every check, in the finding shape below.
 - `possible`: confirmed issues with confidence at least 0.5 and below their effective floor. Each uses the same finding shape. This array is always present, including when empty. These issues never affect the verdict.
 - `dispositions`: what the reviewer did with each scanner candidate: `raised` with the finding's file and line, or `dropped` with the reason and the line that shows why.
@@ -78,7 +78,7 @@ const result = await reviewChange(
 - `trace`: every tool call the reviewer made, as the brain ran it.
 - `usage`: `{ calls, totals }`. One record per model attempt: `callId`, `reviewer`, `purpose`, the model asked for and the model that answered, input, output, cache-read and cache-write tokens, the cost when the host reported one, the outcome (`ok`, `failed` or `refused`) and the measured duration. The totals add them up; a sum the host could not report is null, never zero.
 - `rounds`: every correction round sent, the second reviewer's after the primary's, each `{ by, round, errors, delivered, later, answer }`: the reviewer it went to (`primary` or `second`), the answer it corrects (1 for the answer to the brief), every check that answer failed, the changed ranges the round carried, how many more it promised for a next round, and the answer the checks judged (null when it was not JSON). A finding a check rejected and the next answer left out shows here. Redacted like the report.
-- `completion`: the model completion record, contract `openqodex-model-review-1`. Its proof is the brain's own data: the snapshot before and after, every changed range with how it was delivered, every tool call, every candidate raised or dropped, and every model attempt with its authorization and usage. Nothing in it comes from the reviewer.
+- `completion`: the model completion record, contract `openqodex-model-review-1`. Its `missing` array keeps one line per missing proof, including every unexamined range without shortening. Its proof is the brain's own data: the snapshot before and after, every changed range with how it was delivered, every tool call, every candidate raised or dropped, and every model attempt with its authorization and usage. Nothing in it comes from the reviewer.
 - `scope`: `{ kind, reason }`. `kind` is `delta` when only what changed since `previousReviewedSha` was the reviewer's to review, else `full`; `reason` says why. Null when a proof failed first.
 - `notes`: the convention files supplied, their sources, transformations and omissions, plus what the review could not hold, one plain line each: a file renamed into the scopes from outside them (reviewed as a new file), a link or a submodule the snapshot left out, a base version outside the scopes that was asked for and not read, and a second reviewer's failure that left the review complete.
 - `context`: every context item given, in order, with its hash, and why the brief left one out.

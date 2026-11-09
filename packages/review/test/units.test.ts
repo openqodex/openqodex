@@ -125,7 +125,7 @@ it("keeps an unreadable uncovered file missing after a Read of lines 1 to 5", ()
   const coverage = readCoverage({ change: f.change, obligations: refs, trace: [{ tool: "Read", path: "a.txt", inside: true, ok: true, range: [1, 5] }] });
   expect(coverage.unread).toEqual(refs);
   expect(coverage.given).toEqual([]);
-  expect(missing(f.change, coverage)).toMatchObject({ status: "incomplete", missing: [expect.stringContaining("a.txt:1")] });
+  expect(missing(f.change, coverage)).toMatchObject({ status: "incomplete", missing: ["1 changed range was not examined", "a.txt:1"] });
   expect(refs[0]).toMatchObject({ start: 1, end: 0 });
   expect(refs[0]!.part).toBeUndefined();
 });
@@ -154,7 +154,7 @@ it("notes a single entry whose real finder brief exceeds 256 KB instead of throw
   const brief = { carried: [] };
   const coverage = readCoverage({ change: f.change, obligations: refs, briefCarried: brief.carried, trace: [] });
   expect(coverage.unread).toEqual(refs);
-  expect(missing(f.change, coverage)).toMatchObject({ status: "incomplete", missing: [expect.stringContaining("a.txt:1")] });
+  expect(missing(f.change, coverage)).toMatchObject({ status: "incomplete", missing: ["1 changed range was not examined", "a.txt:1 (part 1 of 1)"] });
 });
 it("leaves an uncarried replacement fragment missing because it has no deletion anchor to page", () => {
   const f = fixture(["a.txt"]);
@@ -166,7 +166,7 @@ it("leaves an uncarried replacement fragment missing because it has no deletion 
   expect(page.delivered).toEqual([]);
   const coverage = readCoverage({ change: f.change, obligations: [fragment], delivered: page.delivered, trace: [] });
   expect(coverage.unread).toEqual([fragment]);
-  expect(missing(f.change, coverage)).toMatchObject({ status: "incomplete", missing: [expect.stringContaining("a.txt:1")] });
+  expect(missing(f.change, coverage)).toMatchObject({ status: "incomplete", missing: ["1 changed range was not examined", "a.txt:1 (deletion a.txt#replacement0:1, old lines 1-3999) (part 1 of 3)"] });
 });
 
 it("bounds rendered hunk visits and snapshot reads for 1500 hunks", () => {

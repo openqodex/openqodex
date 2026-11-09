@@ -863,12 +863,12 @@ describe("28, 29. a reviewer whose trace is not complete (Codex)", () => {
     expect(readFileSync(join(runDir(dir), "trace.json"), "utf8")).toContain("cat /etc/hosts");
   });
 
-  it("29. ranges the rounds could not carry leave it incomplete, named as not given to the reviewer", async () => {
+  it("29. ranges the rounds could not carry leave it incomplete, each named as not examined", async () => {
     const dir = bigChange(DELIVER_LINES * 3);
     expect(await review(dir, untraced([claims]))).toBe(2);
     const report = JSON.parse(out) as Report;
     expect(report.completion?.status).toBe("incomplete");
-    expect(report.completion?.missing.join("\n")).toMatch(/not given to the reviewer: big\.txt:\d+-\d+/);
+    expect(report.completion?.missing).toEqual(["1 changed range was not examined", expect.stringMatching(/^big\.txt:\d+-\d+$/)]);
   });
 });
 

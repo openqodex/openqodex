@@ -385,8 +385,25 @@ export function failureOf(result, report) {
     return { cause: unavailable ? `no reviewer could start: ${last}` : `no report.json (exit ${result.code ?? result.signal}): ${last}`, infra: true, unavailable };
   }
   if (reviewerFailed) return { cause: reviewerFailed, infra: true, unavailable: false };
-  if (report.completion?.status !== "complete") return { cause: missing.join("; ") || "incomplete", infra: false, unavailable: false };
+  if (report.completion?.status !== "complete") return { cause: shortenedMissing(missing).join("; ") || "incomplete", infra: false, unavailable: false };
   return null;
+}
+
+// Benchmarks also run from standalone copies without the core package.
+// Match the receipt's unread-block shortening, keeping other failures.
+function shortenedMissing(missing) {
+  const out = [];
+  for (let i = 0; i < missing.length; i++) {
+    const line = missing[i];
+    out.push(line);
+    const heading = /^(\d+) changed (?:range was|ranges were) not examined$/.exec(line);
+    if (!heading) continue;
+    const n = Number(heading[1]);
+    out.push(...missing.slice(i + 1, i + 1 + Math.min(n, 10)));
+    if (n > 10) out.push(`and ${n - 10} more; the report names each one`);
+    i += n;
+  }
+  return out;
 }
 
 // Failure list: requested models replace served ones, mixed usage looks single,
