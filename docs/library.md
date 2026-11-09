@@ -17,6 +17,10 @@ Importing the library runs nothing. No command starts, nothing is printed, no en
 
 `reviewChange` reviews one change with the same brain as `openqodex review`: the scanners, the code graph, the lenses, the brief, the checked answer with its correction rounds, and the completion record. A server product calls it with its own model and gets back findings, the reviewer's dispositions, coverage, a completion record, the usage of every model call, the scan record and the time each phase took.
 
+Callers that build a `Change` directly with `getChange`, `getTreeChange` or `getAdmittedTreeChange` own its retained patches. Call `cleanupDiffs(change)` in a `finally` block after the last consumer, including when work fails or is cancelled. Without `tempRoot`, spilled patches use the host temporary folder. `reviewChange` owns this cleanup for changes it builds. Identity checks may pass `idOnly: true` to avoid retaining patches or building coverage.
+
+Read small per-file patches with `diffText(change, path)`. It returns null for a disk patch over 5 MB; walk `diffHunks(change, path, range?)` for larger patches. The optional range is `{ start, end, side?: "old" | "new" }`, with inclusive line numbers. Each yielded string is a hunk or a bounded page of one, with its line cursors. The byte index is built once per patch.
+
 ## Two profiles
 
 A review runs in one of two profiles. The profile is declared, never guessed.

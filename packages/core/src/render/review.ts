@@ -203,7 +203,7 @@ function lines(report: Report): Line[] {
     if (fileLines.length > 0) out.push({ kind: "text", text: "" });
     for (const text of fileLines) out.push({ kind: "text", text });
   }
-  if (report.not_reviewed_paths.length > 0) out.push({ kind: "field", label: "Left out, change too large", text: report.not_reviewed_paths.join(", ") });
+  if (report.base.ref === "all" && report.not_reviewed_paths.length > 0) out.push({ kind: "field", label: `Not reviewed: ${report.not_reviewed_paths.length} ${report.not_reviewed_paths.length === 1 ? "file" : "files"}, over 5 MB, links or unreadable`, text: report.not_reviewed_paths.join(", ") });
   out.push({ kind: "text", text: `Scanners: ${coverageLine(report.scanners)}` });
   out.push({ kind: "text", text: c?.contract === "openqodex-model-review-1" ? modelReviewerLine(c) : reviewerLine(c?.reviewer ?? null) });
   out.push({ kind: "text", text: CLOSING });

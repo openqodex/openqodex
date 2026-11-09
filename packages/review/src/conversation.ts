@@ -5,7 +5,7 @@
 import { closeSync, fchmodSync, fstatSync, openSync, readSync, renameSync, rmSync, writeSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { DELIVERY_ROW_BYTES, OpenQodexError, deliveryRow, leftSnapshot, redactSecrets, redactSecretsKeepingLines, removedRuns, secretTexts } from "@openqodex/core";
+import { DELIVERY_ROW_BYTES, OpenQodexError, deliveryRow, diffHunks, diffIndex, leftSnapshot, redactSecrets, redactSecretsKeepingLines, removedRuns, secretTexts } from "@openqodex/core";
 import type { Change, Hunk, Report, TraceEntry } from "@openqodex/core";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Turn } from "./agents/driver.js";
@@ -220,8 +220,8 @@ function gaps(h: Hunk, earlier: Hunk[]): [number, number][] {
 // with the anchors and context from the snapshot. Up to DELIVER_LINES lines
 // and DELIVER_BYTES bytes; a range split at the bound continues next round,
 // and a deletion goes whole or waits. Never carried, so left unread: a
-// deletion whose removed lines the change does not hold (its file was past
-// the diff cap), a file the snapshot dropped, or a binary file. `later`:
+// deletion whose removed lines a hand-built change does not hold, a file
+// the snapshot dropped, or a binary file. `later`:
 // how many of `left` may still come in a round.
 // The text then goes through the brief's redaction once more; if a found
 // secret is still in it, nothing is sent and `leak` is set, which makes the
@@ -255,14 +255,11 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
   };
   // Oversized context cannot keep the changed lines beside it unsent.
   const context = (path: string, i: number, text: string | null): string[] => (text === null ? null : deliveryRow(path, i, text, `${i}\t`)) ?? [`${i}\t(not shown: a context line over ${DELIVERY_ROW_BYTES / 1024} KB)`];
-  const runs = new Map<string, { after: number; oldStart: number; lines: string[] }[]>();
   // The lines that show deletion `h`, or null when the change does not hold
   // what it removed. A deleted file has no snapshot copy, so no context.
   const removedBlock = (h: Hunk): string[] | null => {
     const points = (args.change?.deletionPoints.get(h.path) ?? []).filter((p) => Math.min(...p.anchors) === h.start && Math.max(...p.anchors) === h.end);
     if (points.length === 0) return null;
-    const diff = args.change?.diffs?.find((d) => d.path === h.path);
-    if (diff !== undefined && !runs.has(h.path)) runs.set(h.path, removedRuns(diff.text));
     const file = args.change?.files.find((f) => f.path === h.path);
     const gone = file?.status === "deleted";
     const lines = gone ? { length: 0, read: () => [] } : fileLines(h.path);
@@ -271,9 +268,10 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
     const block: string[] = [];
     for (const p of points) {
       // A deleted empty text file removed no line, and git shows it no hunk.
-      const run = p.lines === 0 && gone && !file.binary ? { after: p.after, oldStart: 1, lines: [] } : runs.get(h.path)?.find((r) => r.after === p.after && r.lines.length === p.lines);
-      if (run === undefined) return null;
-      const n = typeof h.deletion === "object" ? h.deletion.oldEnd - h.deletion.oldStart + 1 : run.lines.length;
+      const run = p.lines === 0 && gone && !file.binary ? { after: p.after, oldStart: 1, lines: [] } : args.change && diffIndex(args.change, h.path)?.removed.find((r) => r.after === p.after && r.count === p.lines);
+      if (!run) return null;
+      const n = typeof h.deletion === "object" ? h.deletion.oldEnd - h.deletion.oldStart + 1 : "count" in run ? run.count : run.lines.length;
+      if (n > DELIVER_LINES) return null;
       if (n === 0) {
         block.push(`${h.path}: the file was deleted; it held no lines.`);
         continue;
@@ -288,8 +286,13 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
       for (let i = from; i <= Math.min(p.after, to); i++) block.push(...context(h.path, i, rows[i - from] ?? null));
       // Redacted as the brief redacts its diff: the snapshot never held these lines.
       const first = typeof h.deletion === "object" ? h.deletion.oldStart : run.oldStart;
-      const last = typeof h.deletion === "object" ? h.deletion.oldEnd : run.oldStart + run.lines.length - 1;
-      const removed = redactSecretsKeepingLines(run.lines.slice(first - run.oldStart, last - run.oldStart + 1).join("\n"), args.secrets).split("\n");
+      const last = typeof h.deletion === "object" ? h.deletion.oldEnd : run.oldStart + ("count" in run ? run.count : run.lines.length) - 1;
+      let skipped = false;
+      const removed = redactSecretsKeepingLines(args.change ? [...diffHunks(args.change, h.path, { start: first, end: last, side: "old" }, DELIVER_BYTES, { onLimit: () => { skipped = true; } })].flatMap((text) => removedRuns(text)).filter((r) => r.oldStart <= last && r.oldStart + r.lines.length - 1 >= first).flatMap((r) => r.lines.slice(Math.max(0, first - r.oldStart), last - r.oldStart + 1)).join("\n") : "", args.secrets).split("\n");
+      if (skipped) {
+        out.push(`${h.path}: skipped removed diff pages over the 512 KB byte budget; these lines remain unread.`, "");
+        return null;
+      }
       for (let i = 0; i < removed.length; i++) {
         const rows = deliveryRow(args.change?.files.find((f) => f.path === h.path)?.oldPath ?? h.path, first + i, removed[i]!, "-\t", true);
         if (rows === null) return null;

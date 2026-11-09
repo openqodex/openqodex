@@ -22,6 +22,7 @@ import {
   buildWholeRepoBrief,
   checkDisplay,
   configHash,
+  cleanupDiffs,
   displayJson,
   finalizeReview,
   gateReceipt,
@@ -209,15 +210,16 @@ function finalizeCommand(repoRoot: string, flags: GlobalFlags, findingsPath: str
 }
 
 async function runAgent(flags: GlobalFlags, scope: ChangeScope, only: string | undefined, skip: string | undefined, noGraph: boolean): Promise<number> {
-  const p = await runPipeline({
+  await runPipeline({
     scope,
     flags,
     only: scannerList("--only", only),
     skip: scannerList("--skip", skip),
+  }, async (p) => {
+    announceRepoFiles(p.repoRoot);
+    if (p.scan === null) { nothingToReview(p.change); return; }
+    await writeBrief(p, flags, noGraph, scope);
   });
-  announceRepoFiles(p.repoRoot);
-  if (p.scan === null) return nothingToReview(p.change);
-  await writeBrief(p, flags, noGraph, scope);
   return EXIT_OK;
 }
 
@@ -334,46 +336,48 @@ async function reviewResolved(
     `Reviewing ${spec} at ${t.headSha.slice(0, 12)}: base ${t.baseRef} (from ${t.baseSource}), merge base ${t.mergeBase.slice(0, 12)}`,
   );
   const change = await getTreeChange({ repoRoot, baseRef: t.baseRef, baseSha: t.mergeBase, headSha: t.headSha, exclude: config.exclude });
-  if (change.files.length === 0) return nothingToReview(change);
-
-  const head = spawnSync("git", ["rev-parse", "--verify", "--quiet", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).stdout.trim();
-  let tree: string | null = null;
-  if (t.headSha !== head || !cleanWorkTree(repoRoot)) {
-    if (t.headSha === head) warn(`Uncommitted work is not part of a target review: reviewing the committed ${spec} at ${t.headSha.slice(0, 12)}`);
-    tree = (await addTargetCheckout(repoRoot, t.headSha, `${change.shortId}-`)).tree;
-  }
-  const target: RunTarget = {
-    spec,
-    base_ref: t.baseRef,
-    base_source: t.baseSource,
-    base_sha: t.baseSha,
-    merge_base: t.mergeBase,
-    head_sha: t.headSha,
-    repo_root: repoRoot,
-    checkout: tree,
-  };
-  let keep = false;
   try {
-    if (tree !== null) {
-      placeSettings(repoRoot, tree, false);
-      const lfs = await lfsPaths(tree, change.changedPaths);
-      if (lfs > 0) warn(`${lfs} changed ${lfs === 1 ? "file is" : "files are"} stored in Git LFS and not fetched: the review sees the pointer files`);
+    if (change.files.length === 0) return nothingToReview(change);
+
+    const head = spawnSync("git", ["rev-parse", "--verify", "--quiet", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).stdout.trim();
+    let tree: string | null = null;
+    if (t.headSha !== head || !cleanWorkTree(repoRoot)) {
+      if (t.headSha === head) warn(`Uncommitted work is not part of a target review: reviewing the committed ${spec} at ${t.headSha.slice(0, 12)}`);
+      tree = (await addTargetCheckout(repoRoot, t.headSha, `${change.shortId}-`)).tree;
     }
-    const p = await scanChange({
-      repoRoot,
-      workDir: tree ?? repoRoot,
-      config,
-      change,
-      flags,
-      only: scannerList("--only", opts.only),
-      skip: scannerList("--skip", opts.skip),
-    });
-    await writeBrief(p, flags, opts.noGraph, null, target);
-    keep = true;
-    return EXIT_OK;
-  } finally {
-    if (tree !== null && !keep) await removeTargetCheckout(repoRoot, tree);
-  }
+    const target: RunTarget = {
+      spec,
+      base_ref: t.baseRef,
+      base_source: t.baseSource,
+      base_sha: t.baseSha,
+      merge_base: t.mergeBase,
+      head_sha: t.headSha,
+      repo_root: repoRoot,
+      checkout: tree,
+    };
+    let keep = false;
+    try {
+      if (tree !== null) {
+        placeSettings(repoRoot, tree, false);
+        const lfs = await lfsPaths(tree, change.changedPaths);
+        if (lfs > 0) warn(`${lfs} changed ${lfs === 1 ? "file is" : "files are"} stored in Git LFS and not fetched: the review sees the pointer files`);
+      }
+      const p = await scanChange({
+        repoRoot,
+        workDir: tree ?? repoRoot,
+        config,
+        change,
+        flags,
+        only: scannerList("--only", opts.only),
+        skip: scannerList("--skip", opts.skip),
+      });
+      await writeBrief(p, flags, opts.noGraph, null, target);
+      keep = true;
+      return EXIT_OK;
+    } finally {
+      if (tree !== null && !keep) await removeTargetCheckout(repoRoot, tree);
+    }
+  } finally { cleanupDiffs(change); }
 }
 
 // The receipt of the newest whole-repo run, beside latest.json, which only
@@ -644,70 +648,72 @@ async function runFinalize(flags: GlobalFlags, path: string | undefined, all: bo
   const change = target
     ? await getTreeChange({ repoRoot, baseRef: target.base_ref, baseSha: target.merge_base, headSha: target.head_sha, exclude: config.exclude })
     : (whole ?? (await getChange({ repoRoot, scope: runFile.scope as ChangeScope, exclude: config.exclude, defaultBase: config.defaultBase })));
-  // A whole-repo run has no change to trace, so its report carries no blast radius.
-  const report = {
-    ...finalizeReview({ change, scan, manifest, config, submission, wholeRepo: whole ?? undefined }),
-    impact: whole ? null : readImpact(repoRoot, dir),
-    ...(manifest.instruction_files?.length ? { notes: instructionNotes(manifest.instruction_files) } : {}),
-  };
-
-  // The run as this machine recorded it when the brief was written, checked
-  // before anything is rendered: the change, the config, the instructions
-  // and the exact texts of the run files, scan.json and its fingerprints
-  // included. A run with no record or another text (a scan.json copied from
-  // another run, its fingerprints emptied) is not trusted: the page shows
-  // no code, `findings` gets no record of it, the push hooks no receipt.
-  const record = readHomeRun(openqodexHomeDir(), repoRoot, basename(dir));
-  let currentInstructions: string | null;
   try {
-    currentInstructions = await checkInstructionsBinding(repoRoot, manifest);
-  } catch (error) {
-    await discard();
-    throw error;
-  }
-  const verified = runMatches(record, { changeId: change.id, configHash: configHash(config), instructionsHash: currentInstructions, texts });
-  if (!verified) warn("openqodex: this run's files are not the ones review --agent recorded on this machine, so report.html shows the findings without the code and openqodex findings will not print this review");
-  // Every output from one redaction pass. The secrets are gone from memory
-  // by now; their saved fingerprints (scan.json, every line of a multi-line
-  // secret included) redact the report, the paths and anything else printed.
-  const out = reviewOutputs({ report, display: verified ? savedDisplay(repoRoot, dir, change, record) : null, dir, redact: (text) => redactByFingerprint(text, scan.secretFingerprints), version: __OPENQODEX_VERSION__ });
-  const { "report.html": html, ...files } = out.files;
-  writeReportFiles(repoRoot, dir, files);
-  if (!writeReportHtml((f) => writeReportFiles(repoRoot, dir, f, PRIVATE), html!)) {
-    await discard();
-    return EXIT_TOOL_FAILED;
-  }
-  const paths = out.paths;
-  const receipt: Latest = {
-    dir: relative(repoRoot, dir),
-    change_id: change.id,
-    kind: "review",
-    finalized: true,
-    verdict: report.verdict,
-  };
-  // A target review is not the developer's change: no receipt.
-  if (whole) writeLatestAll(repoRoot, receipt);
-  else if (!target) {
-    writeLatest(repoRoot, receipt);
-    // A legacy record in the developer's home, so the push hooks accept this
-    // review as before; only for a run this machine scanned (recordRun).
+    // A whole-repo run has no change to trace, so its report carries no blast radius.
+    const report = {
+      ...finalizeReview({ change, scan, manifest, config, submission, wholeRepo: whole ?? undefined }),
+      impact: whole ? null : readImpact(repoRoot, dir),
+      ...(manifest.instruction_files?.length ? { notes: instructionNotes(manifest.instruction_files) } : {}),
+    };
+
+    // The run as this machine recorded it when the brief was written, checked
+    // before anything is rendered: the change, the config, the instructions
+    // and the exact texts of the run files, scan.json and its fingerprints
+    // included. A run with no record or another text (a scan.json copied from
+    // another run, its fingerprints emptied) is not trusted: the page shows
+    // no code, `findings` gets no record of it, the push hooks no receipt.
+    const record = readHomeRun(openqodexHomeDir(), repoRoot, basename(dir));
+    let currentInstructions: string | null;
     try {
-      if (verified) writeHomeReceipt(openqodexHomeDir(), repoRoot, gateReceipt(out.report, "legacy", relative(repoRoot, dir), paths.html));
-      else warn("openqodex: this review is not recorded for the push hooks: its scan was not run by review --agent on this machine, or its files changed since; run openqodex review");
+      currentInstructions = await checkInstructionsBinding(repoRoot, manifest);
     } catch (error) {
-      warn(`openqodex: could not record this review for the push hooks: ${(error as Error).message.split("\n")[0]}`);
+      await discard();
+      throw error;
     }
-  }
-  if (verified) {
-    try {
-      writeHomeLastReview(openqodexHomeDir(), repoRoot, { dir, shown: out.paths.md.slice(0, -"/report.md".length), changeId: change.id, reportSha256: out.reportSha256 });
-    } catch (error) {
-      warn(`openqodex: could not record this review for openqodex findings: ${(error as Error).message.split("\n")[0]}`);
+    const verified = runMatches(record, { changeId: change.id, configHash: configHash(config), instructionsHash: currentInstructions, texts });
+    if (!verified) warn("openqodex: this run's files are not the ones review --agent recorded on this machine, so report.html shows the findings without the code and openqodex findings will not print this review");
+    // Every output from one redaction pass. The secrets are gone from memory
+    // by now; their saved fingerprints (scan.json, every line of a multi-line
+    // secret included) redact the report, the paths and anything else printed.
+    const out = reviewOutputs({ report, display: verified ? savedDisplay(repoRoot, dir, change, record) : null, dir, redact: (text) => redactByFingerprint(text, scan.secretFingerprints), version: __OPENQODEX_VERSION__ });
+    const { "report.html": html, ...files } = out.files;
+    writeReportFiles(repoRoot, dir, files);
+    if (!writeReportHtml((f) => writeReportFiles(repoRoot, dir, f, PRIVATE), html!)) {
+      await discard();
+      return EXIT_TOOL_FAILED;
     }
-  }
-  await discard();
-  emitReview(out.report, flags, repoRoot, paths);
-  return exitFor(report);
+    const paths = out.paths;
+    const receipt: Latest = {
+      dir: relative(repoRoot, dir),
+      change_id: change.id,
+      kind: "review",
+      finalized: true,
+      verdict: report.verdict,
+    };
+    // A target review is not the developer's change: no receipt.
+    if (whole) writeLatestAll(repoRoot, receipt);
+    else if (!target) {
+      writeLatest(repoRoot, receipt);
+      // A legacy record in the developer's home, so the push hooks accept this
+      // review as before; only for a run this machine scanned (recordRun).
+      try {
+        if (verified) writeHomeReceipt(openqodexHomeDir(), repoRoot, gateReceipt(out.report, "legacy", relative(repoRoot, dir), paths.html));
+        else warn("openqodex: this review is not recorded for the push hooks: its scan was not run by review --agent on this machine, or its files changed since; run openqodex review");
+      } catch (error) {
+        warn(`openqodex: could not record this review for the push hooks: ${(error as Error).message.split("\n")[0]}`);
+      }
+    }
+    if (verified) {
+      try {
+        writeHomeLastReview(openqodexHomeDir(), repoRoot, { dir, shown: out.paths.md.slice(0, -"/report.md".length), changeId: change.id, reportSha256: out.reportSha256 });
+      } catch (error) {
+        warn(`openqodex: could not record this review for openqodex findings: ${(error as Error).message.split("\n")[0]}`);
+      }
+    }
+    await discard();
+    emitReview(out.report, flags, repoRoot, paths);
+    return exitFor(report);
+  } finally { cleanupDiffs(change); }
 }
 
 // The code report.html shows for a two-step review whose run files the

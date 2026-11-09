@@ -7,8 +7,13 @@
 // cannot carry a finding. Context lines (" ") are counted too, which matters
 // only if a diff with context is passed in. A hunk that only deletes is kept
 // apart as a deletion point, so a finding can cite the lines around it.
+import { statSync } from "node:fs";
+import { indexedHunks, patchIndex } from "./diff-index.js";
+import type { DiffRange, DiffReadOptions } from "./diff-index.js";
+export { DiffReadLimit } from "./diff-index.js";
+export type { DiffRange } from "./diff-index.js";
 import { LineSet } from "./line-set.js";
-import type { DeletionPoint, DiffCoverage } from "./types.js";
+import type { Change, DeletionPoint, DiffCoverage, DiffEntry } from "./types.js";
 
 const C_ESCAPES: Record<string, number> = {
   a: 7,
@@ -198,4 +203,39 @@ export function removedRuns(fileDiff: string): { after: number; oldStart: number
   }
   close();
   return runs;
+}
+
+// One path index is shared by every consumer of the same per-file array.
+const entries = new WeakMap<NonNullable<Change["diffs"]>, Map<string, DiffEntry>>();
+export function diffEntry(change: Pick<Change, "diffs">, path: string): DiffEntry | undefined {
+  const diffs = change.diffs;
+  if (!diffs) return undefined;
+  let index = entries.get(diffs);
+  if (!index) { index = new Map(diffs.map((d) => [d.path, d])); entries.set(diffs, index); }
+  return index.get(path);
+}
+
+export function diffSize(change: Pick<Change, "diffs">, path: string): number {
+  const entry = diffEntry(change, path);
+  return entry ? entry.text === undefined ? statSync(entry.file).size : Buffer.byteLength(entry.text, "utf8") : 0;
+}
+
+export function diffIndex(change: Pick<Change, "diffs">, path: string) {
+  const entry = diffEntry(change, path);
+  return entry ? patchIndex(entry) : null;
+}
+
+export function* diffHunks(change: Pick<Change, "diffs">, path: string, range?: DiffRange, maxBytes = Infinity, options: DiffReadOptions = {}): Generator<string> {
+  const entry = diffEntry(change, path);
+  if (entry) yield* indexedHunks(entry, range, maxBytes, options);
+}
+
+// Whole text is only for small patches. Large consumers walk diffHunks,
+// optionally selecting the old or new line range they actually need.
+export function diffText(change: Pick<Change, "diffs">, path: string): string | null {
+  const entry = diffEntry(change, path);
+  if (!entry) return null;
+  if (entry.text !== undefined) return entry.text;
+  if (diffSize(change, path) > 5 * 1024 * 1024) return null;
+  return patchIndex(entry).header + [...indexedHunks(entry, undefined, 5 * 1024 * 1024, { sections: true })].join("");
 }

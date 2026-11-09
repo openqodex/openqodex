@@ -16,6 +16,7 @@
 // display.json beside the brief; finalize uses it only when this machine's
 // record of the run still vouches for it (the CLI checks), and only for the
 // change it was made for (checkDisplay).
+import { diffHunks, diffIndex } from "../diff.js";
 import { REDACTED, redactSecrets, redactSecretsKeepingLines, secretTexts } from "../redact.js";
 import type { Change, ChangedFile } from "../types.js";
 
@@ -215,7 +216,6 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
   const { change, secrets } = args;
   const texts = secretTexts(secrets);
   const red = (s: string) => redactSecrets(s, secrets);
-  const diffs = new Map((change.diffs ?? []).map((d) => [d.path, d.text]));
   const tooLarge = new Set(change.notReviewed);
   const budget = new Budget();
   const files: DisplayFile[] = [];
@@ -224,25 +224,28 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
     // The name is listed first, with the longest note it can get, so the
     // file bound holds whatever happens to its rows.
     if (!budget.list(meta)) continue;
-    const text = diffs.get(f.path);
-    const parsed = f.binary || text === undefined ? [] : parseHunks(text);
-    if (parsed.length === 0) {
+    const index = f.binary ? null : diffIndex(change, f.path);
+    if (!index?.hunks.length) {
       files.push({ ...meta, note: noteFor(f, tooLarge.has(f.path)) });
       continue;
     }
-    const count = parsed.reduce((n, h) => n + h.rows.length, 0);
-    const all = parsed.flatMap((h) => h.rows);
-    const sums = { additions: all.filter((r) => r.kind === "add").length, deletions: all.filter((r) => r.kind === "del").length };
+    const sums = { additions: index.hunks.reduce((n, h) => n + h.additions, 0), deletions: index.hunks.reduce((n, h) => n + h.deletions, 0) };
+    const count = index.hunks.reduce((n, h) => n + h.rows, 0);
+    // Refuse display work before parsing payloads that cannot fit the page.
+    if (index.bytes > ROWS_BUDGET - budget.rowBytes) { files.push({ ...meta, ...sums }); continue; }
     if (!budget.roomFor(count)) {
       files.push({ ...meta, ...sums });
       continue;
     }
+    let skipped = false;
+    const parsed = [...diffHunks(change, f.path, undefined, 512 * 1024, { onLimit: () => { skipped = true; } })].flatMap(parseHunks);
     const hunks = parsed.map((h) => redactHunk(h, secrets, texts)).map((h) => ({ ...h, rows: h.rows.map(cutRow) }));
-    if (!budget.take(hunks, count)) {
+    const shownCount = hunks.reduce((n, h) => n + h.rows.length, 0);
+    if (!budget.take(hunks, shownCount)) {
       files.push({ ...meta, ...sums });
       continue;
     }
-    files.push({ ...meta, ...sums, hunks, note: null });
+    files.push({ ...meta, ...sums, hunks, note: skipped ? "skipped diff pages over the 512 KB byte budget" : null });
   }
   return { version: DISPLAY_VERSION, change_id: change.id, kind: "change", files, omitted_files: budget.omitted, rows: budget.rows };
 }

@@ -11,10 +11,15 @@ type Read = (path: string) => string | null;
 // One inventory owns scheduling and coverage. Its parts retain the whole
 // obligation's identity, and deletions retain their distinct old intervals.
 export function obligations(change: Change, read: Read, cache = stagedDiffCache(change)): HunkRef[] {
-  const snapshots = new Map<string, string[] | null>();
+  let snapshotPath: string | null = null;
+  let snapshotLines: string[] | null = null;
   const snapshotOf = (path: string) => {
-    if (!snapshots.has(path)) snapshots.set(path, read(path)?.split("\n") ?? null);
-    return snapshots.get(path)!;
+    if (snapshotPath !== path) {
+      snapshotLines = null;
+      snapshotPath = path;
+      snapshotLines = read(path)?.split("\n") ?? null;
+    }
+    return snapshotLines;
   };
   const order = new Map(change.files.map((f, i) => [f.path, i]));
   const points = new Map<string, number>();
@@ -23,7 +28,7 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
     const point = points.get(h.path) ?? 0;
     points.set(h.path, point + 1);
     const p = change.deletionPoints.get(h.path)![point]!;
-    const run = cache.file(h.path).removed.find((r) => r.after === p.after && r.lines.length === p.lines);
+    const run = cache.info(h.path)?.removed.find((r) => r.after === p.after && r.count === p.lines);
     const first = run?.oldStart ?? 1;
     return { ...h, id: "", point, old: [first, first + p.lines - 1], deletion: { id: `${h.path}#${point}`, oldStart: first, oldEnd: first + p.lines - 1 } };
   });
@@ -37,7 +42,7 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
   for (const h of whole) {
     const [first, last] = h.deletion ? h.old! : [h.start, h.end];
     if (last < first) { out.push(h); continue; }
-    const allReplacements = cache.file(h.path).replacements;
+    const allReplacements = cache.info(h.path)?.replacements ?? [];
     let low = 0;
     let high = allReplacements.length;
     while (low < high) {
@@ -48,6 +53,7 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
     if (!h.deletion) for (let i = low; i < allReplacements.length && allReplacements[i]!.start <= h.end; i++) replacements.push(allReplacements[i]!);
     const snapshot = snapshotOf(h.path);
     const measure = (ref: HunkRef): HunkRef => {
+      if (cache.file(ref.path, ref).overflow) return { ...ref, rows: Infinity, bytes: Infinity };
       const rows = hunkRows(change, ref, [], cache);
       const rendered = rows.length ? rows : !ref.deletion && snapshot ? pageRows(ref.path, ref.start, ref.end, snapshot) : [];
       return { ...ref, rows: rendered?.length ?? Infinity, bytes: rendered === null ? Infinity : Buffer.byteLength(rendered.join("\n"), "utf8") + (rows.length ? 0 : 1) };
@@ -72,7 +78,7 @@ export function obligations(change: Change, read: Read, cache = stagedDiffCache(
           return measure(ref);
         };
         let low = at;
-        let high = Math.max(at, last);
+        let high = Math.max(at, Math.min(last, at + DELIVER_LINES - 1));
         let best = candidate(at);
         while (low <= high) {
           const mid = Math.floor((low + high) / 2);

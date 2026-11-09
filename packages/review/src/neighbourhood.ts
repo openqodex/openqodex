@@ -2,7 +2,7 @@
 // declarations and uses. The snapshot is plain files, not a git database.
 import { lstatSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { changedHunks, display, escapeMarkdown, redactSecrets, secretTexts } from "@openqodex/core";
+import { changedHunks, diffHunks, display, escapeMarkdown, redactSecrets, secretTexts } from "@openqodex/core";
 import type { Change, ImpactSummary } from "@openqodex/core";
 import { PACKET_DIR, PACKET_ROOT } from "@openqodex/graph";
 import { redactStored } from "./redact.js";
@@ -243,15 +243,19 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     const touched = new Set([...(args.impact?.touched ?? []), ...(args.impact?.removed ?? [])]);
     for (const symbol of args.impact?.symbols ?? []) if (touched.has(symbol.id)) addName(symbol.file, symbol.name);
 
+    let skippedPages = 0;
     for (const diff of args.change.diffs ?? []) {
       if (expired()) break;
       let inHunk = false;
       let n = 0;
-      for (const line of diff.text.split("\n")) {
-        if (n++ % 256 === 0 && expired()) break;
-        if (line.startsWith("@@")) inHunk = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line);
-        else if (inHunk && line.startsWith("-")) add(diff.path, line.slice(1));
-        else if (!/^[ +\\]/.test(line)) inHunk = false;
+      for (const hunk of diffHunks(args.change, diff.path, undefined, MAX_TEXT_BYTES, { onLimit: () => { skippedPages++; } })) {
+        if (expired()) break;
+        for (const line of redactSecrets(hunk, args.secrets).split("\n")) {
+          if (n++ % 256 === 0 && expired()) break;
+          if (line.startsWith("@@")) inHunk = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line);
+          else if (inHunk && line.startsWith("-")) add(diff.path, line.slice(1));
+          else if (!/^[ +\\]/.test(line)) inHunk = false;
+        }
       }
     }
     const ranges = new Map<string, { start: number; end: number }[]>();
@@ -343,7 +347,7 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     }
     duration();
     const symbols = redactStored([...selected.values()], args.secrets);
-    const timeReason = timedOut ? `Time cap reached after ${filesRead} of ${totalFiles} files; file counts and sites are partial.` : null;
+    const timeReason = [timedOut ? `Time cap reached after ${filesRead} of ${totalFiles} files; file counts and sites are partial.` : null, skippedPages ? `Skipped ${skippedPages} diff pages over the 512 KB byte budget.` : null].filter(Boolean).join(" ") || null;
     if (symbols.length === 0) return { symbols, packetPath: null, partial: timeReason, durationMs: elapsed };
     const sizeReason = (kept: number) => kept < symbols.length ? `${symbols.length - kept} symbols cut at the packet byte cap.` : null;
     const fit = capped(symbols, NEIGHBOURHOOD_MAX_BYTES, (kept) => [timeReason, sizeReason(kept)].filter((x): x is string => x !== null));

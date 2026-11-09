@@ -10,7 +10,7 @@
 // to FIRST_REVIEW_INSTALL_WAIT_MS, then names the ones still downloading;
 // it resolves only the scanners its own change calls for.
 import { isAbsolute, relative, resolve } from "node:path";
-import { getChange, loadConfig } from "@openqodex/core";
+import { cleanupDiffs, getChange, loadConfig } from "@openqodex/core";
 import { parseFlags } from "../flags.js";
 import { ALL_TIMEOUT_SECONDS, CHANGE_TIMEOUT_SECONDS, runReview } from "../review-run.js";
 import type { ReviewEnd, ReviewOptions } from "../review-run.js";
@@ -94,22 +94,24 @@ async function firstReview(o: Parameters<typeof reviewAfterInit>[0]): Promise<{ 
       .map(([path, content]) => ({ path: relative(resolve(o.repoRoot), resolve(path)), content }))
       .filter((f) => f.path !== "" && !f.path.startsWith("..") && !isAbsolute(f.path));
     const change = await getChange({ repoRoot: o.repoRoot, scope: {}, exclude: config.exclude, defaultBase: config.defaultBase, overlay });
-    if (change.files.length > 0) {
-      out();
-      out("Reviewing your change now. This takes a few minutes.");
-      return await review({ overlay });
-    }
-    if (!o.interactive) {
-      out();
-      out("No change to review here. To review something else, run one of these:");
-      out(`  ${o.runner} review --all          the whole repository`);
-      out(`  ${o.runner} review '#<number>'    a pull request`);
-      out(`  ${o.runner} review <branch>       a branch`);
-      return { ended: "skipped", why: "no change to review" };
-    }
-    const choice = await (o.ask ?? askWhat)();
-    if (choice === null) return { ended: "skipped", why: "not now" };
-    return await review(choice.kind === "all" ? { all: true, timeoutMs: ALL_TIMEOUT_SECONDS * 1000 } : { target: choice.target });
+    try {
+      if (change.files.length > 0) {
+        out();
+        out("Reviewing your change now. This takes a few minutes.");
+        return await review({ overlay });
+      }
+      if (!o.interactive) {
+        out();
+        out("No change to review here. To review something else, run one of these:");
+        out(`  ${o.runner} review --all          the whole repository`);
+        out(`  ${o.runner} review '#<number>'    a pull request`);
+        out(`  ${o.runner} review <branch>       a branch`);
+        return { ended: "skipped", why: "no change to review" };
+      }
+      const choice = await (o.ask ?? askWhat)();
+      if (choice === null) return { ended: "skipped", why: "not now" };
+      return await review(choice.kind === "all" ? { all: true, timeoutMs: ALL_TIMEOUT_SECONDS * 1000 } : { target: choice.target });
+    } finally { cleanupDiffs(change); }
   } catch (error) {
     process.stderr.write(`openqodex: the review after init did not run: ${error instanceof Error ? error.message : String(error)}\n`);
     return { ended: "incomplete", why: "the review stopped with an error, shown above" };

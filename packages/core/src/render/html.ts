@@ -619,7 +619,7 @@ function accounting(report: Report): string {
     ["Below the severity threshold", num(report.below_threshold || 0), esc("left out of the findings, never counted")],
     ["Outside the changed lines", num(outsideChange.length), outsideChange.length > 0 ? esc("shown for information, never counted") : esc("none")],
     ["Scanner results not kept", num(notKept.reduce((n, [, k]) => n + k, 0)), notKept.length > 0 ? esc(`a result is kept only when it sits on a changed line; ${notKept.map(([name, k]) => `${name} ${k}`).join(", ")}`) : esc("none")],
-    ["Left out, change too large", num(leftOut.length), leftOut.length === 0 ? esc("none") : leftOut.map((p) => text(p)).join(", ")],
+    ...(report.base.ref === "all" && leftOut.length > 0 ? [[`Not reviewed: ${leftOut.length} ${leftOut.length === 1 ? "file" : "files"}, over 5 MB, links or unreadable`, num(leftOut.length), leftOut.map((p) => text(p)).join(", ")]] : []),
   ];
   const outside =
     outsideChange.length > 0

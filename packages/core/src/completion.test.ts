@@ -61,9 +61,9 @@ const FROZEN = {
   receipt: "Blocked: 1 finding at or above major (1 critical); 1 of 4 scanners did not run\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\nSummary: Builds the search query from request input and adds a settings module.\n1. Critical security: Query built from request input (app/search.py:14)\nChanged ranges: 2 examined, 0 not examined; coverage labels not recorded\nReport: /r/report.html\nMarkdown: /r/report.md\n",
   sarif: "437a5b05d3a6d134cb617113c6ff5eb8934bc6c3e1d2559ecabc93cb3e6284e3",
   sarifIncomplete: "9d7b14b501dd0a2446dcf9dcd964b8a861e701df3f8d0b235b0c2c4fb9c0fb3a",
-  // Dependency-tree accounting keeps the original candidate wording and HTML hashes.
-  html: "b8bf53915323299ed4307b07042356498d5940905f874bd9a332a88c5cb84efb",
-  htmlIncomplete: "10f3d450a946aac5abc0ed4a52303c5c90b5fa5a9e4f4bca085d940657671cd1",
+  // Change reports omit the retired size-exclusion accounting row and list per-file coverage.
+  html: "5815cf09810313cced518d9a713bd7bedaccd40b0b62d515cd49ae4dfb417cf2",
+  htmlIncomplete: "0f4ca725f547dbb3db4a6bd4bca799368327320de0ac93708b985176cd31ebe3",
 };
 
 const reviewer: ReviewerRecord = {

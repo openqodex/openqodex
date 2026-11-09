@@ -20,7 +20,7 @@
 // call's arguments redacted the same way.
 import { lstatSync, opendirSync } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
-import { REDACTED, redactSecrets, redactSecretsKeepingLines, secretTexts } from "@openqodex/core";
+import { REDACTED, diffEntry, diffHunks, diffIndex, redactSecrets, redactSecretsKeepingLines, secretTexts } from "@openqodex/core";
 import type { Change } from "@openqodex/core";
 import { API_VERSION, PACKET_ROOT, query } from "@openqodex/graph";
 import type { Candidate, Graph, Item } from "@openqodex/graph";
@@ -229,14 +229,6 @@ function placePath(box: ToolBox, tool: string, raw: string, field: "path" | "glo
     if (i === parts.length - 1 && !st.isFile()) return { refused: refusal(`${rel} is not a file`, true, rel) };
   }
   return { rel };
-}
-
-// The only way a tool reads a diff: the change's diff of one file with every
-// secret the scanners found redacted, as the brief's diff is. Null when the
-// change holds no diff for it.
-function redactedDiff(box: ToolBox, rel: string): string | null {
-  const diff = box.change.diffs?.find((d) => d.path === rel);
-  return diff === undefined ? null : redactSecrets(diff.text, box.secrets);
 }
 
 const bytes = (s: string) => Buffer.byteLength(s, "utf8");
@@ -460,21 +452,36 @@ function readDiff(box: ToolBox, args: Args): Result {
   const placed = placePath(box, "read_diff_for_file", raw as string, "path", false);
   if ("refused" in placed) return placed.refused;
   const { rel } = placed;
-  const diff = redactedDiff(box, rel);
-  if (diff === null) {
+  const entry = diffEntry(box.change, rel);
+  if (!entry) {
     const changed = box.change.files.some((f) => f.path === rel);
-    return refusal(changed ? `the diff of ${rel} is not available: the change is too large for every file's diff` : `${rel} is not a changed file; the brief lists the changed files`, true, rel);
+    return refusal(changed ? `the diff of ${rel} is not available in this change; read the file by range with read_file (path, start and lines)` : `${rel} is not a changed file; the brief lists the changed files`, true, rel);
   }
-  const rows = diff.replace(/\n$/, "").split("\n");
-  const head = (shown: number) => `${rel}: the diff against the base, ${shown === rows.length ? `${rows.length} lines` : `the first ${shown} of ${rows.length} lines`}`;
+  const index = diffIndex(box.change, rel)!;
+  const rows: string[] = [];
+  let size = 0;
+  let cut = false;
+  const keep = (text: string) => {
+    for (const row of redactSecretsKeepingLines(text.replace(/\n$/, ""), box.secrets).split("\n")) {
+      size += bytes(row) + 1;
+      if (size > TOOL_REPLY_BYTES) { cut = true; return false; }
+      rows.push(row);
+    }
+    return true;
+  };
+  let skipped = false;
+  if (keep(index.header)) for (const hunk of diffHunks(box.change, rel, undefined, 512 * 1024, { onLimit: () => { skipped = true; } })) if (!keep(hunk)) break;
+  const skippedNote = skipped ? "; skipped diff pages over the 512 KB byte budget" : "";
+  const head = (shown: number) => `${rel}: the diff against the base, ${cut || shown < rows.length ? `the first ${shown} lines` : `${rows.length} lines`}${skippedNote}`;
   const { shown } = fill(head(0), rows);
+
   return {
     text: [head(shown), ...rows.slice(0, shown)].join("\n"),
     ok: true,
     path: rel,
     inside: true,
     range: null,
-    reason: shown < rows.length ? `cut at ${BOUND}: ${shown} of ${rows.length} diff lines sent` : null,
+    reason: cut || shown < rows.length ? `cut at ${BOUND}: ${shown} diff lines sent${skippedNote}` : skipped ? skippedNote.slice(2) : null,
   };
 }
 
