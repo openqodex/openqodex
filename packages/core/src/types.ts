@@ -641,6 +641,10 @@ export type HunkRef = {
   point?: number;
   part?: { n: number; of: number; whole: string };
   old?: [number, number] | null;
+  // Byte fragments always name one line. lineBytes excludes its final LF.
+  fragment?: { of?: string; from: number; to: number };
+  lineBytes?: number;
+  fromByte?: number;
   removedIn?: number | number[];
   rows?: number;
   bytes?: number;
@@ -746,7 +750,9 @@ export type CompletionRecord = {
     hunks: number;
     covered: number;
     unread: (Pick<HunkRef, "path" | "start" | "end" | "deletion"> & Partial<Omit<HunkRef, "path" | "start" | "end" | "deletion">>)[];
-    given?: { path: string; start: number; end: number; deletion?: string; by: "brief" | "page" | "digest" | "read"; fragment?: { of: string; from: number; to: number }; part?: HunkRef["part"] }[];
+    // A deletion's credited old lines are in `old`. `fragment` names bytes of
+    // one line only, and `lineBytes` is that line's length.
+    given?: { path: string; start: number; end: number; deletion?: string; by: "brief" | "page" | "digest" | "read"; old?: [number, number]; lineBytes?: number; fragment?: { of?: string; from: number; to: number }; part?: HunkRef["part"] }[];
     // One entry per original obligation, before delivery splits it into pieces.
     // by names the first source that contributed to its complete coverage.
     inventory?: { path: string; start: number; end: number; deletion?: string; by?: "brief" | "page" | "digest" | "read" }[];

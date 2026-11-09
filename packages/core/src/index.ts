@@ -23,6 +23,7 @@ export * from "./repo-state.js";
 export { closeWider, FolderReader, Guard, homeGuard, writableByMeAlone, type Accept, type EntryResult, type Id, type ReadRefusal, type ReadResult, type Roots, type Wider } from "./guarded-fs.js";
 export * from "./safe-git.js";
 export * from "./delivery.js";
+export { indexedLines } from "./diff-index.js";
 export * from "./instruction-files.js";
 
 export { isShippedInstructionFile, stripInstructionSections } from "./instruction-sections.js";

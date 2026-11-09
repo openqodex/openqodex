@@ -3,7 +3,8 @@
 // indent) or for markdown (headings, bullets and bold labels). The words and
 // their order are the same in both; only the markup differs.
 import pc from "picocolors";
-import { deletionLabel, deletionLabels, shortenedMissing } from "../completion.js";
+import { deletionLabel, unreadRangeCount, deletionLabels, shortenedMissing } from "../completion.js";
+import { hunkFragmentLabel } from "../delivery.js";
 import type { CompletionRecord, ModelCompletionRecord, Report, ReportFinding, ReviewerRecord } from "../types.js";
 import { candidateLocation, coverageLine, display, escapeMarkdown, findingTitle, firstLine, location, lowConfidenceReason, notOpenedLabel, observationsOmittedLine, orderFindings, orderObservations, orderPossible, severityBreakdown, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
@@ -220,21 +221,26 @@ function span(start: number, end: number): string {
 
 export function fileCoverageLines(coverage: CompletionRecord["coverage"]): string[] {
   if (coverage.given === undefined) return [];
-  const files = new Map<string, { start: number; end: number; oldStart: number; label: string }[]>();
+  // `named`: the label is a fragment label, which carries its own path.
+  const files = new Map<string, { start: number; end: number; oldStart: number; label: string; named?: boolean }[]>();
   const ids = deletionLabels(coverage);
+  // A removed fragment of a renamed file names the old path.
+  const oldPath = (path: string) => coverage.files?.find((f) => f.path === path)?.oldPath ?? path;
   for (const g of coverage.given) {
-    const deletion = g.deletion ? ` (deletion ${g.deletion}${g.fragment ? `, old lines ${g.fragment.from}-${g.fragment.to}` : ""})` : "";
+    const deletion = g.deletion ? ` (deletion ${g.deletion}${g.old && !g.lineBytes ? `, old lines ${g.old[0]}-${g.old[1]}` : ""})` : "";
     const part = g.part ? ` (part ${g.part.n} of ${g.part.of})` : "";
-    const label = `${span(g.start, g.end)}${deletion}${part} ${g.by === "digest" ? "structural summary" : g.by}`;
+    const named = Boolean(g.lineBytes && g.fragment);
+    const bytes = named ? hunkFragmentLabel({ ...g, fragment: g.fragment! }, oldPath(g.path)) : span(g.start, g.end);
+    const label = `${bytes}${deletion}${part} ${g.by === "digest" ? "structural summary" : g.by}`;
     const ranges = files.get(g.path) ?? [];
-    ranges.push({ start: g.start, end: g.end, oldStart: g.fragment?.from ?? 0, label });
+    ranges.push({ start: g.start, end: g.end, oldStart: g.old?.[0] ?? 0, label, named });
     files.set(g.path, ranges);
   }
   for (const h of coverage.unread) {
     const deletion = deletionLabel(h, ids);
     const part = h.part ? ` (part ${h.part.n} of ${h.part.of})` : "";
     const ranges = files.get(h.path) ?? [];
-    ranges.push({ start: h.start, end: h.end, oldStart: typeof h.deletion === "object" ? h.deletion.oldStart : 0, label: `${span(h.start, h.end)}${deletion}${part} not examined` });
+    ranges.push({ start: h.start, end: h.end, oldStart: typeof h.deletion === "object" ? h.deletion.oldStart : 0, label: `${h.fragment ? hunkFragmentLabel({ ...h, fragment: h.fragment }, oldPath(h.path)) : span(h.start, h.end)}${deletion}${part} not examined`, named: Boolean(h.fragment) });
     files.set(h.path, ranges);
   }
   for (const file of coverage.files ?? []) {
@@ -242,17 +248,21 @@ export function fileCoverageLines(coverage: CompletionRecord["coverage"]): strin
     const label = file.binary ? "binary, not reviewed by line" : file.status === "renamed" ? "renamed, no changed lines" : file.status === "modified" ? "mode change only" : `${file.status}, no changed lines`;
     files.set(file.path, [{ start: 0, end: 0, oldStart: 0, label }]);
   }
-  return [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([path, ranges]) => `${path}: ${ranges.sort((a, b) => a.start - b.start || a.end - b.end || a.oldStart - b.oldStart).map((r) => r.label).join(", ")}`);
+  // A line that opens with a fragment label takes its path from that label.
+  return [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([path, ranges]) => {
+    const sorted = ranges.sort((a, b) => a.start - b.start || a.end - b.end || a.oldStart - b.oldStart);
+    return `${sorted[0]!.named ? "" : `${path}: `}${sorted.map((r) => r.label).join(", ")}`;
+  });
 }
 
 function receiptCoverage(record: Report["completion"]): string {
   if (!record) return "Changed ranges: not recorded in this report";
   const coverage = record.coverage;
-  if (coverage.given === undefined) return `Changed ranges: ${coverage.covered} examined, ${coverage.unread.length} not examined; coverage labels not recorded`;
+  if (coverage.given === undefined) return `Changed ranges: ${coverage.covered} examined, ${unreadRangeCount(coverage)} not examined; coverage labels not recorded`;
   const counts = { brief: 0, digest: 0, page: 0, read: 0 };
-  if (coverage.inventory === undefined) return `Changed ranges: ${coverage.covered} examined, ${coverage.unread.length} not examined; range source counts not recorded`;
+  if (coverage.inventory === undefined) return `Changed ranges: ${coverage.covered} examined, ${unreadRangeCount(coverage)} not examined; range source counts not recorded`;
   for (const range of coverage.inventory) if (range.by) counts[range.by]++;
-  return `Changed ranges: ${counts.brief} in a finder's brief, ${counts.digest} structural summary, ${counts.page} by page, ${counts.read} read by the reviewer, ${coverage.unread.length} not examined`;
+  return `Changed ranges: ${counts.brief} in a finder's brief, ${counts.digest} structural summary, ${counts.page} by page, ${counts.read} read by the reviewer, ${unreadRangeCount(coverage)} not examined`;
 }
 
 const hasSummary = (report: Report): boolean => report.summary !== null && report.summary.trim() !== "";

@@ -87,7 +87,7 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
   {
     key: "review.stages",
     default: "true",
-    description: "The staged review when openqodex starts its own reviewer: two finder sessions per changed file, then a fresh verifier per batch of candidates. false runs one pass. --agent and --all always run one pass.",
+    description: "The staged review when openqodex starts its own reviewer: two finder sessions per changed file, then a fresh verifier per batch of candidates. false runs one pass, whose correction rounds carry at most 4,000 rows and 512 KB each. --agent and --all always run one pass.",
   },
   { key: "scanners.disable", default: "[]", description: "Built-in scanners to switch off, by name." },
   {

@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
 import { afterAll, expect, it } from "vitest";
 import type { CompletionRecord } from "@openqodex/core";
 import "./global-setup.js";
-import { baseline, git, readJson, report, reportDir, run, stagedProviderEnv } from "./support.js";
+import { baseline, git, report, run, stagedProviderEnv } from "./support.js";
 import { hashSnapshot } from "../../packages/review/src/snapshot.js";
 import { runTool } from "../../packages/review/src/tools/index.js";
 import { fixture, cleanupFixtures } from "../../packages/review/test/staged-fixture.js";

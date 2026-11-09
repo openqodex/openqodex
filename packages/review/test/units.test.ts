@@ -2,16 +2,19 @@
 // changes spawning too many sessions, oversized files staying in one unit.
 // 7. Many hunks reparse snapshots and repeatedly render growing units.
 // 8. A continuation owning a later replacement loses the earlier owner.
+// 11. On-disk long rows are materialised whole to measure or carry a part.
+// 10. A part cannot cut inside a long added line or carry its byte ref.
 // 9. Oversized removed rows are described as an oversized new line.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { afterAll, expect, it } from "vitest";
-import { buildFindBrief, hunkRows, readCoverage, completionRecord } from "@openqodex/core";
+import { buildFindBrief, buildVerifyBrief, hunkRows, readCoverage, completionRecord, verifyPartDistance } from "@openqodex/core";
 import { hunkRefs, obligations, unitsOf, GROUP_DIFF_BYTES, MAX_UNIT_DIFF_BYTES } from "../src/units.js";
 import { deliverRanges } from "../src/conversation.js";
+import { fragmentSnapshotText } from "../src/line-fragments.js";
 import { snapshotText } from "../src/snapshot.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanupFixtures, fixture } from "./staged-fixture.js";
+import { cleanupFixtures, fixture, candidate } from "./staged-fixture.js";
 
 afterAll(cleanupFixtures);
 function missing(change: ReturnType<typeof fixture>["change"], coverage: ReturnType<typeof readCoverage>) {
@@ -35,8 +38,9 @@ it("packs twelve 2 KB file diffs into at most two units without losing a hunk", 
 });
 it("splits a 130 KB file diff at hunk ranges under 120 KB", () => {
   const { change } = fixture(["a.txt"]);
-  change.coverage.set("a.txt", makeLineSet([1, 10]));
-  change.diffs![0]!.text = `@@ -1 +1 @@\n+${"x".repeat(65 * 1024)}\n@@ -10 +10 @@\n+${"y".repeat(65 * 1024)}\n`;
+  // Rows of 1,950 bytes travel whole, so each hunk is 65 KB of plain rows.
+  change.coverage.set("a.txt", makeLineSet([...Array.from({ length: 34 }, (_, i) => i + 1), ...Array.from({ length: 34 }, (_, i) => i + 43)]));
+  change.diffs![0]!.text = `@@ -1 +1,34 @@\n-old\n${`+${"x".repeat(1950)}\n`.repeat(34)}@@ -10 +43,34 @@\n-old\n${`+${"y".repeat(1950)}\n`.repeat(34)}`;
   const refs = hunkRefs(change);
   const units = unitsOf(change, refs);
   expect(units).toHaveLength(2);
@@ -214,10 +218,93 @@ it("names the earlier removal owner when a continuation owns a later replacement
   expect(continuation.removedIn).toBe(1);
   expect(hunkRows(f.change, continuation)).toContain("-old_second");
 });
-it("names removed rows when a replacement owner exceeds the budget", () => {
+it("cuts a removed row over the budget into old-side fragments, with no unread note", () => {
   const f = fixture(["a.txt"]);
   f.change.diffs = [{ path: "a.txt", text: "@@ -1 +1 @@\n-" + "x".repeat(130 * 1024) + "\n+new\n" }];
   const refs = obligations(f.change, () => "new\n");
-  expect(refs.find((h) => h.deletion)!.note).toContain("removed row");
-  expect(refs.find((h) => h.deletion)!.note).not.toContain("single line");
+  const removed = refs.filter((h) => h.deletion);
+  expect(removed.length).toBeGreaterThan(1);
+  expect(removed.every((h) => h.note === undefined && h.lineBytes === 130 * 1024 && h.fragment?.of === h.id)).toBe(true);
+  expect(removed.map((h) => [h.fragment!.from, h.fragment!.to])).toEqual(removed.map((h, i) => [i ? removed[i - 1]!.fragment!.to + 1 : 1, h.fragment!.to]));
+  expect(removed.at(-1)!.fragment!.to).toBe(130 * 1024);
+  expect(hunkRows(f.change, removed[0]!)[0]).toMatch(/^-a\.txt: old line 1, bytes 1 to 2,000 of 133,120\t/);
+});
+
+it("7m cuts a part inside a 1 MB line with a byte fragment ref", () => {
+  const f = fixture(["a.txt"]);
+  const text = "x".repeat(1024 * 1024);
+  f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1 @@\n+" + text + "\n" }];
+  const refs = obligations(f.change, () => text + "\n");
+  expect(refs.length).toBeGreaterThan(1);
+  let next = 1;
+  for (const h of refs) {
+    expect(h.fragment).toMatchObject({ of: h.id, from: next });
+    expect(h.start).toBe(1);
+    expect(h.end).toBe(1);
+    expect(h.bytes).toBeLessThanOrEqual(MAX_UNIT_DIFF_BYTES);
+    const brief = buildFindBrief({ ...f, lenses: [], secrets: [] }, { id: "u1", files: ["a.txt"], hunks: [h], diffBytes: h.bytes! }, "local");
+    expect(brief.carried).toEqual([h]);
+    expect(brief.text).toContain(`bytes ${h.fragment!.from.toLocaleString("en-US")} to`);
+    const firstTo = Math.min(h.fragment!.from + 1999, h.fragment!.to);
+    expect(brief.text).toContain(`a.txt: line 1, bytes ${h.fragment!.from.toLocaleString("en-US")} to ${firstTo.toLocaleString("en-US")} of 1,048,576\t`);
+    next = h.fragment!.to + 1;
+  }
+  expect(next).toBe(1024 * 1024 + 1);
+  const partial = readCoverage({ change: f.change, obligations: refs, briefCarried: refs.slice(0, -1), trace: [] });
+  expect(partial.given).toEqual([]);
+  expect(partial.unread.length).toBeGreaterThan(0);
+  const full = readCoverage({ change: f.change, obligations: refs, briefCarried: refs, trace: [] });
+  expect(full.unread).toEqual([]);
+  expect(full.given).toHaveLength(1);
+  expect(full.given![0]!.by).toBe("brief");
+});
+
+it("carries the byte fragment a verifier candidate quotes", () => {
+  const f = fixture(["a.txt"]);
+  // The quote sits in the middle of fragment 367 of 550, bytes 732,001 to 734,000.
+  const text = "x".repeat(732_999) + "needle target" + "y".repeat(1_100_000 - 732_999 - 13);
+  f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1 @@\n+" + text + "\n" }];
+  const refs = obligations(f.change, () => text + "\n");
+  const c = { ...candidate("a.txt"), evidence: [{ file_path: "a.txt", line_number: 1, quote: "needle target" }] };
+  const brief = buildVerifyBrief({ ...f, lenses: [], secrets: [] }, { file: "a.txt", hunks: refs, candidates: [{ id: "k1", kind: "finder", candidate: c, foundBy: [] }] }).text;
+  expect(Buffer.byteLength(brief)).toBeLessThanOrEqual(256 * 1024);
+  expect(brief).toContain("a.txt: line 1, bytes 732,001 to 734,000 of 1,100,000\t");
+  expect(brief).toContain("needle target");
+  // Fragments far outside the carried part stay out of the brief.
+  expect(brief).not.toContain("bytes 1 to 2,000 of");
+  expect(brief).not.toContain("bytes 1,098,001 to 1,100,000 of");
+});
+
+it("measures and carries an on-disk 6 MB line without a whole snapshot read", () => {
+  const f = fixture(["a.txt"]);
+  const patch = join(f.dir, "long.patch");
+  writeFileSync(patch, "@@ -0,0 +1 @@\n+" + "z".repeat(6 * 1024 * 1024) + "\n");
+  f.change.diffs = [{ path: "a.txt", file: patch }];
+  writeFileSync(join(f.dir, "a.txt"), "z".repeat(6 * 1024 * 1024) + "\n");
+  const reader = fragmentSnapshotText(f.dir);
+  const refs = obligations(f.change, Object.assign(() => { throw new Error("a whole snapshot read"); }, { byteLines: reader.byteLines }));
+  expect(refs.length).toBeGreaterThan(50);
+  expect(refs[0]!.fragment!.from).toBe(1);
+  expect(refs.at(-1)!.fragment!.to).toBe(6 * 1024 * 1024);
+  const last = refs.at(-1)!;
+  const brief = buildFindBrief({ ...f, lenses: [], secrets: [] }, { id: "u1", files: ["a.txt"], hunks: [last], diffBytes: last.bytes! }, "local");
+  expect(brief.carried).toEqual([last]);
+  expect(brief.text).toContain("of 6,291,456");
+});
+it("carries the byte part a verifier quote starts in when it crosses a boundary", () => {
+  const f = fixture(["a.txt"]);
+  const total = 1024 * 1024;
+  f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1 @@\n+" + "x".repeat(total) + "\n" }];
+  const initial = obligations(f.change, () => "x".repeat(total));
+  const edge = initial[0]!.fragment!.to;
+  f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1 @@\n+" + "x".repeat(edge) + "y".repeat(total - edge) + "\n" }];
+  const refs = obligations(f.change, () => "x".repeat(edge) + "y".repeat(total - edge));
+  const c = { ...candidate("a.txt"), evidence: [{ file_path: "a.txt", line_number: 1, quote: "xy" }] };
+  const brief = buildVerifyBrief({ ...f, lenses: [], secrets: [] }, { file: "a.txt", hunks: refs, candidates: [{ id: "k1", kind: "finder", candidate: c, foundBy: [] }] }).text;
+  expect(Buffer.byteLength(brief)).toBeLessThanOrEqual(256 * 1024);
+  const h = refs[0]!;
+  expect(brief).toContain(`bytes ${h.fragment!.from.toLocaleString("en-US")} to ${Math.min(h.fragment!.from + 1999, h.fragment!.to).toLocaleString("en-US")} of 1,048,576\t`);
+  // The match belongs to the fragment it starts in, so the next part is not the candidate's.
+  const cited = [{ id: "k1", kind: "finder" as const, candidate: c, foundBy: [] }];
+  expect(refs.slice(0, 2).map((p) => verifyPartDistance(p, cited, f.change))).toEqual([0, Infinity]);
 });

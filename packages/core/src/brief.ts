@@ -5,7 +5,8 @@ import type { InstructionFile } from "./types.js";
 // the diff, the finding shape and the command that finalizes the review.
 // The whole text passes through redactSecrets before it is returned, so no
 // matched secret ever reaches the brief.
-import { DELIVERY_ROW_BYTES, deliveryRow } from "./delivery.js";
+import { DELIVERY_ROW_BYTES, deliveryRow, fragmentLabel, lineFragments } from "./delivery.js";
+import type { ByteLines } from "./brief-staged.js";
 import { diffSize, diffText, unquoteDiffPath } from "./diff.js";
 import { FIELD_SENTENCE_LIMITS, GLOBAL_CONFIDENCE_FLOOR, POSSIBLE_CONFIDENCE_FLOOR } from "./finalize.js";
 import { computeMissingTestSignal } from "./missing-tests.js";
@@ -15,7 +16,8 @@ import { severityRank } from "./severity.js";
 import type { Change, Config, ContextItem, ContextKind, RunTarget, ScanResult, SelectedLens } from "./types.js";
 
 const MAX_CANDIDATES_SHOWN = 50;
-export const MAX_DIFF_BYTES = DELIVERY_ROW_BYTES;
+// The legacy brief keeps its diff budget independently of row delivery.
+export const MAX_DIFF_BYTES = 1024 * 200;
 
 export function fenceFor(text: string): string {
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
@@ -644,7 +646,9 @@ function lineRanges(set: LineSet): string {
 
 // Redaction precedes row formatting, so a secret spanning a chunk boundary
 // is replaced before any part is sent. The original diff stays unchanged.
-function deliveryDiff(diff: string, secrets: string[]): string | null {
+// `byteLines`: new-side lines' snapshot bytes. A long added or context row
+// is cut from those bytes, so its labels match the pages' for any file.
+function deliveryDiff(diff: string, secrets: string[], byteLines?: ByteLines): string {
   let path = "";
   let oldPath = "";
   let old = 0;
@@ -662,8 +666,14 @@ function deliveryDiff(diff: string, secrets: string[]): string | null {
       inHunk = true;
     } else if (inHunk && /^[+ -]/.test(row)) {
       const removed = row[0] === "-";
-      const parts = deliveryRow(removed ? oldPath : path, removed ? old : next, row.slice(1), row[0]!, removed, row[0]!);
-      if (parts === null) return null;
+      let parts: string[] | null = null;
+      // Each source is read inside the loop, while its file is open. The
+      // snapshot's bytes decide both the cut and the total: a short line
+      // goes whole, however long its decoded text.
+      if (!removed && byteLines && Buffer.byteLength(row) > DELIVERY_ROW_BYTES + 1) for (const { source } of byteLines(path, next, next)) {
+        parts = source.bytes > DELIVERY_ROW_BYTES ? Array.from(lineFragments(source), (f) => `${row[0]}${fragmentLabel(path, next, f.from, f.to, f.total)}\t${redactSecrets(f.text, secrets)}`) : [row];
+      }
+      parts ??= deliveryRow(removed ? oldPath : path, removed ? old : next, row.slice(1), row[0]!, removed, row[0]!);
       rows.push(...parts);
       if (row[0] !== "+") old++;
       if (!removed) next++;
@@ -676,7 +686,7 @@ function deliveryDiff(diff: string, secrets: string[]): string | null {
 
 // The diff, file by file, as many whole files as fit in the brief. Returns
 // the files whose diff it carries: the reviewer must read the others.
-function diffBlockV2(change: Change, secrets: string[]): { text: string; files: Set<string> } {
+function diffBlockV2(change: Change, secrets: string[], byteLines?: ByteLines): { text: string; files: Set<string> } {
   // A Change built without its per-file split carries one block for every file in it.
   const all = change.files.filter((f) => !change.notReviewed.includes(f.path)).map((f) => f.path);
   const parts: { paths: string[]; path?: string; text?: string }[] = change.diffs?.map((d) => ({ paths: [d.path], path: d.path })) ?? (change.diff.trim() === "" ? [] : [{ paths: all, text: change.diff }]);
@@ -687,9 +697,9 @@ function diffBlockV2(change: Change, secrets: string[]): { text: string; files: 
   let bytes = 0;
   for (const p of parts) {
     if (p.path && diffSize(change, p.path) + bytes > MAX_DIFF_BYTES) { left.push(...p.paths.filter((path) => !deletedBinaries.has(path))); continue; }
-    const text = deliveryDiff((p.path ? diffText(change, p.path) : p.text) ?? "", secrets);
-    const size = text === null ? Infinity : Buffer.byteLength(text, "utf8");
-    if (text === null || bytes + size > MAX_DIFF_BYTES) {
+    const text = deliveryDiff((p.path ? diffText(change, p.path) : p.text) ?? "", secrets, byteLines);
+    const size = Buffer.byteLength(text, "utf8");
+    if (bytes + size > MAX_DIFF_BYTES) {
       // A deleted binary has no lines to read: the files table and the
       // deletion line name it, so it is never "not in this brief".
       left.push(...p.paths.filter((path) => !deletedBinaries.has(path)));
@@ -848,6 +858,9 @@ export function buildReviewerBrief(args: {
   // Where `instructions` came from: the repository's file (the laptop), or
   // the host of the library (reviewChange's `instructions`).
   instructionsFrom?: "repository" | "host";
+  // New-side lines' bytes from the snapshot, for cutting long rows. Left
+  // out, long rows are cut from the diff's decoded text.
+  byteLines?: ByteLines;
 }): { text: string; diffFiles: Set<string> } {
   const { change, scan, config } = args;
   const instructions = [instructionsBlock(args.instructions ?? "", args.instructionsFrom), conventionsBlock(args.instructionFiles ?? []), contextBlocks(args.context ?? [])].filter((b) => b !== "").join("\n\n");
@@ -867,7 +880,7 @@ export function buildReviewerBrief(args: {
     ];
     return { text: redactSecrets(`${blocks.filter((b) => b !== "").join("\n\n")}\n`, args.secrets), diffFiles: new Set() };
   }
-  const diff = diffBlockV2(change, args.secrets);
+  const diff = diffBlockV2(change, args.secrets, args.byteLines);
   const blocks = [
     header(change, scan, config, args.target),
     REVIEWER_ROLE,

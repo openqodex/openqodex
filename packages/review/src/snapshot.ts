@@ -3,7 +3,8 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { safeGit } from "@openqodex/core";
+import { DELIVERY_ROW_BYTES, safeGit } from "@openqodex/core";
+import type { LineCount } from "@openqodex/core";
 
 // Every regular file under `dir` but the work tree's .git link file, by
 // path relative to `dir`. Links (there are none: they were written as
@@ -23,10 +24,14 @@ export function snapshotFiles(dir: string): string[] {
 }
 
 const CHUNK_BYTES = 64 * 1024;
-// Anchor by lines for dense files and by bytes for wide rows.
+// Every byte read from snapshot files for review text, for cost tests.
+export const snapshotReads = { bytes: 0 };
+// Anchor by lines for dense files and by bytes for wide rows. A page round
+// finds any line within 64 KB of an anchor, so it never rescans megabytes.
 const ANCHOR_LINES = 1024;
-const ANCHOR_BYTES = 1024 * 1024;
-export type LineIndex = { starts: readonly number[]; lines: readonly number[]; count: number; size: number; text: boolean };
+const ANCHOR_BYTES = 64 * 1024;
+// `long`: each line over 2,000 bytes and its length, LF excluded, as pairs.
+export type LineIndex = { starts: readonly number[]; lines: readonly number[]; count: number; size: number; text: boolean; long: readonly number[] };
 type CachedIndex = { stamp: string; index: LineIndex };
 // A snapshot directory belongs to one review. Hashing at the review's two
 // boundaries invalidates it; cleanup releases anything subsequent reads cached.
@@ -66,13 +71,18 @@ export function lineIndex(dir: string, path: string): LineIndex | null {
     let offset = 0;
     let text = true;
     const decoder = new TextDecoder("utf-8", { fatal: true });
+    const long: number[] = [];
+    let lineStart = 0;
     for (let n = readSync(fd, buf); n > 0; n = readSync(fd, buf)) {
+      snapshotReads.bytes += n;
       const chunk = buf.subarray(0, n);
       if (chunk.includes(0)) text = false;
       if (text) {
         try { decoder.decode(chunk, { stream: true }); } catch { text = false; }
       }
       for (let i = buf.subarray(0, n).indexOf(10); i !== -1; i = buf.subarray(0, n).indexOf(10, i + 1)) {
+        if (offset + i - lineStart > DELIVERY_ROW_BYTES) long.push(count, offset + i - lineStart);
+        lineStart = offset + i + 1;
         if (offset + i + 1 < st.size) {
           const next = offset + i + 1;
           if (count % ANCHOR_LINES === 0 || next - starts[starts.length - 1]! >= ANCHOR_BYTES) {
@@ -87,7 +97,8 @@ export function lineIndex(dir: string, path: string): LineIndex | null {
     if (text) {
       try { decoder.decode(); } catch { text = false; }
     }
-    const index = { starts, lines, count, size: offset, text };
+    if (offset - lineStart > DELIVERY_ROW_BYTES) long.push(count, offset - lineStart);
+    const index = { starts, lines, count, size: offset, text, long };
     cache.set(full, { stamp, index });
     return index;
   } catch {
@@ -113,6 +124,7 @@ function lineOffset(fd: number, index: LineIndex, line: number): number {
   const buf = Buffer.allocUnsafe(CHUNK_BYTES);
   while (current < line) {
     const n = readSync(fd, buf, 0, buf.length, at);
+    snapshotReads.bytes += n;
     if (n === 0) throw new Error("the snapshot ended before the indexed line");
     const chunk = buf.subarray(0, n);
     for (let i = chunk.indexOf(10); i !== -1; i = chunk.indexOf(10, i + 1)) {
@@ -141,6 +153,7 @@ export function readLines(dir: string, path: string, from: number, to: number, m
     const parts: string[] = [];
     for (let at = start; at < end;) {
       const n = readSync(fd, buf, 0, Math.min(buf.length, end - at), at);
+      snapshotReads.bytes += n;
       if (n === 0) return null;
       const chunk = buf.subarray(0, n);
       if (chunk.includes(0)) return null;
@@ -175,6 +188,7 @@ export function* readRows(dir: string, path: string, from: number, to: number, m
     const text = (): string | null => size > maxRowBytes ? null : new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(parts));
     while (at < index.size && line <= last) {
       const n = readSync(fd, chunk, 0, Math.min(chunk.length, index.size - at), at);
+      snapshotReads.bytes += n;
       if (n === 0) throw new Error("the snapshot ended before the indexed row");
       at += n;
       let start = 0;
@@ -215,8 +229,20 @@ export function hashSnapshot(dir: string): string {
   return h.digest("hex");
 }
 
-export function lineCounter(dir: string): (path: string) => number | null {
-  return (path) => lineIndex(dir, path)?.count ?? null;
+// Also names the lines over 2,000 bytes, so a Read that returns one cut
+// is credited by the bytes it returned, never as all of the line.
+export function lineCounter(dir: string): LineCount {
+  return Object.assign((path: string) => lineIndex(dir, path)?.count ?? null, {
+    longLines: (path: string, start: number, end: number) => {
+      const long = lineIndex(dir, path)?.long ?? [];
+      const out: { line: number; bytes: number }[] = [];
+      for (let i = 0; i < long.length; i += 2) if (long[i]! >= start && long[i]! <= end) out.push({ line: long[i]!, bytes: long[i + 1]! });
+      return out;
+    },
+    // A Read decodes a file that is not UTF-8 text, so its bytes are not the
+    // file's. A path with no index counts as text.
+    text: (path: string) => lineIndex(dir, path)?.text ?? true,
+  });
 }
 
 // Keep the whole-file callback contract for report rendering. Range-aware

@@ -1,11 +1,12 @@
-import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, matchesGlob, redactByFingerprint, redactSecrets, VERIFY_BATCH_SIZE, verifyPartDistance, hunksBlock, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank, stagedDiffCache } from "@openqodex/core";
+import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, hunkFragmentLabel, matchesGlob, oldPathOf, redactByFingerprint, redactSecrets, VERIFY_BATCH_SIZE, verifyPartDistance, hunksBlock, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank, stagedDiffCache } from "@openqodex/core";
 import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, HunkRef, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
 import { MAX_CORRECTIONS, converse, deliverRanges } from "./conversation.js";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Conversation, CorrectionRound, Speaker } from "./conversation.js";
 import { checkFindAnswer, checkVerifyAnswer } from "./evidence-check.js";
-import { snapshotText, lineCounter } from "./snapshot.js";
-import { MAX_BRIEF_BYTES, obligations, unitsOf, citedDigest } from "./units.js";
+import { fragmentSnapshotText } from "./line-fragments.js";
+import { lineCounter } from "./snapshot.js";
+import { MAX_BRIEF_BYTES, longestBrief, obligations, unitsOf, citedDigest } from "./units.js";
 import { modelToolEntry } from "./model-loop.js";
 import { usageTotals } from "./usage.js";
 import type { CallRecord, ReviewerRole, ToolLogEntry } from "./usage.js";
@@ -86,10 +87,10 @@ async function pool<T>(jobs: T[], limit: number, work: (job: T) => Promise<void>
 export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const { change, scan, config } = args;
   const citationChange = args.citationChange ?? change;
-  const read = snapshotText(args.snapshotDir);
+  const read = fragmentSnapshotText(args.snapshotDir);
   const lineCount = lineCounter(args.snapshotDir);
   const hunks = args.inventory ?? obligations(change, read, stagedDiffCache(change, args.secrets));
-  const units = args.units ?? unitsOf(change, hunks, (unit) => args.findBrief(unit, "local").text);
+  const units = args.units ?? unitsOf(change, hunks, (unit, both) => longestBrief(unit, args.findBrief, both));
   for (const unit of units) if (unit.digest) {
     unit.digest.text = redactSecrets(unit.digest.text, args.secrets);
     unit.digest.omitted = unit.digest.omitted.map((o) => ({ ...o, why: redactSecrets(o.why, args.secrets) }));
@@ -99,7 +100,9 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const findDeadline = startedAt + (args.deadline - startedAt) / 2;
   const runs: Run[] = [];
   const missing: string[] = [];
-  const notes = hunks.flatMap((h) => h.note ? [`${h.id} ${h.path}:${h.start}-${h.end}: ${h.note}`] : []);
+  // A fragment entry is named by its fragment label, never by a bare line.
+  const noteLine = (h: HunkRef, note: string) => `${h.id} ${h.fragment ? hunkFragmentLabel({ ...h, fragment: h.fragment }, oldPathOf(change, h.path)) : `${h.path}:${h.start}-${h.end}`}: ${note}`;
+  const notes = hunks.flatMap((h) => h.note ? [noteLine(h, h.note)] : []);
   const rounds: CorrectionRound[] = [];
   const closedRuns = new Map<Run, Promise<void>>();
   let live = 0;
@@ -168,8 +171,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const undelivered = (unit: ReviewUnit, briefCarried: HunkRef[], trace: TraceEntry[], delivered: Hunk[]): Hunk[] => {
     if (unit.digest) return [];
     const coverage = args.model
-      ? modelCoverage({ change, obligations: unit.hunks, briefSent: true, briefCarried, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount })
-      : readCoverage({ change, obligations: unit.hunks, briefCarried, trace: args.traced ? trace : [], lineCount, delivered });
+      ? modelCoverage({ change, obligations: unit.hunks, fragmentParts: true, briefSent: true, briefCarried, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount })
+      : readCoverage({ change, obligations: unit.hunks, fragmentParts: true, briefCarried, trace: args.traced ? trace : [], lineCount, delivered });
     return coverage.unread;
   };
   const findings: { run: Run; answer: FindAnswer; passRole: string }[] = [];
@@ -189,7 +192,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           const brief = args.findBrief(unit, pass);
           if (Buffer.byteLength(brief.text, "utf8") > MAX_BRIEF_BYTES) {
             last = "its finder brief exceeds MAX_BRIEF_BYTES";
-            for (const h of unit.hunks) { h.note = last; notes.push(`${h.id} ${h.path}:${h.start}-${h.end}: ${last}`); }
+            for (const h of unit.hunks) { h.note = last; notes.push(noteLine(h, last)); }
             break;
           }
           run = start(attempt === 0 ? passRole : `${passRole}:retry1`, index * 10 + attempt, `Finder for unit ${unit.id} (${pass === "local" ? "correctness and safety" : "interfaces and conventions"})`, brief.text, unit.id);
@@ -277,7 +280,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           // Candidate parts come first, then cited old fragments, then
           // neighbours. Sum isolated blocks conservatively: their repeated
           // headers and the base's omitted headings only overestimate the join.
-          const parts = fileHunks.map((h) => ({ h, distance: verifyPartDistance(h, selected) }))
+          const parts = fileHunks.map((h) => ({ h, distance: verifyPartDistance(h, selected, change) }))
             .sort((a, b) => (a.distance === 0 ? -2 : a.distance) - (b.distance === 0 ? -2 : b.distance));
           // Selection runs nearest first; the brief keeps the file's own order.
           const batch: VerifyBatch = { file, hunks: fileHunks, candidates: selected, shown: [], ...(digestUnit ? {

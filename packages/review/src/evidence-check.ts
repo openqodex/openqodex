@@ -1,15 +1,15 @@
 import { z } from "zod";
-import { DELIVERY_ROW_BYTES, FIELD_SENTENCE_LIMITS, FINDER_CONFIDENCE_FLOOR, diffEntry, diffHunks, proseErrors, scannerTerms } from "@openqodex/core";
+import { lineFragments, FIELD_SENTENCE_LIMITS, FINDER_CONFIDENCE_FLOOR, diffEntry, diffHunks, proseErrors, scannerTerms } from "@openqodex/core";
 import type { Change, EvidenceCitation, FindAnswer, FindCandidate, ReviewUnit, ScanResult, VerifyAnswer, VerifyBatch } from "@openqodex/core";
 
-import type { SnapshotText } from "./snapshot.js";
+import type { FragmentRead as SnapshotText } from "./line-fragments.js";
 
 // Oversized neighbours are gaps in the window, never evidence that the
 // whole file is binary. A quote cannot bridge a row we could not check.
 const quoteLines = (read: SnapshotText, path: string, from: number, to: number): { rows: (string | null)[]; error: string | null } => {
   try {
     if (read.readRows) {
-      const rows = read.readRows(path, from, to, DELIVERY_ROW_BYTES);
+      const rows = read.readRows(path, from, to, 200 * 1024);
       if (rows === null) return { rows: [], error: "the file is not a text file in the snapshot" };
       return { rows: [...rows].map((row) => row.text?.replace(/\n$/, "") ?? null), error: null };
     }
@@ -17,7 +17,7 @@ const quoteLines = (read: SnapshotText, path: string, from: number, to: number):
     if (raw === null) return { rows: [], error: "the file is not a text file in the snapshot" };
     const rows = raw.split("\n");
     if (rows.at(-1) === "") rows.pop();
-    return { rows: rows.slice(from - 1, to).map((row) => Buffer.byteLength(row, "utf8") > DELIVERY_ROW_BYTES ? null : row), error: null };
+    return { rows: rows.slice(from - 1, to).map((row) => Buffer.byteLength(row, "utf8") > 200 * 1024 ? null : row), error: null };
   } catch { return { rows: [], error: "the file could not be read in the snapshot" }; }
 };
 const citedLineError = (read: SnapshotText, path: string, line: number): string | null => {
@@ -63,10 +63,53 @@ export function checkEvidence(c: EvidenceCitation, snapshotText: SnapshotText, c
     return normal(removed.join(" ")).includes(quote) ? null : `evidence ${at}: the quote is not in the removed lines of this file's diff`;
   }
   const from = Math.max(1, c.line_number - 2);
-  const window = quoteLines(snapshotText, c.file_path, from, c.line_number + 2);
+  const to = c.line_number + 2;
+  // Beside lines over the row bound, the short rows are matched first, from
+  // a bounded cache, so many citations there never read the long line.
+  const long = snapshotText.longLines && snapshotText.byteLines ? snapshotText.longLines(c.file_path, from, to).filter((l) => l.bytes > 200 * 1024).map((l) => l.line) : [];
+  if (long.length) {
+    let count = 0;
+    let next = from;
+    const windows: ReturnType<typeof quoteLines>[] = [];
+    for (const line of [...long, to + 1]) {
+      if (line > next) {
+        const window = shortLines(snapshotText, c.file_path, next, Math.min(to, line - 1));
+        if (window.error) return `evidence ${at}: ${window.error}`;
+        count += window.rows.length;
+        windows.push(window);
+      }
+      if (line <= to) count++;
+      next = line + 1;
+    }
+    // The end of the file is checked before any row can match.
+    if (c.line_number - from >= count) return `evidence ${at}: the cited line is past the end of the file`;
+    for (const window of windows) {
+      const groups = [""];
+      for (const row of window.rows) {
+        if (row === null) groups.push("");
+        else groups[groups.length - 1] += ` ${row}`;
+      }
+      if (groups.some((group) => normal(group).includes(quote))) return null;
+    }
+    const found = streamMatch(snapshotText, c.file_path, from, to, quote);
+    if (found === "error") return `evidence ${at}: the file could not be read in the snapshot`;
+    return found === "match" ? null : `evidence ${at}: the quote is not within two lines of the cited line`;
+  }
+  const window = quoteLines(snapshotText, c.file_path, from, to);
   if (window.error) return `evidence ${at}: ${window.error}`;
   if (c.line_number - from >= window.rows.length) return `evidence ${at}: the cited line is past the end of the file`;
-  if (window.rows[c.line_number - from] === null) return `evidence ${at}: line ${c.line_number} is over 200 KB and cannot be checked; cite evidence from another line`;
+  if (window.rows.some((row) => row === null)) {
+    // Keep only enough normalised text to match this quote across fragment
+    // boundaries. Checking evidence never grants whole-line read coverage.
+    if (snapshotText.byteLines) {
+      const found = streamMatch(snapshotText, c.file_path, from, to, quote);
+      if (found === "error") return `evidence ${at}: the file could not be read in the snapshot`;
+      if (found === "match") return null;
+    } else {
+      const raw = snapshotText(c.file_path);
+      if (raw !== null && normal(raw.split("\n").slice(from - 1, to).join(" ")).includes(quote)) return null;
+    }
+  }
   const groups = [""];
   for (const row of window.rows) {
     if (row === null) groups.push("");
@@ -74,6 +117,107 @@ export function checkEvidence(c: EvidenceCitation, snapshotText: SnapshotText, c
   }
   const matches = groups.some((group) => normal(group).includes(quote));
   return matches ? null : `evidence ${at}: the quote is not within two lines of the cited line`;
+}
+
+// Matches `quote` against rows `from` to `to`, fragment by fragment, keeping
+// only a tail as long as the quote. No line is ever held whole. One stream
+// answers every expected citation that shares a long line with this one, and
+// the answers are kept, so many citations of one long line read it once.
+function streamMatch(read: SnapshotText, path: string, from: number, to: number, quote: string): StreamResult {
+  const known = streamed(read);
+  const key = streamKey(path, from, to, quote);
+  const kept = known.results.get(key);
+  if (kept) return kept;
+  const long = new Set((read.longLines?.(path, from, to) ?? []).map((l) => l.line));
+  const shares = (w: Window) => w.path === path && (read.longLines?.(path, w.from, w.to) ?? []).some((l) => long.has(l.line));
+  const wanted = [{ path, from, to, quote }, ...known.expected.filter((w) => shares(w) && !known.results.has(streamKey(w.path, w.from, w.to, w.quote)))];
+  const results = streamWindows(read, path, wanted);
+  wanted.forEach((w, i) => remember(known, streamKey(w.path, w.from, w.to, w.quote), results[i]!));
+  return results[0]!;
+}
+
+type StreamResult = "match" | "none" | "error";
+type Window = { path: string; from: number; to: number; quote: string };
+const streamKey = (path: string, from: number, to: number, quote: string) => `${path}\0${from}\0${to}\0${quote}`;
+
+// Streams the union of the windows once. Each window keeps its own tail,
+// fed only by its own rows, so each answer equals a stream of its rows alone.
+function streamWindows(read: SnapshotText, path: string, windows: Window[]): StreamResult[] {
+  const state = windows.map((w) => ({ w, tail: "", result: "none" as StreamResult }));
+  const first = Math.min(...windows.map((w) => w.from));
+  const last = Math.max(...windows.map((w) => w.to));
+  let at = first;
+  try {
+    for (const { line, source } of read.byteLines!(path, first, last)) {
+      at = line;
+      const open = state.filter((s) => s.result === "none" && line >= s.w.from && line <= s.w.to);
+      if (!open.length) continue;
+      for (const fragment of lineFragments(source)) {
+        for (const s of open) if (s.result === "none") {
+          s.tail = (s.tail + fragment.text).replace(/\s+/g, " ");
+          if (s.tail.includes(s.w.quote)) s.result = "match";
+          else s.tail = s.tail.slice(-s.w.quote.length);
+        }
+        if (open.every((s) => s.result !== "none")) break;
+      }
+      for (const s of open) s.tail = (s.tail + " ").replace(/\s+/g, " ").slice(-s.w.quote.length);
+    }
+  } catch { return state.map((s) => s.result === "match" || s.w.to < at ? s.result : "error"); }
+  return state.map((s) => s.result);
+}
+
+// Per reader: the citations an answer is about to check, and the streamed
+// answers, kept up to about this many bytes of keys; the oldest go first.
+const STREAMED_BYTES = 16 * 1024 * 1024;
+const streams = new WeakMap<object, { expected: Window[]; results: Map<string, StreamResult>; bytes: number }>();
+function streamed(read: SnapshotText) {
+  let known = streams.get(read);
+  if (!known) { known = { expected: [], results: new Map(), bytes: 0 }; streams.set(read, known); }
+  return known;
+}
+function remember(known: ReturnType<typeof streamed>, key: string, result: StreamResult): void {
+  if (known.results.has(key)) return;
+  known.results.set(key, result);
+  known.bytes += key.length * 2;
+  for (const [old] of known.results) {
+    if (known.bytes <= STREAMED_BYTES || old === key) break;
+    known.results.delete(old);
+    known.bytes -= old.length * 2;
+  }
+}
+
+// Names the citations an answer holds, so the first long-line stream for
+// one of them answers the others that share its long line.
+function expectCitations(read: SnapshotText, citations: EvidenceCitation[]): void {
+  streamed(read).expected = citations.filter((c) => !c.removed && normal(c.quote) !== "").map((c) => ({ path: c.file_path, from: Math.max(1, c.line_number - 2), to: c.line_number + 2, quote: normal(c.quote) }));
+}
+
+// The short rows beside a long line, kept per reader up to about this many
+// bytes; the oldest windows go first.
+const SHORT_ROWS_BYTES = 16 * 1024 * 1024;
+const shortRows = new WeakMap<object, { windows: Map<string, ReturnType<typeof quoteLines>>; bytes: number }>();
+const windowBytes = (window: ReturnType<typeof quoteLines>) => window.rows.reduce((n, row) => n + (row?.length ?? 0) * 2 + 16, 64);
+function shortLines(read: SnapshotText, path: string, from: number, to: number): ReturnType<typeof quoteLines> {
+  let known = shortRows.get(read);
+  if (!known) { known = { windows: new Map(), bytes: 0 }; shortRows.set(read, known); }
+  const key = `${path}\0${from}\0${to}`;
+  let window = known.windows.get(key);
+  if (!window) {
+    window = quoteLines(read, path, from, to);
+    known.windows.set(key, window);
+    known.bytes += windowBytes(window);
+    for (const [old, kept] of known.windows) {
+      if (known.bytes <= SHORT_ROWS_BYTES || old === key) break;
+      known.windows.delete(old);
+      known.bytes -= windowBytes(kept);
+    }
+  }
+  return window;
+}
+
+// The bytes the short-row cache holds for one reader, for tests.
+export function evidenceCacheBytes(read: SnapshotText): number {
+  return shortRows.get(read)?.bytes ?? 0;
 }
 
 export type RejectedEvidence = { candidate: FindCandidate; errors: string[] };
@@ -91,6 +235,7 @@ export function checkFindAnswer(value: unknown, unit: ReviewUnit, change: Change
   }
   for (const id of [...answer.examined, ...answer.analysis.map((a) => a.hunk)]) if (!required.some((h) => h.id === id)) errors.push(`hunk ${id} is not in unit ${unit.id}`);
   const rejected: RejectedEvidence[] = [];
+  expectCitations(snapshotText, answer.candidates.flatMap((c) => c.evidence));
   answer.candidates.forEach((c, i) => {
     if (c.lens && !lenses.includes(c.lens)) c.lens = null;
     const candidateErrors = proseErrors(`candidates[${i}].claim`, c.claim, null, FIELD_SENTENCE_LIMITS.problem);
@@ -132,6 +277,7 @@ export function checkVerifyAnswer(value: unknown, batch: VerifyBatch, change: Ch
     const n = answer.verdicts.filter((v) => v.id === c.id).length;
     if (n !== 1) errors.push(`candidate ${c.id}: needs exactly one verdict, got ${n}`);
   }
+  expectCitations(snapshotText, batch.candidates.flatMap((c) => c.kind === "finder" ? c.candidate.evidence : []));
   for (const v of answer.verdicts) {
     const at = `candidate ${v.id}`;
     if (!ids.has(v.id)) errors.push(`${at}: is not in this batch`);

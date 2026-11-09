@@ -207,9 +207,18 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     const name = process.env.OPENQODEX_STANDIN_TOOL_NAME;
     const extraPath = process.env.OPENQODEX_STANDIN_TOOL_PATH;
     const is_error = process.env.OPENQODEX_STANDIN_TOOL_ERROR === "1";
-    const input = name === "Bash" ? { command: "pwd" } : { file_path: extraPath };
-    emit({ type: "assistant", session_id, message: { content: [{ type: "tool_use", id: "extra-call", name, input }] } });
-    emit({ type: "user", session_id, message: { content: [{ type: "tool_result", tool_use_id: "extra-call", content: is_error ? "Permission denied" : "outside content", ...(is_error ? { is_error: true } : {}) }] } });
+    if (process.env.OPENQODEX_STANDIN_TOOL_CUT === "1") {
+      // Read lines 1 to 20 of a snapshot file once, cutting each line at 2,000 characters as Claude Code does.
+      const full = join(snapshot, extraPath);
+      const rows = readFileSync(full, "utf8").split("\n");
+      const content = rows.slice(0, 20).map((row) => row.slice(0, 2000)).join("\n");
+      emit({ type: "assistant", session_id, message: { content: [{ type: "tool_use", id: "extra-call", name: "Read", input: { file_path: full, offset: 1, limit: 20 } }] } });
+      emit({ type: "user", session_id, message: { content: [{ type: "tool_result", tool_use_id: "extra-call", content }] }, tool_use_result: { type: "text", file: { filePath: full, content, startLine: 1, numLines: Math.min(20, rows.length), totalLines: rows.length } } });
+    } else {
+      const input = name === "Bash" ? { command: "pwd" } : { file_path: extraPath };
+      emit({ type: "assistant", session_id, message: { content: [{ type: "tool_use", id: "extra-call", name, input }] } });
+      emit({ type: "user", session_id, message: { content: [{ type: "tool_result", tool_use_id: "extra-call", content: is_error ? "Permission denied" : "outside content", ...(is_error ? { is_error: true } : {}) }] } });
+    }
   }
   const answer = answerForPrompt(prompt);
   emit({ type: "result", subtype: "success", is_error: false, session_id, result: answer, num_turns: 1, total_cost_usd: 0.01, usage: { input_tokens: 1000, output_tokens: 500, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } });

@@ -195,7 +195,7 @@ export function stagedProviderEnv(driver: "claude" | "codex" = "claude", behavio
   const executable = join(provider, driver);
   // Driver environments intentionally omit fixture switches. The provider
   // owns them, so set them in the test provider before it reads its prompt.
-  const switches = ["OPENQODEX_STANDIN_PLANT", "OPENQODEX_STANDIN_FAIL_FINDER", "OPENQODEX_STANDIN_UNRESOLVED_SCANNER", "OPENQODEX_STANDIN_TOOL_SESSION", "OPENQODEX_STANDIN_TOOL_NAME", "OPENQODEX_STANDIN_TOOL_PATH", "OPENQODEX_STANDIN_TOOL_ERROR"].filter((key) => behavior[key] !== undefined).map((key) => `process.env[${JSON.stringify(key)}] = ${JSON.stringify(behavior[key])};`).join("\n");
+  const switches = ["OPENQODEX_STANDIN_PLANT", "OPENQODEX_STANDIN_FAIL_FINDER", "OPENQODEX_STANDIN_UNRESOLVED_SCANNER", "OPENQODEX_STANDIN_TOOL_SESSION", "OPENQODEX_STANDIN_TOOL_NAME", "OPENQODEX_STANDIN_TOOL_PATH", "OPENQODEX_STANDIN_TOOL_ERROR", "OPENQODEX_STANDIN_TOOL_CUT"].filter((key) => behavior[key] !== undefined).map((key) => `process.env[${JSON.stringify(key)}] = ${JSON.stringify(behavior[key])};`).join("\n");
   writeFileSync(executable, `#!${process.execPath}\n${switches}\n${readFileSync(source, "utf8")}`);
   chmodSync(executable, 0o755);
   for (const name of ["submission.json", "find-answers.json"]) {

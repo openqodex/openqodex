@@ -17,7 +17,8 @@ import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
 import * as snapshot from "../src/snapshot.js";
 import { hashSnapshot, lineCounter, lineIndex, readLines, snapshotText } from "../src/snapshot.js";
-import { DELIVERY_ROW_BYTES, buildExcerptDisplay, completionRecord, readCoverage, renderHtml, scanReport } from "@openqodex/core";
+import { buildExcerptDisplay, completionRecord, readCoverage, renderHtml, scanReport } from "@openqodex/core";
+import { fragmentSnapshotText } from "../src/line-fragments.js";
 import { deliverRanges } from "../src/conversation.js";
 import { checkEvidence, checkFindAnswer, checkVerifyAnswer } from "../src/evidence-check.js";
 import { runTool } from "../src/tools/index.js";
@@ -40,7 +41,7 @@ it.each([
   expect(readLines(dir, "a.txt", 20, 30)).toBe("");
 });
 
-it.each([["NUL", Buffer.from([0])], ["invalid UTF-8", Buffer.from([0xff])], ["UTF-16", Buffer.from("bad", "utf16le")], ["Latin-1", Buffer.from([0xe9])]])("refuses the whole file with %s anywhere", async (_name, bad) => {
+it.each([["NUL", Buffer.from([0])], ["invalid UTF-8", Buffer.from([0xff])], ["UTF-16", Buffer.from("bad", "utf16le")], ["Latin-1", Buffer.from([0xe9])]])("refuses the whole file as text with %s anywhere, and pages it by bytes", async (_name, bad) => {
   const { change } = fixture(["a.txt"]);
   const dir = tempDir("oq-index-");
   writeFileSync(join(dir, "a.txt"), Buffer.concat([Buffer.from(`safe\n${"x".repeat(64 * 1024)}\n`), bad, Buffer.from("\nend")]));
@@ -50,7 +51,8 @@ it.each([["NUL", Buffer.from([0])], ["invalid UTF-8", Buffer.from([0xff])], ["UT
   expect(lineIndex(dir, "a.txt")?.text).toBe(false);
   const out = await runTool({ snapshotDir: dir, change, secrets: [], graph: null, graphNote: null }, "read_file", { path: "a.txt", start: 1, lines: 1 });
   expect(out.ok).toBe(false);
-  expect(deliverRanges({ snapshotDir: dir, unread: [{ path: "a.txt", start: 1, end: 1, deletion: false }], secrets: [] }).delivered).toEqual([]);
+  // Fragments are bytes, so a file that is not text is still paged by bytes.
+  expect(deliverRanges({ snapshotDir: dir, unread: [{ path: "a.txt", start: 1, end: 1, deletion: false }], secrets: [] }).delivered).toEqual([{ path: "a.txt", start: 1, end: 1, deletion: false, lineBytes: 4, fragment: { from: 1, to: 4 } }]);
   expect(checkEvidence({ file_path: "a.txt", line_number: 1, quote: "safe" }, snapshotText(dir), change)).not.toBeNull();
 });
 
@@ -126,10 +128,10 @@ it("shows excerpt lines from a 6 MB file while the review completes", () => {
   expect(completion.status).toBe("complete");
 });
 
-it("names an oversized evidence quote and asks for evidence from another line", () => {
+it("accepts a quote inside a long line without reading that line whole", () => {
   const { change, dir } = fixture();
-  writeFileSync(join(dir, "a.txt"), `unsafe operation ${"x".repeat(DELIVERY_ROW_BYTES)}\n`);
-  expect(checkEvidence({ file_path: "a.txt", line_number: 1, quote: "unsafe operation" }, snapshotText(dir), change)).toBe("evidence a.txt:1: line 1 is over 200 KB and cannot be checked; cite evidence from another line");
+  writeFileSync(join(dir, "a.txt"), `unsafe operation ${"x".repeat(6 * 1024 * 1024)}\n`);
+  expect(checkEvidence({ file_path: "a.txt", line_number: 1, quote: "unsafe operation" }, fragmentSnapshotText(dir), change)).toBeNull();
 });
 
 it("accepts evidence two rows from a 250 KB line", () => {
@@ -138,7 +140,7 @@ it("accepts evidence two rows from a 250 KB line", () => {
   expect(checkEvidence({ file_path: "a.txt", line_number: 1, quote: "unsafe operation" }, snapshotText(dir), change)).toBeNull();
 });
 
-it("accepts oversized finder and verifier anchors and refuses only the quote", () => {
+it("accepts oversized finder and verifier anchors and their fragment quotes", () => {
   const { change, dir } = fixture(["a.txt"]);
   writeFileSync(join(dir, "a.txt"), `${"x".repeat(250 * 1024)}\nsafe operation\n`);
   const c = { ...candidate("a.txt"), evidence: [{ file_path: "a.txt", line_number: 2, quote: "safe operation" }] };
@@ -150,7 +152,7 @@ it("accepts oversized finder and verifier anchors and refuses only the quote", (
   expect(found.rejected).toEqual([]);
   expect(found.answer.candidates).toEqual([c]);
   expect(verified.errors).toEqual([]);
-  expect(checkEvidence({ file_path: "a.txt", line_number: 1, quote: "x" }, snapshotText(dir), change)).toContain("cite evidence from another line");
+  expect(checkEvidence({ file_path: "a.txt", line_number: 1, quote: "x" }, fragmentSnapshotText(dir), change)).toBeNull();
 });
 
 it("clips an indexed excerpt span at the end of a 10-line file", () => {

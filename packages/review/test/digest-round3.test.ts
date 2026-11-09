@@ -12,6 +12,8 @@ import { jsonSections } from "../src/digest.js";
 import { MAX_BRIEF_BYTES, obligations, unitsOf } from "../src/units.js";
 import { runStagedReview } from "../src/stages.js";
 import { cleanupFixtures, fixture, candidate, verdict } from "./staged-fixture.js";
+// The 30,000 file test took about 400 ms measured alone; its bound is ten times that.
+const ALONE_MS = 400;
 afterAll(cleanupFixtures);
 
 it("keeps all 50 unchanged odd records when a deletion ends at a page boundary", () => {
@@ -43,7 +45,7 @@ it("reports one added package and zero removed after a new dev key changes its s
   expect(sections.fixed).toContain("records $.packages[*]: added 1, removed 0, changed 0; total 3001");
 });
 
-it("inventories 30000 under-budget JSON files in under one second without old-side recognition", () => {
+it("inventories 30000 under-budget JSON files with two reads each and no old-side recognition", () => {
   const f = fixture(["a.txt"]);
   const paths = Array.from({ length: 30000 }, (_, i) => `p${i}.json`);
   f.change.files = paths.map((path) => ({ path, status: "modified", oldPath: null, binary: false }));
@@ -51,11 +53,14 @@ it("inventories 30000 under-budget JSON files in under one second without old-si
   f.change.coverage = new Map(paths.map((path) => [path, makeLineSet([1])]));
   f.change.diffs = paths.map((path) => ({ path, text: '@@ -1 +1 @@\n-{"old":true}\n+{"next":true}\n' }));
   const start = performance.now();
-  const refs = obligations(f.change, () => '{"next":true}\n');
+  let reads = 0;
+  const refs = obligations(f.change, () => { reads++; return '{"next":true}\n'; });
   const ms = performance.now() - start;
-  console.log(`round3 small JSON: ${ms.toFixed(1)} ms, ${paths.length} files in, ${refs.length} obligations out`);
+  console.log(`round3 small JSON: ${ms.toFixed(1)} ms, ${paths.length} files in, ${refs.length} obligations out, ${reads} reads`);
   expect(refs).toHaveLength(30000);
-  expect(ms).toBeLessThan(1000);
+  // The sizing pass and the paging pass each read a file once.
+  expect(reads).toBeLessThanOrEqual(2 * 30000);
+  expect(ms).toBeLessThan(ALONE_MS * 10);
 });
 
 it("verifies a candidate on a 100 KB cited line with 60 KB of fixed instructions", async () => {

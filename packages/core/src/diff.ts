@@ -8,7 +8,7 @@
 // only if a diff with context is passed in. A hunk that only deletes is kept
 // apart as a deletion point, so a finding can cite the lines around it.
 import { statSync } from "node:fs";
-import { indexedHunks, patchIndex } from "./diff-index.js";
+import { indexedHunks, indexedLines, patchIndex } from "./diff-index.js";
 import type { DiffRange, DiffReadOptions } from "./diff-index.js";
 export { DiffReadLimit } from "./diff-index.js";
 export type { DiffRange } from "./diff-index.js";
@@ -225,9 +225,14 @@ export function diffIndex(change: Pick<Change, "diffs">, path: string) {
   return entry ? patchIndex(entry) : null;
 }
 
-export function* diffHunks(change: Pick<Change, "diffs">, path: string, range?: DiffRange, maxBytes = Infinity, options: DiffReadOptions = {}): Generator<string> {
+type ByteHunk = ReturnType<typeof indexedLines>;
+export function diffHunks(change: Pick<Change, "diffs">, path: string, range: DiffRange, maxBytes: number, options: DiffReadOptions & { byteLines: true }): ByteHunk;
+export function diffHunks(change: Pick<Change, "diffs">, path: string, range?: DiffRange, maxBytes?: number, options?: DiffReadOptions): Generator<string>;
+export function* diffHunks(change: Pick<Change, "diffs">, path: string, range?: DiffRange, maxBytes = Infinity, options: DiffReadOptions & { byteLines?: boolean } = {}): Generator<string | { line: number; old: number; mark: string; source: import("./delivery.js").ByteLine }> {
   const entry = diffEntry(change, path);
-  if (entry) yield* indexedHunks(entry, range, maxBytes, options);
+  if (!entry) return;
+  if (options.byteLines && range) yield* indexedLines(entry, range);
+  else yield* indexedHunks(entry, range, maxBytes, options);
 }
 
 // Whole text is only for small patches. Large consumers walk diffHunks,

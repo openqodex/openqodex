@@ -887,7 +887,7 @@ describe("25. what a correction message may carry", () => {
     expect(r.delivered).toEqual([]);
   });
 
-  it("never delivers a deletion whose removed lines the change does not hold, a dropped file, a binary file or a line over the byte budget, and promises none for a later round", () => {
+  it("never delivers a deletion whose removed lines the change does not hold or a dropped file, but delivers a binary file and a long changed line as labelled bytes", () => {
     const dir = snap();
     writeFileSync(join(dir, "bin.dat"), Buffer.from([0, 1, 2, 10, 3, 10]));
     writeFileSync(join(dir, "long.js"), `${"a".repeat(220_000)}\n`);
@@ -898,10 +898,16 @@ describe("25. what a correction message may carry", () => {
       { path: "bin.dat", start: 3, end: 4, deletion: true },
     ];
     const r = deliverRanges({ snapshotDir: dir, unread, secrets: [], change: { files: [], deletionPoints: new Map([["bin.dat", [{ after: 3, lines: 1, anchors: [3, 4] }]]]), diffs: [] } });
-    expect(r.delivered).toEqual([]);
-    expect(r.left).toHaveLength(4);
+    // Fragments are bytes, so a file that is not text is paged by bytes too.
+    // A route without inventory ids names no fragment owner.
+    expect(r.delivered).toEqual([
+      { ...unread[1], end: 1, lineBytes: 3, fragment: { from: 1, to: 3 } },
+      { ...unread[1], start: 2, lineBytes: 1, fragment: { from: 1, to: 1 } },
+      unread[2],
+    ]);
+    expect(r.left).toEqual([unread[0], unread[3]]);
     expect(r.later).toBe(0);
-    expect(r.text).toBe("");
+    expect(r.text).toContain("long.js: line 1, bytes 1 to 2,000 of 220,000");
   });
 
   it("a range whose lines pass the byte bound before the line bound is sent in a part that fits, not promised for a round that could never carry it", () => {
@@ -910,9 +916,11 @@ describe("25. what a correction message may carry", () => {
     const r = deliverRanges({ snapshotDir: dir, unread: [{ path: "wide.txt", start: 1, end: 1000, deletion: false }], secrets: [] });
     expect(r.delivered.length).toBeGreaterThan(0);
     expect(Buffer.byteLength(r.text, "utf8")).toBeLessThanOrEqual(512 * 1024);
-    expect(r.text).toContain("wide.txt: line 1, part 1 of 2\t");
-    expect(r.text).toContain("wide.txt: line 1, part 2 of 2\t");
-    expect(r.left).toEqual([{ path: "wide.txt", start: r.delivered.at(-1)!.end + 1, end: 1000, deletion: false }]);
+    expect(r.text).toContain("wide.txt: line 1, bytes 1 to 2,000 of 2,502\t");
+    expect(r.text).toContain("wide.txt: line 1, bytes 2,001 to 2,502 of 2,502\t");
+    // Lines 1 to 198 fit whole with their context; the rest waits for a page.
+    expect(r.delivered).toEqual([{ path: "wide.txt", start: 1, end: 198, deletion: false }]);
+    expect(r.left).toEqual([{ path: "wide.txt", start: 199, end: 1000, deletion: false }]);
     expect(r.later).toBe(1);
   });
 

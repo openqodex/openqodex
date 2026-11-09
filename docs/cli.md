@@ -106,7 +106,7 @@ A finding counts toward the verdict only on a line the change added or modified.
 
 ### Very long lines
 
-A correction round carries at most 4,000 rows and 512 KB, context included. The brief carries at most 200 KB of diff text. A line longer than 2,000 characters is given to the reviewer in parts, each with its file, line number and part number. Every part must fit before the line counts as given. A changed line the 200 KB budget cannot carry keeps the review incomplete and is named in the receipt. A context line that large is left out and marked as not shown.
+A correction round carries at most 4,000 rows and 512 KB, context included. The brief carries at most 200 KB of diff text. With `review.stages: false`, the record does not require a replaced line's old text. Pages still carry pure deletions in fragments. A line of 2,000 bytes or fewer travels whole; a longer line is cut into fragments of at most 2,000 bytes. UTF-8 boundaries can make a fragment shorter. Each fragment is labelled with its path, line and bytes, such as "a.js: line 7, bytes 2,001 to 4,000 of 50,000,000". A removed line uses its old path and old line number, such as "a.js: old line 7, bytes 1 to 2,000 of 6,000". The record credits a line only when every fragment reached a reviewer. When a reviewer's Read returns a cut line, OpenQodex records the bytes it returned and credits only those. A Read with no recorded byte ranges credits none of a line over 2,000 bytes. A file that is not UTF-8 text is reviewed by bytes, and a Read credits none of its long lines. Missing bytes are listed beneath their changed range, and the receipt counts ranges, not gaps. Oversized context is left out and marked as not shown.
 
 ### Reviewing a branch or a pull request
 

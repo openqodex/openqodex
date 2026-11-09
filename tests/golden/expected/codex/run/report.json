@@ -1298,9 +1298,9 @@
     },
     "snapshot": {
       "change_id": "597352237e5136f4462a792835c483d3224a4216fa84bbfbf2a9761a490605de",
-      "tree": "4c95ec9ba366b4790662be2fb4095289572c9a2c",
-      "before": "5504e00e108c933cfdd28a5ce8ec7745e77e866304879221a7d1199084dfdfe5",
-      "after": "5504e00e108c933cfdd28a5ce8ec7745e77e866304879221a7d1199084dfdfe5"
+      "tree": "eff460ded1d28628803132ea709021e3f7584b3d",
+      "before": "88693abdaeef4ba7fa5d765b10d1ac22607b5f1b39665d2af53d944bd4cd2e2d",
+      "after": "88693abdaeef4ba7fa5d765b10d1ac22607b5f1b39665d2af53d944bd4cd2e2d"
     },
     "candidates": {
       "total": 24,
@@ -1340,11 +1340,10 @@
           "start": 9,
           "end": 10,
           "deletion": "Dockerfile#0",
-          "fragment": {
-            "of": "Dockerfile#0",
-            "from": 10,
-            "to": 10
-          },
+          "old": [
+            10,
+            10
+          ],
           "by": "brief"
         },
         {

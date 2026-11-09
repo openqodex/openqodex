@@ -23,7 +23,7 @@ An unknown key prints a warning and is ignored. A name in `scanners.disable` tha
 | `review.default_base` | `null` | The branch or ref to diff against when the branch has no upstream; null uses the remote's default branch. |
 | `review.include_fixtures` | `false` | Keep scanner findings in test fixtures, mocks and snapshots. |
 | `review.instructions_files` | `[]` | Repo-relative convention paths or globs the owners chose for the reviewer. Empty reads none. |
-| `review.stages` | `true` | The staged review when openqodex starts its own reviewer: two finder sessions per changed file, then a fresh verifier per batch of candidates. false runs one pass. --agent and --all always run one pass. |
+| `review.stages` | `true` | The staged review when openqodex starts its own reviewer: two finder sessions per changed file, then a fresh verifier per batch of candidates. false runs one pass, whose correction rounds carry at most 4,000 rows and 512 KB each. --agent and --all always run one pass. |
 | `scanners.disable` | `[]` | Built-in scanners to switch off, by name. |
 | `scanners.custom` | `[]` | Open source scanners to add by GitHub link; each runs only after openqodex trust. |
 | `graph.enabled` | `true` | Show the callers and importers of the changed code in the brief. |

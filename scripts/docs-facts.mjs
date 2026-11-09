@@ -23,6 +23,8 @@
 //     and the benchmark only under it, and the required check names; no
 //     sentence in AGENTS.md or CONTRIBUTING.md says less; and the gate
 //     action's steps equal scripts/gate.sh's, one for one.
+//  8. the staged budgets in docs/claude-code-review.md and the single-pass
+//     brief's diff budget in docs/cli.md equal their code values.
 // It cannot check what a sentence means, a measured time or a privacy
 // promise. Those are in the manual claims ledger.
 import { execFileSync } from "node:child_process";
@@ -361,6 +363,10 @@ for (const [name, value, label] of [
   if (value !== ({ MAX_UNIT_DIFF_BYTES: 120 * 1024, DELIVER_LINES: 4000, MAX_BRIEF_BYTES: 256 * 1024 })[name]) fail("docs/claude-code-review.md", `${name} changed; update the documented budget`);
   if (!read("docs/claude-code-review.md").includes(`\`${name}\``) || !read("docs/claude-code-review.md").includes(label)) fail("docs/claude-code-review.md", `must name ${name} and ${label}`);
 }
+
+// The single-pass brief's diff budget, MAX_DIFF_BYTES in core's brief.ts.
+const { MAX_DIFF_BYTES } = await import(join(root, "packages/core/dist/index.js"));
+if (!read("docs/cli.md").includes(`The brief carries at most ${MAX_DIFF_BYTES / 1024} KB of diff text.`)) fail("docs/cli.md", `must say the brief carries at most ${MAX_DIFF_BYTES / 1024} KB of diff text (MAX_DIFF_BYTES)`);
 
 if (errors.length) {
   for (const error of errors) console.error(`docs-facts: ${error}`);
