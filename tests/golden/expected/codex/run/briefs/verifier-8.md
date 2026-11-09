@@ -6,6 +6,9 @@
 - Scanners: 15 scanners ran, 5 had nothing to check
 - Block threshold: warn only, nothing blocks the push
 
+The current folder holds a frozen copy of the code under review, with the change applied. Read it only through the tools you were given; it is the only place you can read, and you never run the repository's code.
+OpenQodex replaced every value the secret scanner matched with `[redacted]`, in this copy and in the diff. Treat `[redacted]` as a real value you cannot see, never as a placeholder or a missing value; raise no finding about the masking itself.
+
 ## The file
 
 db/migrations/002_index_item_names.sql
@@ -367,6 +370,7 @@ When you confirm, keep the candidate's cause and consequence as its claim and ev
 Name each step by its code: the call, the exception, the keyword, the field.
 Correct a detail only when you cite the line that refutes it, and say so in `reason`.
 Refute when the code shows the claim is wrong or the path cannot happen. Cite the line that shows why.
+A claim that a value is a placeholder, missing or redacted, where the copy reads `[redacted]`, is refuted.
 Check for an upstream guard, an unreachable branch, an already validated value, or generic "missing X" without a concrete path.
 Use unresolved when the code does not settle a finder candidate. Doubt alone is not a refutation.
 A scanner candidate is always confirmed or refuted, never unresolved.

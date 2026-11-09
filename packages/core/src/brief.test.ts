@@ -31,6 +31,7 @@
 // 15. The reviewer omits shown defects or weakens impact and scope rules.
 // 16. The judgement rule substitutes the default for a configured confidence
 //     floor, including zero, while the other brief rules use that floor.
+// 17. A full diff budget tells the reviewer to open a deleted binary file.
 import { describe, expect, it } from "vitest";
 import { buildBrief, buildReviewerBrief, buildWholeRepoBrief } from "./brief.js";
 import { selectLenses } from "./lenses.js";
@@ -226,6 +227,29 @@ describe("10. the reviewer brief's diff section", () => {
     expect(text).toContain("Raise findings with evidence you can point at, with confidence set honestly. Anchor each on an added or modified line or a deletion anchor.");
     expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
     expect(text).toContain("`severity` reflects impact on users or the system, not your confidence");
+  });
+
+  it("a full diff budget tells the reviewer to open a deleted binary file", () => {
+    const header = "diff --git a/app/big.py b/app/big.py\n--- /dev/null\n+++ b/app/big.py\n@@ -0,0 +1,205 @@\n";
+    const rows = `+${"x".repeat(1000)}\n`.repeat(204);
+    const big = header + rows + `+${"x".repeat(200 * 1024 - header.length - rows.length - 2)}\n`;
+    const deleted = "diff --git a/logo.png b/logo.png\ndeleted file mode 100644\nindex 1234567..0000000\nBinary files a/logo.png and /dev/null differ\n";
+    const change = makeChange({
+      files: [
+        { path: "app/big.py", status: "added", oldPath: null, binary: false },
+        { path: "logo.png", status: "deleted", oldPath: null, binary: true },
+      ],
+      changedPaths: ["app/big.py"],
+      coverage: new Map([["app/big.py", new Set(Array.from({ length: 205 }, (_, i) => i + 1))]]),
+      deletionPoints: new Map([["logo.png", [{ after: 0, lines: 0, anchors: [1] }]]]),
+      diff: big + deleted,
+      diffs: [{ path: "app/big.py", text: big }, { path: "logo.png", text: deleted }],
+    });
+    const { text, diffFiles } = buildReviewerBrief({ change, scan: makeScan(), lenses: [], config: makeConfig(), secrets: [] });
+    expect([...diffFiles]).toEqual(["app/big.py", "logo.png"]);
+    expect(text).toContain("| deleted, binary | logo.png |");
+    expect(text).toContain("Binary files a/logo.png and /dev/null differ");
+    expect(text).not.toContain("These files changed but their diff is not in this brief");
   });
 
   it("names the files to open with their changed lines and deletions, and says the rest is already shown", () => {

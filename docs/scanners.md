@@ -329,6 +329,21 @@ These are the known misses, where OpenQodex reads less than the scanner:
 - Network: OpenQodex starts it with no network option. It needs none.
 - Redaction: OpenQodex redacts the secrets that gitleaks finds. It redacts them in the review brief that the reviewer reads, in each report file and in the terminal. In this version, no file that OpenQodex keeps holds such a secret.
 
+To allowlist a known public value, add an `[allowlist]` section to the repository's root `.gitleaks.toml`. Use `paths` for a path or `regexes` for a pattern matching the value. The entries are regular expressions. For example, this keeps gitleaks's default rules and allowlists one file and one value pattern:
+
+```toml
+[extend]
+useDefault = true
+
+[allowlist]
+paths = ['''^assets/public-digests\.json$''']
+regexes = ['''^public-test-key-[a-z0-9]+$''']
+```
+
+The allowlist removes both the matching gitleaks candidates and their redaction in the frozen copy and diff. The reviewer sees the original values.
+
+Every reviewer brief explains that OpenQodex replaced matched values with `[redacted]`. The verifier refutes claims that these values are placeholders, missing or redacted. It cannot yet tell those replacements from a literal `"[redacted]"` committed by the repository. That literal gets no finding about being a placeholder until the redaction provenance follow-up records which file and line OpenQodex masked.
+
 ## bandit
 
 - Version: 1.9.4.
