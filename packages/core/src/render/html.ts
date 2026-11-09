@@ -21,7 +21,7 @@ import type { Candidate, ImpactEdge, ImpactSummary, Report, ReportFinding } from
 import type { Display, DisplayFile, DisplayHunk } from "./display.js";
 import { coverageLine, lowConfidenceReason, observationsOmittedLine, orderObservations, orderPossible, verdictLine } from "./common.js";
 import { REPORT_CSS } from "./html-style.js";
-import { modelReviewerLine, product } from "./review.js";
+import { fileCoverageLines, modelReviewerLine, product } from "./review.js";
 
 export type HtmlInput = {
   report: Report;
@@ -542,7 +542,7 @@ function coverage(report: Report): string {
   const excluded = out.length === 0 ? "none" : out.map((s) => `${text(s.scanner)}: ${text(s.reason || s.status.replace(/_/g, " "))}`).join("; ");
 
   const items: [string, string][] = [
-    ["Changed ranges given to the reviewer", ranges],
+    ["Changed ranges given to the reviewer", `${ranges}${completion ? fileCoverageLines(completion.coverage).map((line) => `<p>${text(line)}</p>`).join("") : ""}`],
     ["Files the reviewer opened", read],
     ...(notOpened ? [notOpened] : []),
     ["Scanner candidates", esc(candidates)],

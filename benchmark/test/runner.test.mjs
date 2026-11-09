@@ -6,11 +6,14 @@
 // Codex's own output. The run folder rules (one plan per folder, one runner
 // at a time, a crashed attempt kept) are checked on executeRun, the code
 // run.mjs runs, with the review step, which would call a model, replaced.
+// Failures guarded:
+// 1. The new not examined sentence loses the coverage halt class.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { reasonClass } from "../lib/halts.mjs";
 import { git } from "../lib/cases.mjs";
 import { redactRowReasons, saveSampleRow, jobState, attemptDir, codexModelFrom, executeRun, failureOf, lockRun, planJobs, provenanceProblems, resumeProblems, runManifest, sampleRecord, claudeModels, claudeRunModels, takeOverStale, treeState } from "../lib/runner.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
@@ -32,7 +35,7 @@ describe("attempts", () => {
     expect(failureOf({ code: 2, signal: null, stderr: "Full review unavailable: openqodex could not start a reviewer." }, null)).toMatchObject({ infra: true, unavailable: true });
     const timedOut = { completion: { status: "incomplete", missing: ["the reviewer timed out and was stopped"] } };
     expect(failureOf({ code: 2, signal: null, stderr: "" }, timedOut)).toMatchObject({ infra: true, cause: "the reviewer timed out and was stopped" });
-    const unread = { completion: { status: "incomplete", missing: ["1 changed range was not read: a.py:3"] } };
+    const unread = { completion: { status: "incomplete", missing: ["1 changed range was not examined", "a.py:3-3"] } };
     expect(failureOf({ code: 2, signal: null, stderr: "" }, unread)).toMatchObject({ infra: false });
     expect(failureOf({ code: 0, signal: null, stderr: "" }, { completion: { status: "complete", missing: [] } })).toBeNull();
   });
@@ -415,4 +418,9 @@ describe("retry state on disk", () => {
       expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false, retriesUsed: 0 });
     }
   });
+});
+
+it("C3 fix 3. not examined ranges retain the coverage halt class", () => {
+  expect(reasonClass("2 changed ranges were not examined; a.py:3-4; b.py:5-6")).toBe("coverage");
+  expect(reasonClass("1 changed range was not examined; a.py:3-3")).toBe("coverage");
 });

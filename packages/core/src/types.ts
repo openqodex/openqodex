@@ -740,7 +740,12 @@ export type CompletionRecord = {
     hunks: number;
     covered: number;
     unread: (Pick<HunkRef, "path" | "start" | "end" | "deletion"> & Partial<Omit<HunkRef, "path" | "start" | "end" | "deletion">>)[];
-    given?: { path: string; start: number; end: number; deletion?: string; by: "brief" | "page" | "digest" | "read"; fragment?: { of: string; from: number; to: number } }[];
+    given?: { path: string; start: number; end: number; deletion?: string; by: "brief" | "page" | "digest" | "read"; fragment?: { of: string; from: number; to: number }; part?: HunkRef["part"] }[];
+    // One entry per original obligation, before delivery splits it into pieces.
+    // by names the first source that contributed to its complete coverage.
+    inventory?: { path: string; start: number; end: number; deletion?: string; by?: "brief" | "page" | "digest" | "read" }[];
+    // Includes files with no line obligations, such as binaries and pure renames.
+    files?: ChangedFile[];
     files_read: string[];
     files_not_read: string[];
   };

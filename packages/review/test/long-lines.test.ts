@@ -103,7 +103,7 @@ it("lines too large for the brief budget stay incomplete and the receipt names t
   const r = review({ after: "x".repeat(220_000) + "\n" + "y".repeat(220_000) + "\n" });
   expect(r.status, r.stderr).toBe(2);
   expect(r.report.completion.status).toBe("incomplete");
-  expect(r.stdout).toContain("not given to the reviewer: app/server.py:1-2");
+  expect(r.stdout).toContain("1 changed range was not examined; app/server.py:1-2");
   expect(r.report.completion.coverage.unread).toEqual([{ path: "app/server.py", start: 1, end: 2, deletion: false }]);
 }, 120_000);
 

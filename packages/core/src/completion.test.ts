@@ -26,13 +26,17 @@
 //     snapshot leaves the model record complete.
 // 10. The model record's reviewer line prints an unknown cost or token count
 //     as a number instead of "not reported".
+// 13. Eleven unread ranges collapse to ten names, or parts and deletion
+//     fragments lose their identity in either completion record.
+// 15. Plain unread deletions lose their id in missing and per-file labels.
+// 14. Overlapping delivery sources list one range twice or credit reads first.
 // 12. Partial brief ranges or deletion fragments credit a whole obligation.
 // 11. The markdown, HTML or SARIF of a model review loses the model record
 //     or prints the agent's reviewer line instead of the model's.
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { makeLineSet } from "../../../tests/line-set.mjs";
-import { budgetRefusedLine, completionRecord, modelCompletionRecord, singlePassModelCoverage, readCoverage, singlePassCoverage } from "./completion.js";
+import { budgetRefusedLine, completionRecord, modelCompletionRecord, modelCoverage, singlePassModelCoverage, readCoverage, singlePassCoverage } from "./completion.js";
 import type { Hunk } from "./completion.js";
 import { checkSubmission } from "./finalize.js";
 import { buildDisplay } from "./render/display.js";
@@ -46,19 +50,20 @@ import type { ModelAttempt, ModelCompletionRecord, ModelToolEntry, Report, Revie
 // fixture inputs below. Any difference is a change to the agent record or its
 // report, which the push hooks, the Action and the golden run read. The
 // verdict's count of scanners that did not run was added on 2026-10-12
-// (issue 166): the fixture scan has one scanner not installed.
+// (issue 166): the fixture scan has one scanner not installed. C3 updates
+// only unread entries, the receipt coverage line and their report hashes.
 const FROZEN = {
   traced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"complete\",\"missing\":[],\"refused\":[],\"reviewer\":{\"driver\":\"claude\",\"version\":\"2.1.289\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":10,\"input_tokens\":45000,\"output_tokens\":3000,\"cost_usd\":0.31}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"candidates\":{\"total\":3,\"disposed\":3},\"coverage\":{\"hunks\":2,\"covered\":2,\"unread\":[],\"files_read\":[\"app/search.py\"],\"files_not_read\":[\"app/settings.py\"]},\"outside_reads\":[],\"trace_complete\":true}",
-  untraced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"incomplete\",\"missing\":[\"the reviewer timed out and was stopped\",\"the snapshot changed while the reviewer read it\",\"1 scanner candidate has no disposition\",\"the reviewer's answer still failed 1 check after the correction rounds\",\"1. a problem\",\"2 changed ranges were not given to the reviewer: app/search.py:14-15, app/settings.py:1-3\"],\"refused\":[],\"reviewer\":{\"driver\":\"codex\",\"version\":\"0.160.0\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":2,\"input_tokens\":2000,\"output_tokens\":1000,\"cost_usd\":null}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":null,\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"candidates\":{\"total\":3,\"disposed\":2},\"coverage\":{\"hunks\":2,\"covered\":0,\"unread\":[{\"path\":\"app/search.py\",\"start\":14,\"end\":15,\"deletion\":false},{\"path\":\"app/settings.py\",\"start\":1,\"end\":3,\"deletion\":false}],\"files_read\":[],\"files_not_read\":[]},\"outside_reads\":[],\"trace_complete\":false}",
+  untraced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"incomplete\",\"missing\":[\"the reviewer timed out and was stopped\",\"the snapshot changed while the reviewer read it\",\"1 scanner candidate has no disposition\",\"the reviewer's answer still failed 1 check after the correction rounds\",\"1. a problem\",\"2 changed ranges were not examined\",\"app/search.py:14-15\",\"app/settings.py:1-3\"],\"refused\":[],\"reviewer\":{\"driver\":\"codex\",\"version\":\"0.160.0\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":2,\"input_tokens\":2000,\"output_tokens\":1000,\"cost_usd\":null}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":null,\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"candidates\":{\"total\":3,\"disposed\":2},\"coverage\":{\"hunks\":2,\"covered\":0,\"unread\":[{\"path\":\"app/search.py\",\"start\":14,\"end\":15,\"deletion\":false},{\"path\":\"app/settings.py\",\"start\":1,\"end\":3,\"deletion\":false}],\"files_read\":[],\"files_not_read\":[]},\"outside_reads\":[],\"trace_complete\":false}",
   md: "# Blocked: 1 finding at or above major \\(1 critical\\); 1 of 4 scanners did not run\n\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\n\nSummary: Builds the search query from request input and adds a settings module.\n\nCounts: 1 finding \\(1 critical\\), 2 scanner candidates dropped\n\n## Findings \\(1\\)\n\n### 1. Critical security: Query built from request input\n\n- **Where:** app/search.py:14\n- **Problem:** The search query puts q from the request straight into the SQL text.\n- **Why it matters:** Anyone who can call search can read or change every row.\n- **Fix:** Pass q as a bound parameter to cur.execute.\n- **Source:** semgrep:python.lang.security.audit.formatted-sql-query\n\n## Dropped scanner candidates \\(2\\)\n\n### c2 at app/settings.py:3: The key is a documented local sample. \\(see app/settings.py:3\\)\n\n- **Source:** gitleaks:generic-api-key\n\n### c3 at app/settings.py:1: The import is used by the next change. \\(see app/settings.py:1\\)\n\n- **Source:** ruff:F401\n\n## Coverage\n\n- **Files the reviewer opened:** app/search.py\n- **Files not opened (their changed lines were in the brief):** app/settings.py\n- **Changed ranges given to the reviewer:** 2 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included \\(brakeman: needs Ruby 2.7 or newer\\)\n\nReviewer: claude 2.1.289, 72 s, 10 turns, 1 correction round, 45,000 tokens in, 3,000 out, $0.31\n\nMade by Qodex: review on every pull request at https://qodex.ai\n",
   term: "Blocked: 1 finding at or above major (1 critical); 1 of 4 scanners did not run\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\nSummary: Builds the search query from request input and adds a settings module.\nCounts: 1 finding (1 critical), 2 scanner candidates dropped\n\nFindings (1)\n1. Critical security: Query built from request input\n   Where: app/search.py:14\n   Problem: The search query puts q from the request straight into the SQL text.\n   Why it matters: Anyone who can call search can read or change every row.\n   Fix: Pass q as a bound parameter to cur.execute.\n   Source: semgrep:python.lang.security.audit.formatted-sql-query\n\nDropped scanner candidates (2)\nc2 at app/settings.py:3: The key is a documented local sample. (see app/settings.py:3)\n   Source: gitleaks:generic-api-key\nc3 at app/settings.py:1: The import is used by the next change. (see app/settings.py:1)\n   Source: ruff:F401\n\nCoverage\n   Files the reviewer opened: app/search.py\n   Files not opened (their changed lines were in the brief): app/settings.py\n   Changed ranges given to the reviewer: 2 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included (brakeman: needs Ruby 2.7 or newer)\nReviewer: claude 2.1.289, 72 s, 10 turns, 1 correction round, 45,000 tokens in, 3,000 out, $0.31\nMade by Qodex: review on every pull request at https://qodex.ai\n",
-  mdIncomplete: "# Review incomplete: this is not a review of the change\n\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\n\nSummary: Builds the search query from request input and adds a settings module.\n\n## Missing\n\n### the reviewer timed out and was stopped\n\n### the snapshot changed while the reviewer read it\n\n### 1 scanner candidate has no disposition\n\n### the reviewer's answer still failed 1 check after the correction rounds\n\n### 1. a problem\n\n### 2 changed ranges were not given to the reviewer: app/search.py:14-15, app/settings.py:1-3\n\n## Findings so far \\(the change was not fully reviewed\\) \\(1\\)\n\n### 1. Critical security: Query built from request input\n\n- **Where:** app/search.py:14\n- **Problem:** The search query puts q from the request straight into the SQL text.\n- **Why it matters:** Anyone who can call search can read or change every row.\n- **Fix:** Pass q as a bound parameter to cur.execute.\n- **Source:** semgrep:python.lang.security.audit.formatted-sql-query\n\n## Dropped scanner candidates \\(2\\)\n\n### c2 at app/settings.py:3: The key is a documented local sample. \\(see app/settings.py:3\\)\n\n- **Source:** gitleaks:generic-api-key\n\n### c3 at app/settings.py:1: The import is used by the next change. \\(see app/settings.py:1\\)\n\n- **Source:** ruff:F401\n\n## Coverage\n\n- **Files the reviewer opened:** not recorded by Codex\n- **Reads outside the snapshot:** not recorded by Codex\n- **Changed ranges given to the reviewer:** 0 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included \\(brakeman: needs Ruby 2.7 or newer\\)\n\nReviewer: codex 0.160.0, 72 s, 2 turns, 1 correction round, 2,000 tokens in, 1,000 out\n\nMade by Qodex: review on every pull request at https://qodex.ai\n",
-  receipt: "Blocked: 1 finding at or above major (1 critical); 1 of 4 scanners did not run\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\nSummary: Builds the search query from request input and adds a settings module.\n1. Critical security: Query built from request input (app/search.py:14)\nReport: /r/report.html\nMarkdown: /r/report.md\n",
+  mdIncomplete: "# Review incomplete: this is not a review of the change\n\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\n\nSummary: Builds the search query from request input and adds a settings module.\n\n## Missing\n\n### the reviewer timed out and was stopped\n\n### the snapshot changed while the reviewer read it\n\n### 1 scanner candidate has no disposition\n\n### the reviewer's answer still failed 1 check after the correction rounds\n\n### 1. a problem\n\n### 2 changed ranges were not examined\n\n### app/search.py:14-15\n\n### app/settings.py:1-3\n\n## Findings so far \\(the change was not fully reviewed\\) \\(1\\)\n\n### 1. Critical security: Query built from request input\n\n- **Where:** app/search.py:14\n- **Problem:** The search query puts q from the request straight into the SQL text.\n- **Why it matters:** Anyone who can call search can read or change every row.\n- **Fix:** Pass q as a bound parameter to cur.execute.\n- **Source:** semgrep:python.lang.security.audit.formatted-sql-query\n\n## Dropped scanner candidates \\(2\\)\n\n### c2 at app/settings.py:3: The key is a documented local sample. \\(see app/settings.py:3\\)\n\n- **Source:** gitleaks:generic-api-key\n\n### c3 at app/settings.py:1: The import is used by the next change. \\(see app/settings.py:1\\)\n\n- **Source:** ruff:F401\n\n## Coverage\n\n- **Files the reviewer opened:** not recorded by Codex\n- **Reads outside the snapshot:** not recorded by Codex\n- **Changed ranges given to the reviewer:** 0 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included \\(brakeman: needs Ruby 2.7 or newer\\)\n\nReviewer: codex 0.160.0, 72 s, 2 turns, 1 correction round, 2,000 tokens in, 1,000 out\n\nMade by Qodex: review on every pull request at https://qodex.ai\n",
+  receipt: "Blocked: 1 finding at or above major (1 critical); 1 of 4 scanners did not run\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\nSummary: Builds the search query from request input and adds a settings module.\n1. Critical security: Query built from request input (app/search.py:14)\nChanged ranges: 2 examined, 0 not examined; coverage labels not recorded\nReport: /r/report.html\nMarkdown: /r/report.md\n",
   sarif: "437a5b05d3a6d134cb617113c6ff5eb8934bc6c3e1d2559ecabc93cb3e6284e3",
-  sarifIncomplete: "af49b4b3be1ff4bdcd3bc0669474de26dc58588aeaba0994599c68424ac1744c",
+  sarifIncomplete: "9d7b14b501dd0a2446dcf9dcd964b8a861e701df3f8d0b235b0c2c4fb9c0fb3a",
   // Dependency-tree accounting keeps the original candidate wording and HTML hashes.
   html: "b8bf53915323299ed4307b07042356498d5940905f874bd9a332a88c5cb84efb",
-  htmlIncomplete: "707bbba16177709f0199be7d615636456cc3e3fed95171138a6849b265a52feb",
+  htmlIncomplete: "10f3d450a946aac5abc0ed4a52303c5c90b5fa5a9e4f4bca085d940657671cd1",
 };
 
 const reviewer: ReviewerRecord = {
@@ -259,7 +264,7 @@ describe("the model record", () => {
     const r = modelCompletionRecord(modelArgs({ toolLog: [read("app/search.py", [1, 40]), read("app/settings.py", [1, 3], { delivered: false })] }));
     expect(r.status).toBe("incomplete");
     expect(r.coverage.unread).toEqual([{ path: "app/settings.py", start: 1, end: 3, deletion: false }]);
-    expect(r.missing).toContain("1 changed range was not sent to the reviewer: app/settings.py:1-3");
+    expect(r.missing).toEqual(["1 changed range was not examined", "app/settings.py:1-3"]);
     expect(r.tool_log[1]).toMatchObject({ served: true, delivered: false });
   });
 
@@ -419,4 +424,61 @@ it("records each source's exact interval before fallback reads", () => {
     { path: "app/search.py", start: 5, end: 6, by: "page" },
     { path: "app/search.py", start: 7, end: 10, by: "read" },
   ]);
+});
+
+it.each([true, false, "model"] as const)("7k. eleven unread ranges lose separate missing entries, trace %s", (traced) => {
+  const change = makeChange();
+  const obligations: Hunk[] = Array.from({ length: 11 }, (_, i) => ({ path: "src/big.ts", start: i * 10 + 1, end: i * 10 + 5, deletion: false }));
+  const coverage = traced === "model" ? modelCoverage({ change, obligations, briefSent: true, toolLog: [] }) : readCoverage({ change, obligations, trace: [] });
+  const record = traced === "model" ? modelCompletionRecord(modelArgs({ coverage, toolLog: [] })) : completionRecord({ change, reviewer, coverage, trace: [], snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, submissionErrors: [], wholeRepo: false, traced });
+  expect(record.status).toBe("incomplete");
+  expect(record.missing).toEqual([
+    "11 changed ranges were not examined",
+    "src/big.ts:1-5", "src/big.ts:11-15", "src/big.ts:21-25", "src/big.ts:31-35",
+    "src/big.ts:41-45", "src/big.ts:51-55", "src/big.ts:61-65", "src/big.ts:71-75",
+    "src/big.ts:81-85", "src/big.ts:91-95", "src/big.ts:101-105",
+  ]);
+  expect(record.coverage.unread).toEqual(obligations);
+});
+
+it.each([false, true])("7k. unread parts and deletion fragments lose their identity, model %s", (model) => {
+  const change = makeChange();
+  const obligations: Hunk[] = [
+    { path: "src/big.ts", start: 11, end: 20, deletion: false, part: { n: 2, of: 3, whole: "h1" } },
+    { path: "src/old.ts", start: 1, end: 2, deletion: { id: "src/old.ts#0", oldStart: 21, oldEnd: 30 }, part: { n: 3, of: 3, whole: "h2" } },
+  ];
+  const coverage = readCoverage({ change, obligations, trace: [] });
+  const record = model ? modelCompletionRecord(modelArgs({ coverage })) : completionRecord({ change, reviewer, coverage, trace: [], snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, submissionErrors: [], wholeRepo: false });
+  expect(record.missing).toEqual([
+    "2 changed ranges were not examined",
+    "src/big.ts:11-20 (part 2 of 3)",
+    "src/old.ts:1-2 (deletion src/old.ts#0, old lines 21-30) (part 3 of 3)",
+  ]);
+});
+
+it("14. overlapping brief, digest, page and read coverage lists each interval once in tool order", () => {
+  const change = makeChange();
+  const hunk = { path: "src/big.ts", start: 1, end: 10, deletion: false };
+  const coverage = readCoverage({ change, obligations: [hunk], briefCarried: [{ ...hunk, end: 3 }], digestCarried: [{ ...hunk, end: 5 }], delivered: [{ ...hunk, end: 7 }], trace: [{ tool: "Read", path: hunk.path, range: [1, 10], ok: true, inside: true }] });
+  expect(coverage.given).toEqual([
+    { path: "src/big.ts", start: 1, end: 3, by: "brief" },
+    { path: "src/big.ts", start: 4, end: 5, by: "digest" },
+    { path: "src/big.ts", start: 6, end: 7, by: "page" },
+    { path: "src/big.ts", start: 8, end: 10, by: "read" },
+  ]);
+});
+
+it("C3 fix 2. unread plain deletion anchors name the deletion in missing and per-file lines", () => {
+  for (const status of ["modified", "deleted"] as const) {
+    const change = makeChange({ files: [{ path: "a.py", status, oldPath: null, binary: false }], coverage: new Map(), deletionPoints: new Map([["a.py", [{ after: 4, anchors: status === "deleted" ? [1] : [4, 5], lines: 3 }]]]) });
+    const coverage = readCoverage({ change, trace: [] });
+    const label = status === "deleted" ? "a.py:1 (deletion a.py#0)" : "a.py:4-5 (deletion a.py#0)";
+    for (const record of [completionRecord({ change, reviewer, coverage, trace: [], snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, submissionErrors: [], wholeRepo: false }), modelCompletionRecord(modelArgs({ coverage }))]) {
+      expect(record.missing).toEqual(["1 changed range was not examined", label]);
+      const r = { ...checkedReport(), completion: record };
+      const fileLabel = status === "deleted" ? "a.py: 1 (deletion a.py#0)" : "a.py: 4-5 (deletion a.py#0)";
+      expect(renderReview(r, { format: "terminal" })).toContain(fileLabel + " not examined");
+      expect(renderHtml({ report: r, display: null })).toContain(fileLabel + " not examined");
+    }
+  }
 });

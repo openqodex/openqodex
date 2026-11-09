@@ -187,7 +187,7 @@ describe("a model reviewer through reviewChange", () => {
     expect(refused.model.requests).toHaveLength(1);
     expect(refused.result.status).toBe("incomplete");
     expect(refused.result.coverage?.unread).toEqual([{ path: "b/second.txt", start: 1, end: 1000, deletion: false }]);
-    expect(refused.result.completion?.missing).toEqual(["budget refused before correction call 2", "1 changed range was not sent to the reviewer: b/second.txt:1-1000"]);
+    expect(refused.result.completion?.missing).toEqual(["budget refused before correction call 2", "1 changed range was not examined", "b/second.txt:1-1000"]);
   });
 
   it("2. records one usage entry per attempt, each with its purpose, and totals that add them up", async () => {
@@ -228,7 +228,7 @@ describe("a model reviewer through reviewChange", () => {
     // is not covered: coverage names the whole range, as it does for an agent.
     expect(reads[1]!.range).toEqual([reads[0]!.range![1] + 1, 1000]);
     expect(r.result.coverage?.unread).toEqual([{ path: "b/second.txt", start: 1, end: 1000, deletion: false }]);
-    expect(r.result.completion?.missing).toContain("1 changed range was not sent to the reviewer: b/second.txt:1-1000");
+    expect(r.result.completion?.missing).toEqual(["budget refused before brief call 3", "1 changed range was not examined", "b/second.txt:1-1000"]);
     expect(r.result.status).toBe("incomplete");
     expect(r.result.reason).toContain("budget refused before brief call 3");
   });

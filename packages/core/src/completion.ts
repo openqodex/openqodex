@@ -95,7 +95,7 @@ export function readCoverage(args: CoverageArgs): Coverage {
     reads.set(t.path, [...(reads.get(t.path) ?? []), t.range]);
   }
   const whole = (args.change.uncovered ?? []).map((path) => ({ path, start: 1, end: args.lineCount?.(path) ?? 0, deletion: false }));
-  const hunks = args.obligations ?? [...changedHunks(args.change), ...whole];
+  const hunks: Hunk[] = args.obligations ?? [...changedHunks(args.change), ...whole];
   const sources = [
     { by: "brief" as const, entries: args.briefCarried ?? [] },
     { by: "digest" as const, entries: args.digestCarried ?? [] },
@@ -104,7 +104,8 @@ export function readCoverage(args: CoverageArgs): Coverage {
   const given: NonNullable<Coverage["given"]> = [];
   const unread: Hunk[] = [];
   const deletionId = (h: Hunk) => typeof h.deletion === "object" ? h.deletion.id : `${h.path}#${h.point ?? (args.change.deletionPoints.get(h.path) ?? []).findIndex((p) => Math.min(...p.anchors) === h.start && Math.max(...p.anchors) === h.end)}`;
-  for (const h of hunks) {
+  const inventory: NonNullable<Coverage["inventory"]> = hunks.map((h) => ({ path: h.path, start: h.start, end: h.end, ...(h.deletion ? { deletion: deletionId(h) } : {}) }));
+  for (const [index, h] of hunks.entries()) {
     if (h.end < h.start && !h.deletion) { unread.push(h); continue; }
     const matching = sources.map((source) => ({ ...source, entries: source.entries.filter((d) => d.path === h.path && Boolean(d.deletion) === Boolean(h.deletion) && (!h.deletion || deletionId(d) === deletionId(h))) }));
     const range = (d: Hunk): [number, number] => typeof d.deletion === "object" ? [d.deletion.oldStart, d.deletion.oldEnd] : [d.start, d.end];
@@ -112,6 +113,7 @@ export function readCoverage(args: CoverageArgs): Coverage {
     const own = matching.flatMap((s) => s.entries.map(range));
     const read = h.deletion ? [] : reads.get(h.path) ?? [];
     if ((h.deletion && end < start ? !matching.some((s) => s.entries.length) : !covers([...own, ...read], start, end))) { unread.push(h); continue; }
+    const firstCredit = given.length;
     // Own deliveries win over reads. Subtract earlier credit so overlapping
     // finder pairs and repeated reads never list a line twice.
     let left: [number, number][] = [[start, end]];
@@ -128,7 +130,7 @@ export function readCoverage(args: CoverageArgs): Coverage {
           if (b < from || a > to) { next.push([from, to]); continue; }
           const first = Math.max(a, from);
           const last = Math.min(b, to);
-          given.push({ path: h.path, start: h.deletion ? h.start : first, end: h.deletion ? h.end : last, ...(h.deletion ? { deletion: deletionId(h), ...(typeof h.deletion === "object" ? { fragment: { of: deletionId(h), from: first, to: last } } : {}) } : {}), by });
+          given.push({ path: h.path, start: h.deletion ? h.start : first, end: h.deletion ? h.end : last, ...(h.deletion ? { deletion: deletionId(h), ...(typeof h.deletion === "object" ? { fragment: { of: deletionId(h), from: first, to: last } } : {}) } : {}), ...(h.part && h.part.of > 1 ? { part: h.part } : {}), by });
           if (from < first) next.push([from, first - 1]);
           if (last < to) next.push([last + 1, to]);
         }
@@ -136,11 +138,12 @@ export function readCoverage(args: CoverageArgs): Coverage {
       }
     };
     if (h.deletion && end < start) {
-      given.push({ path: h.path, start: h.start, end: h.end, deletion: deletionId(h), by: matching.find((s) => s.entries.length > 0)!.by });
+      given.push({ path: h.path, start: h.start, end: h.end, deletion: deletionId(h), ...(h.part && h.part.of > 1 ? { part: h.part } : {}), by: matching.find((s) => s.entries.length > 0)!.by });
     } else {
       for (const source of matching) credit(source.by, source.entries.map(range));
       credit("read", read);
     }
+    inventory[index]!.by = given[firstCredit]!.by;
 
   }
   const readable = args.change.files.filter((f) => f.status !== "deleted" && !f.binary).map((f) => f.path);
@@ -149,6 +152,8 @@ export function readCoverage(args: CoverageArgs): Coverage {
     covered: hunks.length - unread.length,
     unread,
     given,
+    inventory,
+    files: args.change.files,
     files_read: [...reads.keys()].sort(),
     files_not_read: readable.filter((p) => !reads.has(p)).sort(),
   };
@@ -162,17 +167,62 @@ function singlePassRanges(args: { change: Change; diffFiles: ReadonlySet<string>
 
 export function singlePassCoverage(args: CoverageArgs & { diffFiles: ReadonlySet<string> }): Coverage {
   const { diffFiles: _, ...rest } = args;
-  const { given: __, ...coverage } = readCoverage({ ...rest, briefCarried: singlePassRanges(args) });
+  const { given: __, inventory: ___, files: ____, ...coverage } = readCoverage({ ...rest, briefCarried: singlePassRanges(args) });
   return coverage;
 }
 
 export function singlePassModelCoverage(args: Omit<CoverageArgs, "trace"> & { diffFiles: ReadonlySet<string>; briefSent: boolean; toolLog: ModelToolEntry[] }): Coverage {
   const { diffFiles: _, ...rest } = args;
-  const { given: __, ...coverage } = modelCoverage({ ...rest, briefCarried: singlePassRanges(args) });
+  const { given: __, inventory: ___, files: ____, ...coverage } = modelCoverage({ ...rest, briefCarried: singlePassRanges(args) });
   return coverage;
 }
 
-const where = (h: Hunk) => (h.end > h.start ? `${h.path}:${h.start}-${h.end}` : `${h.path}:${h.start}`);
+const rangeKey = (h: { path: string; start: number; end: number }) => `${h.path}:${h.start}:${h.end}`;
+
+// Build once per report, including the single pass which saves no inventory.
+export function deletionLabels(coverage: Coverage, change?: Pick<Change, "deletionPoints">): Map<string, string> {
+  const ids = new Map<string, string>();
+  for (const r of coverage.inventory ?? []) if (r.deletion) ids.set(rangeKey(r), r.deletion);
+  for (const [path, points] of change?.deletionPoints ?? []) {
+    points.forEach((p, point) => ids.set(rangeKey({ path, start: Math.min(...p.anchors), end: Math.max(...p.anchors) }), `${path}#${point}`));
+  }
+  return ids;
+}
+
+export function deletionLabel(h: Hunk, ids: ReadonlyMap<string, string>): string {
+  if (typeof h.deletion === "object") return ` (deletion ${h.deletion.id}, old lines ${h.deletion.oldStart}-${h.deletion.oldEnd})`;
+  if (h.deletion !== true) return "";
+  const id = ids.get(rangeKey(h)) ?? (h.point === undefined ? undefined : `${h.path}#${h.point}`);
+  return ` (deletion${id ? ` ${id}` : ""})`;
+}
+
+function where(h: Hunk, ids: ReadonlyMap<string, string>): string {
+  const deletion = deletionLabel(h, ids);
+  const part = h.part ? ` (part ${h.part.n} of ${h.part.of})` : "";
+  return `${h.path}:${h.start}${h.end > h.start ? `-${h.end}` : ""}${deletion}${part}`;
+}
+
+function unreadEntries(coverage: Coverage, change?: Pick<Change, "deletionPoints">): string[] {
+  const n = coverage.unread.length;
+  const ids = deletionLabels(coverage, change);
+  return n === 0 ? [] : [`${n} changed ${n === 1 ? "range was" : "ranges were"} not examined`, ...coverage.unread.map((h) => where(h, ids))];
+}
+
+// Only the unread block is shortened. Other failures keep their own entries.
+export function shortenedMissing(missing: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < missing.length; i++) {
+    const line = missing[i]!;
+    out.push(line);
+    const heading = /^(\d+) changed (?:range was|ranges were) not examined$/.exec(line);
+    if (!heading) continue;
+    const n = Number(heading[1]);
+    out.push(...missing.slice(i + 1, i + 1 + Math.min(n, MAX_LISTED)));
+    if (n > MAX_LISTED) out.push(`and ${n - MAX_LISTED} more; the report names each one`);
+    i += n;
+  }
+  return out;
+}
 
 function listed(items: string[]): string {
   const more = items.length - MAX_LISTED;
@@ -225,8 +275,7 @@ export function completionRecord(args: {
     missing.push(`the reviewer's answer still failed ${n} ${n === 1 ? "check" : "checks"} after the correction rounds`, ...args.submissionErrors.slice(0, MAX_LISTED));
   }
   if (!args.wholeRepo && args.coverage.unread.length > 0) {
-    const n = args.coverage.unread.length;
-    missing.push(`${n} changed ${n === 1 ? "range was" : "ranges were"} ${traced ? "not read" : "not given to the reviewer"}: ${listed(args.coverage.unread.map(where))}`);
+    missing.push(...unreadEntries(args.coverage, args.change));
   }
   return {
     version: 1,
@@ -296,6 +345,9 @@ export function modelCompletionRecord(args: {
   second?: ModelCompletionRecord;
   sessions?: ReviewerSessionRecord[];
   missing?: string[];
+  // The change's deletion points, so an unread deletion is named by its id
+  // the way the agent record names it.
+  deletionPoints?: Change["deletionPoints"];
 }): ModelCompletionRecord {
   const missing: string[] = [...(args.missing ?? [])];
   const add = (line: string) => {
@@ -329,8 +381,7 @@ export function modelCompletionRecord(args: {
     missing.push(`the reviewer's answer still failed ${n} ${n === 1 ? "check" : "checks"} after the correction rounds`, ...args.submissionErrors.slice(0, MAX_LISTED));
   }
   if (args.coverage.unread.length > 0) {
-    const n = args.coverage.unread.length;
-    missing.push(`${n} changed ${n === 1 ? "range was" : "ranges were"} not sent to the reviewer: ${listed(args.coverage.unread.map(where))}`);
+    missing.push(...unreadEntries(args.coverage, args.deletionPoints ? { deletionPoints: args.deletionPoints } : undefined));
   }
   // Only the names the responses gave: a model the provider did not name is not listed.
   const servedModels = [...new Set(args.attempts.map((a) => a.usage?.servedModel).filter((m): m is string => typeof m === "string" && m !== ""))];

@@ -93,7 +93,7 @@ describe("observations in reports", () => {
     expect(sha(renderSarif(sample))).toBe("799e8690949407f48546da588ccd4975ea73ef9d1e5c6e67f380584778147bd9");
   });
   it("keeps the existing receipt bytes without observations", () => {
-    expect(sha(renderReceipt(sample, paths))).toBe("b88433c2e378e4146291d79b5d9d93e99e31cd97604c3fad9370a347c0f99f42");
+    expect(sha(renderReceipt(sample, paths))).toBe("f116291f779928ac28c627802583eb67dd56efbfa1362835e233b525d1f2cc1e");
   });
 
   it.each(["markdown", "reviewMarkdown"])("keeps all observation fields in %s after findings and before coverage", (name) => {

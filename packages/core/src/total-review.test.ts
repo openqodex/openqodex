@@ -263,7 +263,7 @@ describe("the completion record", () => {
   it("9. is incomplete when a candidate has no disposition or a changed range was not read", () => {
     expect(completionRecord({ ...base, candidates: { total: 3, disposed: 2 } }).status).toBe("incomplete");
     const unread = singlePassCoverage({ change, diffFiles: new Set(), trace: [] });
-    expect(completionRecord({ ...base, coverage: unread }).missing.join("\n")).toMatch(/not read/);
+    expect(completionRecord({ ...base, coverage: unread }).missing).toEqual(["2 changed ranges were not examined", "app/search.py:14-15", "app/settings.py:1-3"]);
   });
 });
 
