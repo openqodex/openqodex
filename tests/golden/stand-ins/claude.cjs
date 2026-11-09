@@ -56,6 +56,28 @@ function remember(prompt) {
       if (next && /^[ +]/.test(row)) { put(m[1], next++, row.slice(1)); }
     }
   }
+  for (const m of prompt.matchAll(/^### d\d+ (.+?) \(structural summary: json\)\n([\s\S]*?)(?=^### |^## |$(?![\s\S]))/gm)) {
+    for (const plant of plants.filter((p) => p.file_path === m[1])) {
+      for (const row of m[2].split("\n")) {
+        const odd = /^odd record \$.*?@(\d+)-(\d+): (.+)$/.exec(row);
+        if (odd && Number(odd[1]) === plant.line_number) {
+          const rows = readFileSync(join(snapshot, plant.file_path), "utf8").split("\n");
+          // The odd-record entry must contain the actual record. Its opening
+          // line is not a scalar, so a scalar listing cannot trigger this plant.
+          const record = rows.slice(Number(odd[1]) - 1, Number(odd[2])).join("\n").replace(/,\s*$/, "");
+          try {
+            if (JSON.stringify(JSON.parse(odd[3])) === JSON.stringify(JSON.parse(record))) put(plant.file_path, plant.line_number, rows[plant.line_number - 1]);
+          } catch { /* A shortened odd record cannot trigger a full-record plant. */ }
+        }
+        const scalar = /^\$.*?@(\d+) = (.+)$/.exec(row);
+        if (!scalar || Number(scalar[1]) !== plant.line_number) continue;
+        // A plant fires only after its value appears in received digest text.
+        // Disk supplies the literal evidence, never the decision to find it.
+        const quote = readFileSync(join(snapshot, plant.file_path), "utf8").split("\n")[plant.line_number - 1];
+        if (quote?.includes(scalar[2])) put(plant.file_path, plant.line_number, quote);
+      }
+    }
+  }
   let path = null;
   for (const row of prompt.split("\n")) {
     const header = /^(.+) lines \d+ to \d+ \(with context \d+ to \d+\):$/.exec(row);
@@ -76,6 +98,7 @@ function answerForPrompt(prompt) {
   const change_id = /`change_id`:\s*`([0-9a-f]+)`/.exec(brief)?.[1] ?? /["`]?change_id["`]?\s*[:=]\s*["`]?([0-9a-f]{12,64})/.exec(brief)?.[1] ?? frozen.change_id;
   if (kind === "single") return JSON.stringify({ ...frozen, change_id });
   const hunks = [...brief.matchAll(/^###\s+(h\d+)\s+(.+?)\s+(\d+)-(\d+)/gm)].map((m) => ({ id: m[1], file: m[2], start: Number(m[3]), end: Number(m[4]) }));
+  const digests = [...brief.matchAll(/^###\s+(d\d+)\s+(.+?) \(structural summary: (json|store)\)/gm)].map((m) => ({ id: m[1], file: m[2] }));
   if (kind === "find") {
     const unit = /\b(u\d+)\b/.exec(first)?.[1] ?? /(?:unit|review unit)[`"\s:*]+(u\d+)/i.exec(brief)?.[1];
     if (!unit) throw new Error("find brief has no unit id");
@@ -89,9 +112,10 @@ function answerForPrompt(prompt) {
       if (plants.includes(f) && !hasPlant(received, f)) continue;
       const hunk = hunks.find((h) => h.file === f.file_path && f.line_number >= h.start && f.line_number <= h.end)
         ?? hunks.find((h) => h.file === f.file_path && Math.min(Math.abs(h.start - f.line_number), Math.abs(h.end - f.line_number)) <= 2);
-      if (!hunk) continue;
+      const digest = digests.find((d) => d.file === f.file_path);
+      if (!hunk && !digest) continue;
       // A deleted line can move the planted location beside its anchor.
-      const anchor = Math.max(hunk.start, Math.min(hunk.end, f.line_number));
+      const anchor = hunk ? Math.max(hunk.start, Math.min(hunk.end, f.line_number)) : f.line_number;
       const key = `${f.file_path}:${f.line_number}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -99,7 +123,7 @@ function answerForPrompt(prompt) {
       if (!quote?.trim()) continue;
       candidates.push({ severity: f.severity, category: f.category, confidence: 0.8, file_path: f.file_path, line_number: anchor, line_end: Math.max(anchor, f.line_end ?? f.line_number), title: f.title, claim: f.problem, evidence: [{ file_path: f.file_path, line_number: f.line_number, quote }] });
     }
-    return JSON.stringify({ version: "find-1", change_id, unit, examined: hunks.map((h) => h.id), analysis: hunks.map((h) => ({ hunk: h.id, changed: "The planted operation changes here.", could_break: "Unsafe inputs can affect this operation." })), candidates });
+    return JSON.stringify({ version: "find-1", change_id, unit, examined: [...hunks, ...digests].map((h) => h.id), analysis: [...hunks, ...digests].map((h) => ({ hunk: h.id, changed: "The planted operation changes here.", could_break: "Unsafe inputs can affect this operation." })), candidates });
   }
   const candidates = new Map();
   for (const m of brief.matchAll(/^### ([ck]\d+) \((finder|scanner)\)\n([\s\S]*?)(?=^### |^## )/gm)) {

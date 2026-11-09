@@ -1,4 +1,5 @@
 // 7n. An over-cap change loses removed rows from its last file.
+// 6. A code deletion beside store digests loses its brief credit.
 // 5. Thousands of unsplit hunks abandon a verifiable candidate.
 // 1. Part sessions receive other parts; verifier briefs grow to a whole file.
 // 2. Wide neighbouring parts overflow a single-candidate verifier brief.
@@ -16,7 +17,7 @@
 // a line tie splits duplicate candidates, and refutation prose waits for assembly.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
 import { buildFindBrief, buildVerifyBrief, completionRecord, getChange, readCoverage } from "@openqodex/core";
@@ -69,6 +70,43 @@ function setup(answerer?: Answerer, files?: string[]) {
 function completion(r: Awaited<ReturnType<typeof runStagedReview>>, f: ReturnType<typeof setup>) {
   return completionRecord({ change: f.change, reviewer: { driver: "model", version: "fixture", pid: null, started_at: "now", ended_at: "now", duration_ms: 0, rounds: r.sessions.reduce((n, s) => n + s.rounds, 0), usage: r.sessions[0]!.usage, sessions: r.sessions }, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: r.required, disposed: r.disposed }, coverage: readCoverage({ change: f.change, trace: [], obligations: r.obligations, briefCarried: r.briefCarried, delivered: r.delivered }), trace: [], submissionErrors: [], wholeRepo: false, missing: r.missing });
 }
+it("credits a code deletion's brief beside an oversized store root", async () => {
+  const store = ".pnpm-store/v11/files/fixture";
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") {
+      const ids = brief.unit!.digest ? ["d1"] : brief.unit!.hunks.map((h) => h.id);
+      answer.examined = ids;
+      answer.analysis = ids.map((hunk) => ({ hunk, changed: "The operation changed.", could_break: "Inputs can be unsafe." }));
+      answer.candidates = [];
+    }
+    return answer;
+  }, ["Dockerfile"]);
+  const code = "FROM python:latest\n\nRUN apt-get update && apt-get install curl\n\nWORKDIR /app\nADD requirements.txt .\nRUN pip install -r requirements.txt\nCOPY app ./app\n\nEXPOSE 5000\nCMD python\n";
+  writeFileSync(join(f.dir, "Dockerfile"), code);
+  mkdirSync(join(f.dir, ".pnpm-store/v11/files"), { recursive: true });
+  writeFileSync(join(f.dir, store), "module.exports = 1;\n".repeat(5000));
+  f.change.files.push({ path: store, status: "added", oldPath: null, binary: false });
+  f.change.changedPaths.push(store);
+  f.change.coverage = new Map([["Dockerfile", makeLineSet([1, 3, 5, 6, 7])], [store, makeLineSet(Array.from({ length: 5000 }, (_, i) => i + 1))]]);
+  f.change.deletionPoints.set("Dockerfile", [{ after: 9, lines: 1, anchors: [9, 10] }]);
+  // The retained patch is the control for the diff-cap fix on C4.2.
+  f.change.diffs = [{ path: "Dockerfile", text: "@@ -9,3 +9,2 @@\n \n-USER app\n EXPOSE 5000\n" }];
+  f.args.findBrief = (unit, pass) => {
+    const brief = buildFindBrief({ ...f, lenses: [], secrets: [] }, unit, pass);
+    f.realBriefs.set(brief.text, { unit, pass });
+    return brief;
+  };
+  let units: ReviewUnit[] = [];
+  f.args.onUnits = (value) => { units = value; };
+  const r = await runStagedReview(f.args);
+  expect(units.some((u) => u.digest?.kind === "store")).toBe(true);
+  expect(units.some((u) => !u.digest && u.files.includes("Dockerfile"))).toBe(true);
+  expect(r.sessions.filter((s) => s.role.startsWith("finder:"))).toHaveLength(units.length * 2);
+  const coverage = readCoverage({ change: f.change, obligations: r.obligations, briefCarried: r.briefCarried, digestCarried: r.digestCarried, delivered: r.delivered, trace: [] });
+  expect(coverage.given).toContainEqual(expect.objectContaining({ path: "Dockerfile", start: 9, end: 10, by: "brief" }));
+  expect(coverage.unread).toEqual([]);
+  expect(r.missing).toEqual([]);
+});
 it("sends an invented quote back and never verifies the rejected candidate", async () => {
   const f = setup((answer, request) => {
     if (answer.version === "find-1" && answer.candidates.length) {
@@ -1036,4 +1074,28 @@ it("7n. delivers the removed rows in the last file of a 6 MB change", async () =
   expect(result.delivered).toContainEqual(expect.objectContaining({ path: "zz-last.txt", deletion: expect.any(Object) }));
   expect(f.requests.some((r) => r.messages.some((m) => m.text.includes("-\tremoved tail")))).toBe(true);
   expect(result.missing).toEqual([]);
+});
+
+// 7j. A stored or unsent digest must never credit a changed range.
+it.each([false, true])("credits digest ranges only after a brief was sent, refused: %s", async (refused) => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") {
+      answer.examined = ["d1"];
+      answer.analysis = [{ hunk: "d1", changed: "Records changed.", could_break: "Values can be invalid." }];
+      answer.candidates = [];
+      expect(brief.unit!.digest?.kind).toBe("json");
+    }
+    return answer;
+  }, ["a.txt"]);
+  const hunks = hunkRefs(f.change);
+  f.args.inventory = hunks;
+  f.args.units = [{ id: "u1", files: ["a.txt"], hunks, diffBytes: 0, digest: { id: "d1", kind: "json", text: "array length 300", processed: hunks.map((h) => h.id), omitted: [] } }];
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: [] });
+  if (refused) f.refuse();
+  const r = await runStagedReview(f.args);
+  const coverage = readCoverage({ change: f.change, obligations: hunks, trace: [], digestCarried: r.digestCarried, briefCarried: r.briefCarried, delivered: r.delivered });
+  expect(coverage.given).toEqual(refused ? [] : [expect.objectContaining({ path: "a.txt", by: "digest" })]);
+  expect(coverage.unread).toHaveLength(refused ? 1 : 0);
+  expect(r.rounds.flatMap((round) => round.delivered)).toEqual([]);
+  if (!refused) expect(r.missing).toEqual([]);
 });

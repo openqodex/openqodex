@@ -1,11 +1,11 @@
-import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, matchesGlob, redactByFingerprint, VERIFY_BATCH_SIZE, verifyPartDistance, hunksBlock, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank, stagedDiffCache } from "@openqodex/core";
+import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, matchesGlob, redactByFingerprint, redactSecrets, VERIFY_BATCH_SIZE, verifyPartDistance, hunksBlock, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank, stagedDiffCache } from "@openqodex/core";
 import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, HunkRef, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
 import { MAX_CORRECTIONS, converse, deliverRanges } from "./conversation.js";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Conversation, CorrectionRound, Speaker } from "./conversation.js";
 import { checkFindAnswer, checkVerifyAnswer } from "./evidence-check.js";
 import { snapshotText, lineCounter } from "./snapshot.js";
-import { MAX_BRIEF_BYTES, obligations, unitsOf } from "./units.js";
+import { MAX_BRIEF_BYTES, obligations, unitsOf, citedDigest } from "./units.js";
 import { modelToolEntry } from "./model-loop.js";
 import { usageTotals } from "./usage.js";
 import type { CallRecord, ReviewerRole, ToolLogEntry } from "./usage.js";
@@ -90,6 +90,10 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const lineCount = lineCounter(args.snapshotDir);
   const hunks = args.inventory ?? obligations(change, read, stagedDiffCache(change, args.secrets));
   const units = args.units ?? unitsOf(change, hunks, (unit) => args.findBrief(unit, "local").text);
+  for (const unit of units) if (unit.digest) {
+    unit.digest.text = redactSecrets(unit.digest.text, args.secrets);
+    unit.digest.omitted = unit.digest.omitted.map((o) => ({ ...o, why: redactSecrets(o.why, args.secrets) }));
+  }
   args.onUnits?.(units);
   const startedAt = args.now();
   const findDeadline = startedAt + (args.deadline - startedAt) / 2;
@@ -162,6 +166,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   // carried their lines and no earlier round delivered them. The same rule as
   // the single pass: coverage never rests on the finder's own `examined` list.
   const undelivered = (unit: ReviewUnit, briefCarried: HunkRef[], trace: TraceEntry[], delivered: Hunk[]): Hunk[] => {
+    if (unit.digest) return [];
     const coverage = args.model
       ? modelCoverage({ change, obligations: unit.hunks, briefSent: true, briefCarried, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount })
       : readCoverage({ change, obligations: unit.hunks, briefCarried, trace: args.traced ? trace : [], lineCount, delivered });
@@ -188,15 +193,16 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
             break;
           }
           run = start(attempt === 0 ? passRole : `${passRole}:retry1`, index * 10 + attempt, `Finder for unit ${unit.id} (${pass === "local" ? "correctness and safety" : "interfaces and conventions"})`, brief.text, unit.id);
-          run.briefCarried = brief.carried;
+          run.briefCarried = unit.digest ? [] : brief.carried;
+          run.digestCarried = unit.digest ? unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)) : [];
           began = true;
           let checked: ReturnType<typeof checkFindAnswer> | null = null;
-          run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, earlier: brief.carried, deadline: findDeadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role),
+          run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, earlier: [...run.briefCarried, ...run.digestCarried], deadline: findDeadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role),
             check: (value, trace, delivered) => {
               const result = checkFindAnswer(value, unit, citationChange, read, args.manifest.lenses.map((lens) => lens.name));
               checked = result;
               run!.examined = result.answer.examined;
-              const unread: Hunk[] = result.parsed && pass === "local" ? unit.hunks.filter((h) => !result.answer.examined.includes(h.id)) : [];
+              const unread: Hunk[] = result.parsed && pass === "local" && !unit.digest ? unit.hunks.filter((h) => !result.answer.examined.includes(h.id)) : [];
               if (result.parsed && pass === "local") for (const h of undelivered(unit, brief.carried, trace, delivered)) if (!unread.some((u) => u.path === h.path && u.start === h.start && u.end === h.end && JSON.stringify(u.deletion) === JSON.stringify(h.deletion))) unread.push(h);
               return { report: null, errors: result.errors, unread, required: 0, disposed: 0 };
             },
@@ -253,7 +259,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     const batches: VerifyBatch[] = [];
     for (const [file, list] of files) {
       const fileHunks = hunks.filter((h) => h.path === file);
-      const sizes = new Map(fileHunks.map((h) => [h.id, Buffer.byteLength(hunksBlock(change, [h], args.secrets).text, "utf8") + 2]));
+      const digestUnit = units.find((u) => u.digest && u.files.includes(file));
+      const sizes = new Map(fileHunks.map((h) => [h.id, digestUnit ? 0 : Buffer.byteLength(hunksBlock(change, [h], args.secrets).text, "utf8") + 2]));
       list.sort((a, b) => candidateLine(a) - candidateLine(b) || Number(a.kind === "finder") - Number(b.kind === "finder"));
       for (let i = 0; i < list.length;) {
         let end = Math.min(i + VERIFY_BATCH_SIZE, list.length);
@@ -273,7 +280,17 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           const parts = fileHunks.map((h) => ({ h, distance: verifyPartDistance(h, selected) }))
             .sort((a, b) => (a.distance === 0 ? -2 : a.distance) - (b.distance === 0 ? -2 : b.distance));
           // Selection runs nearest first; the brief keeps the file's own order.
-          const batch: VerifyBatch = { file, hunks: fileHunks, candidates: selected, shown: [] };
+          const batch: VerifyBatch = { file, hunks: fileHunks, candidates: selected, shown: [], ...(digestUnit ? {
+            digest: citedDigest(units, file, selected.flatMap((c): [number, number][] => c.kind === "finder"
+              ? [[c.candidate.line_number, c.candidate.line_end ?? c.candidate.line_number], ...c.candidate.evidence.filter((e) => e.file_path === file && !e.removed).map((e): [number, number] => [e.line_number, e.line_number])]
+              : [[c.candidate.lineStart, c.candidate.lineEnd]]), selected.flatMap((c) => c.kind === "finder" ? c.candidate.evidence.map((e) => e.file_path) : [])),
+            citedText: selected.map((c) => {
+              const line = candidateLine(c);
+              const from = Math.max(1, line - 2);
+              const text = read.readLines?.(file, from, line + 2, 16 * 1024) ?? null;
+              return text === null ? `${file}:${line}: read the cited lines with your tools.` : `${file} lines ${from}-${line + 2} from the snapshot:\n${text.split("\n").map((row, i) => `${from + i}\t${row}`).join("\n")}`;
+            }).join("\n\n"),
+          } : {}) };
           let bytes = Buffer.byteLength(args.verifyBrief(batch).text, "utf8");
           const own = parts.filter((p) => p.distance === 0);
           if (bytes + own.reduce((n, p) => n + sizes.get(p.h.id)!, 0) > MAX_BRIEF_BYTES) {
@@ -573,6 +590,10 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       return item.v.tier === "finding" && !duplicateKeys.has(key);
     }) };
     const sent = runs.filter((r) => (r.session.sentRounds ?? r.talk.rounds) > 0);
+    const digested = new Set(sent.filter((r) => r.digestCarried.length).map((r) => r.unit));
+    for (const unit of units) if (unit.digest && digested.has(unit.id)) {
+      (report.notes ??= []).push(`structural summary coverage (${unit.digest.kind}): ${unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)).map((h) => `${h.path}:${h.start}-${h.end}`).join(", ")}`);
+    }
     return { report, submission, sessions, trace, usage: { calls, totals: usageTotals(calls) }, rounds, missing: [...new Set(missing)], required: requiredCandidates(scan, config).length, disposed: requiredCandidates(scan, config).filter((c) => !unverified.has(c.id)).length, obligations: hunks, briefCarried: sent.flatMap((r) => r.briefCarried), digestCarried: sent.flatMap((r) => r.digestCarried), delivered: runs.flatMap((r) => r.talk.carried.slice(0, Math.max(0, (r.session.sentRounds ?? r.talk.rounds) - 1)).flat()) };
   } finally {
     clearInterval(heartbeat);

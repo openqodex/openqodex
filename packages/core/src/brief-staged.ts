@@ -33,14 +33,14 @@ export const FINDER_CONFIDENCE_FLOOR = POSSIBLE_CONFIDENCE_FLOOR;
 // One verifier batch: the candidates of one file, at most VERIFY_BATCH_SIZE.
 // The scheduler measures the full rendered brief and sets `shown` to the ids
 // it can carry. Other parts retain their tool-read headings.
-export type VerifyBatch = { file: string; hunks: HunkRef[]; candidates: VerifyCandidate[]; shown?: string[] };
+export type VerifyBatch = { file: string; hunks: HunkRef[]; candidates: VerifyCandidate[]; shown?: string[]; digest?: ReviewUnit["digest"]; citedText?: string };
 export const VERIFY_BATCH_SIZE = 6;
 
 // The brief of one finder session: the unit's hunks with their ids, the
 // code around its files, the matched lenses, the pass's questions and the
 // find answer shape (FindAnswer).
 export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: FindPass): { text: string; diffFiles: Set<string>; carried: HunkRef[]; bytes: number } {
-  const hunks = hunksBlock(args.change, unit.hunks, args.secrets);
+  const hunks = unit.digest ? { text: digestBlock(unit.digest, unit.hunks, unit.files[0] ?? ""), diffFiles: new Set<string>(), carried: [] } : hunksBlock(args.change, unit.hunks, args.secrets);
   const blocks = [
     header(args.change, args.scan, args.config, args.target, "# OpenQodex review brief: find pass"),
     copyBlock,
@@ -55,6 +55,7 @@ export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: Fi
     lensBlock(args.lenses, false, true),
     passBlock(pass),
     FIND_WORK,
+    unit.digest ? "A structural summary replaces the lines of a file a parser understood. Judge the shape, the values, the counts and the outliers, and open any range with your tools when the summary leaves a question open." : "",
     findAnswerBlock(args.change, unit),
   ];
   const text = render(blocks, args.secrets);
@@ -75,8 +76,8 @@ export function buildVerifyBrief(args: StagedBriefArgs, batch: VerifyBatch): { t
     instructionsBlock(args.instructions ?? "", args.instructionsFrom, "verify"),
     conventionsBlock(args.instructionFiles ?? [], "verify"),
     `## The file\n\n${batch.file}`,
-    hunksBlock(args.change, shown, args.secrets).text,
-    omittedHeadings(omitted),
+    batch.digest ? digestBlock(batch.digest, batch.hunks, batch.file) : hunksBlock(args.change, shown, args.secrets).text,
+    batch.digest ? batch.citedText ?? "Read the cited lines with your tools." : omittedHeadings(omitted),
     args.impactBlock ?? "",
     args.neighbourhoodBlock ?? "",
     verifyCandidatesBlock(batch, args.lenses),
@@ -84,6 +85,19 @@ export function buildVerifyBrief(args: StagedBriefArgs, batch: VerifyBatch): { t
     verifyAnswerBlock(args.change, batch, args.confidenceFloor),
   ];
   return { text: render(blocks, args.secrets) };
+}
+
+function digestBlock(digest: NonNullable<ReviewUnit["digest"]>, hunks: HunkRef[], path: string): string {
+  const processed = new Set(digest.processed);
+  const root = digest.kind === "store" ? /^Store root: (.+)$/m.exec(digest.text)?.[1] ?? path : path;
+  return [
+    `### ${digest.id} ${root} (structural summary: ${digest.kind})`, "",
+    "structural summary coverage: parsed structure and values, grouped by path or content kind; source text is transformed as named below.",
+    digest.text, "", "Processed ranges:",
+    ...hunks.filter((h) => processed.has(h.id)).map((h) => `${h.id} ${h.path}:${h.start}-${h.end}${h.deletion ? ` (removed ${h.old?.join("-") ?? ""})` : ""}`),
+    "", "Omissions:",
+    ...(digest.omitted.length ? digest.omitted.map((o) => `${o.path}:${o.lines[0]}-${o.lines[1]}: ${o.why}`) : ["None."]),
+  ].join("\n");
 }
 
 function omittedHeadings(hunks: HunkRef[]): string {
@@ -247,7 +261,7 @@ function selectedRows(ref: HunkRef, diff: ReturnType<typeof splitDiff>, removed:
 }
 
 type ParsedFile = { overflow?: boolean; diff: ReturnType<typeof splitDiff>; removed: ReturnType<typeof removedRuns>; replacements: ReturnType<typeof replacementRuns> };
-export type StagedDiffCache = { file(path: string, ref?: HunkRef): ParsedFile; info(path: string): ReturnType<typeof diffIndex> };
+export type StagedDiffCache = { readonly secrets: string[]; file(path: string, ref?: HunkRef): ParsedFile; info(path: string): ReturnType<typeof diffIndex> };
 type CachedDiff = { sources: Change["diffs"]; variants: Map<string, StagedDiffCache>; file?: { key: string; path: string; entry: unknown; text?: string; range?: string; parsed: ParsedFile } };
 const stagedCaches = new WeakMap<Change, CachedDiff>();
 
@@ -263,7 +277,7 @@ export function stagedDiffCache(change: Change, secrets: string[] = []): StagedD
   let cache = cached.variants.get(key);
   if (!cache) {
     const shared = cached;
-    cache = { info: (path) => diffIndex(change, path), file(path, ref) {
+    cache = { secrets, info: (path) => diffIndex(change, path), file(path, ref) {
       const entry = diffEntry(change, path);
       const rangeKey = entry?.file ? JSON.stringify(ref) : undefined;
       if (!shared.file || shared.file.key !== key || shared.file.path !== path || shared.file.entry !== entry || shared.file.text !== entry?.text || shared.file.range !== rangeKey) {
@@ -457,12 +471,13 @@ const FIND_WORK = [
 function findAnswerBlock(change: Change, unit: ReviewUnit): string {
   const path = unit.hunks[0]?.path ?? unit.files[0] ?? "app/search.py";
   const line = unit.hunks[0]?.start ?? 14;
+  const ids = unit.digest ? [unit.digest.id] : unit.hunks.map((h) => h.id);
   const example: FindAnswer = {
     version: "find-1",
     change_id: change.shortId,
     unit: unit.id,
-    examined: unit.hunks.map((hunk) => hunk.id),
-    analysis: unit.hunks.map((hunk) => ({ hunk: hunk.id, changed: "The query now includes request input directly.", could_break: "Request input could change the query's meaning." })),
+    examined: ids,
+    analysis: ids.map((id) => ({ hunk: id, changed: "The query now includes request input directly.", could_break: "Request input could change the query's meaning." })),
     candidates: [{
       severity: "critical", category: "security", confidence: 0.9,
       file_path: path, line_number: line, line_end: line,
@@ -478,7 +493,7 @@ function findAnswerBlock(change: Change, unit: ReviewUnit): string {
     '- `version`: always "find-1".',
     `- \`change_id\`: \`${change.shortId}\`.`,
     `- \`unit\`: \`${unit.id}\`.`,
-    "- `examined`: every hunk id of this unit, exactly once.",
+    unit.digest ? '- `examined`: ["d1"], the structural summary id, exactly once.' : "- `examined`: every hunk id of this unit, exactly once.",
     "- `analysis`: one entry per hunk, before candidates. `hunk` is its id.",
     "- `changed`: what changed. `could_break`: what that change could break. Use one or two short sentences each.",
     "- `candidates`: every code-backed defect or convention issue you found. This list may be empty.",

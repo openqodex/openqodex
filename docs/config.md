@@ -138,6 +138,8 @@ Findings outside the changed lines never count toward the verdict.
 
 A list of globs. The default is an empty list. A matching file is left out of the change. The brief does not show it, and no finding in it is kept. Scanners do not receive it as a changed file. A scanner that reads a whole project, such as brakeman or golangci-lint, may still read it.
 
+A big JSON file needs no exclusion. In the default staged review, a successful JSON parse allows structural summary coverage once the changed range exceeds the part budget. Smaller JSON changes are shown as rows. Use exclusions only when you want a file left out of the review.
+
 A renamed file has two paths, and each is matched on its own. A file renamed out of an excluded path is reviewed as a new file, with none of the excluded file's removed lines. A file renamed into an excluded path is reviewed as a deleted file.
 
 Globs match the path from the repository root, with forward slashes:
