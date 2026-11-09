@@ -132,6 +132,12 @@
 //    after accept: accept refuses numbers that differ from the run's
 //    score.json, refuses a copy of the asset (which has none) for an entry
 //    that has them, and records their hash (boardHash) beside the score hash.
+// 18. A board number that moved inside its noise is called a gain: a
+//    Greptile or Martian gain is called only when both runs' repeat ranges
+//    (lib/noise.mjs) do not overlap and the rise is larger than the judge's
+//    disagreement with itself on its fixed sample (the calibration's
+//    judgeVariability). The range is descriptive, not a confidence
+//    interval, and a board line never raises the alarm.
 
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -144,6 +150,9 @@ import { ISSUE_METRICS, RESAMPLES, clusterFn, pairedBounds, pairedSums, seedOf }
 import { isPersonName, readPeople } from "./lib/rulings.mjs";
 import { claudeRunModels, savedSampleRows } from "./lib/runner.mjs";
 import { canonical, rulesDifferences } from "./lib/score.mjs";
+import { boardConfigOf } from "./lib/martian-board.mjs";
+import { boardGain } from "./lib/noise.mjs";
+import { SUITES } from "./lib/suites.mjs";
 
 // Who may accept a run: the people of the adjudication file's folder.
 const peopleFolder = join(benchRoot, "review-queue");
@@ -221,6 +230,38 @@ function leaves(v, at = "", out = new Map()) {
     for (const k of Object.keys(v).sort()) if (!NOT_COMPARED.has(k)) leaves(v[k], at === "" ? k : `${at}.${k}`, out);
   } else out.set(at, v);
   return out;
+}
+
+// The judge's disagreement with itself for a run's board: the judgeVariability
+// rate of the calibration its comparison record pins, or null.
+export function judgeDisagreement(index, entry, board) {
+  // A suite with no board has no disagreement to read.
+  if (!entry.release || !board) return null;
+  const file = join(index, "comparisons", `${entry.release}.json`);
+  if (!existsSync(file)) return null;
+  for (const ref of JSON.parse(readFileSync(file, "utf8")).calibrations ?? []) {
+    const path = join(index, "..", ref.file);
+    const calibration = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
+    if (calibration?.board?.name === board) return calibration.judgeVariability?.rate ?? null;
+  }
+  return null;
+}
+
+// The board line of one configuration: the newest run's repeat range
+// against the accepted run's, and whether a gain is called (failure 18).
+// Null when the suite has no Greptile or Martian board or either run has
+// no range for the configuration.
+export function boardLine(accepted, candidate, config, { disagreement = null } = {}) {
+  const board = SUITES[candidate.suite]?.board;
+  if (board !== "greptile" && board !== "martian") return null;
+  let key;
+  try { key = boardConfigOf(config); } catch { return null; }
+  const before = accepted.outside?.[board]?.range?.[key];
+  const after = candidate.outside?.[board]?.range?.[key];
+  if (!before || !after) return null;
+  const shown = (r) => r.metric === "caught" ? `mean ${r.mean.toFixed(1)} of ${r.of} caught (${r.min} to ${r.max} over ${r.repeats} repeats)` : `mean ${r.metric.toUpperCase()} ${r.mean.toFixed(3)} (${r.min.toFixed(3)} to ${r.max.toFixed(3)} over ${r.repeats} repeats)`;
+  const g = boardGain(before, after, { disagreement });
+  return { ...g, text: `Board ${board}, a range over repeats, descriptive and not a confidence interval: ${shown(after)} against ${shown(before)}; ${g.called ? "a gain" : `no gain is called: ${g.why}`}.` };
 }
 
 // One configuration of a scanner-only run against the accepted run of its
@@ -488,6 +529,8 @@ export function runTrend({ index = indexRoot, suite = null, mode = null, config 
       log(`The accepted run ${acceptedId} is the newest of this group.`);
       continue;
     }
+    const line = boardLine(accepted, newest, g.config, { disagreement: judgeDisagreement(index, newest, SUITES[newest.suite]?.board) });
+    if (line) log(line.text);
     if (newest.perCase === null || accepted.perCase === null) {
       log(`Held-out entries hold aggregates only, so ${newest.runId} is not paired with ${acceptedId}.`);
       continue;

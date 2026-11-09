@@ -7,11 +7,11 @@ import { fileURLToPath } from "node:url";
 import { benchRoot } from "../lib/cases.mjs";
 import { greptileEntryProblems, greptileRows } from "../lib/greptile.mjs";
 import { cacheRoot, licenceExclusion, licenceRecord } from "../lib/licence.mjs";
-import { GREPTILE_HASHED, SUITES, canonicalJson, checkPinned, entryHash, greptileTruth, rawPath, realCaseId, sha256, splitRewriteProblems, suiteHashOf, truthHashOf } from "../lib/suites.mjs";
+import { GREPTILE_HASHED, SUITES, canonicalJson, checkPinned, entryHash, exposureSplitProblems, greptileTruth, rawPath, realCaseId, sha256, suiteHashOf, truthHashOf } from "../lib/suites.mjs";
 import { fetchPinned } from "./aacr.mjs";
 
 const SOURCES = join(benchRoot, "suites/greptile/sources.json");
-export const SPLIT_NAME = "greptile-v1";
+export const SPLIT_NAME = "greptile-v2";
 const byBytes = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const cleanText = (s) => s.replace(/ *\u2014 */g, " - ");
 
@@ -51,7 +51,7 @@ export async function fetchGreptileData({ sources = JSON.parse(readFileSync(SOUR
   return { sources, files };
 }
 
-export async function ingestGreptile({ sources, cache = cacheRoot(), offline = false, previous = null } = {}) {
+export async function ingestGreptile({ sources, cache = cacheRoot(), offline = false, previous = null, root = benchRoot } = {}) {
   const data = await fetchGreptileData({ sources, cache, offline });
   sources = data.sources;
   const rows = greptileRows(data.files.get(sources.original.asset.path).toString("utf8"));
@@ -122,7 +122,14 @@ export async function ingestGreptile({ sources, cache = cacheRoot(), offline = f
   const files = pinsOf(sources).map(({ path, sha256 }) => ({ path, sha256 }));
   const dataset = { name: "Greptile's 50 reconstructed pull requests", repo: sources.corrected.repo, revision: sources.corrected.revision, url: sources.corrected.url, readDate: sources.corrected.readDate, licence: sources.corrected.licence, original: sources.original, files };
   const suite = { version: 1, suite: "greptile", dataset, hashCovers: GREPTILE_HASHED, hash: suiteHashOf(entries), cases: entries };
-  const split = { version: 1, name: SPLIT_NAME, suite: "greptile", rule: "All fifty public reconstructed cases are development cases for reproduction. They overlap Martian's held-out repository groups. No independent held-out claim or tuning on these cases is permitted.", dataset: { repo: dataset.repo, revision: dataset.revision, files }, cases: { dev: entries.map((e) => e.name), test: [] }, subsets: {}, counts: { dev: entries.length, test: 0 } };
+  // The split is not made here: its exposure comes from saved reading notes
+  // (docs/benchmark.md, "Tune and score"), so the ingest reads the committed
+  // file and refuses one that does not place exactly these cases.
+  const splitPath = join(root, SUITES.greptile.split);
+  if (!existsSync(splitPath)) throw new Error(`${splitPath} is missing: the ${SPLIT_NAME} split records exposure from saved files and is never generated`);
+  const split = JSON.parse(readFileSync(splitPath, "utf8"));
+  const splitProblems = [...(split.name === SPLIT_NAME ? [] : [`it is named ${split.name}`]), ...(canonicalJson(split.dataset) === canonicalJson({ repo: dataset.repo, revision: dataset.revision, files }) ? [] : ["its dataset differs from the pinned sources"]), ...exposureSplitProblems(split, entries)];
+  if (splitProblems.length > 0) throw new Error(`${splitPath} does not split this suite: ${splitProblems.join("; ")}`);
   const lines = [
     `Greptile ingest: ${entries.length} cases. Usable: ${entries.filter((e) => e.status === "usable").length}. Excluded: ${entries.filter((e) => e.status !== "usable").length}.`,
     `Original labels: ${entries.reduce((n, e) => n + e.truthSets.greptile.items, 0)}. Corrected Augment comments: ${entries.reduce((n, e) => n + e.truthSets.augment.items, 0)}. Kept as two truth sets.`,
@@ -131,19 +138,16 @@ export async function ingestGreptile({ sources, cache = cacheRoot(), offline = f
     "The corrected JSON totals differ from its README table (145 claimed, 137 present); the JSON files are the truth source.",
     "Fork metadata snapshots and the real GitHub licence answers are retained in sources.json. The full API response hashes are recorded; a fresh cache uses the frozen selected metadata, never today's branch tips.",
     `Explicit title joins: ${titleJoins.length}.`, ...titleJoins,
-    `Suite hash: ${suite.hash}. Split ${SPLIT_NAME}: dev ${entries.length}, test 0.`,
+    `Suite hash: ${suite.hash}. Split ${SPLIT_NAME}: tune ${split.counts.tune}, score ${split.counts.score}; ${split.counts.exposed} exposed, ${split.counts.clean} clean, exposure on record in the split file.`,
     "This suite overlaps Martian's public cases and repository groups. Materialisation is not a held-out model evaluation.",
     "Materialisation reservation: Sentry #3 introduces a gitlink at sentry-repo that the laptop shape cannot preserve. Use --reviewers model:scripted with --materialise-only to select the server shape. No model runs.",
     ...entries.map((e) => `${e.id}: greptile ${e.truthSets.greptile.items}, augment ${e.truthSets.augment.items}; ${e.status}; ${e.licence.class}${e.excludedWhy ? ` (${e.excludedWhy})` : ""}`),
   ];
   const report = `${lines.join("\n")}\n`;
-  return { suite, split, report, files: { [SUITES.greptile.cases]: `${JSON.stringify(suite, null, 2)}\n`, [SUITES.greptile.split]: `${JSON.stringify(split, null, 2)}\n`, "suites/greptile/ingest-report.txt": report } };
+  return { suite, split, report, files: { [SUITES.greptile.cases]: `${JSON.stringify(suite, null, 2)}\n`, "suites/greptile/ingest-report.txt": report } };
 }
 
 export function writeGreptileIngest(result, { root = benchRoot } = {}) {
-  const splitPath = join(root, SUITES.greptile.split);
-  const problems = existsSync(splitPath) ? splitRewriteProblems(JSON.parse(readFileSync(splitPath, "utf8")), result.split) : [];
-  if (problems.length > 0) throw new Error(`a new split is a new file: ${problems.join("; ")}`);
   for (const [rel, text] of Object.entries(result.files)) {
     const path = join(root, rel);
     mkdirSync(dirname(path), { recursive: true });

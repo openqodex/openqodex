@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { agreementOf, checkedBytes, compareLabels, costOfUsage, finalizeCalibration, hash, martianLabels, validateCalibration } from "../lib/calibration.mjs";
 import { greptileInputs, martianInputs } from "../lib/calibration-inputs.mjs";
 import { benchRoot } from "../lib/cases.mjs";
-import { suiteHashOf } from "../lib/suites.mjs";
+import { SUITES, suiteHashOf } from "../lib/suites.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 import { judgeGreptile } from "../outside/boards/greptile-judge.mjs";
 import { MARTIAN_CITED } from "../lib/martian-board.mjs";
@@ -28,14 +28,14 @@ describe("board calibration", () => {
   it("refuses a Greptile calibration suite missing a case from its split before reading public sources", async () => {
     const root = tempDir("oq-calibration-greptile-count-");
     const suite = read(join(benchRoot, "suites/greptile/cases.json"));
-    const split = read(join(benchRoot, "splits/greptile-v1.json"));
+    const split = read(join(benchRoot, SUITES.greptile.split));
     suite.cases = suite.cases.slice(0, 1);
     split.cases.dev = split.cases.dev.slice(0, 2);
     suite.hash = suiteHashOf(suite.cases);
     write(join(root, "suites/greptile/cases.json"), suite);
-    write(join(root, "splits/greptile-v1.json"), split);
+    write(join(root, SUITES.greptile.split), split);
     const count = split.cases.dev.length + split.cases.test.length;
-    await expect(greptileInputs({ root })).rejects.toThrow(`Greptile requires all ${count} cases from splits/greptile-v1.json`);
+    await expect(greptileInputs({ root })).rejects.toThrow(`Greptile requires all ${count} cases from ${SUITES.greptile.split}`);
   });
   it("refuses a Martian public review count that differs from its split instead of a literal fifty", async () => {
     const root = tempDir("oq-calibration-martian-count-");

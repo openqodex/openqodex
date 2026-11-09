@@ -1,4 +1,4 @@
-import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, matchesGlob, redactByFingerprint, VERIFY_BATCH_SIZE, checkSubmission, findingKey, modelCoverage, outsideSnapshot, readCoverage, requiredCandidates, severityRank } from "@openqodex/core";
+import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, matchesGlob, redactByFingerprint, VERIFY_BATCH_SIZE, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank } from "@openqodex/core";
 import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
 import { MAX_CORRECTIONS, converse, deliverRanges } from "./conversation.js";
 import { TIMED_OUT } from "./agents/driver.js";
@@ -117,7 +117,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     rounds.push(round);
     emit(() => args.onRound?.(round));
   };
-  const failed = (talk: Conversation) => talk.failure ?? (args.traced && talk.trace.some(outsideSnapshot) ? "the reviewer tried to read outside the snapshot" : talk.errors.length > 0 ? talk.errors.join("; ") : null);
+  const failed = (talk: Conversation) => talk.failure ?? (args.traced && talk.trace.some(leftSnapshot) ? "the reviewer read outside the snapshot" : talk.errors.length > 0 ? talk.errors.join("; ") : null);
   const recordOf = (r: Run): StagedSessionRecord => ({ role: r.role, ...(r.unit ? { unit: r.unit } : {}), rounds: r.talk.rounds, usage: r.talk.usage, failure: failed(r.talk), ...(r.examined ? { examined: r.examined } : {}), ...(r.dropped?.length ? { dropped: r.dropped } : {}) });
   const start = (role: ReviewerRole, order: number, name: string, brief: string, unit?: string): Run => {
     emit(() => args.onBrief?.(role, brief));
@@ -196,7 +196,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           noteRefusal(run);
           last = failed(run.talk);
           const result = checked as ReturnType<typeof checkFindAnswer> | null;
-          if (result && result.answerErrors.length === 0 && run.talk.errors.every((error) => result.errors.includes(error)) && run.talk.failure === null && (!args.traced || !run.talk.trace.some(outsideSnapshot))) {
+          if (result && result.answerErrors.length === 0 && run.talk.errors.every((error) => result.errors.includes(error)) && run.talk.failure === null && (!args.traced || !run.talk.trace.some(leftSnapshot))) {
             const rejected = new Set(result.rejected.map((r) => r.candidate));
             answer = { ...result.answer, candidates: result.answer.candidates.filter((c) => !rejected.has(c)) };
             run.dropped = result.rejected.map(({ candidate: c }) => ({ title: c.title, file_path: c.file_path, line_number: c.line_number, confidence: c.confidence, reason: "evidence not found" }));
@@ -279,6 +279,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     };
     await pool(batches.map((batch, index) => ({ batch, index })), VERIFIERS_CONCURRENCY, async ({ batch, index }) => {
       let accepted = false;
+      const failures: string[] = [];
       for (let attempt = 0; attempt < 2 && !stopped() && args.now() < args.deadline; attempt++) {
         let run: Run | null = null;
         try {
@@ -287,17 +288,20 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           let answer: VerifyAnswer | null = null;
           run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, deadline: args.deadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role), check: verifyCheck(batch, (a) => { answer = a; }), deliver: noDelivery });
           noteRefusal(run);
-          if (run.talk.failure === null && (!args.traced || !run.talk.trace.some(outsideSnapshot)) && answer !== null && (failed(run.talk) === null || isolate(batch, answer, run.talk.errors))) {
+          if (run.talk.failure === null && (!args.traced || !run.talk.trace.some(leftSnapshot)) && answer !== null && (failed(run.talk) === null || isolate(batch, answer, run.talk.errors))) {
             verified.push({ batch, run, answer, brief: brief.text, number: index + 1, corrections: 0 }); accepted = true; break;
           }
+          failures.push(failed(run.talk) ?? "the verifier gave no answer that could be checked");
         } catch (error) {
           if (hostFailure !== null) throw hostFailure;
-          if (run) run.talk.failure = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
+          const failure = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
+          failures.push(failure);
+          if (run) run.talk.failure = failure;
         } finally {
           if (run) await close(run);
         }
       }
-      if (!accepted) abandon(batch, stopped() ? "the review stopped" : args.now() >= args.deadline ? ranOut("the verifier did not finish in time") : "the verifier session failed twice");
+      if (!accepted) abandon(batch, stopped() ? "the review stopped" : args.now() >= args.deadline ? ranOut("the verifier did not finish in time") : `the verifier session failed twice (${failures.map((failure, i) => `attempt ${i + 1}: ${failure}`).join("; ")})`);
     });
 
     if (hostFailure !== null) throw hostFailure;
@@ -362,7 +366,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           // The saved answer is context, not a call in this new session.
           run.talk.rounds--;
           noteRefusal(run);
-          if (answer !== null && run.talk.failure === null && (!args.traced || !run.talk.trace.some(outsideSnapshot)) && (failed(run.talk) === null || isolate(owner.batch, answer, run.talk.errors))) owner.answer = answer;
+          if (answer !== null && run.talk.failure === null && (!args.traced || !run.talk.trace.some(leftSnapshot)) && (failed(run.talk) === null || isolate(owner.batch, answer, run.talk.errors))) owner.answer = answer;
           else {
             if (!isolate(owner.batch, owner.answer, problems)) {
               abandon(owner.batch, "the verifier did not correct its answer");

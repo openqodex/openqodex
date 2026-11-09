@@ -6,10 +6,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildGraph, detectImpact, extractFacts, frameworkLayer, renderImpactBlock, validateFrameworkEvidence } from "../../index.js";
-import { pluginCpuMs, readerCpuMs } from "../../test-timing.js";
+import { growthTests, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
 import { MAX_ENTITIES_PER_APP } from "../stage.js";
 import { MAX_ANNOTATIONS, readFacts } from "./facts.js";
 import { junit } from "./index.js";
+import { MAX_WORK } from "./resolve.js";
 
 // These checks need a whole graph or a timed reader, beyond corpus scoring.
 const roots: string[] = [];
@@ -97,11 +98,18 @@ describe("the JUnit plugin on a Maven application", () => {
 });
 
 describe("the JUnit plugin on hostile input", () => {
+  const head = "package shop;\nimport org.junit.jupiter.api.Test;\nclass Hostile {\n";
+  const methods = Array.from({ length: MAX_ANNOTATIONS + 100 }, (_, i) => `  @Test void t${i}() {}\n`).join("");
+  const body = `${head}${methods}}\n`;
+  const source = body + "//" + "x".repeat(1024 * 1024 - body.length - 3);
+  const hostileRepo = () => {
+    const root = makeRepo({ "pom.xml": pom, "src/test/java/shop/Hostile.java": source });
+    commitAll(root);
+    return root;
+  };
+  const buildAt = (root: string) => () => buildGraph({ repoRoot: root, store: null, maxFileBytes: 1024 * 1024, budgetMs: 120_000 });
+
   it("keeps 1999 roles and a cap gap when a near 1 MiB file exceeds the default file limit", async () => {
-    const head = "package shop;\nimport org.junit.jupiter.api.Test;\nclass Hostile {\n";
-    const methods = Array.from({ length: MAX_ANNOTATIONS + 100 }, (_, i) => `  @Test void t${i}() {}\n`).join("");
-    const body = `${head}${methods}}\n`;
-    const source = body + "//" + "x".repeat(1024 * 1024 - body.length - 3);
     expect(Buffer.byteLength(source)).toBe(1024 * 1024 - 1);
     expect(junit.wants(source, "java")).toBe(true);
     const facts = await extractFacts("java", source);
@@ -110,23 +118,26 @@ describe("the JUnit plugin on hostile input", () => {
     expect(annotations[0]).toMatchObject({ name: "Test", owner: "Hostile", method: { name: "t0", line: 4, column: 14 } });
     expect(annotations[annotations.length - 1]).toMatchObject({ name: "Test", method: { name: "t1998" } });
     expect(facts?.frameworks?.junit?.filter((f) => f.kind === "cap")).toHaveLength(1);
-    const root = makeRepo({ "pom.xml": pom, "src/test/java/shop/Hostile.java": source });
-    commitAll(root);
+    const root = hostileRepo();
     const skipped = await buildGraph({ repoRoot: root, store: null });
     expect(skipped.status.notRead).toContainEqual({ file: "src/test/java/shop/Hostile.java", reason: "size" });
-    const build = () => buildGraph({ repoRoot: root, store: null, maxFileBytes: 1024 * 1024, budgetMs: 120_000 });
-    const graph = await build();
+    const graph = await buildAt(root)();
     expect(graph.status.notRead).toEqual([]);
-    const readMs = await readerCpuMs("java", [source], readFacts);
-    const resolveMs = await pluginCpuMs(build, "junit");
-    expect(readMs + resolveMs).toBeLessThan(1000);
     expect(graph.frameworks?.roles.filter((r) => r.plugin === "junit")).toHaveLength(MAX_ANNOTATIONS);
     expect(graph.frameworks?.edges.filter((e) => e.plugin === "junit")).toHaveLength(0);
     expect(graph.frameworks?.unknowns.filter((u) => u.plugin === "junit")).toEqual([
       expect.objectContaining({ cause: "fan-out-capped", scope: { file: "src/test/java/shop/Hostile.java" }, affects: ["tests"] }),
     ]);
-    console.log(`JUnit hostile: ${Buffer.byteLength(source)} bytes, ${annotations.length} annotation facts, ${MAX_ANNOTATIONS} roles, 0 edges, 1 gap, ${(readMs + resolveMs).toFixed(1)} ms.`);
+    console.log(`JUnit hostile: ${Buffer.byteLength(source)} bytes, ${annotations.length} annotation facts, ${MAX_ANNOTATIONS} roles, 0 edges, 1 gap.`);
   }, 120_000);
+
+  growthTests("inside its time", () => {
+    it("reads and resolves the near 1 MiB file in under a second of CPU time", async () => {
+      const readMs = await readerCpuMs("java", [source], readFacts);
+      const resolveMs = await pluginCpuMs(buildAt(hostileRepo()), "junit");
+      expect(readMs + resolveMs, `${(readMs + resolveMs).toFixed(1)} ms`).toBeLessThan(1000);
+    }, 120_000);
+  });
 });
 
 
@@ -174,20 +185,24 @@ describe("JUnit review regressions", () => {
     console.log("JUnit annotation filter: 3000 annotations in, 1000 facts and roles out, 0 gaps.");
   });
 
-  it("keeps test roles when indexing 8000 small Java files would exhaust the resolution budget", async () => {
+  it("keeps test roles when indexing more Java symbols than the resolution work limit would exhaust it", async () => {
+    // The guard is the count, not the file count: indexing one step per
+    // class, method or import would pass MAX_WORK here and cap the plugin.
+    // 2000 files hold as many symbols as 8000 did, at a quarter of the git work.
+    const count = 2000;
     const files: Record<string, string> = { "pom.xml": pom };
-    const methods = Array.from({ length: 24 }, (_, i) => `  void m${i}() {}`).join("\n");
-    for (let i = 0; i < 8000; i++) files[`src/main/java/plain/Plain${i}.java`] = `package plain;\nimport java.util.List;\nclass Plain${i} {\n${methods}\n}\n`;
+    const methods = Array.from({ length: Math.ceil(MAX_WORK / count) }, (_, i) => `  void m${i}() {}`).join("\n");
+    for (let i = 0; i < count; i++) files[`src/main/java/plain/Plain${i}.java`] = `package plain;\nimport java.util.List;\nclass Plain${i} {\n${methods}\n}\n`;
     files[test] = "package shop;\nimport org.junit.jupiter.api.Test;\nclass ServiceTest { @Test void reads() {} }\n";
     const root = makeRepo(files);
     commitAll(root);
-    const graph = await buildGraph({ repoRoot: root, store: null, maxFiles: 9000, budgetMs: 120_000, maxHeapMb: 2048 });
+    const graph = await buildGraph({ repoRoot: root, store: null, budgetMs: 120_000, maxHeapMb: 2048 });
     expect(graph.status.notRead).toEqual([]);
-    expect(graph.status.filesParsed).toBe(8001);
+    expect(graph.status.filesParsed).toBe(count + 1);
     expect(graph.frameworks?.roles.filter((r) => r.plugin === "junit")).toHaveLength(1);
     expect(graph.frameworks?.unknowns.filter((u) => u.plugin === "junit")).toEqual([]);
-    console.log("JUnit linear indexing: 8001 Java files in, 1 test role out, 0 gaps.");
-  }, 180_000);
+    console.log(`JUnit linear indexing: ${count + 1} Java files in, 1 test role out, 0 gaps.`);
+  }, 120_000);
 
   it("rebinds unchanged test facts when the metadata corpus deletes only a shadowing annotation", async () => {
     const fixture = join(dirname(fileURLToPath(import.meta.url)), "../../../corpus/frameworks/junit/junit-metadata-edit");

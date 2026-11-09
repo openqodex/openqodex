@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { acceptedProblems, entryProblems, groupKeys, listEntries } from "../benchmark/lib/index.mjs";
 import { SUITES } from "../benchmark/lib/suites.mjs";
+import { boardConfigOf } from "../benchmark/lib/martian-board.mjs";
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const START = "<!-- benchmark-results:start -->";
@@ -36,8 +37,33 @@ const boardCells = (numbers) => [numbers?.semantic?.precision, numbers?.semantic
 const boardHead = ["Semantic precision", "Semantic recall", "Semantic F1", "Noise rate", "Line precision", "Line recall"];
 const readable = ({ e, g, s }) => !SUITES[e.suite]?.board || Boolean(board(e, g)) || s.issueRecall.all.hit > 0;
 const recall = (s, interval = false) => (unruled(s) ? "not yet ruled" : ratio(s.issueRecall.all, interval));
+// A number whose reviewer was tuned on the very cases it scored says so beside it.
+const tuned = (e, text) => (e.tunedOn === true ? `${text} (tuned on these cases)` : text);
 const suiteLabel = (e) => `${suiteName(e.suite)}, ${e.split} split${e.subset ? `, ${e.subset} subset` : ""}`;
-const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, `rules ${e.rulesVersion}`, ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : [])].join(", ");
+// The scoring rules a run was scored under; an entry from before the rules had versions is legacy.
+const rulesLabel = (e) => `scoring rules ${e.rulesVersion ?? "legacy"}`;
+// A README row names its scoring rules, so two runs that differ only there read apart (issue #280).
+// Rows that still read alike also name the rest of their group key: mode, path, split hash and purpose.
+const casesCells = (rows) => {
+  const short = ({ e }) => `${suiteLabel(e)}, ${rulesLabel(e)}`;
+  const seen = (r) => [reviewer(r.g), r.g.config, modelName(r.e, r.g), short(r)].join("\n");
+  const count = new Map();
+  for (const r of rows) count.set(seen(r), (count.get(seen(r)) ?? 0) + 1);
+  return new Map(rows.map((r) => [r, count.get(seen(r)) > 1
+    ? `${short(r)}, ${r.e.mode} mode, ${r.e.path} path${r.e.splitHash ? `, split hash ${r.e.splitHash.slice(0, 12)}` : ""}${r.e.purpose ? `, ${r.e.purpose} purpose` : ""}`
+    : short(r)]));
+};
+const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, rulesLabel(e), ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : []), ...(e.purpose ? [`${e.purpose} purpose`] : [])].join(", ");
+// A Greptile or Martian row's repeat range: the mean, never the best repeat, with the lowest and highest.
+const repeatRange = (e, g) => e.outside?.[SUITES[e.suite]?.board]?.range?.[boardConfigOf(g.config)];
+export function rangeLine(e, g) {
+  const r = repeatRange(e, g);
+  if (!r) return null;
+  const text = r.metric === "caught"
+    ? `caught ${r.mean.toFixed(1)} of ${r.of} cases on average (${percent(r.mean / r.of)}), from ${r.min} to ${r.max}`
+    : `F1 ${percent(r.mean)} on average, from ${percent(r.min)} to ${percent(r.max)}`;
+  return `${runLink(e)}, ${g.config}: ${tuned(e, text)} across ${r.repeats} repeats. The range is the lowest and highest repeat, not a confidence interval.`;
+}
 const precisionRange = (s) => (s.precision.lower.of === 0 ? "not measured" : `${ratio(s.precision.lower)} to ${ratio(s.precision.upper)}`);
 
 export function renderResults(index) {
@@ -78,7 +104,7 @@ export function renderResults(index) {
     page.push(`## ${suiteName(suite)}`, "",
       table(["Reviewer", "Model", "Group", "Repeats", "Issue recall", "Location recall", "Precision lower bound", "Precision upper bound", "Clean rate", "Cost per review", "Time per review", "Run", "Accepted date"], selected.map(({ e, g, s, accepted }) => [
         reviewer(g), modelName(e, g), groupLabel(e, g),
-        e.repeat, recall(s, true), ratio(s.location?.recall), ratio(s.precision.lower), ratio(s.precision.upper), ratio(s.controls), cost(s),
+        e.repeat, tuned(e, recall(s, true)), ratio(s.location?.recall), ratio(s.precision.lower), ratio(s.precision.upper), ratio(s.controls), cost(s),
         typeof s.wallMsMean === "number" ? `${(s.wallMsMean / 1000).toFixed(1)} s` : "not measured", runLink(e), accepted.acceptedAt.slice(0, 10),
       ])), "");
     for (const { e, g, s } of selected) {
@@ -92,6 +118,8 @@ export function renderResults(index) {
           `The difference is ${noise} issues across ${e.repeat} repeats, or ${(noise / e.repeat).toFixed(2)} per repeat.`, "");
       }
     }
+    const ranged = selected.map(({ e, g }) => rangeLine(e, g)).filter(Boolean);
+    if (ranged.length > 0) page.push("### Board scores", "", ...ranged.flatMap((line) => [line, ""]));
     if (suite === "aacr") {
       page.push("### Board scores", "");
       for (const { e, g } of selected) {
@@ -106,12 +134,13 @@ export function renderResults(index) {
   const shown = rows.filter(readable);
   const plain = shown.filter(({ e, g }) => !board(e, g));
   const boarded = shown.filter(({ e, g }) => board(e, g));
+  const cases = casesCells(shown);
   const headline = [START, "## Benchmark", "",
-    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review"], plain.map(({ e, g, s }) => [
-      `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), recall(s), precisionRange(s), ratio(s.controls), cost(s),
+    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review"], plain.map((r) => [
+      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), precisionRange(r.s), ratio(r.s.controls), cost(r.s),
     ])), ""] : []),
-    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review"], boarded.map(({ e, g, s }) => [
-      `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), recall(s), ...boardCells(board(e, g)), cost(s),
+    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review"], boarded.map((r) => [
+      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), ...boardCells(board(r.e, r.g)), cost(r.s),
     ])), ""] : []),
     "[Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)", END].join("\n");
   return { page: page.join("\n"), headline };

@@ -4,7 +4,7 @@
 // redaction, and the check on every changed range the tool sends itself.
 import { lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DELIVERY_ROW_BYTES, OpenQodexError, deliveryRow, outsideSnapshot, redactSecrets, redactSecretsKeepingLines, removedRuns, secretTexts } from "@openqodex/core";
+import { DELIVERY_ROW_BYTES, OpenQodexError, deliveryRow, leftSnapshot, redactSecrets, redactSecretsKeepingLines, removedRuns, secretTexts } from "@openqodex/core";
 import type { Change, Hunk, Report, TraceEntry } from "@openqodex/core";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Turn } from "./agents/driver.js";
@@ -368,8 +368,8 @@ export async function converse(args: {
         c.failure = turn.failure === TIMED_OUT ? (args.timedOut ?? TIMED_OUT) : turn.failure;
         break;
       }
-      // An attempt outside the snapshot ends the review: it never completes.
-      if (args.traced && c.trace.some(outsideSnapshot)) break;
+      // A served read outside the snapshot ends the review. Refusals do not.
+      if (args.traced && c.trace.some(leftSnapshot)) break;
       const parsed = parseAnswer(turn.finalText);
       const result = "error" in parsed ? { report: null, errors: [`1. ${parsed.error}`], unread: [] as Hunk[], required: c.required, disposed: 0 } : args.check(parsed.value, c.trace, c.delivered);
       if ("value" in parsed) c.submission = parsed.value;

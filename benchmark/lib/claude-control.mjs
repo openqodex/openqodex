@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { git } from "./cases.mjs";
 import { claudeEnv } from "./reviewers.mjs";
+import { reviewHealth } from "./score.mjs";
 
 const exec = promisify(execFile);
 export const CONTROL_PROMPT = "/code-review medium";
@@ -78,17 +79,22 @@ export function controlSample({ job, attempt, result, command, version, startedA
   const inputTokens = each.length > 0 ? sum("inputTokens") + sum("cacheReadInputTokens") + sum("cacheCreationInputTokens") : native?.usage?.input_tokens == null ? null : native.usage.input_tokens + (native.usage.cache_read_input_tokens ?? 0) + (native.usage.cache_creation_input_tokens ?? 0);
   const outputTokens = each.length > 0 ? sum("outputTokens") : native?.usage?.output_tokens ?? null;
   const body = typeof native?.result === "string" ? native.result : result.stdout;
-  const complete = result.code === 0 && native?.is_error === false && typeof native.result === "string" && stopped === null;
+  const modelStatus = models.length === 1 ? "known" : models.length > 1 ? "mixed" : "none";
+  const usage = { turns: native?.num_turns ?? null, input_tokens: inputTokens, output_tokens: outputTokens, cost_usd: native?.total_cost_usd ?? null };
+  const ran = result.code === 0 && native?.is_error === false && typeof native.result === "string" && stopped === null;
+  // Claude Code answers an API error with exit 0 and is_error false (issue
+  // 284): the health rule the scorers apply decides it at the source too.
+  const health = reviewHealth({ reviewer: "control", nativeBody: body, stopped, models, modelStatus, usage });
+  const complete = ran && health.ok;
   return {
     jobId: job.jobId, caseId: job.caseId, firstAttempt: attempt === 1, case: job.case,
     config: job.config, reviewer: "control", graph: "off", repeat: job.repeat, attempt,
     started_at: startedAt, exit: result.code ?? null, signal: result.signal ?? null,
     wallMs: result.wallMs, status: complete ? "complete" : "failed", stopped,
-    failure: complete ? null : stopped ?? (body || result.stderr || `Claude Code exited ${result.code}`),
+    failure: complete ? null : stopped ?? (ran ? health.reason : body || result.stderr || `Claude Code exited ${result.code}`),
     command, reviewerUsed: { name: "claude", version },
     model: models.length === 1 ? models[0] : models.length > 1 ? models : null, models,
-    modelFrom: CONTROL_MODEL_FROM, modelStatus: models.length === 1 ? "known" : models.length > 1 ? "mixed" : "none",
-    usage: { turns: native?.num_turns ?? null, input_tokens: inputTokens, output_tokens: outputTokens, cost_usd: native?.total_cost_usd ?? null },
+    modelFrom: CONTROL_MODEL_FROM, modelStatus, usage,
     nativeBody: body,
   };
 }

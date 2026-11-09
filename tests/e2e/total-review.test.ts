@@ -1,8 +1,9 @@
 // `openqodex review` as one run: the built CLI, the real scanners and, when
 // they are installed and logged in, the real Claude Code and the real Codex
 // as the reviewer. The cases with a real reviewer cost real usage, so there
-// are four; each one skips with a printed reason when the reviewer cannot
-// run here.
+// are five, and they run only in the model tier (pnpm gate:model, which sets
+// OPENQODEX_MODEL_TESTS=1); anywhere else their groups skip with a printed
+// reason. In the model tier a reviewer that cannot run fails the case.
 //
 // Ways it could fail, written before the code:
 //  1. Scanner text reaches the printed report raw, or the report is not complete.
@@ -26,7 +27,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Candidate, Report } from "@openqodex/core";
 import "./global-setup.js";
-import { baseline, codexMissing, demo, generatedSecret, readJson, reportDir, reviewerMissing, root, run, noReviewerEnv, toolsHome } from "./support.js";
+import { baseline, codexMissing, demo, generatedSecret, modelTestsOff, readJson, reportDir, requireReviewer, reviewerMissing, root, run, noReviewerEnv, toolsHome } from "./support.js";
 import { removeTempDirs } from "../temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -63,20 +64,21 @@ describe("without a reviewer", () => {
   });
 });
 
-describe("with Claude Code as the reviewer", () => {
-  const missing = reviewerMissing();
+describe.skipIf(modelTestsOff("total review with claude"))("with Claude Code as the reviewer", () => {
   let dir: string;
   let demoRun: ReturnType<typeof run>;
   let report: Report;
+  // The review runs every verifier after the reviewer; it takes longer than
+  // the helper's 300 s default (issue 283), so the run gets 900 s and the
+  // hook more than that.
   beforeAll(() => {
-    if (missing !== null) return;
+    requireReviewer(reviewerMissing());
     dir = demo("total-claude");
-    demoRun = run("total-claude", dir, ["review", "--no-color"], { home: process.env.HOME });
+    demoRun = run("total-claude", dir, ["review", "--no-color"], { home: process.env.HOME, timeout: 900_000 });
     report = readJson<Report>(join(reportDir(dir), "report.json"));
-  }, 700_000);
+  }, 1_000_000);
 
   it("1, 6. the planted change gives a complete report where no scanner message appears raw", () => {
-    if (missing !== null) return void process.stdout.write(`total review with claude: skipped, ${missing}\n`);
     expect(demoRun.status, demoRun.stderr).toBe(0);
     expect(report.completion?.status).toBe("complete");
     expect(report.completion?.reviewer?.driver).toBe("claude");
@@ -94,7 +96,6 @@ describe("with Claude Code as the reviewer", () => {
   });
 
   it("9. the screen shows the receipt and report.html holds every finding under the code, with no secret and no script", () => {
-    if (missing !== null) return void process.stdout.write(`total review with claude: skipped, ${missing}\n`);
     const lines = demoRun.stdout.trimEnd().split("\n");
     for (const prose of ["Problem:", "Why it matters:", "Fix:"]) expect(demoRun.stdout).not.toContain(prose);
     const html = /^Report: (\/.+\/report\.html)$/m.exec(demoRun.stdout)?.[1];
@@ -114,14 +115,12 @@ describe("with Claude Code as the reviewer", () => {
   });
 
   it("2. finds the pagination offset bug that no scanner reports", () => {
-    if (missing !== null) return void process.stdout.write(`total review with claude: skipped, ${missing}\n`);
     const bug = expected.bugs.find((b) => b.id === "pagination-off-by-one")!;
     const hit = report.findings.some((f) => f.file_path === bug.file && f.line_number <= bug.lines[1] + 2 && f.line_end >= bug.lines[0] - 2);
     expect(hit, JSON.stringify(report.findings.map((f) => `${f.file_path}:${f.line_number} ${f.title}`))).toBe(true);
   });
 
   it("3. a clean change gives a complete report with no findings", () => {
-    if (missing !== null) return void process.stdout.write(`total review with claude: skipped, ${missing}\n`);
     const clean = baseline();
     writeFileSync(join(clean, "README.md"), "# Demo service\n\nA small Flask service used to try OpenQodex.\n");
     const out = run("total-clean", clean, ["review", "--format", "json"], { home: process.env.HOME });
@@ -132,10 +131,9 @@ describe("with Claude Code as the reviewer", () => {
   });
 });
 
-describe("with Codex as the reviewer", () => {
-  const missing = codexMissing();
+describe.skipIf(modelTestsOff("total review with codex"))("with Codex as the reviewer", () => {
   it("8. the planted change gives a complete report that names Codex and says reads were not recorded", () => {
-    if (missing !== null) return void process.stdout.write(`total review with codex: skipped, ${missing}\n`);
+    requireReviewer(codexMissing());
     const dir = demo("total-codex");
     const out = run("total-codex", dir, ["review", "--reviewer", "codex", "--no-color"], { home: process.env.HOME, timeout: 900_000 });
     const report = readJson<Report>(join(reportDir(dir), "report.json"));

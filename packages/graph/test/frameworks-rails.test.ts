@@ -3,7 +3,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, frameworkLayer, openStore } from "../src/index.js";
 import type { Graph, Registration } from "../src/index.js";
 import { rails } from "../src/frameworks/rails/index.js";
-import { expectLinear, readerCpuMs, stageCpuMs } from "../src/test-timing.js";
+import { expectLinear, growthTests, readerCpuMs, stageCpuMs } from "../src/test-timing.js";
 import { commitAll, git, makeHome, makeRepo, symbol, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -256,18 +256,22 @@ describe("the Rails plugin on hostile input", () => {
     return root;
   };
 
-  it("reads the facts of a 1 MiB hostile routes file and spec file in time that grows with each", async () => {
-    const read = (root: Parameters<typeof rails.facts>[0]) => rails.facts(root, "ruby");
-    expectLinear("the Rails fact reader on routes files of 256 KiB and of 1 MiB", await readerCpuMs("ruby", [quarter.routes], read), await readerCpuMs("ruby", [routes], read));
-    expectLinear("the Rails fact reader on spec files of 256 KiB and of 1 MiB", await readerCpuMs("ruby", [quarter.spec], read), await readerCpuMs("ruby", [spec], read));
-  }, 120_000);
+  growthTests("in time that grows with it", () => {
+    it("reads the facts of a 1 MiB hostile routes file and spec file in time that grows with each", async () => {
+      const read = (root: Parameters<typeof rails.facts>[0]) => rails.facts(root, "ruby");
+      expectLinear("the Rails fact reader on routes files of 256 KiB and of 1 MiB", await readerCpuMs("ruby", [quarter.routes], read), await readerCpuMs("ruby", [routes], read));
+      expectLinear("the Rails fact reader on spec files of 256 KiB and of 1 MiB", await readerCpuMs("ruby", [quarter.spec], read), await readerCpuMs("ruby", [spec], read));
+    }, 120_000);
 
-  it("resolves hostile resources, deep nesting, slot-heavy patterns and backtracking requests in time that grows with them, with every cap named as a gap", async () => {
-    const root = committed(files);
-    const graph = await build(root)();
+    it("resolves hostile resources, deep nesting, slot-heavy patterns and backtracking requests in time that grows with them", async () => {
+      expectLinear("the frameworks stage on the hostile Rails input", await stageCpuMs(build(committed(quarter.files)), "frameworks"), await stageCpuMs(build(committed(files)), "frameworks"));
+    }, 120_000);
+  });
+
+  it("resolves hostile resources, deep nesting, slot-heavy patterns and backtracking requests, with every cap named as a gap", async () => {
+    const graph = await build(committed(files))();
     const data = graph.frameworks;
     expect(data?.plugins.find((p) => p.id === "rails")?.status).toBe("ok");
-    expectLinear("the frameworks stage on the hostile Rails input", await stageCpuMs(build(committed(quarter.files)), "frameworks"), await stageCpuMs(build(root), "frameworks"));
     const capped = data?.unknowns.filter((u) => u.plugin === "rails" && (u.cause === "fan-out-capped" || u.cause === "budget")) ?? [];
     expect(capped.length).toBeGreaterThan(0);
     expect(registrations(graph).length).toBeLessThanOrEqual(10_000);

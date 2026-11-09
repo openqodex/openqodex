@@ -20,17 +20,26 @@ import type { Change, CompletionRecord, ModelAttempt, ModelCompletionRecord, Mod
 // the call (every session's calls are kept in one trace).
 export type TraceEntry = { tool: string; path: string | null; inside: boolean | null; range: [number, number] | null; ok: boolean; detail?: string; own?: true; session?: string };
 
-// Whether a call left the snapshot: anything not shown inside it, except the
+// Whether a call names anything outside the snapshot, except the
 // agent's own saved output of this session.
 export function outsideSnapshot(t: TraceEntry): boolean {
   return t.inside !== true && t.own !== true;
+}
+
+// A missing result keeps ok true, so an unanswered call still fails closed.
+export function leftSnapshot(t: TraceEntry): boolean {
+  return outsideSnapshot(t) && t.ok;
+}
+
+export function refusedOutside(t: TraceEntry): boolean {
+  return outsideSnapshot(t) && !t.ok;
 }
 
 export type Hunk = { path: string; start: number; end: number; deletion: boolean };
 
 export type Coverage = CompletionRecord["coverage"];
 
-// The tools a reviewer is given. Anything else in a trace fails the run.
+// The tools a reviewer is given. A successful call to anything else fails the run.
 export const REVIEWER_TOOLS: readonly string[] = ["Read", "Grep", "Glob"];
 // Added unless the user config sets `reviewer_web: off`.
 export const REVIEWER_WEB_TOOLS: readonly string[] = ["WebSearch", "WebFetch"];
@@ -144,12 +153,16 @@ export function completionRecord(args: {
   if (args.snapshot.after === null || args.snapshot.after !== args.snapshot.before) {
     missing.push("the snapshot changed while the reviewer read it");
   }
-  // Fails closed: an attempt counts, whether or not the agent's own rules refused it.
   const outside = traced ? [...new Set(args.trace.filter(outsideSnapshot).map((t) => t.path ?? "(no path)"))] : [];
-  if (outside.length > 0) missing.push(`the reviewer tried to read outside the snapshot: ${listed(outside)}`);
+  const reads = traced ? [...new Set(args.trace.filter(leftSnapshot).map((t) => t.path ?? "(no path)"))] : [];
+  if (reads.length > 0) missing.push(`the reviewer read outside the snapshot: ${listed(reads)}`);
   const given = args.tools ?? REVIEWER_TOOLS;
-  const tools = traced ? [...new Set(args.trace.map((t) => t.tool).filter((t) => !given.includes(t)))] : [];
+  const tools = traced ? [...new Set(args.trace.filter((t) => t.ok && !given.includes(t.tool)).map((t) => t.tool))] : [];
   if (tools.length > 0) missing.push(`the reviewer used a tool it was not given: ${tools.join(", ")}`);
+  const refused = traced ? [...new Set([
+    ...args.trace.filter(refusedOutside).map((t) => t.path ?? "(no path)"),
+    ...args.trace.filter((t) => !t.ok && !given.includes(t.tool)).map((t) => t.tool),
+  ])] : [];
   const open = args.candidates.total - args.candidates.disposed;
   if (open > 0) missing.push(`${open} scanner ${open === 1 ? "candidate has" : "candidates have"} no disposition`);
   if (args.submissionErrors.length > 0) {
@@ -165,6 +178,7 @@ export function completionRecord(args: {
     contract: "openqodex-review-2",
     status: missing.length === 0 ? "complete" : "incomplete",
     missing,
+    refused,
     reviewer: args.reviewer,
     snapshot: { change_id: args.change.id, ...args.snapshot },
     candidates: args.candidates,
@@ -251,14 +265,15 @@ export function modelCompletionRecord(args: {
   if (args.attempts.length === 0) add("no model call was made");
   if (args.snapshot.after === null || args.snapshot.after !== args.snapshot.before) add("the snapshot changed while the reviewer read it");
   const defined = (t: ModelToolEntry) => args.tools.includes(t.tool);
-  // Fails closed: a call counts whether or not the brain refused it, and a
-  // defined tool's call not shown inside the snapshot counts as outside.
-  const outside = [...new Set(args.toolLog.filter((t) => defined(t) && t.inside !== true).map((t) => t.path ?? "(no path)"))];
-  if (outside.length > 0) add(`the reviewer tried to read outside the snapshot: ${listed(outside)}`);
-  const unscoped = [...new Set(args.toolLog.filter((t) => defined(t) && t.inside === true && t.in_scope === false).map((t) => t.path ?? "(no path)"))];
+  // Only successful calls fail the review. Refusal text is still served to the model.
+  const outside = [...new Set(args.toolLog.filter((t) => t.ok && defined(t) && t.inside !== true).map((t) => t.path ?? "(no path)"))];
+  if (outside.length > 0) add(`the reviewer read outside the snapshot: ${listed(outside)}`);
+  const unscoped = [...new Set(args.toolLog.filter((t) => t.ok && defined(t) && t.inside === true && t.in_scope === false).map((t) => t.path ?? "(no path)"))];
   if (unscoped.length > 0) add(`the reviewer asked for a path outside the review's scopes: ${listed(unscoped)}`);
-  const undefinedTools = [...new Set(args.toolLog.filter((t) => !defined(t)).map((t) => t.tool))];
+  const undefinedTools = [...new Set(args.toolLog.filter((t) => t.ok && !defined(t)).map((t) => t.tool))];
   if (undefinedTools.length > 0) add(`the reviewer returned a tool call the brain did not define: ${listed(undefinedTools)}`);
+  const refused = [...new Set(args.toolLog.filter((t) => !t.ok && (!defined(t) || t.inside !== true || t.in_scope === false))
+    .map((t) => defined(t) ? t.path ?? "(no path)" : t.tool))];
   const open = args.candidates.total - args.candidates.disposed;
   if (open > 0) add(`${open} scanner ${open === 1 ? "candidate has" : "candidates have"} no disposition`);
   if (args.submissionErrors.length > 0) {
@@ -275,6 +290,7 @@ export function modelCompletionRecord(args: {
     contract: MODEL_REVIEW_CONTRACT,
     status: missing.length === 0 ? "complete" : "incomplete",
     missing,
+    refused,
     reviewer: { kind: "model", model: args.model, servedModels, calls: args.attempts.filter((a) => a.outcome !== "refused").length },
     snapshot: { change_id: args.changeId, ...args.snapshot },
     candidates: args.candidates,

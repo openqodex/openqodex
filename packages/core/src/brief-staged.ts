@@ -1,5 +1,5 @@
 // One brief per finder session and one per verifier batch.
-import { conventionsBlock, contextBlocks, fenceFor, header, instructionsBlock, lensBlock, MAX_DIFF_BYTES, SEVERITY_RULES, targetBlock, writingRules } from "./brief.js";
+import { conventionsBlock, contextBlocks, copyBlock, fenceFor, header, instructionsBlock, lensBlock, MAX_DIFF_BYTES, SEVERITY_RULES, targetBlock, writingRules } from "./brief.js";
 import { removedRuns } from "./diff.js";
 import { GLOBAL_CONFIDENCE_FLOOR, POSSIBLE_CONFIDENCE_FLOOR, scannerCategory } from "./finalize.js";
 import { redactSecrets, redactSecretsKeepingLines } from "./redact.js";
@@ -41,6 +41,7 @@ export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: Fi
   const hunks = hunksBlock(args.change, unit.hunks, args.secrets);
   const blocks = [
     header(args.change, args.scan, args.config, args.target, "# OpenQodex review brief: find pass"),
+    copyBlock,
     targetBlock(args.target, true),
     instructionsBlock(args.instructions ?? "", args.instructionsFrom, "find"),
     conventionsBlock(args.instructionFiles ?? [], "find"),
@@ -64,6 +65,7 @@ export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: Fi
 export function buildVerifyBrief(args: StagedBriefArgs, batch: VerifyBatch): { text: string } {
   const blocks = [
     header(args.change, args.scan, args.config, args.target, "# OpenQodex review brief: verify pass"),
+    copyBlock,
     targetBlock(args.target, true),
     instructionsBlock(args.instructions ?? "", args.instructionsFrom, "verify"),
     conventionsBlock(args.instructionFiles ?? [], "verify"),
@@ -176,6 +178,15 @@ function hunksBlock(change: Change, hunks: HunkRef[], secrets: string[]): { text
   // larger. A hunk over the brief's diff budget is read through the tools
   // instead, and its file must then be read to count.
   for (const ref of hunks) {
+    if (ref.deletion && change.files.some((file) => file.path === ref.path && file.binary && file.status === "deleted")) {
+      blocks.push([
+        `### ${ref.id} ${ref.path} ${ref.start}-${ref.end}`,
+        "",
+        "The file is binary and was deleted. There are no lines to read; the deletion is the change.",
+      ].join("\n"));
+      shown.add(ref.path);
+      continue;
+    }
     let file = files.get(ref.path);
     if (!file) {
       const text = redactSecretsKeepingLines(change.diffs?.find((diff) => diff.path === ref.path)?.text ?? "", secrets);
@@ -316,6 +327,7 @@ const VERIFY_WORK = [
   "Name each step by its code: the call, the exception, the keyword, the field.",
   "Correct a detail only when you cite the line that refutes it, and say so in `reason`.",
   "Refute when the code shows the claim is wrong or the path cannot happen. Cite the line that shows why.",
+  "A claim that a value is a placeholder, missing or redacted, where the copy reads `[redacted]`, is refuted.",
   'Check for an upstream guard, an unreachable branch, an already validated value, or generic "missing X" without a concrete path.',
   "Use unresolved when the code does not settle a finder candidate. Doubt alone is not a refutation.",
   "A scanner candidate is always confirmed or refuted, never unresolved.",

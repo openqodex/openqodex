@@ -70,6 +70,8 @@ export function validateCalibration(record, { build, board, agreementRuling }) {
   need(equal(record.board, board) && record.judgeModel === board.judgeModel && record.promptHash === board.promptHash, "board, prompt or judge differs from the comparison board");
   need(record.version === 1 && typeof record.vendor === "string" && record.vendor.length > 0 && typeof record.labelUnit === "string" && record.labelUnit.length > 0 && Number.isFinite(record.costUsd) && record.costUsd >= 0, "missing vendor, label unit or cost");
   validateAgreement(record);
+  const v = record.judgeVariability;
+  if (v !== undefined) need(Array.isArray(v?.sample) && v.sample.length > 0 && Number.isInteger(v.labels) && v.labels > 0 && Number.isInteger(v.disagree) && v.disagree >= 0 && v.disagree <= v.labels && v.rate === v.disagree / v.labels && Array.isArray(v.passes) && v.passes.length === 2, "judgeVariability must give its sample, both passes and the disagreement rate");
   need(Object.values(record.agreement).every((v) => v >= 0.9) || (agreementRuling !== undefined && equal(agreementRuling, agreementPercentages(record.agreement))), "agreement must be at least 90 percent on each class without a matching calibration ruling");
   return record;
 }
