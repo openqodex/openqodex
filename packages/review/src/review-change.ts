@@ -520,7 +520,8 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       try { live.kill?.(); } catch { /* Stop the remaining reviewers too. */ }
       void Promise.resolve().then(() => live.close()).catch(() => {});
     }
-    for (const change of changes) cleanupDiffs(change);
+    // A patch that cannot be removed never keeps the snapshot from going.
+    for (const change of changes) { try { cleanupDiffs(change); } catch { /* private to this user; removed with the host's temp folder */ } }
     if (snapshot !== null) deps.snapshots.removeNow(repoRoot, snapshot as Snapshot);
   });
   const scanHost: ScanHost = { resolveTool: deps.resolveTool, onProgress: say, onScan: (scan) => deps.onEvent({ type: "scan", scan }), ...(deps.scratchRoot !== undefined ? { scratchRoot: deps.scratchRoot } : {}) };
@@ -882,7 +883,9 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
   } finally {
     over = true;
     for (const live of liveSessions) { try { await live.close(); } catch { /* Other cleanup must still run. */ } }
+    // A finished review is the result; a leftover temporary patch is not.
     try { for (const change of changes) cleanupDiffs(change); }
+    catch { /* private to this user; removed with the host's temp folder */ }
     finally {
       try { graphLease?.release(); }
       finally {

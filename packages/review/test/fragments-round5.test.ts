@@ -239,3 +239,14 @@ it("R5.11 keeps hunkRefs from registering a list, so an inventory with secrets c
   obligations(f.change, fragmentSnapshotText(f.dir), stagedDiffCache(f.change, list));
   expect(registeredSecrets(f.change)).toBe(list);
 });
+
+it("R5.12 a removed line's fragments at the same line do not count as the added line's sent bytes", () => {
+  const f = fixture(["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "y".repeat(6000) + "\nrow 2\n");
+  const unread: HunkRef[] = [{ id: "h1", path: "a.txt", start: 1, end: 1, deletion: false, lineBytes: 6000, fragment: { of: "h1", from: 1, to: 6000 } }];
+  const earlier: HunkRef[] = [{ id: "d1", path: "a.txt", start: 1, end: 1, deletion: { id: "a.txt#0", oldStart: 1, oldEnd: 1 }, old: [1, 1], lineBytes: 6000, fragment: { of: "d1", from: 1, to: 6000 } } as HunkRef];
+  const page = deliverRanges({ snapshotDir: f.dir, change: f.change, secrets: [], unread, earlier });
+  expect(page.text).toContain("a.txt: line 1, bytes 1 to 2,000 of 6,000");
+  expect(page.text).toContain("a.txt: line 1, bytes 4,001 to 6,000 of 6,000");
+  expect(page.left).toEqual([]);
+});

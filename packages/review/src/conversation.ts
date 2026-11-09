@@ -469,7 +469,8 @@ export function deliverRanges(args: { snapshotDir: string; unread: Hunk[]; earli
               out.push(...frame);
               bytes -= frameSize;
               room -= frame.length;
-              const sent = (args.earlier ?? []).filter((d) => d.path === h.path && d.start === at && d.fragment).map((d) => d.fragment!);
+              // A removed line's fragments are old-side bytes; only this line's own count.
+              const sent = (args.earlier ?? []).filter((d) => !d.deletion && d.path === h.path && d.start === at && d.fragment).map((d) => d.fragment!);
               next = sendFragments(source, next, end, (f) => fragmentLabel(h.path, at, f.from, f.to, f.total), sent, (f) => {
                 const previous = delivered.at(-1);
                 if (previous?.path === h.path && previous.start === at && previous.fragment?.to === f.from - 1) previous.fragment.to = f.to;

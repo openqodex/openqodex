@@ -303,6 +303,8 @@ function manifest(file: StoreFile): string | null {
 
 // The caller repeats the root summary and paginates these file blocks by
 // the size of the complete brief, crediting only a page's listed files.
+const COMPLETE_TEXT_BYTES = 8 * 1024;
+
 export function storeSections(root: string, files: StoreFile[], secrets: string[] = []): { summary: string; entries: { file: StoreFile; text: string; omitted: Digest["omitted"] }[] } {
   const kinds = new Map<string, number>();
   const sizes = files.map((file) => ({ file, bytes: file.bytes ?? Buffer.byteLength(file.text ?? "", "utf8"), lines: file.text === null || file.text === "" ? 0 : file.text.replace(/\n$/, "").split("\n").length }));
@@ -326,7 +328,9 @@ export function storeSections(root: string, files: StoreFile[], secrets: string[
     if (found) out.push(`manifest ${file.path}: ${found}`);
     if (generatedFiles.has(file)) out.push(`generated/minified: ${file.path}`);
     for (const row of file.changed.map((h) => `${file.path}:${h.start}-${h.end}${h.deletion ? ` removed ${h.old?.join("-") ?? ""}` : ""}`)) out.push(row);
-    if (file.text !== null && !file.text.includes("\0") && lines < 30) out.push(`Complete text ${file.path}:`, file.text);
+    // A short file travels whole only when it is also small: a one-line
+    // minified bundle would push the page past the brief bound.
+    if (file.text !== null && !file.text.includes("\0") && lines < 30 && Buffer.byteLength(file.text, "utf8") <= COMPLETE_TEXT_BYTES) out.push(`Complete text ${file.path}:`, file.text);
     else for (const h of file.changed) omitted.push({ path: file.path, lines: [h.start, h.end], why: file.text === null ? "binary or unavailable text; metadata and changed ranges only" : "file text grouped by content kind; inspect with tools" });
     return { file, text: redactSecrets(out.join("\n"), secrets), omitted };
   });

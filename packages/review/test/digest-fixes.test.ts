@@ -164,3 +164,10 @@ it("redacts a 300-digit numeric value before showing its first 120 characters", 
   expect(digest.text).not.toContain(digits.slice(0, 120));
   expect(digest.text).toContain("[redacted]");
 });
+
+it("keeps a one-line 100 KB store file out of the complete text and names its omission", () => {
+  const sections = storeSections("node_modules", [{ path: "node_modules/p/bundle.min.js", text: "x".repeat(100 * 1024), status: "added", changed: [{ ...ref(1), path: "node_modules/p/bundle.min.js" }] }]);
+  expect(sections.entries[0]!.text).not.toContain("Complete text");
+  expect(Buffer.byteLength(sections.entries[0]!.text)).toBeLessThan(2000);
+  expect(sections.entries[0]!.omitted).toHaveLength(1);
+});

@@ -169,8 +169,11 @@ export async function reviewChanges(args: {
   try {
     const { change: since } = await getAdmittedTreeChange({ repoRoot: clonePath, baseRef: "the previously reviewed commit", baseSha: previous, headSha: args.headSha, exclude, admit, ...temp });
     try { return { full, obligation: deltaChange(full, since, args.tempRoot), renamedIn }; }
-    finally { cleanupDiffs(since); }
-  } catch (error) { cleanupDiffs(full); throw error; }
+    finally { try { cleanupDiffs(since); } catch { /* the delta is the result; a leftover private patch is not */ } }
+  } catch (error) {
+    try { cleanupDiffs(full); } catch { /* the original error is the one to report */ }
+    throw error;
+  }
 
 }
 
