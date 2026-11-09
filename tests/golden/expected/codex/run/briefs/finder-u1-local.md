@@ -6,6 +6,9 @@
 - Scanners: 15 scanners ran, 5 had nothing to check
 - Block threshold: warn only, nothing blocks the push
 
+The current folder holds a frozen copy of the code under review, with the change applied. Read it only through the tools you were given; it is the only place you can read, and you never run the repository's code.
+OpenQodex replaced every value the secret scanner matched with `[redacted]`, in this copy and in the diff. Treat `[redacted]` as a real value you cannot see, never as a placeholder or a missing value; raise no finding about the masking itself.
+
 ## Your unit
 
 Unit: u1
@@ -1331,6 +1334,55 @@ Suppress when:
   / Supabase Auth) that owns auth flows; the route is a thin
   pass-through and the provider rate-limits
 
+### replaced-line-drops-behavior
+
+A replacement drops an effect the old line had and the change does not restore it (confidence floor 0.7)
+
+For each removed line beside a replacement, name the old line's effects.
+These include conditions, calls, resource releases and error handling.
+Also check slices, initial values, retries, statuses and parser keys.
+Compare those effects with the new code.
+Include surrounding control flow and callers.
+
+Flag a dropped effect only when this change never restores it.
+Show the resulting failure from the code.
+Name the lost effect.
+Identify the input or path that needs it.
+State the consequence.
+Cite the replacement line.
+A missing effect alone does not prove a defect.
+Check whether the change intentionally removes the behavior.
+Verify that the code supports that reason.
+
+This lens triggers on replacements in files with these extensions:
+
+- `.c`, `.cc`, `.cpp`, `.cxx`, `.C`, `.h`, `.hh`, `.hpp`, `.hxx`, `.rs`, `.cs`, `.php`
+- `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`, `.py`, `.pyi`, `.go`, `.rb`
+- `.java`, `.kt`, `.kts`, `.swift`, `.m`, `.mm`, `.scala`, `.sc`, `.sh`, `.bash`, `.zsh`, `.sql`
+- `.lua`, `.pl`, `.pm`, `.r`, `.R`, `.dart`, `.ex`, `.exs`, `.erl`, `.hrl`, `.hs`, `.clj`
+- `.cljs`, `.cljc`, `.vue`, `.svelte`, `.vb`, `.fs`, `.fsx`, `.ps1`, `.psm1`, `.groovy`, `.gradle`, `.asm`
+- `.s`, `.S`, `.zig`, `.jl`, `.ml`, `.mli`, `.nim`, `.v`, `.vhd`, `.vhdl`, `.f`, `.f90`
+- `.f95`, `.for`, `.cob`, `.cbl`, `.coffee`, `.elm`, `.el`, `.lisp`, `.lsp`, `.scm`, `.ss`, `.rkt`
+- `.d`, `.pas`, `.p`, `.raku`, `.tcl`, `.awk`
+
+Suppress when:
+- a renamed call has the same effect,
+- the old line moved elsewhere in the same change and still runs on the
+  paths that need it,
+- another condition, call or cleanup preserves the old effect,
+- the change explains why the behavior is no longer needed and the code
+  supports that explanation,
+- the edit only adds lines, or changes formatting or comments without
+  changing behavior.
+
+Example: `return ptr ? *ptr : 0;` becomes `return *ptr;`. The old line
+handled a null pointer. If callers can still pass null, check for another null guard.
+Without one, the replacement dereferences null instead of returning zero.
+Flag the lost check. If the same change guards null before this line, raise nothing.
+
+Severity follows the demonstrated consequence. Raise a bug, not a
+request for tests, a style preference, or speculative hardening.
+
 ### sql-string-concatenation
 
 SQL built via string concatenation / template-string interpolation of unsanitized input (confidence floor 0.75)
@@ -1373,6 +1425,8 @@ Pass: local
 ## How to work
 
 For each hunk, write what changed and what it could break before anything else.
+Then follow each changed condition, mutation, async completion and cleanup through the whole flow it belongs to.
+Look across the other hunks of this unit and the code around the change.
 Before judging a changed call, contract, default or fallback, read the other side in the other file.
 Use "Code around the change" first, then your tools. Name the question you are answering before each read.
 Raise every defect you can show with a line of code at confidence 0.5 or higher.
@@ -1542,13 +1596,17 @@ Fields:
 - `file_path` and `line_number`: the file and line showing the problem.
 - `line_end`: optional end of the range, at least `line_number`.
 - `title`: a short noun phrase naming the problem.
-- `claim`: what is wrong and why it matters, in one or two sentences.
+- `claim`: what is wrong and why it matters. Name the code that makes it happen at each step, from the changed line to the effect.
+  When the evidence line itself is the defect, quote its words (a bare `pass`, an empty handler).
 - `evidence`: one to three citations. Each has `file_path`, `line_number` and `quote`.
 - `quote`: the line's text, copied exactly without the diff marker. Set `removed: true` when the change removed it.
 - `lens`: the listed pattern's name when it led to the candidate. Otherwise omit it or set null.
 
 Writing rules, checked by a script that sends back every broken rule:
-- At most 20 words per sentence. Use at most two sentences in each of: `changed`, `could_break`, `claim`.
+- At most 20 words per sentence.
+- At most 2 sentences in `changed`.
+- At most 2 sentences in `could_break`.
+- At most 3 sentences in `claim`.
 - Plain text on one line: no line break, no em dash.
 - Never name a scanner or a rule id in `title`, `claim`. The report shows the source separately.
 - Use the active voice and name the actor. Say one fact per sentence. Use the same word for the same thing every time.

@@ -1,0 +1,1049 @@
+{
+  "version": 1,
+  "board": {
+    "name": "martian",
+    "repository": "withmartian/code-review-benchmark",
+    "commit": "e616e849755441da38f18bf3adba2c9583b03803",
+    "judgeModel": "gpt-5.2",
+    "promptHash": "c04a15540cb245ee8659012294324322a7f43f552fd8e7bfb3a3cc37cc961bdb",
+    "metric": "F1",
+    "profile": "core",
+    "pinHash": "3b8c10c4b22f4822ad7653fdfe02e243894dc4d075be3b3bc3b696fe78f31d6f"
+  },
+  "vendor": "Augment",
+  "labelUnit": "golden comment caught or missed across all categories",
+  "build": {
+    "commit": "320f1e46f072fe238bf46db8b56a4f8a4975d3df",
+    "tree": "a77cb19e82c7421097bda733f6eb0d171fc46fc3",
+    "bundleHash": "8e96c624eae7236c5b4b77cd59e4d1dcd2972d237bdc05ba9fce5362bf9bab15",
+    "version": "0.13.0"
+  },
+  "startedAt": "2026-10-22T22:59:28.091Z",
+  "endedAt": "2026-10-22T22:59:46.018Z",
+  "promptHash": "c04a15540cb245ee8659012294324322a7f43f552fd8e7bfb3a3cc37cc961bdb",
+  "judgeModel": "gpt-5.2",
+  "counts": {
+    "total": 173,
+    "agree": 163,
+    "disagree": 10,
+    "byClass": {
+      "positive": {
+        "total": 108,
+        "agree": 100,
+        "disagree": 8
+      },
+      "negative": {
+        "total": 65,
+        "agree": 63,
+        "disagree": 2
+      }
+    }
+  },
+  "agreement": {
+    "positive": 0.9259259259259259,
+    "negative": 0.9692307692307692
+  },
+  "costUsd": 1.82659925,
+  "costBasis": "Reported token usage at the pinned public rates in outside/prices.json, not an invoice.",
+  "pricesHash": "80b6284ce3a71edba665278bfa1b5f61e75995bdea0c4123ce0b855b6837f405",
+  "relay": {
+    "relay": true,
+    "requests": 956,
+    "stripped": 1,
+    "parameterChanges": {
+      "chat_template_kwargs": 1,
+      "temperature": 956,
+      "top_p": 1,
+      "max_tokens": 1
+    },
+    "upstreamStatuses": {
+      "200": 1
+    },
+    "usage": {
+      "responses": 960,
+      "missing": 0,
+      "inputTokens": 414275,
+      "outputTokens": 78687,
+      "cachedTokens": 0
+    },
+    "cacheHits": 955,
+    "connectionDrops": 0,
+    "invalidAnswers": 4,
+    "judgeFailures": []
+  },
+  "sources": {
+    "version": 1,
+    "repo": "withmartian/code-review-benchmark",
+    "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+    "tree": "e616e849755441da38f18bf3adba2c9583b03803",
+    "files": [
+      {
+        "path": "methodology/full.md",
+        "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/methodology/full.md",
+        "sha256": "223378ad6b79b98ecdda1bbc60164bb21468a5a164ed2023365931a068cbbdb3"
+      },
+      {
+        "path": "offline/analysis/benchmark_dashboard.json",
+        "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+        "sha256": "43f8a9e89e8c1839b6f9712be6757e078f5230165ac14b34f968d0832cb0b2e7"
+      },
+      {
+        "path": "offline/analysis/score_profiles.py",
+        "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/score_profiles.py",
+        "sha256": "b5d474a373f008f0899dbcbe8deca5f596d8081bc9579b75391971f6f2959f52"
+      },
+      {
+        "path": "offline/code_review_benchmark/__init__.py",
+        "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "offline/code_review_benchmark/step2_5_dedup_candidates.py",
+        "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/step2_5_dedup_candidates.py",
+        "sha256": "5438ffb2a487129bd0f85d5a8c43020efe5027ec2d1d51e599b9c1d9f743cd4c"
+      },
+      {
+        "path": "offline/code_review_benchmark/step2_extract_comments.py",
+        "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/step2_extract_comments.py",
+        "sha256": "d0b328d3953a3f68819ed530b1aafb594e7ad7cf09ef64e3b7e82d7bb221c800"
+      },
+      {
+        "path": "offline/code_review_benchmark/step3_judge_comments.py",
+        "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/step3_judge_comments.py",
+        "sha256": "7370dfb21bed01655aada1d4d75f32e07c92e4c4c86dfc6cf6d47058a65ce16d"
+      },
+      {
+        "path": "offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+        "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+        "sha256": "56e38e37ce5709885a1627a6979fef53048bb19735e792481ec7c8b767be726d"
+      }
+    ],
+    "data": {
+      "repo": "withmartian/code-review-benchmark",
+      "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+      "readDate": "2026-10-14",
+      "path": "offline/results/benchmark_data.json",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/results/benchmark_data.json",
+      "sha256": "60fe361f1430ce3d55bf85d2ceba30205c6a207eb2c49447a2b527e23718d5ed"
+    }
+  },
+  "score": {
+    "profile": "core",
+    "metric": "F1",
+    "beta": 1,
+    "publishedJudge": "anthropic_claude-opus-4-5-20251101",
+    "ours": {
+      "precision": 0.5187165775401069,
+      "recall": 0.6139240506329114,
+      "f1": 0.5623188405797102,
+      "fbeta": 0.5623188405797102,
+      "tp": 97,
+      "fp": 90,
+      "fn": 61,
+      "prs": 50
+    },
+    "cited": {
+      "board": "martian-offline",
+      "product": "Augment",
+      "tool": "augment",
+      "metric": "F1",
+      "value": 62.2,
+      "metrics": {
+        "precision": 59.5,
+        "recall": 65.2
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-01-22",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    }
+  },
+  "labels": [
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37429#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37429#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37429#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37429#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37429#g5",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37634#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37634#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37634#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37634#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/38446#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/38446#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/36882#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/36882#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/36880#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/36880#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/36880#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/36880#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/36880#g5",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37038#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/37038#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/33832#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/33832#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/33832#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/33832#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/40940#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/40940#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1#g1",
+      "label": "negative",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/93824#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/93824#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/93824#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/93824#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/93824#g5",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5#g5",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5#g6",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/97529#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/97529#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/80168#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/80168#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/80168#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/80528#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/80528#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/77754#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/77754#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/77754#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/77754#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/95633#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/95633#g2",
+      "label": "positive",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3#g1",
+      "label": "negative",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/103633#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/103633#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/103633#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/67876#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/67876#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/getsentry/sentry/pull/67876#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/32918#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/keycloak/keycloak/pull/32918#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/94942#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/94942#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/90939#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/90939#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/80329#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/80329#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/90045#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/90045#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/90045#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/106778#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/106778#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/107534#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/79265#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/79265#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/79265#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/79265#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/79265#g5",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/9#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/9#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/76186#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/76186#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/grafana/grafana/pull/76186#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10#g5",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10#g6",
+      "label": "positive",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10#g7",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/7#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/7#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/7#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/7#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/7#g5",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8#g5",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8#g6",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/3#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/3#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/3#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/5#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/5#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/5#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/6#g1",
+      "label": "negative",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4#g5",
+      "label": "negative",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4#g6",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4#g7",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4#g8",
+      "label": "negative",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/2#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/ai-code-review-evaluation/discourse-graphite/pull/2#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/22532#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/22532#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/22532#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/22532#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/8330#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/8330#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/14943#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/14943#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/22345#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/22345#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g5",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g6",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g7",
+      "label": "negative",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g8",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/11059#g9",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/7232#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/7232#g2",
+      "label": "negative",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/7232#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/14740#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/14740#g2",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/14740#g3",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/14740#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/14740#g5",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/14740#g6",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10600#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10600#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10600#g3",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10600#g4",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10600#g5",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10967#g1",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10967#g2",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10967#g3",
+      "label": "negative",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10967#g4",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10967#g5",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/10967#g6",
+      "label": "positive",
+      "published": "positive"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/8087#g1",
+      "label": "negative",
+      "published": "negative"
+    },
+    {
+      "id": "https://github.com/calcom/cal.com/pull/8087#g2",
+      "label": "positive",
+      "published": "positive"
+    }
+  ],
+  "judgeFailures": {
+    "items": 0,
+    "reviews": 0,
+    "labels": 0,
+    "byClass": {
+      "positive": 0,
+      "negative": 0
+    },
+    "failures": [],
+    "failedLabels": []
+  },
+  "status": "complete"
+}

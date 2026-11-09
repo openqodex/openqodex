@@ -1,2 +1,8 @@
 {"at":"2026-10-11T23:13:36.996Z","suite":"martian","caseCount":50,"purpose":"materialise-only","runId":null,"release":null,"by":"Sid"}
 {"at":"2026-10-12T00:13:15.986Z","suite":"aacr","caseCount":28,"purpose":"materialise-only","runId":null,"release":null,"by":"Sid"}
+{"at":"2026-10-24T01:49:45.452Z","suite":"martian","caseCount":50,"purpose":"materialise-only","runId":null,"release":null,"by":"Sid"}
+{"at":"2026-10-25T19:09:45.030Z","suite":"martian","caseCount":50,"purpose":"release-run","runId":"2026-10-24-25e37262-martian-claude","release":"compare-2026-10","by":"Sid"}
+{"at":"2026-10-25T19:09:45.710Z","suite":"martian","caseCount":50,"purpose":"release-run","runId":"2026-10-24-25e37262-martian-control","release":"compare-2026-10","by":"Sid"}
+{"at":"2026-10-25T19:09:46.430Z","suite":"martian","caseCount":50,"purpose":"release-run","runId":"2026-10-24-25e37262-martian-library","release":"compare-2026-10","by":"Sid"}
+{"at":"2026-10-26T04:28:01.404Z","suite":"martian","caseCount":50,"purpose":"release-run","runId":"2026-10-24-25e37262-martian-control-49","release":"compare-2026-10","by":"Sid"}
+{"at":"2026-10-28T10:27:49.704Z","suite":"martian","caseCount":50,"purpose":"release-run","runId":"2026-10-28-55a9d696-martian-control","release":"compare-2026-10","by":"Sid"}

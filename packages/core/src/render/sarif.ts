@@ -2,7 +2,7 @@
 // one per scanner, so a code scanning view groups them by tool. Observations
 // have note level and a tier property, separate from counted results.
 import type { Candidate, Report, ReportFinding, Severity } from "../types.js";
-import { orderObservations } from "./common.js";
+import { orderObservations, orderPossible } from "./common.js";
 
 type SarifResult = {
   ruleId: string;
@@ -121,10 +121,10 @@ export function renderSarif(report: Report): string {
     else add(scannerOf(f.source ?? "", report), fromFinding(f));
   }
   for (const c of report.not_reviewed) add(c.source, fromCandidate(c));
-  for (const f of orderObservations(report)) {
+  for (const [tier, items] of [["observation", orderObservations(report)], ["possible", orderPossible(report)]] as const) for (const f of items) {
     const result = fromFinding(f);
     result.level = "note";
-    result.properties["openqodex.tier"] = "observation";
+    result.properties["openqodex.tier"] = tier;
     if (f.origin === "agent") agent.push(result);
     else add(scannerOf(f.source ?? "", report), result);
   }

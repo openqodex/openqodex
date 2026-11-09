@@ -138,7 +138,7 @@ export function renderImpactBlock(impact: ImpactSummary, opts: { overflow?: stri
   const removed = impact.removed.filter((id) => !sym.get(id)?.movedTo);
 
   if (impact.touched.length === 0 && impact.removed.length === 0 && impact.exports.length === 0) {
-    out.push("", "The change touches no function, method, class or type in a TypeScript, JavaScript, Python, Go or Ruby file, so there is no caller to trace.");
+    out.push("", "The change touches no function, method, class or type in a TypeScript, JavaScript, Python, Go, Ruby or Java file, so there is no caller to trace.");
     pushImporters(out, impact, at);
     out.push(...renderFrameworkLines(impact.frameworks, packet));
     return out.join("\n");

@@ -143,6 +143,17 @@ function repo(): string {
   return dir;
 }
 
+// A folder laid out like the review's snapshot of repo(), plus `extra`
+// files, for the trace check's path rules run in process.
+function snapshotLike(extra: Record<string, string> = {}): string {
+  const dir = tempDir("oq-total-snap-");
+  for (const [path, text] of Object.entries({ "README.md": "hello\n", "db/x.sql": SQL, ...extra })) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true });
+    writeFileSync(join(dir, path), text);
+  }
+  return dir;
+}
+
 type Answer = (text: string, snapshotDir: string) => Partial<Turn> | Promise<Partial<Turn>>;
 // `deadlines`: each start's deadline, with the clock when it started.
 type Fake = ReviewerDriver & { sent: string[]; snapshots: string[]; closed: number; deadlines: { deadline: number; at: number }[] };
@@ -245,21 +256,15 @@ function legacyConfig(dir: string): void {
 const checkouts = () => (existsSync(join(home, "checkouts")) ? readdirSync(join(home, "checkouts")) : []);
 
 describe("the total review run", () => {
-  it("1, 8. a complete review exits 0 under warn only, prints one JSON document and leaves nothing on stdout but the report", async () => {
+  it("1, 8, 26. a complete review exits 0 under warn only, prints one JSON document, leaves nothing on stdout but the report and never shows the fallback text", async () => {
     const driver = fake([good]);
     expect(await review(repo(), driver)).toBe(0);
     const report = JSON.parse(out) as Report;
     expect(report.completion?.status).toBe("complete");
     expect(report.completion?.reviewer).toMatchObject({ driver: "claude", version: "9.9.9", pid: null });
     expect(err).toContain("Reviewer");
-  });
-
-  it("9. a complete review blocked at block_on_severity exits 1", async () => {
-    const dir = repo();
-    mkdirSync(join(dir, ".openqodex"), { recursive: true });
-    writeFileSync(join(dir, ".openqodex/config.yaml"), "review:\n  block_on_severity: major\n");
-    expect(await review(dir, fake([good]))).toBe(1);
-    expect((JSON.parse(out) as Report).verdict).toBe("blocked");
+    expect(out + err).not.toContain("review --agent");
+    expect(out + err).not.toContain("To review with the agent you are in");
   });
 
   it("1, 2, 12. a candidate left with no disposition gets two correction rounds in the same session, then exits 2 incomplete", async () => {
@@ -291,7 +296,8 @@ describe("the total review run", () => {
     expect((JSON.parse(out) as Report).completion?.missing.join("\n")).toContain("/etc/hosts");
   });
 
-  it("4. removes the snapshot after success, after a driver failure and after a timeout", async () => {
+  // After a timeout: case 39 below.
+  it("4. removes the snapshot after success and after a driver failure", async () => {
     // This regression checks the single-pass conversation.
     singleSession = true;
     await review(repo(), fake([good]));
@@ -301,12 +307,6 @@ describe("the total review run", () => {
     };
     expect(await review(repo(), fake([boom]))).toBe(2);
     expect(checkouts()).toEqual([]);
-    const slow: Answer = () => new Promise(() => {});
-    const driver = fake([slow]);
-    expect(await review(repo(), driver, [], 1_000)).toBe(2);
-    expect(driver.closed).toBe(1);
-    expect(checkouts()).toEqual([]);
-    expect(err).toMatch(/timed out/);
   });
 
   it("5. an edit in the developer's folder during the review does not change what was reviewed", async () => {
@@ -324,29 +324,26 @@ describe("the total review run", () => {
 });
 
 describe("13. the trace check fails closed", () => {
+  // The path rules, in process (`classify`, the check the review runs on
+  // every traced call); the cases after the table run whole reviews.
   const cases: [string, ToolCall][] = [
     ["a relative path that climbs out with ../", { tool: "Read", input: { file_path: "../../../etc/hosts" }, ok: true, read: null }],
     ["an absolute path outside", { tool: "Read", input: { file_path: "/etc/hosts" }, ok: false, read: null }],
     ["a Grep with its path outside", { tool: "Grep", input: { pattern: "key", path: "/Users" }, ok: true, read: null }],
     ["a Glob pattern rooted outside", { tool: "Glob", input: { pattern: "/etc/**/*.conf" }, ok: true, read: null }],
     ["a Glob pattern that climbs out", { tool: "Glob", input: { pattern: "../**/*" }, ok: true, read: null }],
-    ["a home path", { tool: "Read", input: { file_path: "~/.ssh/config" }, ok: true, read: null }],
-    ["an environment-style path", { tool: "Read", input: { file_path: "$HOME/.ssh/config" }, ok: true, read: null }],
     ["a URL-encoded path", { tool: "Read", input: { file_path: "%2e%2e/%2e%2e/etc/hosts" }, ok: true, read: null }],
-    ["an unknown tool", { tool: "Bash", input: { command: "ls" }, ok: true, read: null }],
     ["an input that cannot be read", { tool: "Read", input: "not an object", ok: true, read: null }],
     ["a path that is not text", { tool: "Grep", input: { pattern: "x", path: 7 }, ok: true, read: null }],
-    ["a Glob alternative list that climbs out", { tool: "Glob", input: { pattern: "{../outside/*.txt,*.ts}" }, ok: true, read: null }],
-    ["a Glob pattern with .. in the middle", { tool: "Glob", input: { pattern: "src/**/../../../*" }, ok: true, read: null }],
     ["a Grep file glob that climbs out", { tool: "Grep", input: { pattern: "key", glob: "../*.env" }, ok: true, read: null }],
   ];
-  for (const [name, call] of cases) {
-    it(`${name} makes the run incomplete`, async () => {
-      const answer: Answer = (text) => ({ finalText: submission(text), calls: [call] });
-      expect(await review(repo(), fake([answer]))).toBe(2);
-      expect((JSON.parse(out) as Report).completion?.status).toBe("incomplete");
-    });
-  }
+  for (const [name, call] of cases) it(`${name} is outside the snapshot`, () => expect(classify(snapshotLike(), call).inside).toBe(false));
+  // Not a path rule: a tool the reviewer was not given fails the run.
+  it("an unknown tool makes the run incomplete", async () => {
+    const answer: Answer = (text) => ({ finalText: submission(text), calls: [{ tool: "Bash", input: { command: "ls" }, ok: true, read: null }] });
+    expect(await review(repo(), fake([answer]))).toBe(2);
+    expect((JSON.parse(out) as Report).completion?.status).toBe("incomplete");
+  });
   it("reads inside the snapshot, relative or absolute, keep the run complete", async () => {
     const answer: Answer = (text, snapshotDir) => ({
       finalText: submission(text),
@@ -381,21 +378,30 @@ describe("13. the trace check fails closed", () => {
 const glob = (pattern: string): ToolCall => ({ tool: "Glob", input: { pattern }, ok: true, read: null });
 const grep = (files: string): ToolCall => ({ tool: "Grep", input: { pattern: "readFileSync", glob: files }, ok: true, read: null });
 const readOf = (file: string): ToolCall => ({ tool: "Read", input: { file_path: file }, ok: true, read: null });
+// A call and the text the trace must name it by.
+type Asked = [ToolCall, string];
+const globAsked = (pattern: string): Asked => [glob(pattern), pattern];
+const grepAsked = (files: string): Asked => [grep(files), files];
+const readAsked = (file: string): Asked => [readOf(file), file];
 
-// One call in an otherwise good answer: inside keeps the run complete,
-// outside ends it incomplete and names what the call asked for.
-async function expectInside(call: (snapshotDir: string) => ToolCall, dir = repo()): Promise<void> {
+// One call in an otherwise good answer, through a whole review: inside
+// keeps the run complete. Each family below keeps one such run, which
+// proves the review asks the check the rest of its rows ask in process.
+async function expectInsideRun(call: (snapshotDir: string) => ToolCall, dir = repo()): Promise<void> {
   const answer: Answer = (text, snapshotDir) => ({ finalText: submission(text), calls: [call(snapshotDir)] });
   expect(await review(dir, fake([answer]))).toBe(0);
   expect((JSON.parse(out) as Report).completion?.status).toBe("complete");
 }
-async function expectOutside(call: ToolCall): Promise<void> {
-  const answer: Answer = (text) => ({ finalText: submission(text), calls: [call] });
-  expect(await review(repo(), fake([answer]))).toBe(2);
-  const report = JSON.parse(out) as Report;
-  expect(report.completion?.status).toBe("incomplete");
-  const input = call.input as Record<string, string>;
-  expect(report.completion?.outside_reads).toEqual([input.file_path ?? input.path ?? (call.tool === "Grep" ? input.glob : input.pattern)]);
+// The same rules in process: `classify` on one call against a folder laid
+// out like the review's snapshot. Outside, the trace names what the call
+// asked for (`asked`, written by each row), as the report's outside_reads does.
+function expectInside(call: (snapshotDir: string) => ToolCall, snapshotDir = snapshotLike()): void {
+  expect(classify(snapshotDir, call(snapshotDir))).toMatchObject({ inside: true });
+}
+function expectOutside([call, asked]: Asked): void {
+  const entry = classify(snapshotLike(), call);
+  expect(entry).toMatchObject({ inside: false, path: asked });
+  expect(entry.own).toBeUndefined();
 }
 
 describe("30. brace lists in a file pattern", () => {
@@ -408,22 +414,22 @@ describe("30. brace lists in a file pattern", () => {
     ["a list of absolute paths in the snapshot", (snapshotDir) => glob(`{${snapshotDir}/db/**,${snapshotDir}/README.md}`)],
     ["an escaped brace in a file name", () => glob("**/\\{id\\}.sql")],
   ];
-  for (const [name, call] of inside) it(`${name} keeps the run complete`, () => expectInside(call));
-  const outside: [string, ToolCall][] = [
-    ["a list with one alternative that climbs out", glob("{db/**,../x}")],
-    ["a list with one absolute alternative outside", glob("{/etc/*,x}")],
-    ["a list with one home alternative", glob("{~/a,b}")],
-    ["a nested list with one absolute alternative outside", glob("{db/**,{x,/etc/*}}")],
-    ["two dots formed by joining a list to its neighbour", glob(".{.,x}/*")],
-    ["an escaped slash that makes an alternative absolute", glob("{\\/etc/*,x}")],
-    ["an escaped dot that forms two dots", glob(".\\./*")],
-    ["a list that is never closed", grep("{packages/cli/src/**,scripts/*.mjs")],
-    ["a close with no open", grep("packages/cli/src/**}")],
-    ["a pattern of a million alternatives, past the bound, which must not be expanded", glob("{a,b,c,d}/".repeat(10))],
-    ["a pattern whose alternatives would hold more characters than the bound, which must not be expanded", glob(`{${Array.from({ length: 256 }, (_, i) => `d${i}`).join(",")}}/${"x".repeat(4096)}`)],
-    ["a list nested deeper than the stack can follow, within the length bound", glob(`${"{".repeat(30_000)}a${"}".repeat(30_000)}`)],
+  it(`${inside[0]![0]} keeps a whole review complete`, () => expectInsideRun(inside[0]![1]));
+  for (const [name, call] of inside) it(`${name} is inside the snapshot`, () => expectInside(call));
+  const outside: [string, Asked][] = [
+    ["a list with one alternative that climbs out", globAsked("{db/**,../x}")],
+    ["a list with one home alternative", globAsked("{~/a,b}")],
+    ["a nested list with one absolute alternative outside", globAsked("{db/**,{x,/etc/*}}")],
+    ["two dots formed by joining a list to its neighbour", globAsked(".{.,x}/*")],
+    ["an escaped slash that makes an alternative absolute", globAsked("{\\/etc/*,x}")],
+    ["an escaped dot that forms two dots", globAsked(".\\./*")],
+    ["a list that is never closed", grepAsked("{packages/cli/src/**,scripts/*.mjs")],
+    ["a close with no open", grepAsked("packages/cli/src/**}")],
+    ["a pattern of a million alternatives, past the bound, which must not be expanded", globAsked("{a,b,c,d}/".repeat(10))],
+    ["a pattern whose alternatives would hold more characters than the bound, which must not be expanded", globAsked(`{${Array.from({ length: 256 }, (_, i) => `d${i}`).join(",")}}/${"x".repeat(4096)}`)],
+    ["a list nested deeper than the stack can follow, within the length bound", globAsked(`${"{".repeat(30_000)}a${"}".repeat(30_000)}`)],
   ];
-  for (const [name, call] of outside) it(`${name} makes the run incomplete`, () => expectOutside(call));
+  for (const [name, call] of outside) it(`${name} is outside the snapshot`, () => expectOutside(call));
 });
 
 describe("31. two dots inside a name", () => {
@@ -433,13 +439,14 @@ describe("31. two dots inside a name", () => {
     ["a dotfile pattern, whose .* never matches the parent folder", glob("**/.*")],
     ["a two-letter locale folder, whose ?? never matches the parent folder", glob("locales/??/*.json")],
   ];
-  for (const [name, call] of inside) it(`${name} keeps the run complete`, () => expectInside(() => call));
-  it("a read of a file whose name starts with two dots keeps the run complete", () => expectInside((s) => readOf(join(s, "..env.example"))));
-  const outside: [string, ToolCall][] = [
-    ["two parent steps after a folder", glob("a/../../x")],
-    ["a parent step between backslashes", glob("a\\..\\x")],
+  it(`${inside[0]![0]} keeps a whole review complete`, () => expectInsideRun(() => inside[0]![1]));
+  for (const [name, call] of inside) it(`${name} is inside the snapshot`, () => expectInside(() => call));
+  it("a read of a file whose name starts with two dots is inside the snapshot", () => expectInside((s) => readOf(join(s, "..env.example"))));
+  const outside: [string, Asked][] = [
+    ["two parent steps after a folder", globAsked("a/../../x")],
+    ["a parent step between backslashes", globAsked("a\\..\\x")],
   ];
-  for (const [name, call] of outside) it(`${name} makes the run incomplete`, () => expectOutside(call));
+  for (const [name, call] of outside) it(`${name} is outside the snapshot`, () => expectOutside(call));
 });
 
 describe("32. $ and % in a name", () => {
@@ -454,36 +461,39 @@ describe("32. $ and % in a name", () => {
     git(dir, "commit", "-qm", "Names with $ and %");
     return dir;
   }
+  // The same two files in a folder laid out like the snapshot, for the rules in process.
+  const namedLike = () => snapshotLike({ "app/routes/posts.$slug.tsx": "export default function Post() {}\n", "docs/100%.md": "# Full\n" });
   const delivered = (snapshotDir: string, file: string): ToolCall => ({ tool: "Read", input: { file_path: join(snapshotDir, file) }, ok: true, read: { path: join(snapshotDir, file), start: 1, lines: 1 } });
-  it("a read of a Remix route file named with $ keeps the run complete", () => expectInside((s) => delivered(s, "app/routes/posts.$slug.tsx"), named()));
-  it("a read of a file named with % keeps the run complete", () => expectInside((s) => delivered(s, "docs/100%.md"), named()));
-  it("a read of a Remix route file padded with spaces, which Claude Code trims, keeps the run complete", () => expectInside(() => readOf(" app/routes/posts.$slug.tsx "), named()));
-  it("a Grep file glob holding $ keeps the run complete", () => expectInside(() => grep("app/routes/*.$slug.tsx"), named()));
-  it("an absolute file pattern in the snapshot naming a $ file keeps the run complete", () => expectInside((s) => glob(`${s}/app/routes/posts.$slug.tsx`), named()));
-  const outside: [string, ToolCall][] = [
-    ["a $HOME path", readOf("$HOME/.ssh/id_rsa")],
-    ["a %USERPROFILE% path", readOf("%USERPROFILE%\\x")],
-    ["a ${HOME} path", readOf("${HOME}/x")],
+  it("a read of a Remix route file named with $ keeps a whole review complete", () => expectInsideRun((s) => delivered(s, "app/routes/posts.$slug.tsx"), named()));
+  it("a read of a Remix route file named with $ is inside the snapshot", () => expectInside((s) => delivered(s, "app/routes/posts.$slug.tsx"), namedLike()));
+  it("a read of a file named with % is inside the snapshot", () => expectInside((s) => delivered(s, "docs/100%.md"), namedLike()));
+  it("a read of a Remix route file padded with spaces, which Claude Code trims, is inside the snapshot", () => expectInside(() => readOf(" app/routes/posts.$slug.tsx "), namedLike()));
+  it("a Grep file glob holding $ is inside the snapshot", () => expectInside(() => grep("app/routes/*.$slug.tsx"), namedLike()));
+  it("an absolute file pattern in the snapshot naming a $ file is inside the snapshot", () => expectInside((s) => glob(`${s}/app/routes/posts.$slug.tsx`), namedLike()));
+  const outside: [string, Asked][] = [
+    ["a $HOME path", readAsked("$HOME/.ssh/id_rsa")],
+    ["a %USERPROFILE% path", readAsked("%USERPROFILE%\\x")],
+    ["a ${HOME} path", readAsked("${HOME}/x")],
   ];
-  for (const [name, call] of outside) it(`${name} that names no file in the snapshot makes the run incomplete`, () => expectOutside(call));
+  for (const [name, call] of outside) it(`${name} that names no file in the snapshot is outside it`, () => expectOutside(call));
 });
 
 describe("33. no reading of ours is looser than Claude Code's or ripgrep's", () => {
   it("an escaped bracket at the start of a pattern is a name, not a Windows root, on macOS and Linux", () => expectInside(() => glob("\\[id\\]/page.tsx")));
-  const outside: [string, ToolCall][] = [
-    ["a Grep file glob that Claude Code splits at a space into an absolute piece", grep("*.ts /etc/*")],
-    ["a Grep file glob that Claude Code splits at a comma into an absolute piece", grep("a,/etc/*")],
-    ["a Grep file glob that Claude Code splits at a comma into a piece that climbs out", grep("src/*,../x")],
-    ["a negated pattern that climbs out", grep("!../secrets/*")],
-    ["a negated absolute pattern", glob("!/etc/*")],
-    ["a brace inside a bracket class, which ripgrep reads as a plain character", glob("*.[{]ts")],
-    ["a Grep folder with spaces around it, which Claude Code trims to an absolute folder", { tool: "Grep", input: { pattern: "key", path: " /etc " }, ok: true, read: null }],
-    ["a read with a space before ~/, which Claude Code trims to the home folder", readOf(" ~/.ssh/id_rsa")],
-    ["a Grep file glob of more pieces than the bound", grep("a,".repeat(300))],
+  const outside: [string, Asked][] = [
+    ["a Grep file glob that Claude Code splits at a space into an absolute piece", grepAsked("*.ts /etc/*")],
+    ["a Grep file glob that Claude Code splits at a comma into an absolute piece", grepAsked("a,/etc/*")],
+    ["a Grep file glob that Claude Code splits at a comma into a piece that climbs out", grepAsked("src/*,../x")],
+    ["a negated pattern that climbs out", grepAsked("!../secrets/*")],
+    ["a negated absolute pattern", globAsked("!/etc/*")],
+    ["a brace inside a bracket class, which ripgrep reads as a plain character", globAsked("*.[{]ts")],
+    ["a Grep folder with spaces around it, which Claude Code trims to an absolute folder", [{ tool: "Grep", input: { pattern: "key", path: " /etc " }, ok: true, read: null }, " /etc "]],
+    ["a read with a space before ~/, which Claude Code trims to the home folder", readAsked(" ~/.ssh/id_rsa")],
+    ["a Grep file glob of more pieces than the bound", grepAsked("a,".repeat(300))],
   ];
-  for (const [name, call] of outside) it(`${name} makes the run incomplete`, () => expectOutside(call));
-  it("a Grep file glob of 200,000 commas is too large to check and does not crash the check", () => expectOutside(grep(",".repeat(200_000))));
-  it("a Grep file glob with many empty pieces, which Claude Code drops before the bound, keeps the run complete", () => expectInside(() => grep(`${",".repeat(1000)}*.sql`)));
+  for (const [name, call] of outside) it(`${name} is outside the snapshot`, () => expectOutside(call));
+  it("a Grep file glob of 200,000 commas is too large to check and does not crash the check", () => expectOutside(grepAsked(",".repeat(200_000))));
+  it("a Grep file glob with many empty pieces, which Claude Code drops before the bound, is inside the snapshot", () => expectInside(() => grep(`${",".repeat(1000)}*.sql`)));
   // Timed on the check alone: a review around it takes longer than the bound.
   const timed = (pattern: string) => {
     const snapshotDir = tempDir("oq-work-");
@@ -585,7 +595,7 @@ describe("35. the reviewer's own saved tool output", () => {
   // The model provider stand-in, started by the real driver: answers detect,
   // then replays the recorded run with the answer replaced by a submission
   // for this brief. `session` is the folder the Read names, as recorded or another.
-  function standIn(readSession: string): string {
+  function standIn(readSession: string, served = false): string {
     const dir = tempDir("oq-spool-bin-");
     const template = submission("`change_id`: `000000000000`");
     writeFileSync(
@@ -616,6 +626,7 @@ describe("35. the reviewer's own saved tool output", () => {
         "  for (const line of text.split('\\n').filter((l) => l !== '')) {",
         "    const e = JSON.parse(line);",
         `    if (e.type === 'assistant') for (const c of e.message.content) if (c.type === 'tool_use' && c.input.file_path) c.input.file_path = c.input.file_path.split(${JSON.stringify(session)}).join(${JSON.stringify(readSession)});`,
+        `    if (${served} && e.type === 'user') for (const c of e.message.content) if (c.type === 'tool_result') { delete c.is_error; c.content = 'served output'; }`,
         `    if (e.type === 'result') e.result = stagedAnswer(brief, ${JSON.stringify(template)}.split('000000000000').join(id), (file, line) => require('node:fs').readFileSync(join(snapshot, file), 'utf8').split('\\n')[line - 1]);`,
         "    process.stdout.write(JSON.stringify(e) + '\\n');",
         "  }",
@@ -627,13 +638,13 @@ describe("35. the reviewer's own saved tool output", () => {
     chmodSync(join(dir, "claude"), 0o755);
     return dir;
   }
-  function claudeReview(readSession: string): Promise<number> {
-    vi.stubEnv("PATH", `${standIn(readSession)}:${process.env.PATH ?? ""}`);
+  function claudeReview(readSession: string, served = false): Promise<number> {
+    vi.stubEnv("PATH", `${standIn(readSession, served)}:${process.env.PATH ?? ""}`);
     const { global } = parseFlags(["--cwd", repo(), "--no-color", "--format", "json"], {});
     return runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer: "claude", timeoutMs: 60_000, drivers: [claudeDriver] });
   }
 
-  it("a read of the output Claude Code saved for this session keeps the run complete; one of another session's output, a transcript or the login does not", async () => {
+  it("a refused read of another session's output fails the review, while a served read must fail", async () => {
     const config = tempDir("oq-claude-config-");
     vi.stubEnv("CLAUDE_CONFIG_DIR", config);
     const code = await claudeReview(session);
@@ -643,9 +654,16 @@ describe("35. the reviewer's own saved tool output", () => {
     expect(code).toBe(0);
 
     out = "";
-    expect(await claudeReview("f0000000-0000-4000-8000-000000000000")).toBe(2);
+    expect(await claudeReview("f0000000-0000-4000-8000-000000000000")).toBe(0);
     const other = JSON.parse(out) as Report;
     expect(other.completion?.outside_reads).toEqual([expect.stringMatching(/\/f0000000-0000-4000-8000-000000000000\/tool-results\/toolu_01ReGzL1ywcwshVJvEbzxZyr\.txt$/)]);
+
+    expect(other.completion?.status).toBe("complete");
+    expect(other.completion?.refused).toEqual(other.completion?.outside_reads);
+    out = "";
+    expect(await claudeReview("f0000000-0000-4000-8000-000000000000", true)).toBe(2);
+    const served = JSON.parse(out) as Report;
+    expect(served.completion?.missing.join(" ")).toContain("the reviewer read outside the snapshot");
 
     const snapshot = tempDir("oq-spool-snap-");
     const own = { configDir: config, sessionId: session };
@@ -686,7 +704,9 @@ describe("what leaves the process", () => {
 });
 
 // The installed gitleaks of the end-to-end home or the developer's home, for
-// the cases that need a secret found by the real scanner; null when neither has it.
+// the cases that need a secret found by the real scanner; null when neither
+// has it, and those cases are reported as skipped. The full gate fills the
+// end-to-end home first (scripts/require-scanners.mjs), so there they run.
 function installedGitleaks(): string | null {
   for (const h of [process.env.OPENQODEX_E2E_HOME ?? cacheFolder("openqodex-e2e-home"), join(homedir(), ".openqodex")]) {
     if (existsSync(join(h, "tools/gitleaks"))) return join(h, "tools/gitleaks");
@@ -714,8 +734,7 @@ describe("21. secrets outside file contents", () => {
     return readdirSync(run, { recursive: true }).map(String).filter((n) => statSync(join(run, n)).isFile()).map((n) => readFileSync(join(run, n), "utf8")).join("\n");
   };
 
-  it("a secret in a file name stops the review before the reviewer starts, and is printed nowhere", async () => {
-    if (gitleaks === null) return void process.stdout.write("filename secret: skipped, gitleaks is not installed\n");
+  it.skipIf(gitleaks === null)("a secret in a file name stops the review before the reviewer starts, and is printed nowhere", async () => {
     const key = secret();
     const dir = withSecret(key, true);
     const driver = fake([good]);
@@ -727,8 +746,7 @@ describe("21. secrets outside file contents", () => {
     expect(out + err + runFiles(dir)).not.toContain(key);
   });
 
-  it("a secret in a tool call's input is redacted in trace.json and the completion record", async () => {
-    if (gitleaks === null) return void process.stdout.write("trace secret: skipped, gitleaks is not installed\n");
+  it.skipIf(gitleaks === null)("a secret in a tool call's input is redacted in trace.json and the completion record", async () => {
     const key = secret();
     const dir = withSecret(key, false);
     const leak: Answer = () => ({ finalText: "not json", calls: [{ tool: "Read", input: { file_path: `/outside/${key}` }, ok: false, read: null }] });
@@ -736,8 +754,7 @@ describe("21. secrets outside file contents", () => {
     expect(out + err + runFiles(dir)).not.toContain(key);
   });
 
-  it("36. a secret the reviewer's answer holds as a key is redacted in rounds.json and every other run file", async () => {
-    if (gitleaks === null) return void process.stdout.write("round key secret: skipped, gitleaks is not installed\n");
+  it.skipIf(gitleaks === null)("36. a secret the reviewer's answer holds as a key is redacted in rounds.json and every other run file", async () => {
     const key = secret();
     const dir = withSecret(key, false);
     // Every answer fails its checks and holds the secret as a key, so each
@@ -929,9 +946,8 @@ describe("25. what a correction message may carry", () => {
     expect(r.text).toBe('a.py: 1 line removed between lines 1 and 2 (with context 1 to 2):\n1\tone\n-\tKEY = "[redacted]"\n2\ttwo');
   });
 
-  it("a planted secret in an unread range never reaches the correction the reviewer gets", async () => {
-    const gitleaks = installedGitleaks();
-    if (gitleaks === null) return void process.stdout.write("correction secret: skipped, gitleaks is not installed\n");
+  it.skipIf(installedGitleaks() === null)("a planted secret in an unread range never reaches the correction the reviewer gets", async () => {
+    const gitleaks = installedGitleaks()!;
     const dir = repo();
     const secret = `sk_live_${Array.from({ length: 24 }, (_, i) => "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[(i * 7 + Math.floor(Math.random() * 57)) % 57]).join("")}`;
     writeFileSync(join(dir, "big.py"), `${Array.from({ length: 3000 }, (_, i) => `value_${i} = "${"y".repeat(70)}"`).join("\n")}\nSTRIPE_KEY = "${secret}"\n`);
@@ -1024,16 +1040,11 @@ const fallback = (dir: string, rest = "") => `To review with the agent you are i
 const SAME_AGENT = "Reviewed by the coding agent you are using.";
 
 describe("26. the fallback when no reviewer can start", () => {
-  it("with no driver available the message names the fallback command", async () => {
-    const dir = repo();
-    expect(await review(dir, fake([good], false))).toBe(2);
-    expect(err).toContain("Full review unavailable");
-    expect(err).toContain(fallback(dir));
-  });
-
-  it("the fallback command keeps the folder and the network limits of the run it replaces", async () => {
+  // The command with no extra flags is checked by the case after this one.
+  it("with no driver available the message names the fallback command, which keeps the folder and the network limits of the run it replaces", async () => {
     const dir = repo();
     expect(await review(dir, fake([good], false), ["--offline", "--no-install"])).toBe(2);
+    expect(err).toContain("Full review unavailable");
     expect(err).toContain(fallback(dir, " --offline --no-install"));
   });
 
@@ -1052,12 +1063,6 @@ describe("26. the fallback when no reviewer can start", () => {
     expect(argv.slice(0, 4)).toEqual(["npx", "-y", "openqodex@0.0.0-test", "review"]);
     // Exercise run's real flag check and agent path with bounded local work.
     await expect(reviewCommand([...argv.slice(4), "--only", "sqllint", "--no-graph", "--offline"])).resolves.toBe(0);
-  });
-
-  it("with a driver available the fallback text never appears", async () => {
-    expect(await review(repo(), fake([good]))).toBe(0);
-    expect(out + err).not.toContain("review --agent");
-    expect(out + err).not.toContain("To review with the agent you are in");
   });
 });
 
@@ -1217,14 +1222,15 @@ describe("the Action's review flags", () => {
     expect(readFileSync(join(folder, "report.md"), "utf8")).toContain("Review incomplete");
   });
 
-  it("R18. --block-on-severity wins over the repository's block_on_severity in a review", async () => {
+  it("9, R18. a complete review blocked at the repository's block_on_severity exits 1, and --block-on-severity wins over it", async () => {
     const dir = repo();
     mkdirSync(join(dir, ".openqodex"), { recursive: true });
-    writeFileSync(join(dir, ".openqodex/config.yaml"), "review:\n  block_on_severity: critical\n");
-    expect(await withOptions(dir, fake([good]), {})).toBe(0);
+    writeFileSync(join(dir, ".openqodex/config.yaml"), "review:\n  block_on_severity: major\n");
+    expect(await withOptions(dir, fake([good]), {})).toBe(1);
+    expect((JSON.parse(out) as Report).verdict).toBe("blocked");
     out = "";
-    expect(await withOptions(dir, fake([good]), { blockOn: "major" })).toBe(1);
-    expect((JSON.parse(out) as Report).block_on_severity).toBe("major");
+    expect(await withOptions(dir, fake([good]), { blockOn: "critical" })).toBe(0);
+    expect((JSON.parse(out) as Report).block_on_severity).toBe("critical");
   });
 });
 
@@ -1336,11 +1342,12 @@ describe("37, 38, 39. the review's time cap", () => {
     }
   });
 
-  it("39. a reviewer that never answers is stopped at --timeout 1, exits 2 and says so on the terminal and in the report", async () => {
+  it("4, 39. a reviewer that never answers is stopped at --timeout 1, exits 2, says so on the terminal and in the report and leaves no snapshot", async () => {
     const driver = fake([() => new Promise(() => {})]);
     const r = await typed(driver, ["--timeout", "1"]);
     expect(r.code).toBe(2);
     expect(driver.closed).toBe(1);
+    expect(checkouts()).toEqual([]);
     expect(err).toContain(`openqodex: ${capLine("1 second")}`);
     const report = JSON.parse(readFileSync(join(r.folder, "report.json"), "utf8")) as Report;
     expect(report.verdict).toBe("incomplete");

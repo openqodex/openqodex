@@ -1,0 +1,779 @@
+{
+  "version": 1,
+  "rows": [
+    {
+      "board": "greptile-original",
+      "product": "Greptile",
+      "metric": "bug catch rate",
+      "value": 82,
+      "measuredBy": "Greptile",
+      "measurementDate": "2025-07",
+      "source": "https://www.greptile.com/benchmarks",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Greptile original set: 50 bugs in 50 pull requests across five repositories",
+        "revision": "July 2025 original set",
+        "source": "https://www.greptile.com/benchmarks"
+      },
+      "snapshot": {
+        "file": "index/outside-sources/greptile-original.json",
+        "sha256": "f8e49272e643a29b32f4232e29ec471331a0cdec28a353ef76f8518504699dd9"
+      }
+    },
+    {
+      "board": "greptile-original",
+      "product": "Cursor Bugbot",
+      "metric": "bug catch rate",
+      "value": 58,
+      "measuredBy": "Greptile",
+      "measurementDate": "2025-07",
+      "source": "https://www.greptile.com/benchmarks",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Greptile original set: 50 bugs in 50 pull requests across five repositories",
+        "revision": "July 2025 original set",
+        "source": "https://www.greptile.com/benchmarks"
+      },
+      "snapshot": {
+        "file": "index/outside-sources/greptile-original.json",
+        "sha256": "f8e49272e643a29b32f4232e29ec471331a0cdec28a353ef76f8518504699dd9"
+      }
+    },
+    {
+      "board": "greptile-original",
+      "product": "GitHub Copilot",
+      "metric": "bug catch rate",
+      "value": 54,
+      "measuredBy": "Greptile",
+      "measurementDate": "2025-07",
+      "source": "https://www.greptile.com/benchmarks",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Greptile original set: 50 bugs in 50 pull requests across five repositories",
+        "revision": "July 2025 original set",
+        "source": "https://www.greptile.com/benchmarks"
+      },
+      "snapshot": {
+        "file": "index/outside-sources/greptile-original.json",
+        "sha256": "f8e49272e643a29b32f4232e29ec471331a0cdec28a353ef76f8518504699dd9"
+      }
+    },
+    {
+      "board": "greptile-original",
+      "product": "CodeRabbit",
+      "metric": "bug catch rate",
+      "value": 44,
+      "measuredBy": "Greptile",
+      "measurementDate": "2025-07",
+      "source": "https://www.greptile.com/benchmarks",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Greptile original set: 50 bugs in 50 pull requests across five repositories",
+        "revision": "July 2025 original set",
+        "source": "https://www.greptile.com/benchmarks"
+      },
+      "snapshot": {
+        "file": "index/outside-sources/greptile-original.json",
+        "sha256": "f8e49272e643a29b32f4232e29ec471331a0cdec28a353ef76f8518504699dd9"
+      }
+    },
+    {
+      "board": "greptile-original",
+      "product": "Graphite",
+      "metric": "bug catch rate",
+      "value": 6,
+      "measuredBy": "Greptile",
+      "measurementDate": "2025-07",
+      "source": "https://www.greptile.com/benchmarks",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Greptile original set: 50 bugs in 50 pull requests across five repositories",
+        "revision": "July 2025 original set",
+        "source": "https://www.greptile.com/benchmarks"
+      },
+      "snapshot": {
+        "file": "index/outside-sources/greptile-original.json",
+        "sha256": "f8e49272e643a29b32f4232e29ec471331a0cdec28a353ef76f8518504699dd9"
+      }
+    },
+    {
+      "board": "augment-corrected",
+      "product": "Augment Code Review",
+      "metric": "F-score",
+      "value": 59,
+      "metrics": {
+        "precision": 65,
+        "recall": 55
+      },
+      "measuredBy": "Augment Code",
+      "measurementDate": "2025-11-14",
+      "measurementDateBasis": "Evaluation as-of date stated in the golden set README. The numerical table was published on 2025-12-11 and the article was updated on 2026-06-18. Individual run dates are not published.",
+      "source": "https://www.augmentcode.com/blog/we-benchmarked-7-ai-code-review-tools-on-real-world-prs-here-are-the-results",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Augment corrected golden comments, expanded from Greptile's original set",
+        "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+        "source": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc"
+      },
+      "measurementDateSource": "https://github.com/ai-code-review-evaluations/golden_comments/blob/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/README.md",
+      "snapshot": {
+        "file": "index/outside-sources/augment-corrected.json",
+        "sha256": "0437856c6a9519c6660a74eec3c57e86a6150750993fdee6ef6f782aa334ef92"
+      }
+    },
+    {
+      "board": "augment-corrected",
+      "product": "Cursor Bugbot",
+      "metric": "F-score",
+      "value": 49,
+      "metrics": {
+        "precision": 60,
+        "recall": 41
+      },
+      "measuredBy": "Augment Code",
+      "measurementDate": "2025-11-14",
+      "measurementDateBasis": "Evaluation as-of date stated in the golden set README. The numerical table was published on 2025-12-11 and the article was updated on 2026-06-18. Individual run dates are not published.",
+      "source": "https://www.augmentcode.com/blog/we-benchmarked-7-ai-code-review-tools-on-real-world-prs-here-are-the-results",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Augment corrected golden comments, expanded from Greptile's original set",
+        "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+        "source": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc"
+      },
+      "measurementDateSource": "https://github.com/ai-code-review-evaluations/golden_comments/blob/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/README.md",
+      "snapshot": {
+        "file": "index/outside-sources/augment-corrected.json",
+        "sha256": "0437856c6a9519c6660a74eec3c57e86a6150750993fdee6ef6f782aa334ef92"
+      }
+    },
+    {
+      "board": "augment-corrected",
+      "product": "Greptile",
+      "metric": "F-score",
+      "value": 45,
+      "metrics": {
+        "precision": 45,
+        "recall": 45
+      },
+      "measuredBy": "Augment Code",
+      "measurementDate": "2025-11-14",
+      "measurementDateBasis": "Evaluation as-of date stated in the golden set README. The numerical table was published on 2025-12-11 and the article was updated on 2026-06-18. Individual run dates are not published.",
+      "source": "https://www.augmentcode.com/blog/we-benchmarked-7-ai-code-review-tools-on-real-world-prs-here-are-the-results",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Augment corrected golden comments, expanded from Greptile's original set",
+        "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+        "source": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc"
+      },
+      "measurementDateSource": "https://github.com/ai-code-review-evaluations/golden_comments/blob/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/README.md",
+      "snapshot": {
+        "file": "index/outside-sources/augment-corrected.json",
+        "sha256": "0437856c6a9519c6660a74eec3c57e86a6150750993fdee6ef6f782aa334ef92"
+      }
+    },
+    {
+      "board": "augment-corrected",
+      "product": "Codex Code Review",
+      "metric": "F-score",
+      "value": 41,
+      "metrics": {
+        "precision": 68,
+        "recall": 29
+      },
+      "measuredBy": "Augment Code",
+      "measurementDate": "2025-11-14",
+      "measurementDateBasis": "Evaluation as-of date stated in the golden set README. The numerical table was published on 2025-12-11 and the article was updated on 2026-06-18. Individual run dates are not published.",
+      "source": "https://www.augmentcode.com/blog/we-benchmarked-7-ai-code-review-tools-on-real-world-prs-here-are-the-results",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Augment corrected golden comments, expanded from Greptile's original set",
+        "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+        "source": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc"
+      },
+      "measurementDateSource": "https://github.com/ai-code-review-evaluations/golden_comments/blob/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/README.md",
+      "snapshot": {
+        "file": "index/outside-sources/augment-corrected.json",
+        "sha256": "0437856c6a9519c6660a74eec3c57e86a6150750993fdee6ef6f782aa334ef92"
+      }
+    },
+    {
+      "board": "augment-corrected",
+      "product": "CodeRabbit",
+      "metric": "F-score",
+      "value": 39,
+      "metrics": {
+        "precision": 36,
+        "recall": 43
+      },
+      "measuredBy": "Augment Code",
+      "measurementDate": "2025-11-14",
+      "measurementDateBasis": "Evaluation as-of date stated in the golden set README. The numerical table was published on 2025-12-11 and the article was updated on 2026-06-18. Individual run dates are not published.",
+      "source": "https://www.augmentcode.com/blog/we-benchmarked-7-ai-code-review-tools-on-real-world-prs-here-are-the-results",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Augment corrected golden comments, expanded from Greptile's original set",
+        "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+        "source": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc"
+      },
+      "measurementDateSource": "https://github.com/ai-code-review-evaluations/golden_comments/blob/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/README.md",
+      "snapshot": {
+        "file": "index/outside-sources/augment-corrected.json",
+        "sha256": "0437856c6a9519c6660a74eec3c57e86a6150750993fdee6ef6f782aa334ef92"
+      }
+    },
+    {
+      "board": "augment-corrected",
+      "product": "Claude Code",
+      "metric": "F-score",
+      "value": 31,
+      "metrics": {
+        "precision": 23,
+        "recall": 51
+      },
+      "measuredBy": "Augment Code",
+      "measurementDate": "2025-11-14",
+      "measurementDateBasis": "Evaluation as-of date stated in the golden set README. The numerical table was published on 2025-12-11 and the article was updated on 2026-06-18. Individual run dates are not published.",
+      "source": "https://www.augmentcode.com/blog/we-benchmarked-7-ai-code-review-tools-on-real-world-prs-here-are-the-results",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Augment corrected golden comments, expanded from Greptile's original set",
+        "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+        "source": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc"
+      },
+      "measurementDateSource": "https://github.com/ai-code-review-evaluations/golden_comments/blob/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/README.md",
+      "snapshot": {
+        "file": "index/outside-sources/augment-corrected.json",
+        "sha256": "0437856c6a9519c6660a74eec3c57e86a6150750993fdee6ef6f782aa334ef92"
+      }
+    },
+    {
+      "board": "augment-corrected",
+      "product": "GitHub Copilot",
+      "metric": "F-score",
+      "value": 25,
+      "metrics": {
+        "precision": 20,
+        "recall": 34
+      },
+      "measuredBy": "Augment Code",
+      "measurementDate": "2025-11-14",
+      "measurementDateBasis": "Evaluation as-of date stated in the golden set README. The numerical table was published on 2025-12-11 and the article was updated on 2026-06-18. Individual run dates are not published.",
+      "source": "https://www.augmentcode.com/blog/we-benchmarked-7-ai-code-review-tools-on-real-world-prs-here-are-the-results",
+      "readDate": "2026-10-14",
+      "goldenSet": {
+        "identity": "Augment corrected golden comments, expanded from Greptile's original set",
+        "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+        "source": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc"
+      },
+      "measurementDateSource": "https://github.com/ai-code-review-evaluations/golden_comments/blob/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/README.md",
+      "snapshot": {
+        "file": "index/outside-sources/augment-corrected.json",
+        "sha256": "0437856c6a9519c6660a74eec3c57e86a6150750993fdee6ef6f782aa334ef92"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "CodeRabbit",
+      "tool": "coderabbit",
+      "metric": "F1",
+      "value": 42.2,
+      "metrics": {
+        "precision": 32.6,
+        "recall": 59.5
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-01-22",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "KG",
+      "tool": "kg",
+      "metric": "F1",
+      "value": 24.5,
+      "metrics": {
+        "precision": 54.3,
+        "recall": 15.8
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-02-02",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Claude Code (CLI)",
+      "tool": "claude-code",
+      "metric": "F1",
+      "value": 47.2,
+      "metrics": {
+        "precision": 46.3,
+        "recall": 48.1
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-03-10",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "GitHub Copilot",
+      "tool": "copilot-v2",
+      "metric": "F1",
+      "value": 48.7,
+      "metrics": {
+        "precision": 38.5,
+        "recall": 66.5
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-06-24",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "CodeAnt",
+      "tool": "codeant-v2",
+      "metric": "F1",
+      "value": 40.6,
+      "metrics": {
+        "precision": 40.1,
+        "recall": 41.1
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-03-25",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Baz",
+      "tool": "baz",
+      "metric": "F1",
+      "value": 46.5,
+      "metrics": {
+        "precision": 61.5,
+        "recall": 37.3
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-01-22",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Qodo Extended",
+      "tool": "qodo-extended-v2",
+      "metric": "F1",
+      "value": 65.8,
+      "metrics": {
+        "precision": 67.1,
+        "recall": 64.6
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-03-29",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Devin",
+      "tool": "devin",
+      "metric": "F1",
+      "value": 51.6,
+      "metrics": {
+        "precision": 69.1,
+        "recall": 41.1
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-03-02",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Gitar",
+      "tool": "gitar",
+      "metric": "F1",
+      "value": 41.3,
+      "metrics": {
+        "precision": 38.3,
+        "recall": 44.9
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-04-21",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Gemini",
+      "tool": "gemini-v2",
+      "metric": "F1",
+      "value": 49.7,
+      "metrics": {
+        "precision": 45.3,
+        "recall": 55.1
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-04-22",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Graphite",
+      "tool": "graphite",
+      "metric": "F1",
+      "value": 14.1,
+      "metrics": {
+        "precision": 100,
+        "recall": 7.6
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-01-24",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Cursor Bugbot",
+      "tool": "bugbot",
+      "metric": "F1",
+      "value": 51.4,
+      "metrics": {
+        "precision": 56.9,
+        "recall": 46.8
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-01-22",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Claude Code",
+      "tool": "claude",
+      "metric": "F1",
+      "value": 40.4,
+      "metrics": {
+        "precision": 43.2,
+        "recall": 38
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-01-27",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "GitLab Duo Code Review",
+      "tool": "gitlab",
+      "metric": "F1",
+      "value": 53,
+      "metrics": {
+        "precision": 53.5,
+        "recall": 52.5
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-04-24",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Kodus",
+      "tool": "kodus-v2",
+      "metric": "F1",
+      "value": 46.7,
+      "metrics": {
+        "precision": 59.2,
+        "recall": 38.6
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-03-12",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Macroscope",
+      "tool": "macroscope",
+      "metric": "F1",
+      "value": 54.2,
+      "metrics": {
+        "precision": 61.1,
+        "recall": 48.7
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-03-09",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Cubic v2",
+      "tool": "cubic-v2",
+      "metric": "F1",
+      "value": 63.6,
+      "metrics": {
+        "precision": 61.5,
+        "recall": 65.8
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-03-13",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Qodo v2",
+      "tool": "qodo-v2",
+      "metric": "F1",
+      "value": 58.5,
+      "metrics": {
+        "precision": 55.4,
+        "recall": 62
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-02-27",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Greptile v4",
+      "tool": "greptile-v4-1",
+      "metric": "F1",
+      "value": 51.1,
+      "metrics": {
+        "precision": 50.9,
+        "recall": 51.3
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-04-06",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Sourcery",
+      "tool": "sourcery",
+      "metric": "F1",
+      "value": 47,
+      "metrics": {
+        "precision": 41,
+        "recall": 55.1
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-03-08",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    },
+    {
+      "board": "martian-offline",
+      "product": "Augment",
+      "tool": "augment",
+      "metric": "F1",
+      "value": 62.2,
+      "metrics": {
+        "precision": 59.5,
+        "recall": 65.2
+      },
+      "measuredBy": "Martian",
+      "measurementDate": "2026-01-22",
+      "measurementDateBasis": "Latest review collection date encoded in evaluations.json repo_name. Earlier cases may have earlier dates.",
+      "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "evaluationsSource": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "readDate": "2026-10-14",
+      "judgeModel": "anthropic_claude-opus-4-5-20251101",
+      "profile": "core",
+      "goldenSet": {
+        "identity": "Martian published offline golden comments, category scoring profiles",
+        "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+        "source": "https://github.com/withmartian/code-review-benchmark/tree/e616e849755441da38f18bf3adba2c9583b03803/offline/golden_comments"
+      }
+    }
+  ]
+}

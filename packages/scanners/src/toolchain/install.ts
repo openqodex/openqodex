@@ -654,19 +654,21 @@ export function readGemLock(file: string): { name: string; version: string; sha2
 // Installs one tool from the table and returns it. Throws InstallError with the
 // plain reason. Safe to call from several processes at once: one installs, the
 // others wait on the lock and then find it installed. `place`: where it
-// goes, by default the OpenQodex home's tools folder.
+// goes, by default the OpenQodex home's tools folder. `probeHome`: where the
+// runtime probe runs, by default in the OpenQodex home's cache.
 export async function installTool(
   tool: string,
-  opts: { table?: Toolchain; onProgress?: (line: string) => void; place?: InstallPlace } = {},
+  opts: { table?: Toolchain; onProgress?: (line: string) => void; place?: InstallPlace; probeHome?: string } = {},
 ): Promise<ResolvedTool> {
   const table = opts.table ?? loadToolchain();
   const recipe = table.tools[tool];
   if (!recipe) throw new InstallError("failed", `${tool} is not in the toolchain table`);
   const place = opts.place ?? homePlace();
   const root = place.root;
-  const runtime = await missingRuntime(recipe);
+  const check = checkRuntime(recipe, opts.probeHome);
+  const runtime = (await check).reason;
   if (runtime) throw new InstallError("not_installed", runtime);
-  if (isInstalled(root, tool, recipe)) return resolvedTool(root, tool, recipe);
+  if (isInstalled(root, tool, recipe)) return resolvedTool(root, tool, recipe, check);
   const unsupported = unsupportedReason(table, recipe);
   if (unsupported) throw new InstallError("not_installed", unsupported);
   const dir = ensureWritable(place, tool);
@@ -685,7 +687,7 @@ export async function installTool(
       }
       return published;
     });
-    if (result !== "lost_lock" && isInstalled(root, tool, recipe)) return resolvedTool(root, tool, recipe);
+    if (result !== "lost_lock" && isInstalled(root, tool, recipe)) return resolvedTool(root, tool, recipe, check);
   }
   throw new InstallError("failed", "install failed: another install kept taking the lock");
 }

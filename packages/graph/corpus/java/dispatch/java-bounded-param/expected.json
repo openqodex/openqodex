@@ -1,0 +1,20 @@
+{
+  "guards": "dispatches through the first Java type parameter bound and leaves unbounded parameters unresolved",
+  "callers": [
+    { "to": "bound/Repo.java#Repo.find", "site": "bound/Host.java:4", "tier": "certain", "kind": "calls" },
+    { "to": "bound/Impl.java#Impl.find", "site": "bound/Host.java:4", "tier": "possible", "kind": "dispatches_to" },
+    { "to": "bound/Repo.java#Repo.find", "site": "bound/Host.java:7", "tier": "certain", "kind": "calls" },
+    { "to": "bound/Impl.java#Impl.find", "site": "bound/Host.java:7", "tier": "possible", "kind": "dispatches_to" }
+  ],
+  "dispatch": [
+    { "site": "bound/Host.java:4", "candidates": ["bound/Impl.java#Impl.find"] },
+    { "site": "bound/Host.java:7", "candidates": ["bound/Impl.java#Impl.find"] }
+  ],
+  "notReached": [
+    { "to": "bound/Repo.java#Repo.find", "site": "bound/Host.java:10" },
+    { "to": "bound/Impl.java#Impl.find", "site": "bound/Host.java:10" }
+  ],
+  "unknowns": [{ "file": "bound/Host.java", "line": 10, "cause": "no-receiver-type" }],
+  "noMiss": ["bound/Host.java:10"],
+  "allRead": true
+}

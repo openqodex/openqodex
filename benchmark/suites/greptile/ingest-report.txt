@@ -1,0 +1,66 @@
+Greptile ingest: 50 cases. Usable: 50. Excluded: 0.
+Original labels: 50. Corrected Augment comments: 137. Kept as two truth sets.
+Original source: https://www.greptile.com/benchmarks; revision sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7; read 2026-10-14.
+Corrected source: https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc; revision 3f2c8ab794b4ed71c099cbf0a7670555e90906dc; read 2026-10-14; licence unverified: no licence file in the pinned tree.
+The corrected JSON totals differ from its README table (145 claimed, 137 present); the JSON files are the truth source.
+Fork metadata snapshots and the real GitHub licence answers are retained in sources.json. The full API response hashes are recorded; a fresh cache uses the frozen selected metadata, never today's branch tips.
+Explicit title joins: 6.
+https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3: page title "Support upsampled error count with performance optimizations" maps to corrected title "feat(upsampling) - Support upsampled error count with performance optimizations"
+https://github.com/ai-code-review-evaluation/sentry-greptile/pull/7: page title "Implement cross-system issue synchronization" maps to corrected title "feat(ecosystem): Implement cross-system issue synchronization"
+https://github.com/ai-code-review-evaluation/sentry-greptile/pull/8: page title "Reorganize incident creation / issue occurrence logic" maps to corrected title "ref(crons): Reorganize incident creation / issue occurrence logic"
+https://github.com/ai-code-review-evaluation/sentry-greptile/pull/9: page title "Add ability to use queues to manage parallelism" maps to corrected title "feat(uptime): Add ability to use queues to manage parallelism"
+https://github.com/ai-code-review-evaluation/sentry-greptile/pull/10: page title "Add hook for producing occurrences from the stateful detector" maps to corrected title "feat(workflow_engine): Add in hook for producing occurrences from the stateful detector"
+https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/2: page title "Add caching support for IdentityProviderStorageProvider .getForLogin operations" maps to corrected title "Add caching support for IdentityProviderStorageProvider.getForLogin operations"
+Suite hash: 0a4ba736cee010825ec2adbca880b028b0070849c19b405fa910a2ca07017f4d. Split greptile-v2: tune 30, score 20; 26 exposed, 24 clean, exposure on record in the split file.
+This suite overlaps Martian's public cases and repository groups. Materialisation is not a held-out model evaluation.
+Materialisation reservation: Sentry #3 introduces a gitlink at sentry-repo that the laptop shape cannot preserve. Use --reviewers model:scripted with --materialise-only to select the server shape. No model runs.
+greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b: greptile 1, augment 5; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938: greptile 1, augment 2; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226: greptile 1, augment 2; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f: greptile 1, augment 4; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e: greptile 1, augment 5; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf: greptile 1, augment 2; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac: greptile 1, augment 2; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde: greptile 1, augment 2; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7: greptile 1, augment 5; usable; unverified
+greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f: greptile 1, augment 2; usable; unverified
+greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee: greptile 1, augment 3; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71: greptile 1, augment 4; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e: greptile 1, augment 6; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c: greptile 1, augment 1; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0: greptile 1, augment 3; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b: greptile 1, augment 3; usable; copyleft
+greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd: greptile 1, augment 5; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f: greptile 1, augment 1; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12: greptile 1, augment 3; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f: greptile 1, augment 1; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12: greptile 1, augment 2; usable; copyleft
+greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96: greptile 1, augment 2; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9: greptile 1, augment 2; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d: greptile 1, augment 2; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f: greptile 1, augment 2; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a: greptile 1, augment 1; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf: greptile 1, augment 3; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81: greptile 1, augment 2; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b: greptile 1, augment 4; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5: greptile 1, augment 4; usable; permissive
+greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b: greptile 1, augment 2; usable; permissive
+greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd: greptile 1, augment 4; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273: greptile 1, augment 2; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c: greptile 1, augment 3; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c: greptile 1, augment 3; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d: greptile 1, augment 3; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0: greptile 1, augment 3; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664: greptile 1, augment 5; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c: greptile 1, augment 4; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca: greptile 1, augment 2; usable; unverified
+greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279: greptile 1, augment 3; usable; unverified

@@ -77,7 +77,7 @@ const report = {
   findings: [],
   below_threshold: 0,
   outside_change: [],
-  low_confidence: [],
+  possible: [], low_confidence: [],
   not_reviewed: [],
   dropped: [],
   scanners: [],
@@ -116,10 +116,11 @@ describe("the model record from the brain's evidence", () => {
     expect(r.missing).toContain("the reviewer failed: socket hang up");
   });
 
-  it("4. a tool the brain did not define and a path outside the snapshot are named", () => {
+  it("4. refused tools and outside paths make the model record incomplete", () => {
     const r = modelRecord(evidence({ toolLog: [read(), read({ tool: "bash", path: null, range: null, inside: null, ok: false, delivered: true, reason: "not a tool" }), read({ path: "/etc/passwd", range: null, inside: false, ok: false, reason: "outside the snapshot" })] }));
-    expect(r.missing).toContain("the reviewer returned a tool call the brain did not define: bash");
-    expect(r.missing).toContain("the reviewer tried to read outside the snapshot: /etc/passwd");
+    expect(r.status).toBe("complete");
+    expect(r.missing).toEqual([]);
+    expect(r.refused).toEqual(["bash", "/etc/passwd"]);
   });
 
   it("5. a secret in a tool call's path or reason is redacted in the record", () => {

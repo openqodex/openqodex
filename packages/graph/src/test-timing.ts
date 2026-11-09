@@ -8,10 +8,28 @@
 // bound is the middle of the two, as in the scanners' YAML key test. A loose
 // absolute bound beside it fails only a gross slowdown.
 // Test code only: nothing src/index.ts exports reaches this file.
-import { expect } from "vitest";
+import { describe, expect } from "vitest";
 import type { Node } from "web-tree-sitter";
 import { parserFor } from "./parser.js";
 import type { Graph, Lang } from "./types.js";
+
+// The growth tests run only when OPENQODEX_GROWTH_TESTS is 1, the variable
+// that marks the full tier. A shared runner's noise alone has pushed a ratio
+// on unchanged input to 8.0 to 9.3 against the bound of 8 (issues 215, 275,
+// 296), so the fast tier that gates every pull request does not run them.
+// Every growth test sits inside a growthTests block; the skip is said once
+// per test file, so a skipped test is never read as a passed one. The
+// scanners' growth tests use this helper too (packages/scanners/test).
+const GROWTH_ON = process.env.OPENQODEX_GROWTH_TESTS === "1";
+let skipSaid = false;
+export const GROWTH_SKIP_REASON = "growth tests skipped: they run on the full tier, with OPENQODEX_GROWTH_TESTS=1";
+export const growthTests = (name: string, body: () => void): void => {
+  if (!GROWTH_ON && !skipSaid) {
+    skipSaid = true;
+    console.log(GROWTH_SKIP_REASON);
+  }
+  describe.skipIf(!GROWTH_ON)(name, body);
+};
 
 // A larger input takes less than this many times the CPU of the smaller.
 export const MAX_GROWTH = 8;
@@ -126,7 +144,9 @@ export function expectLinear(what: string, small: number, large: number): void {
 // inputs are read twice more, in turn (smaller, larger, smaller, larger),
 // and the check compares the median of each input's three readings: one
 // reading in a busy stretch moves neither median, whichever way it points.
-export async function expectLinearRepeated(what: string, smallAt: (repeats: number) => number | Promise<number>, largeAt: (repeats: number) => number | Promise<number>, opts: { maxRepeats?: number } = {}): Promise<void> {
+// `opts.looseBoundMs` replaces LOOSE_BOUND_MS for a reader slow per byte
+// on input the product reads whole (the scanners' YAML key reader).
+export async function expectLinearRepeated(what: string, smallAt: (repeats: number) => number | Promise<number>, largeAt: (repeats: number) => number | Promise<number>, opts: { maxRepeats?: number; looseBoundMs?: number } = {}): Promise<void> {
   const maxRepeats = opts.maxRepeats ?? MAX_REPEATS;
   let repeats = 1;
   let small = await smallAt(repeats);
@@ -146,7 +166,7 @@ export async function expectLinearRepeated(what: string, smallAt: (repeats: numb
   const all = (ms: number[]) => ms.map((m) => m.toFixed(1)).join(", ");
   const said = `${what}: ${median(smalls).toFixed(1)} ms of CPU time for ${repeats} runs on the smaller input, ${median(larges).toFixed(1)} ms for as many on four times it${smalls.length > 1 ? ` (the medians of readings taken in turn: ${all(smalls)} ms and ${all(larges)} ms)` : ""}`;
   expect(growth(), said).toBeLessThan(MAX_GROWTH);
-  expect(median(larges) / repeats, said).toBeLessThan(LOOSE_BOUND_MS);
+  expect(median(larges) / repeats, said).toBeLessThan(opts.looseBoundMs ?? LOOSE_BOUND_MS);
 }
 
 // The most readings of each input expectLinearRepeated takes, and the middle one.

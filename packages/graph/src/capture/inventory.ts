@@ -27,6 +27,7 @@ const EXT_LANG: Record<string, Lang> = {
   ".go": "go",
   ".rb": "ruby",
   ".rake": "ruby",
+  ".java": "java",
 };
 
 // Folders that hold generated, vendored or installed code, never the repo's

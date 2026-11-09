@@ -1,0 +1,206 @@
+{
+  "guards": "Local classes keep block identity. Initializer scopes retain the enclosing instance. Local receivers hide package types.",
+  "callers": [
+    {
+      "to": "src/main/java/j3/Host.java#Host.first.Local.run",
+      "site": "src/main/java/j3/Host.java:9",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.first.Local.work",
+      "site": "src/main/java/j3/Host.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.second.Local.run",
+      "site": "src/main/java/j3/Host.java:17",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.second.Local.work",
+      "site": "src/main/java/j3/Host.java:13",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.blocks.Local.run",
+      "site": "src/main/java/j3/Host.java:22",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.blocks$2.Local.run",
+      "site": "src/main/java/j3/Host.java:26",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Initializers.java#Initializers.h",
+      "site": "src/main/java/j3/Initializers.java:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Initializers.java#Initializers.stat",
+      "site": "src/main/java/j3/Initializers.java:13",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.factories.Pair.of",
+      "site": "src/main/java/j3/scoped/Receivers.java:9",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.factories.Pair.of",
+      "site": "src/main/java/j3/scoped/Receivers.java:10",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.factories.Pair.use",
+      "site": "src/main/java/j3/scoped/Receivers.java:10",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.register",
+      "site": "src/main/java/j3/scoped/Receivers.java:18",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.factories.Local.run",
+      "site": "src/main/java/j3/scoped/Receivers.java:18",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.factories.Local.make",
+      "site": "src/main/java/j3/scoped/Receivers.java:19",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.factories.Local.use",
+      "site": "src/main/java/j3/scoped/Receivers.java:20",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Pair.of",
+      "site": "src/main/java/j3/scoped/Receivers.java:22",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.register",
+      "site": "src/main/java/j3/scoped/Receivers.java:27",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.genericReference.Box.make",
+      "site": "src/main/java/j3/scoped/Receivers.java:27",
+      "tier": "possible",
+      "kind": "may_invoke"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/j3/Host.java#Host.first.Local.run",
+      "site": "src/main/java/j3/Host.java:17"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.second.Local.run",
+      "site": "src/main/java/j3/Host.java:9"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.blocks.Local.run",
+      "site": "src/main/java/j3/Host.java:26"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.blocks$2.Local.run",
+      "site": "src/main/java/j3/Host.java:22"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.first.Local.run",
+      "site": "src/main/java/j3/Host.java:28"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.second.Local.run",
+      "site": "src/main/java/j3/Host.java:28"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.blocks.Local.run",
+      "site": "src/main/java/j3/Host.java:28"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.blocks$2.Local.run",
+      "site": "src/main/java/j3/Host.java:28"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Pair.of",
+      "site": "src/main/java/j3/scoped/Receivers.java:9"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Pair.of",
+      "site": "src/main/java/j3/scoped/Receivers.java:10"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Pair.use",
+      "site": "src/main/java/j3/scoped/Receivers.java:10"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Mode.valueOf",
+      "site": "src/main/java/j3/scoped/Receivers.java:12"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Local.run",
+      "site": "src/main/java/j3/scoped/Receivers.java:18"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Local.make",
+      "site": "src/main/java/j3/scoped/Receivers.java:19"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Local.use",
+      "site": "src/main/java/j3/scoped/Receivers.java:20"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Pair.java#Box.make",
+      "site": "src/main/java/j3/scoped/Receivers.java:27"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/main/java/j3/Host.java",
+      "line": 28,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/j3/scoped/Receivers.java",
+      "line": 12,
+      "cause": "miss",
+      "note": "no definition of valueOf where the evidence points (java:src/main/java/j3/scoped/Receivers.java::Receivers.factories.Mode)"
+    }
+  ],
+  "references": [
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.factories.Local.run",
+      "site": "src/main/java/j3/scoped/Receivers.java:18",
+      "tier": "certain",
+      "kind": "uses_value"
+    },
+    {
+      "to": "src/main/java/j3/scoped/Receivers.java#Receivers.genericReference.Box.make",
+      "site": "src/main/java/j3/scoped/Receivers.java:27",
+      "tier": "certain",
+      "kind": "uses_value"
+    }
+  ]
+}

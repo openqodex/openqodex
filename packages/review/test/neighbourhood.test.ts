@@ -440,7 +440,9 @@ it("measures the repository's own tree as a snapshot and marks any time cap", ()
   const repo = fileURLToPath(new URL("../../../", import.meta.url));
   const dir = snapshot();
   const ignored = new Set([".git", "node_modules", "dist", "build", "target", ".pnpm-store", ".openqodex", ".openqodex-review", ".private", ".claude", ".agents", ".codex", ".aws", "credentials"]);
-  cpSync(repo, dir, { recursive: true, filter: (path) => !relative(repo, path).split(/[\\/]/).some((part) => ignored.has(part) || part.startsWith(".env") || part === "settings.local.json") });
+  // Saved benchmark runs are ignored data, not the tree; a laptop may hold hundreds of megabytes of them.
+  const isRunData = (rel: string) => rel === "benchmark/results" || rel.startsWith("benchmark/results/");
+  cpSync(repo, dir, { recursive: true, filter: (path) => { const rel = relative(repo, path); return !isRunData(rel.split("\\").join("/")) && !rel.split(/[\\/]/).some((part) => ignored.has(part) || part.startsWith(".env") || part === "settings.local.json"); } });
   const path = "packages/review/src/neighbourhood.ts";
   const line = readFileSync(join(dir, path), "utf8").split("\n").findIndex((row) => row.startsWith("export function buildNeighbourhood")) + 1;
   expect(line).toBeGreaterThan(0);

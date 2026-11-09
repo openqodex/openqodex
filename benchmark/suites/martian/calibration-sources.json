@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "repo": "withmartian/code-review-benchmark",
+  "revision": "e616e849755441da38f18bf3adba2c9583b03803",
+  "tree": "b9fb3aa3f0935747ca4728a3220d68c2324c85a6",
+  "files": [
+    {
+      "path": "methodology/full.md",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/methodology/full.md",
+      "sha256": "223378ad6b79b98ecdda1bbc60164bb21468a5a164ed2023365931a068cbbdb3"
+    },
+    {
+      "path": "offline/analysis/benchmark_dashboard.json",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/benchmark_dashboard.json",
+      "sha256": "43f8a9e89e8c1839b6f9712be6757e078f5230165ac14b34f968d0832cb0b2e7"
+    },
+    {
+      "path": "offline/analysis/score_profiles.py",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/analysis/score_profiles.py",
+      "sha256": "b5d474a373f008f0899dbcbe8deca5f596d8081bc9579b75391971f6f2959f52"
+    },
+    {
+      "path": "offline/code_review_benchmark/__init__.py",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "offline/code_review_benchmark/step2_5_dedup_candidates.py",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/step2_5_dedup_candidates.py",
+      "sha256": "5438ffb2a487129bd0f85d5a8c43020efe5027ec2d1d51e599b9c1d9f743cd4c"
+    },
+    {
+      "path": "offline/code_review_benchmark/step2_extract_comments.py",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/step2_extract_comments.py",
+      "sha256": "d0b328d3953a3f68819ed530b1aafb594e7ad7cf09ef64e3b7e82d7bb221c800"
+    },
+    {
+      "path": "offline/code_review_benchmark/step3_judge_comments.py",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/step3_judge_comments.py",
+      "sha256": "7370dfb21bed01655aada1d4d75f32e07c92e4c4c86dfc6cf6d47058a65ce16d"
+    },
+    {
+      "path": "offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/results/anthropic_claude-opus-4-5-20251101/evaluations.json",
+      "sha256": "56e38e37ce5709885a1627a6979fef53048bb19735e792481ec7c8b767be726d"
+    }
+  ]
+}

@@ -1,19 +1,33 @@
 name: CI
 
-# Where each check runs (decided 2026-10-12):
-# - A pull request runs the Linux gate only.
-# - The merge queue runs the full gate: the Linux gate, the macOS gate and
-#   the scanner-only benchmark. Each queued pull request is tested merged
-#   with main and with every pull request ahead of it in the queue. A pull
-#   request whose run fails leaves the queue, and main does not change.
-# - A push to main runs the full gate on the commit that landed.
-# - A pull request with the label full-ci runs the full gate too, so a
-#   scanner or installer change can be checked before it is queued.
+# Where each check runs (decided 2026-10-12, narrowed 2026-10-23):
+# - An ordinary pull request and its merge queue run get the fast gate: the
+#   Linux gate without the end-to-end tests and the golden run. Each queued
+#   pull request is tested merged with main and with every pull request
+#   ahead of it in the queue. A pull request whose run fails leaves the
+#   queue, and main does not change.
+# - The full gate runs where a release is at stake: the Linux gate with the
+#   end-to-end tests and the golden run, the macOS gate and the scanner-only
+#   benchmark. It runs for the "Version packages" pull request (the
+#   changesets branch changeset-release/main, from this repository), both on
+#   the pull request and in the merge queue, so the queue merges it only on
+#   a green full gate; on a pull request with the label full-ci; and on each
+#   push to main, on the commit that landed.
+# - The version pull request's own pull_request run starts on its own: the
+#   release workflow pushes that branch with the release token (a maintainer's
+#   fine-grained personal access token), not with the workflow's token (a push
+#   with that token starts no run). The full gate's condition matches the
+#   branch name and this repository, not who pushed, so it holds for those
+#   pushes. The queue run recognises the
+#   pull request by the branch name in the queue's merge commit message,
+#   "Merge pull request #N from <owner>/changeset-release/main".
+# - The cost of the narrowing: a break that only the full gate catches lands
+#   on main and shows on main's own run. It is fixed there before the version
+#   pull request, whose full gate must be green before a release.
 # The ruleset on main requires the three checks by these job names, so the
 # names do not change. A job skipped by its condition counts as passed: that
-# is how a pull request without the label passes with the Linux gate alone.
-# In the merge queue and on main, no job is skipped.
-# scripts/gate.sh runs the gate's steps (.github/actions/gate) on one
+# is how a fast-gate run passes with the Linux gate alone.
+# scripts/gate.sh runs the full gate's steps (.github/actions/gate) on one
 # machine; the benchmark job runs in CI only.
 
 on:
@@ -37,10 +51,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/gate
+        with:
+          # The full gate's condition. The two jobs below carry the same
+          # expression: a job's if cannot read a shared value.
+          full: ${{ github.event_name == 'push' || (github.event_name == 'merge_group' && contains(github.event.merge_group.head_commit.message, '/changeset-release/main')) || (github.event_name == 'pull_request' && ((github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) || contains(github.event.pull_request.labels.*.name, 'full-ci'))) }}
 
   gate-macos:
     name: Gate (macos-latest)
-    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'merge_group' && contains(github.event.merge_group.head_commit.message, '/changeset-release/main')) || (github.event_name == 'pull_request' && ((github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) || contains(github.event.pull_request.labels.*.name, 'full-ci'))) }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,7 +75,7 @@ jobs:
   # scripts/gate.sh does not run it: it needs Ruby and Go.
   bench-scan:
     name: Scanner-only benchmark
-    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'merge_group' && contains(github.event.merge_group.head_commit.message, '/changeset-release/main')) || (github.event_name == 'pull_request' && ((github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) || contains(github.event.pull_request.labels.*.name, 'full-ci'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -86,6 +104,10 @@ jobs:
       #   run to accept when a pull request moves the score. A branch older
       #   than the harness runs the old harness here; merge main into it.
       # - On a push to main, the commit that landed.
+      # Since 2026-10-23 the queue runs this job only for the version pull
+      # request (an ordinary pull request's queue run is the fast gate), so
+      # for every other change the first bullet describes the run on main
+      # after the merge.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}

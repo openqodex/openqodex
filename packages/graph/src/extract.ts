@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import type { Node, Tree } from "web-tree-sitter";
 import type { BoundImport, CallFact, DefFact, FileFacts, ImportFact, Lang, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
+import { MAX_TYPE_DEPTH } from "./types.js";
 import { walkTree } from "./walk.js";
 import type { TreeVisitor } from "./walk.js";
 
@@ -29,8 +30,9 @@ import type { TreeVisitor } from "./walk.js";
 // base made by a call or a subscript, a Ruby superclass or mixin that is
 // not a constant), as the class's dynamic bases. 17: the framework
 // plugins' facts beside the language facts (FileFacts.frameworks). 18: how
-// a Ruby class takes a mixin written as an expression.
-export const EXTRACTOR_VERSION = 18;
+// a Ruby class takes a mixin written as an expression. 19: Java (its
+// package, static imports, constructors, varargs and each call's argument count).
+export const EXTRACTOR_VERSION = 25;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -46,12 +48,17 @@ type Frame = {
   // end (`pick(k)()` and `pick(k)` start at one place, never end at one).
   aliases?: Map<string, { ref?: number; callNode?: number }>;
   tables?: Map<string, number>; // names bound to a literal table, index into tables
-  typeParams?: Map<string, TypeRef | null>; // TypeScript type parameters and their constraints
+  typeParams?: Map<string, TypeRef | null>; // Type parameters and their bounds.
   objectAt?: number; // a module made from an object literal: the literal's start
   fnAt?: number; // a const bound to a function: the function's start, whose frame is this definition's
-  // Parameters of this function frame given another value in its body: a
-  // call of one may not run what the caller passed.
+  // Parameters and locals given another value lose their original callable value.
   reassigned?: Set<string>;
+  // A Java type's frame: the names of its fields, read before its methods,
+  // and the declared type of each field that has one.
+  members?: Set<string>;
+  fieldTypes?: Record<string, TypeRef>;
+  // Java local types bind only within their declaring block and below.
+  javaTypes?: Map<string, TypeRef>;
 };
 
 // A frame once pushed: linked to the one around it, with what every lookup
@@ -94,6 +101,16 @@ function typeRef(t: TypeRef): TypeRef {
   const bound = at && !at.fns?.has(head) ? at.imports?.get(head) : undefined;
   if (at && bound) s[READ_AS] = { at, bound };
   return t;
+}
+
+// Assignment preserves a result only when its receiver type also stays the same.
+function sameType(a: TypeRef | undefined, b: TypeRef | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.name === b.name && a.qualifier === b.qualifier && !a.elem === !b.elem && a.result === b.result
+    && !a.promise === !b.promise && !a.awaited === !b.awaited
+    && a.kind === b.kind && a.param === b.param && (a.args?.length ?? 0) === (b.args?.length ?? 0)
+    && (a.args ?? []).every((arg, i) => sameType(arg, b.args?.[i]))
+    && a.bound?.import === b.bound?.import && a.bound?.imported === b.bound?.imported && sameType(a.on, b.on);
 }
 
 // The first scope from `from` outwards that knows `name` as a nested
@@ -207,6 +224,7 @@ function typeNodes(node: Node | null, take: (n: Node) => boolean): void {
 }
 
 class Ctx {
+  goFields = new Map<string, Record<string, TypeRef>>();
   defs: DefFact[] = [];
   calls: CallFact[] = [];
   values: ValueRef[] = [];
@@ -220,7 +238,7 @@ class Ctx {
   // Calls whose names are bound when the walk ends, each with a reference to
   // its scope: a scope's names are known only once all of it has been read
   // (hoisting in JavaScript, any assignment makes a Python name local).
-  private pending: { call: CallFact; scope: Scope; ident: Ident | undefined }[] = [];
+  private pending: { call: CallFact; scope: Scope; ident: Ident | undefined; receiverName?: string }[] = [];
   // Value references the same way: a name of a local variable is dropped
   // once every scope is known.
   private pendingValues: { ref: ValueRef; scope: Scope; ident: Ident | undefined }[] = [];
@@ -334,7 +352,6 @@ class Ctx {
   // is no longer evidence for any call to it.
   // `innermost`: Python, where assigning in a function makes a new local.
   assign(name: string, type: TypeRef | null, innermost = false): void {
-    this.reassign(name);
     let s: Scope | null = this.top;
     for (let steps = 0; s && steps <= MAX_SCOPE_DEPTH; s = s.parent, steps++) {
       if (innermost && !s.locals) continue;
@@ -346,9 +363,10 @@ class Ctx {
       if (innermost && !s.locals?.has(name)) break;
       const locals = s.locals;
       if (locals?.has(name)) {
+        (s.reassigned ??= new Set()).add(name);
         const old = locals.get(name) ?? null;
         if (old?.declared) return;
-        const same = old !== null && type !== null && old.name === type.name && old.qualifier === type.qualifier && !old.elem === !type.elem && old.result === type.result;
+        const same = old !== null && type !== null && sameType(old, type);
         locals.set(name, same ? old : null);
         return;
       }
@@ -404,17 +422,18 @@ class Ctx {
     this.calls.push({ name: "", line, column, caller: this.caller(), recv: { kind: "other" }, dynamic: true });
   }
 
-  addCall(nameNode: Node, recv: Receiver, implicit = false): number {
+  addCall(nameNode: Node, recv: Receiver, implicit = false, receiverName?: string): number {
     const { line, column } = pos(nameNode);
     const call: CallFact = { name: nameNode.text, line, column, caller: this.caller(), recv };
     const index = this.calls.length;
     if (implicit) call.implicit = true;
     const callerDef = call.caller >= 0 ? this.defs[call.caller] : undefined;
-    if (callerDef?.static || callerDef?.kind === "class" || callerDef?.kind === "module") call.static = true;
+    // A Java constructor runs on the new instance: its calls are never static.
+    if ((callerDef?.static && !callerDef.ctor) || callerDef?.kind === "class" || callerDef?.kind === "module") call.static = true;
     this.calls.push(call);
     const ident = (recv as Tagged)[IDENT];
     if (ident) delete (recv as Tagged)[IDENT];
-    if (this.lang === "ruby") return index;
+    if (this.lang === "ruby" && receiverName === undefined) return index;
     // Past the depth bound the scopes around a call are not read: the safe
     // reading is a call nothing binds, never one bound past a scope that hides it.
     if (this.top.depth > MAX_SCOPE_DEPTH) {
@@ -424,7 +443,7 @@ class Ctx {
     }
     // A Go receiver name is decided where it is read (identReceiver is not
     // used for Go): no Go name is hoisted.
-    if (recv.kind === "none" || ident) this.pending.push({ call, scope: this.top, ident });
+    if (recv.kind === "none" || ident || receiverName !== undefined) this.pending.push({ call, scope: this.top, ident, receiverName });
     return index;
   }
 
@@ -491,11 +510,10 @@ class Ctx {
     scope.tables.set(name, index);
   }
 
-  // An assignment to `name`: when it is a parameter of the function frame
-  // that holds it, that parameter no longer holds what the caller passed.
+  // An assigned parameter or local no longer holds its original callable value.
   reassign(name: string): void {
     const at = this.lookup(this.top, name);
-    if (at && !at.block && at.def >= 0 && this.defs[at.def]?.params?.includes(name)) (at.reassigned ??= new Set()).add(name);
+    if (at?.locals?.has(name)) (at.reassigned ??= new Set()).add(name);
   }
 
   // A computed call on `name` (`handlers[key]()`, call index `call`).
@@ -529,16 +547,27 @@ class Ctx {
     const topNames = new Set(this.defs.filter((d) => d.topLevel).map((d) => d.name));
     // A local alias's call node, made into the call it names.
     const aliasCalls: { call: CallFact; callNode: number }[] = [...this.aliasCalls];
-    for (const { call, scope, ident } of this.pending) {
-      if (ident) {
+    const bindAlias = (call: CallFact, at: Scope | null, name: string, refOnly = false) => {
+      if (at?.reassigned?.has(name)) return;
+      const alias = at?.aliases?.get(name);
+      if (alias?.ref !== undefined) {
+        call.alias = alias.ref;
+        if (name !== call.name) call.aliasOf = name;
+      }
+      else if (!refOnly && alias?.callNode !== undefined) aliasCalls.push({ call, callNode: alias.callNode });
+    };
+    for (const { call, scope, ident, receiverName } of this.pending) {
+      if (ident || receiverName !== undefined) {
         // The name read again with every scope complete. The same scope
         // answering keeps the type the walk had at the call; a nearer scope
         // that declared the name later decides instead.
-        const at = this.lookup(scope, ident.name);
+        const name = ident?.name ?? receiverName as string;
+        const at = this.lookup(scope, name);
         // A method called on a table (`handlers.set(...)`) may change what it holds.
-        const table = at?.tables?.get(ident.name);
+        const table = at?.tables?.get(name);
         if (table !== undefined) this.openTables.add(table);
-        if (at !== ident.at || call.recv.kind === "name") call.recv = receiverIn(at, ident.name, ident.path, topNames);
+        if (ident && (at !== ident.at || call.recv.kind === "name")) call.recv = receiverIn(at, name, ident.path, topNames);
+        if (!ident || ident.path.length === 0) bindAlias(call, at, name, true);
         continue;
       }
       const at = this.lookup(scope, call.name);
@@ -551,9 +580,7 @@ class Ctx {
       else if (at.depth > 0 || !topNames.has(call.name)) {
         call.shadowed = true;
         // A local given one value once: the call may run that value.
-        const alias = at.aliases?.get(call.name);
-        if (alias?.ref !== undefined) call.alias = alias.ref;
-        else if (alias?.callNode !== undefined) aliasCalls.push({ call, callNode: alias.callNode });
+        bindAlias(call, at, call.name);
         // A parameter of the function whose frame holds it: the function
         // calls what it is given there.
         const owner = !at.block && at.def >= 0 && !at.reassigned?.has(call.name) ? this.defs[at.def] : undefined;
@@ -612,8 +639,10 @@ class Ctx {
     for (const c of this.calls) {
       if (c.alias === undefined) continue;
       const to = renumber.get(c.alias);
-      if (to === undefined) delete c.alias;
-      else c.alias = to;
+      if (to === undefined) {
+        delete c.alias;
+        delete c.aliasOf;
+      } else c.alias = to;
     }
     for (const d of this.defs) {
       if (!d.returns) continue;
@@ -628,6 +657,8 @@ class Ctx {
     // holds now, or the import it held when the type was read if the code
     // assigned the name something else after.
     const bindType = (t: TypeRef | null | undefined): void => {
+      if (t?.on) bindType(t.on);
+      t?.args?.forEach(bindType);
       const s = t as Stamped | null | undefined;
       const at = s?.[READ_IN];
       if (!s || !at) return;
@@ -769,7 +800,10 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
     const head = t.childForFieldName("name")?.text;
     const arg = t.childForFieldName("type_arguments")?.firstNamedChild ?? null;
     // Promise<T> is a T once awaited; Array<T> and its kin hold T.
-    if (head === "Promise") return jsTypeRef(arg);
+    if (head === "Promise") {
+      const inner = jsTypeRef(arg);
+      return inner ? { ...inner, promise: true } : null;
+    }
     if (head === "Array" || head === "ReadonlyArray" || head === "Set" || head === "ReadonlySet") {
       const inner = jsTypeRef(arg);
       return inner ? { ...inner, elem: true } : null;
@@ -808,13 +842,13 @@ function jsReceiver(ctx: Ctx, object: Node): Receiver {
   if (!base) return { kind: "other" };
   if (base.type === "this") return { kind: "self", path };
   if (base.type === "super") return path.length === 0 ? { kind: "super" } : { kind: "other" };
-  if (base.type === "parenthesized_expression" && base.firstNamedChild?.type === "new_expression") base = base.firstNamedChild;
+  while (base.type === "parenthesized_expression" && base.firstNamedChild) base = base.firstNamedChild;
   if (base.type === "new_expression") {
     const type = newType(base);
     return type ? { kind: "type", type, path } : { kind: "other" };
   }
   if (base.type === "call_expression" || base.type === "await_expression") {
-    const type = callType(base);
+    const type = callType(ctx, base);
     return type ? { kind: "type", type, path } : { kind: "other" };
   }
   if (base.type === "identifier") {
@@ -1098,20 +1132,71 @@ function newType(value: Node | null): TypeRef | null {
   return ctor ? jsTypeRef(ctor) : null;
 }
 
-// `make()`, `await make()`, `ns.make()`: typed by make's declared return type,
-// looked up when the graph is resolved.
-function callType(value: Node | null): TypeRef | null {
+// A method result keeps its receiver type. Deeper chains remain unknown.
+function methodResultType(name: Node, on: TypeRef | null | undefined, result = 0): TypeRef | null {
+  if (!on || on.elem) return null;
+  let depth = 0;
+  for (let t: TypeRef | undefined = on; t?.on; t = t.on) {
+    if (++depth >= MAX_TYPE_DEPTH) return null;
+  }
+  return typeRef({ name: name.text, qualifier: null, ...pos(name), result, on });
+}
+
+// Calls carry the function name or the declared type of their receiver.
+function callType(ctx: Ctx, value: Node | null, depth = 0): TypeRef | null {
+  if (depth > MAX_TYPE_DEPTH) return null;
   let v = value;
-  if (v?.type === "await_expression") v = v.firstNamedChild;
+  while (v?.type === "parenthesized_expression") v = v.firstNamedChild;
+  if (v?.type === "await_expression") {
+    const result = callType(ctx, v.firstNamedChild, depth);
+    return result ? { ...result, awaited: true } : null;
+  }
   if (v?.type !== "call_expression") return null;
   const fn = v.childForFieldName("function");
   if (fn?.type === "identifier") return typeRef({ name: fn.text, qualifier: null, ...pos(fn), result: 0 });
-  if (fn?.type === "member_expression" && fn.childForFieldName("object")?.type === "identifier") {
+  if (fn?.type === "member_expression") {
     const prop = fn.childForFieldName("property");
-    const object = fn.childForFieldName("object") as Node;
-    if (prop) return typeRef({ name: prop.text, qualifier: object.text, ...pos(fn), result: 0 });
+    let object = fn.childForFieldName("object");
+    while (object?.type === "parenthesized_expression") object = object.firstNamedChild;
+    if (!prop || !object) return null;
+    if (object.type === "identifier") {
+      const local = ctx.local(object.text);
+      if (local !== undefined) return methodResultType(prop, local);
+      return typeRef({ name: prop.text, qualifier: object.text, ...pos(fn), result: 0 });
+    }
+    if (object.type === "call_expression" || object.type === "await_expression") return methodResultType(prop, callType(ctx, object, depth + 1));
+    if (object.type === "new_expression") return methodResultType(prop, newType(object));
+    const cls = ctx.cls();
+    if (!cls || ctx.defs[ctx.caller()]?.static) return null;
+    if (object.type === "this" && cls.cls) {
+      return ctx.defs[cls.def]?.topLevel ? methodResultType(prop, typeRef({ name: cls.cls, qualifier: null, ...pos(object) })) : null;
+    }
+    if (object.type === "member_expression" && object.childForFieldName("object")?.type === "this") {
+      const field = object.childForFieldName("property");
+      return field ? methodResultType(prop, ctx.defs[cls.def]?.fields[field.text]) : null;
+    }
   }
   return null;
+}
+
+// Read fields before method bodies, including fields declared after their callers.
+function jsFields(node: Node): Record<string, TypeRef> {
+  const fields: Record<string, TypeRef> = {};
+  for (const member of node.childForFieldName("body")?.namedChildren ?? []) {
+    if (member.type === "public_field_definition" || member.type === "field_definition") {
+      const name = member.childForFieldName("name") ?? member.childForFieldName("property");
+      const type = jsTypeRef(member.childForFieldName("type")) ?? newType(member.childForFieldName("value"));
+      if (name && type) fields[name.text] = type;
+    }
+    if (member.type !== "method_definition" || member.childForFieldName("name")?.text !== "constructor") continue;
+    for (const p of member.childForFieldName("parameters")?.namedChildren ?? []) {
+      const isProperty = p.namedChildren.some((c) => c.type === "accessibility_modifier") || p.children.some((c) => c.type === "readonly");
+      const pattern = p.childForFieldName("pattern");
+      const type = jsTypeRef(p.childForFieldName("type"));
+      if (isProperty && pattern?.type === "identifier" && type) fields[pattern.text] = type;
+    }
+  }
+  return fields;
 }
 
 function jsResults(fn: Node): TypeRef[] | undefined {
@@ -1202,7 +1287,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // The superclass first: a member is looked up there before an interface.
         bases.push(...implemented);
         const def = ctx.addDef(node, name, "class", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node) && !isDefaultExport(node), bases, ...(dynamicBases.length > 0 ? { dynamicBases } : {}) });
-        return ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
+        const leave = ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
+        (ctx.defs[def] as DefFact).fields = jsFields(node);
+        return leave;
       }
       case "method_definition": {
         const name = node.childForFieldName("name");
@@ -1300,7 +1387,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           ctx.declareFn(name.text, def, block);
           return ctx.push({ def, cls: null, locals: null, fnAt: (value as Node).startIndex });
         }
-        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(value), block);
+        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value), block);
         return;
       }
       case "statement_block":
@@ -1440,7 +1527,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (assigned) ctx.addValue(assigned, "assign");
         const type = newType(right);
         if (left?.type === "identifier") {
-          ctx.assign(left.text, type ?? callType(right));
+          ctx.assign(left.text, type ?? callType(ctx, right));
           return;
         }
         // `({ f } = deps)`, `[a, b] = list`: each name gets a value whose type is not known.
@@ -1953,9 +2040,9 @@ function goResults(node: Node): (TypeRef | null)[] | undefined {
   return out;
 }
 
-// `F()` or `pkg.F()`: typed by F's declared result at `index`, looked up when
-// the graph is resolved. A method call's result is not followed.
-function goCallType(ctx: Ctx, call: Node, index: number): TypeRef | null {
+// Calls keep their result position and the type of a known receiver.
+function goCallType(ctx: Ctx, call: Node, index: number, depth = 0): TypeRef | null {
+  if (depth > MAX_TYPE_DEPTH) return null;
   const fn = call.childForFieldName("function");
   if (fn?.type === "identifier") return { name: fn.text, qualifier: null, ...pos(fn), result: index };
   if (fn?.type === "selector_expression") {
@@ -1964,6 +2051,15 @@ function goCallType(ctx: Ctx, call: Node, index: number): TypeRef | null {
     if (operand?.type === "identifier" && field && ctx.local(operand.text) === undefined) {
       return { name: field.text, qualifier: operand.text, ...pos(fn), result: index };
     }
+    if (!operand || !field) return null;
+    const recv = goReceiver(ctx, operand, depth + 1);
+    if (recv.kind !== "type") return null;
+    let on: TypeRef | undefined = recv.type;
+    for (const name of recv.path) {
+      if (!on || on.qualifier || on.elem || on.result !== undefined) return null;
+      on = ctx.goFields.get(on.name)?.[name];
+    }
+    return methodResultType(field, on, index);
   }
   return null;
 }
@@ -1976,7 +2072,7 @@ function goValueType(ctx: Ctx, value: Node | undefined, index = 0): TypeRef | nu
   return null;
 }
 
-function goReceiver(ctx: Ctx, operand: Node): Receiver {
+function goReceiver(ctx: Ctx, operand: Node, depth = 0): Receiver {
   const path: string[] = [];
   let base: Node | null = operand;
   while (base && base.type === "selector_expression") {
@@ -1992,7 +2088,7 @@ function goReceiver(ctx: Ctx, operand: Node): Receiver {
     return t?.elem ? { kind: "type", type: { ...t, elem: false }, path } : { kind: "other" };
   }
   if (base?.type === "call_expression") {
-    const type = goCallType(ctx, base, 0);
+    const type = goCallType(ctx, base, 0, depth);
     return type ? { kind: "type", type, path } : { kind: "other" };
   }
   if (base?.type !== "identifier") return { kind: "other" };
@@ -2005,6 +2101,22 @@ function goReceiver(ctx: Ctx, operand: Node): Receiver {
 
 function extractGo(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
   const ctx = new Ctx("go");
+  // Package types are visible before their declarations. Keep their direct field annotations for receiver calls.
+  for (const decl of tree.rootNode.namedChildren) {
+    if (decl.type !== "type_declaration") continue;
+    for (const spec of decl.namedChildren) {
+      const name = spec.childForFieldName("name");
+      const body = spec.childForFieldName("type");
+      if (!name || body?.type !== "struct_type") continue;
+      const fields: Record<string, TypeRef> = {};
+      const list = body.namedChildren.find((c) => c.type === "field_declaration_list");
+      for (const field of list?.namedChildren ?? []) {
+        const type = goTypeRef(field.childForFieldName("type"));
+        if (type) for (const n of field.childrenForFieldName("name")) fields[n.text] = type;
+      }
+      ctx.goFields.set(name.text, fields);
+    }
+  }
   const exported = (name: string) => /^[A-Z]/.test(name);
   const signatureUses = (node: Node, def: number) => {
     for (const field of ["parameters", "result"]) for (const r of goTypeNames(node.childForFieldName(field))) ctx.addTypeUse(r, def);
@@ -2231,7 +2343,7 @@ function extractGo(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
         else if (fn?.type === "selector_expression") {
           const field = fn.childForFieldName("field");
           const operand = fn.childForFieldName("operand");
-          if (field && operand) ctx.addCall(field, goReceiver(ctx, operand));
+          if (field && operand) ctx.addCall(field, goReceiver(ctx, operand), false, operand.type === "identifier" ? operand.text : undefined);
         } else if (fn?.type === "index_expression") {
           // handlers[key](x): a computed callee, maybe on a literal table.
           ctx.addDynamicCall(fn);
@@ -2253,6 +2365,895 @@ function extractGo(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
     }
   } });
   return ctx.facts();
+}
+
+// ---------- Java ----------
+
+const JAVA_TYPES = new Set([
+  "package_declaration",
+  "import_declaration",
+  "class_declaration",
+  "interface_declaration",
+  "enum_declaration",
+  "record_declaration",
+  "annotation_type_declaration",
+  "method_declaration",
+  "constructor_declaration",
+  "annotation_type_element_declaration",
+  "field_declaration",
+  "static_initializer",
+  "class_body",
+  "block",
+  "constructor_body",
+  "for_statement",
+  "enhanced_for_statement",
+  "catch_clause",
+  "try_with_resources_statement",
+  "switch_block",
+  "switch_rule",
+  "switch_block_statement_group",
+  "type_pattern",
+  "record_pattern_component",
+  "constant_declaration",
+  "enum_constant",
+  "compact_constructor_declaration",
+  "if_statement",
+  "while_statement",
+  "explicit_constructor_invocation",
+  "local_variable_declaration",
+  "instanceof_expression",
+  "cast_expression",
+  "lambda_expression",
+  "method_invocation",
+  "object_creation_expression",
+  "method_reference",
+  "assignment_expression",
+]);
+
+// The keywords of a declaration's modifiers (`public`, `static`, `abstract`, `default`).
+function javaModifiers(node: Node): Set<string> {
+  const mods = node.namedChildren.find((c) => c.type === "modifiers");
+  return new Set(mods ? mods.children.filter((c) => !c.isNamed).map((c) => c.type) : []);
+}
+
+// Class and method parameters use their first bound. All names shadow outer parameters.
+function javaTypeParams(node: Node): Map<string, TypeRef | null> | null {
+  const list = node.childForFieldName("type_parameters");
+  if (!list) return null;
+  const out = new Map<string, TypeRef | null>();
+  for (const tp of list.namedChildren) {
+    const name = tp.type === "type_parameter" ? tp.namedChildren.find((c) => c.type === "type_identifier") : undefined;
+    if (name) out.set(name.text, null);
+  }
+  const previous = enteringTypeParams;
+  enteringTypeParams = out;
+  for (const tp of list.namedChildren) {
+    const name = tp.type === "type_parameter" ? tp.namedChildren.find((c) => c.type === "type_identifier") : undefined;
+    const bound = tp.namedChildren.find((c) => c.type === "type_bound")?.firstNamedChild;
+    if (name && bound) out.set(name.text, declared(javaTypeRef(bound)));
+  }
+  enteringTypeParams = previous;
+  return out.size > 0 ? out : null;
+}
+
+// The names of a type written `a.b.C` in order, with the node of the last;
+// null for anything that is not a plain or a scoped type name.
+function javaTypeChain(node: Node | null): { names: string[]; last: Node; args?: Node } | null {
+  if (!node) return null;
+  if (node.type === "generic_type") {
+    const head = javaTypeChain(node.namedChildren.find((c) => c.type === "type_identifier" || c.type === "scoped_type_identifier") ?? null);
+    const args = node.namedChildren.find((c) => c.type === "type_arguments");
+    return head ? { ...head, ...(args ? { args } : {}) } : null;
+  }
+  if (node.type === "type_identifier") return { names: [node.text], last: node };
+  if (node.type !== "scoped_type_identifier") return null;
+  const parts = node.namedChildren.filter((c) => c.type === "type_identifier" || c.type === "scoped_type_identifier");
+  const head = javaTypeChain(parts[0] ?? null);
+  const last = parts[parts.length - 1];
+  if (!head || !last || parts.length !== 2 || last.type !== "type_identifier") return null;
+  return { names: [...head.names, last.text], last };
+}
+
+// A declarator's own dimensions (`Foo xs[]`): the type is an array of what is written.
+function javaDims(t: TypeRef | null, declarator: Node | null | undefined): TypeRef | null {
+  return t && declarator?.childForFieldName("dimensions") ? { ...t, elem: true } : t;
+}
+
+// A field whose type names no class (a type parameter, a primitive): an
+// entry that names nothing, so the field hides one of a base class.
+function opaqueType(at: Node): TypeRef {
+  return { name: "", qualifier: null, ...pos(at) };
+}
+
+// Local type names use the same scoped path in annotations, receivers and result qualifiers.
+function javaScopedTypeNames(names: readonly string[]): string[] {
+  const head = names[0] as string;
+  for (let s = readingScope, steps = 0; s && steps <= MAX_SCOPE_DEPTH; s = s.parent, steps++) {
+    const local = s.javaTypes?.get(head);
+    if (local) return [...(local.qualifier ? local.qualifier.split(".") : []), local.name, ...names.slice(1)];
+  }
+  return [...names];
+}
+
+// A bound can be used inside arguments that already consumed part of the depth limit.
+function javaBoundType(t: TypeRef, depth: number): TypeRef {
+  return { ...t, args: depth < MAX_TYPE_DEPTH ? t.args?.map((a) => javaBoundType(a, depth + 1)) : undefined };
+}
+
+// Written types keep arguments. Parameters use their bound, or remain unknown without one.
+function javaTypeRef(node: Node | null, depth = 0): TypeRef | null {
+  if (!node || depth > MAX_TYPE_DEPTH) return null;
+  if (node.type === "array_type") {
+    const inner = javaTypeRef(node.childForFieldName("element"), depth + 1);
+    return inner ? { ...inner, elem: true } : null;
+  }
+  if (node.type === "annotated_type") return javaTypeRef(node.namedChildren.find((c) => c.type !== "marker_annotation" && c.type !== "annotation") ?? null, depth + 1);
+  const chain = javaTypeChain(node);
+  if (!chain) return null;
+  const name = chain.names[chain.names.length - 1] as string;
+  if (chain.names.length === 1) {
+    if (name === "var") return null;
+    const bound = typeParam(name);
+    // Nested bounds keep their head type to prevent exponential expansion.
+    if (bound !== undefined) return bound ? (depth > 0 ? { ...bound, args: undefined } : javaBoundType(bound, depth)) : null;
+  }
+  const names = javaScopedTypeNames(chain.names);
+  // Unknown arguments keep their slot, so later parameter indices never shift.
+  const args = depth < MAX_TYPE_DEPTH ? chain.args?.namedChildren
+    .filter((c) => c.type !== "line_comment" && c.type !== "block_comment")
+    .map((c) => javaTypeRef(c, depth + 1) ?? opaqueType(c)) : undefined;
+  return { name, qualifier: names.length > 1 ? names.slice(0, -1).join(".") : null, ...pos(node), ...(args ? { args } : {}) };
+}
+
+// Every named type in a written type, generic arguments included (`Map<K,
+// List<V>>` names Map, K, List and V); type parameters are not.
+function javaTypeNames(node: Node | null): TypeRef[] {
+  const out: TypeRef[] = [];
+  typeNodes(node, (n) => {
+    if (n.type !== "type_identifier" && n.type !== "scoped_type_identifier") return false;
+    const r = javaTypeRef(n);
+    if (r) out.push(r);
+    return true;
+  });
+  return out;
+}
+
+// A field belongs to the nearest class or to an enclosing instance.
+function javaField(ctx: Ctx, name: string): "self" | "outer" | null {
+  let first = true;
+  for (let s: Scope | null = ctx.top; s; s = s.parent) {
+    if (s.cls === null) continue;
+    if (s.members?.has(name)) return first ? "self" : "outer";
+    first = false;
+  }
+  return null;
+}
+
+// An identifier before a dot: a local's declared or constructed type, a
+// field of this class, else a name the resolver looks up (a type, a package).
+function javaLocalValue(ctx: Ctx, name: string): TypeRef | null | undefined {
+  const at = ctx.lookup(ctx.top, name);
+  // A nearer class's field hides a captured local, but not a local declared inside that class's method.
+  for (let s: Scope | null = ctx.top; s && s !== at; s = s.parent) {
+    if (s.members?.has(name)) return undefined;
+  }
+  return ctx.local(name);
+}
+
+function javaIdent(ctx: Ctx, name: string, path: string[]): Receiver {
+  const t = javaLocalValue(ctx, name);
+  if (t !== undefined) return t && !t.elem ? { kind: "type", type: t, path } : { kind: "other" };
+  const field = javaField(ctx, name);
+  if (field === "self") return { kind: "self", path: [name, ...path] };
+  if (field === "outer") return { kind: "other" };
+  const names = javaScopedTypeNames([name]);
+  return { kind: "name", name: names[0] as string, path: [...names.slice(1), ...path], nesting: null };
+}
+
+// The declared type of a field of the nearest class.
+function javaSelfFieldType(ctx: Ctx, name: string): TypeRef | null {
+  if (javaField(ctx, name) !== "self") return null;
+  for (let s: Scope | null = ctx.top; s; s = s.parent) if (s.cls !== null) return s.fieldTypes?.[name] ?? null;
+  return null;
+}
+
+// `make()`, `this.make()` or `Type.make()`: typed by make's declared result,
+// looked up when the graph is resolved. A method called on a value of a
+// known type (a typed local or parameter, a field, a constructed value,
+// another call whose type is known) carries that type in `on`.
+function javaCallType(ctx: Ctx, call: Node, depth = 0): TypeRef | null {
+  const name = call.childForFieldName("name");
+  let object = call.childForFieldName("object");
+  if (!name || depth > MAX_TYPE_DEPTH) return null;
+  while (object?.type === "parenthesized_expression") object = object.firstNamedChild;
+  if (!object || object.type === "this") return ctx.cls() ? { name: name.text, qualifier: null, ...pos(call), result: 0 } : null;
+  const depthOf = (t: TypeRef): number => {
+    const children = [...(t.args ?? []), ...(t.on ? [t.on] : [])];
+    return children.reduce((max, child) => Math.max(max, 1 + depthOf(child)), 0);
+  };
+  // Past MAX_TYPE_DEPTH the type is not followed: the validator keeps the facts.
+  const onValue = (on: TypeRef | null | undefined): TypeRef | null => (on && !on.elem && depthOf(on) < MAX_TYPE_DEPTH ? { name: name.text, qualifier: null, ...pos(call), result: 0, on } : null);
+  if (object.type === "identifier") {
+    const local = javaLocalValue(ctx, object.text);
+    if (local !== undefined) return onValue(local);
+    const field = javaField(ctx, object.text);
+    if (field === "self") return onValue(javaSelfFieldType(ctx, object.text));
+    if (field === "outer") return null;
+    return { name: name.text, qualifier: javaScopedTypeNames([object.text]).join("."), ...pos(call), result: 0 };
+  }
+  if (object.type === "field_access" && object.childForFieldName("object")?.type === "this" && ctx.cls()) {
+    const field = object.childForFieldName("field");
+    return field?.type === "identifier" ? onValue(javaSelfFieldType(ctx, field.text)) : null;
+  }
+  if (object.type === "method_invocation") return onValue(javaCallType(ctx, object, depth + 1));
+  if (object.type === "object_creation_expression") return onValue(javaValueType(ctx, object));
+  return null;
+}
+
+// What a value's type is known to be: a constructed class, a cast, a call's declared result.
+function javaValueType(ctx: Ctx, value: Node | null): TypeRef | null {
+  let v = value;
+  while (v?.type === "parenthesized_expression") v = v.firstNamedChild;
+  if (v?.type === "object_creation_expression") return v.namedChildren.some((c) => c.type === "class_body") ? null : javaTypeRef(v.childForFieldName("type"));
+  if (v?.type === "cast_expression") return declared(javaTypeRef(v.childForFieldName("type")));
+  if (v?.type === "method_invocation") return javaCallType(ctx, v);
+  return null;
+}
+
+// The receiver of `a.b.m()`: the object flattened to a base and a path.
+function javaReceiver(ctx: Ctx, object: Node): Receiver {
+  const path: string[] = [];
+  let base: Node | null = object;
+  while (base?.type === "field_access") {
+    const field = base.childForFieldName("field");
+    if (field?.type === "this") {
+      const type = javaTypeRef(base.childForFieldName("object"));
+      // The qualifier of `Outer.this` is an expression name in the grammar.
+      const qualifier = base.childForFieldName("object");
+      const names = qualifier?.text.replace(/\s+/g, "").split(".");
+      for (let s = ctx.cls(); s; s = s.parent?.clsScope ?? null) {
+        const d = ctx.defs[s.def];
+        if (!d || !names || (d.name !== names.join(".") && s.cls !== names.join("."))) continue;
+        return { kind: "type", type: type ?? { name: d.name, qualifier: d.owner, ...pos(base) }, path };
+      }
+      return { kind: "other" };
+    }
+    // A qualified super receiver is not read.
+    if (field?.type !== "identifier") return { kind: "other" };
+    path.unshift(field.text);
+    base = base.childForFieldName("object");
+  }
+  while (base?.type === "parenthesized_expression") base = base.firstNamedChild;
+  switch (base?.type) {
+    case "this":
+      return ctx.cls() ? { kind: "self", path } : { kind: "other" };
+    case "super":
+      return path.length === 0 && ctx.cls() ? { kind: "super" } : { kind: "other" };
+    case "identifier":
+      return javaIdent(ctx, base.text, path);
+    case "method_invocation":
+    case "object_creation_expression":
+    case "cast_expression": {
+      const type = javaValueType(ctx, base);
+      return type ? { kind: "type", type, path } : { kind: "other" };
+    }
+    default:
+      return { kind: "other" };
+  }
+}
+
+// The receiver that names a type written in place (`new a.b.T()`, `T::m`).
+function javaTypeReceiver(chain: { names: string[] }): Receiver {
+  const names = javaScopedTypeNames(chain.names);
+  return { kind: "name", name: names[0] as string, path: names.slice(1), nesting: null };
+}
+
+function extractJava(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
+  const ctx = new Ctx("java");
+  let javaPackage: string | null = null;
+  // Inside a static field's initializer or a static initializer block: a
+  // call there runs on the class, one in an instance initializer on an instance.
+  let staticInit = 0;
+  // Each call node's call, by the node's end (a call and its receiver call start at one place).
+  const callAt = new Map<number, number>();
+  // A method called on an identifier: when the name is a parameter of its
+  // method, decided once the body is read (it may be assigned below).
+  const paramCalls: { name: string; scope: Scope }[] = [];
+  const blockFrame = (locals = new Map<string, TypeRef | null>()): Leave => ctx.push({ def: -1, cls: null, locals, block: true });
+  // Pattern names stay local when their typed scope ends.
+  const patternNames = new Map<Scope, Set<string>>();
+  type PatternBinding = { type: TypeRef | null; negated: boolean; supported: boolean };
+  type PatternFlow = {
+    frame: Scope;
+    condition: Node;
+    consequence: Node | null;
+    alternative: Node | null;
+    patterns: Map<string, PatternBinding>;
+    phase: "condition" | "consequence" | "alternative";
+  };
+  const patternFlows: PatternFlow[] = [];
+  const notePattern = (frame: Scope, name: string) => {
+    let names = patternNames.get(frame);
+    if (!names) patternNames.set(frame, (names = new Set()));
+    names.add(name);
+  };
+  const endPatterns = (leave: Leave, frame: Scope, surviving?: ReadonlyMap<string, TypeRef | null>) => {
+    leave();
+    for (const name of patternNames.get(frame) ?? []) {
+      ctx.setLocal(name, surviving?.get(name) ?? null, true);
+      notePattern(ctx.top.decl, name);
+    }
+    patternNames.delete(frame);
+  };
+  const bindPattern = (node: Node, name: string, type: TypeRef | null) => {
+    const frame = ctx.top.decl;
+    const flow = patternFlows[patternFlows.length - 1];
+    let binding: PatternBinding | null = null;
+    if (flow?.frame === frame && node.startIndex >= flow.condition.startIndex && node.endIndex <= flow.condition.endIndex) {
+      binding = { type, negated: false, supported: true };
+      // Record components start inside the pattern expression.
+      let expression: Node | null = node;
+      while (expression && expression.id !== flow.condition.id && expression.type !== "instanceof_expression") expression = expression.parent;
+      binding.supported = expression?.type === "instanceof_expression";
+      for (let at = expression?.parent; binding.supported && at && at.id !== flow.condition.id; at = at.parent) {
+        const operator = at.childForFieldName("operator")?.text;
+        if (at.type === "parenthesized_expression") continue;
+        if (at.type === "unary_expression" && operator === "!") {
+          binding.negated = !binding.negated;
+          continue;
+        }
+        if (at.type === "binary_expression" && operator === "&&" && !binding.negated) continue;
+        binding.supported = false;
+      }
+      if (!binding.supported) binding.type = null;
+      flow.patterns.set(name, binding);
+    }
+    ctx.setLocal(name, binding?.negated || binding?.supported === false ? null : type, true);
+    notePattern(frame, name);
+  };
+  // Read the branch boundary before extracting its first relevant node.
+  const enterPatternBranch = (node: Node) => {
+    const flow = patternFlows[patternFlows.length - 1];
+    if (!flow || node.startIndex < flow.condition.endIndex) return;
+    const phase = flow.alternative && node.startIndex >= flow.alternative.startIndex ? "alternative" : "consequence";
+    if (phase === flow.phase) return;
+    flow.phase = phase;
+    const branch = phase === "alternative" ? flow.alternative : flow.consequence;
+    // Block branches keep separate maps for value references resolved after the walk.
+    const branchLocals = branch?.type === "block" && branch.id === node.id ? new Map<string, TypeRef | null>() : undefined;
+    const locals = branchLocals ?? flow.frame.locals;
+    for (const [name, binding] of flow.patterns) {
+      const visible = binding.supported && binding.negated === (phase === "alternative");
+      locals?.set(name, visible ? binding.type : null);
+    }
+    return branchLocals;
+  };
+  const completesAbruptly = (branch: Node | null): boolean => {
+    let last = branch;
+    let read = 0;
+    while (last?.type === "block") {
+      if (++read > MAX_TYPE_NODES) return false;
+      let statement: Node | null = null;
+      for (let i = last.namedChildCount - 1; i >= 0; i--) {
+        if (++read > MAX_TYPE_NODES) return false;
+        const child = last.namedChild(i);
+        if (child && child.type !== "line_comment" && child.type !== "block_comment") {
+          statement = child;
+          break;
+        }
+      }
+      last = statement;
+    }
+    return last !== null && ["return_statement", "throw_statement", "break_statement", "continue_statement"].includes(last.type);
+  };
+  const breakBoundaries = new Set([
+    "for_statement", "enhanced_for_statement", "while_statement", "do_statement",
+    "switch_expression", "switch_statement", "lambda_expression", "class_body", "enum_body",
+  ]);
+  const loopCanBreak = (body: Node | null): boolean => {
+    const stack = body ? [{ node: body, nested: false }] : [];
+    let read = 0;
+    while (stack.length > 0) {
+      if (++read > MAX_TYPE_NODES) return true;
+      const { node, nested } = stack.pop()!;
+      if (node.type === "break_statement") {
+        // A labeled break may target this loop from a nested statement.
+        if (!nested || node.namedChildren.some((c) => c.type === "identifier")) return true;
+        continue;
+      }
+      const inside = nested || breakBoundaries.has(node.type);
+      for (let i = 0; i < node.namedChildCount; i++) {
+        if (read + stack.length >= MAX_TYPE_NODES) return true;
+        const child = node.namedChild(i);
+        if (child) stack.push({ node: child, nested: inside });
+      }
+    }
+    return false;
+  };
+  const breaksAnyLabel = (body: Node | null, labels: ReadonlySet<string>): boolean => {
+    if (labels.size === 0) return false;
+    const stack = body ? [body] : [];
+    let read = 0;
+    while (stack.length > 0) {
+      if (++read > MAX_TYPE_NODES) return true;
+      const node = stack.pop()!;
+      // Breaks cannot cross a class or lambda boundary.
+      if (["lambda_expression", "class_body", "enum_body", "interface_body", "annotation_type_body"].includes(node.type)) continue;
+      if (node.type === "break_statement") {
+        const label = node.namedChildren.find((c) => c.type === "identifier");
+        if (label && labels.has(label.text)) return true;
+        continue;
+      }
+      for (let i = 0; i < node.namedChildCount; i++) {
+        if (read + stack.length >= MAX_TYPE_NODES) return true;
+        const child = node.namedChild(i);
+        if (child) stack.push(child);
+      }
+    }
+    return false;
+  };
+  let anonymous = 0;
+  const localTypes = new Map<string, Map<string, number>>();
+  const typeUses = (node: Node | null, caller: number) => {
+    for (const r of javaTypeNames(node)) ctx.addTypeUse(r, caller);
+  };
+  // The parameters of a method, a constructor or a lambda: each a local
+  // with its declared type, the names in order, and whether the last is varargs.
+  const params = (list: Node | null, locals: Map<string, TypeRef | null>, user: number): { names: string[]; varargs: boolean } => {
+    const names: string[] = [];
+    let varargs = false;
+    for (const p of list?.namedChildren ?? []) {
+      if (p.type === "formal_parameter") {
+        const name = p.childForFieldName("name");
+        const typeNode = p.childForFieldName("type");
+        typeUses(typeNode, user);
+        if (!name) continue;
+        locals.set(name.text, declared(javaDims(javaTypeRef(typeNode), p)));
+        names.push(name.text);
+      } else if (p.type === "spread_parameter") {
+        const typeNode = p.namedChildren.find((c) => c.type !== "modifiers" && c.type !== "variable_declarator") ?? null;
+        const name = p.namedChildren.find((c) => c.type === "variable_declarator")?.childForFieldName("name");
+        typeUses(typeNode, user);
+        varargs = true;
+        if (!name) continue;
+        const t = javaTypeRef(typeNode);
+        locals.set(name.text, t ? { ...t, elem: true, declared: true } : null);
+        names.push(name.text);
+      }
+    }
+    return { names, varargs };
+  };
+  // A call: its argument count when the list parsed, and whether it runs on the class.
+  const addCall = (nameNode: Node, recv: Receiver, args: Node | null, callNode: Node): number => {
+    const object = callNode.childForFieldName("object");
+    const receiverName = object?.type === "identifier" && javaLocalValue(ctx, object.text) !== undefined ? object.text : undefined;
+    const index = ctx.addCall(nameNode, recv, false, receiverName);
+    const call = ctx.calls[index] as CallFact;
+    if (args && !args.hasError) call.arity = args.namedChildren.filter((c) => c.type !== "line_comment" && c.type !== "block_comment").length;
+    const callerDef = call.caller >= 0 ? ctx.defs[call.caller] : undefined;
+    if (callerDef?.kind === "class") {
+      if (staticInit > 0) call.static = true;
+      else delete call.static;
+    }
+    callAt.set(callNode.endIndex, index);
+    return index;
+  };
+  // Named and anonymous types share field collection and member ownership.
+  const typeBody = (node: Node, body: Node | null, def: number, qualified: string, typeParams?: Map<string, TypeRef | null> | null): Leave => {
+    const fields = (ctx.defs[def] as DefFact).fields;
+    const members = new Set<string>();
+    const leave = ctx.push({ def, cls: qualified, locals: null, members, fieldTypes: fields, ...(typeParams ? { typeParams } : {}) });
+    // Fields are read first so methods can use fields declared below them.
+    const decls = (body?.namedChildren ?? []).flatMap((c) => (c.type === "enum_body_declarations" ? c.namedChildren : [c]));
+    for (const f of decls) {
+      if (f.type === "enum_constant") {
+        const n = f.childForFieldName("name");
+        if (!n) continue;
+        const owner = ctx.defs[def] as DefFact;
+        const hasBody = f.namedChildren.some((c) => c.type === "class_body");
+        members.add(n.text);
+        fields[n.text] = { name: hasBody ? n.text : owner.name, qualifier: hasBody ? qualified : owner.owner, ...pos(n) };
+        continue;
+      }
+      if (f.type !== "field_declaration" && f.type !== "constant_declaration") continue;
+      const typeNode = f.childForFieldName("type");
+      const type = javaTypeRef(typeNode);
+      typeUses(typeNode, def);
+      for (const d of f.childrenForFieldName("declarator")) {
+        const n = d.childForFieldName("name");
+        if (!n) continue;
+        members.add(n.text);
+        fields[n.text] = javaDims(type, d) ?? opaqueType(n);
+      }
+    }
+    for (const p of node.type === "record_declaration" ? (node.childForFieldName("parameters")?.namedChildren ?? []) : []) {
+      if (p.type !== "formal_parameter") continue;
+      const n = p.childForFieldName("name");
+      const typeNode = p.childForFieldName("type");
+      const type = javaTypeRef(typeNode);
+      typeUses(typeNode, def);
+      if (!n) continue;
+      members.add(n.text);
+      fields[n.text] = type ?? opaqueType(n);
+    }
+    return leave;
+  };
+  // Same-named local types use source-order ordinals within their enclosing scope.
+  const typeDecl = (node: Node): Leave => {
+    const name = node.childForFieldName("name");
+    if (!name) return blockFrame();
+    const local = ctx.top.depth > 0 && ctx.top.cls === null;
+    let outer = ctx.cls()?.cls ?? null;
+    if (local) {
+      const owner = ctx.ownerName() ?? outer ?? "";
+      const scope = ctx.defs[ctx.caller()]?.kind === "class" ? `${owner}.<init>` : owner;
+      let names = localTypes.get(scope);
+      if (!names) localTypes.set(scope, (names = new Map()));
+      const ordinal = (names.get(name.text) ?? 0) + 1;
+      names.set(name.text, ordinal);
+      outer = ordinal === 1 ? scope : `${scope}$${ordinal}`;
+      (ctx.top.decl.javaTypes ??= new Map()).set(name.text, { name: name.text, qualifier: outer, ...pos(name) });
+    }
+    const typeParams = javaTypeParams(node);
+    enteringTypeParams = typeParams;
+    const bases: TypeRef[] = [];
+    const baseNodes: Node[] = [];
+    const take = (list: Node | null | undefined, rel?: "implements") => {
+      const types = list?.type === "type_list" ? list.namedChildren : list ? [list] : [];
+      for (const t of types) {
+        baseNodes.push(t);
+        const ref = javaTypeRef(t);
+        if (ref) bases.push(rel ? { ...ref, rel } : ref);
+      }
+    };
+    take(node.childForFieldName("superclass")?.namedChildren[0]);
+    take(node.childForFieldName("interfaces")?.namedChildren[0], "implements");
+    // An interface's `extends` are all its bases.
+    take(node.namedChildren.find((c) => c.type === "extends_interfaces")?.namedChildren[0]);
+    enteringTypeParams = null;
+    const iface = node.type === "interface_declaration" || node.type === "annotation_type_declaration";
+    const fields: Record<string, TypeRef> = {};
+    const def = ctx.addDef(node, name, "class", { owner: outer, topLevel: ctx.top.depth === 0, exported: javaModifiers(node).has("public"), bases, fields, ...(iface ? { iface: true } : {}) });
+    const leave = typeBody(node, node.childForFieldName("body"), def, outer ? `${outer}.${name.text}` : name.text, typeParams);
+    for (const b of baseNodes) typeUses(b, def);
+    return leave;
+  };
+  // A method, a constructor or an annotation element: a definition when
+  // it stands directly in a named type, else its body is the enclosing method's.
+  const method = (node: Node): Leave => {
+    const cls = ctx.top.cls !== null ? ctx.top : null;
+    const name = node.childForFieldName("name");
+    const typeParams = javaTypeParams(node);
+    const locals = new Map<string, TypeRef | null>();
+    const frame = (def: number): Leave => ctx.push({ def, cls: null, locals, ...(typeParams ? { typeParams } : {}) });
+    enteringTypeParams = typeParams;
+    if (!cls || !name) {
+      params(node.childForFieldName("parameters"), locals, ctx.caller());
+      typeUses(node.childForFieldName("type"), ctx.caller());
+      enteringTypeParams = null;
+      return frame(-1);
+    }
+    const owner = ctx.defs[cls.def] as DefFact;
+    const mods = javaModifiers(node);
+    const inIface = owner.iface === true;
+    const compact = node.type === "compact_constructor_declaration";
+    const isCtor = node.type === "constructor_declaration" || compact;
+    const body = node.childForFieldName("body");
+    const typeNode = node.childForFieldName("type");
+    const resultName = typeNode?.type === "type_identifier" ? typeNode.text : null;
+    const param = resultName && !typeParams?.has(resultName) ? [...(cls.typeParams?.keys() ?? [])].indexOf(resultName) : -1;
+    const result: TypeRef | null = param >= 0 && typeNode
+      ? { kind: "param", name: resultName as string, qualifier: null, ...pos(typeNode), param }
+      : javaTypeRef(typeNode);
+    const results = isCtor ? [{ name: owner.name, qualifier: owner.owner, ...pos(name) }] : [result];
+    const def = ctx.addDef(node, name, "method", {
+      owner: cls.cls,
+      exported: mods.has("public") || (inIface && !mods.has("private")),
+      results,
+      ...(mods.has("static") && !isCtor ? { static: true } : {}),
+      ...(mods.has("abstract") || (inIface && !body) ? { abstract: true } : {}),
+      ...(isCtor ? { ctor: true } : {}),
+    });
+    // A record's compact constructor takes the record's components.
+    const sig = params(compact ? (node.parent?.parent?.childForFieldName("parameters") ?? null) : node.childForFieldName("parameters"), locals, def);
+    typeUses(typeNode, def);
+    enteringTypeParams = null;
+    const d = ctx.defs[def] as DefFact;
+    d.params = sig.names;
+    if (sig.varargs) d.varargs = true;
+    return frame(def);
+  };
+  // A method reference (`T::m`, `this::m`, `x::m`): a value reference with its receiver.
+  const methodRef = (node: Node) => {
+    const kids = node.namedChildren.filter((c) => c.type !== "line_comment" && c.type !== "block_comment");
+    const name = kids[kids.length - 1];
+    const target = kids[0];
+    // `T::new` names a constructor, not a method: not read in this version.
+    if (!name || !target || kids.length !== 2 || name.type !== "identifier") return;
+    const chain = target.type === "identifier" ? null : javaTypeChain(target);
+    const recv = chain ? javaTypeReceiver(chain) : javaReceiver(ctx, target);
+    if (recv.kind === "other") return;
+    const parent = node.parent;
+    if (parent?.type === "argument_list") {
+      const call = parent.parent ? callAt.get(parent.parent.endIndex) : undefined;
+      const arg = parent.namedChildren.filter((c) => c.type !== "line_comment" && c.type !== "block_comment").findIndex((c) => c.startIndex === node.startIndex);
+      ctx.addValue({ name, recv }, "arg", call !== undefined ? { call, arg } : {});
+    } else if (parent?.type === "return_statement") {
+      const ref = ctx.addValue({ name, recv }, "return");
+      const owner = ctx.top.fnDecl.def;
+      if (owner >= 0) ((ctx.defs[owner] as DefFact).returns ??= []).push(ref);
+    } else {
+      const ref = ctx.addValue({ name, recv }, "assign");
+      const local = parent?.type === "variable_declarator" && parent.parent?.type === "local_variable_declaration"
+        ? parent.childForFieldName("name") : null;
+      if (local) ctx.noteAssign(local.text, { ref }, true, true);
+    }
+  };
+  walkTree(tree.rootNode, readers, { interesting: JAVA_TYPES, visit: (node) => {
+    const branchLocals = enterPatternBranch(node);
+    switch (node.type) {
+      case "package_declaration": {
+        const id = node.namedChildren.find((c) => c.type === "scoped_identifier" || c.type === "identifier");
+        javaPackage = id ? id.text.replace(/\s+/g, "") : null;
+        return false;
+      }
+      case "import_declaration": {
+        const id = node.namedChildren.find((c) => c.type === "scoped_identifier" || c.type === "identifier");
+        if (!id) return false;
+        const parts = id.text.replace(/\s+/g, "").split(".");
+        const isStatic = node.children.some((c) => c.type === "static");
+        const star = node.namedChildren.some((c) => c.type === "asterisk");
+        // The class an import names: the last part, or the one before a static member.
+        const clsAt = parts.length - (isStatic && !star ? 2 : 1);
+        if (clsAt < 0) return false;
+        const fact: ImportFact = { spec: "", ...pos(node), names: [], namespace: null, star: false, reexport: false, typeOnly: false };
+        if (star && !isStatic) {
+          fact.spec = parts.join(".");
+          fact.star = true;
+        } else {
+          const cls = parts[clsAt] as string;
+          fact.spec = parts.slice(0, clsAt).join(".");
+          fact.names.push({ imported: cls, local: cls });
+          if (isStatic && star) fact.staticStar = true;
+          else if (isStatic) fact.staticMember = parts[parts.length - 1] as string;
+        }
+        ctx.imports.push(fact);
+        return false;
+      }
+      case "class_declaration":
+      case "interface_declaration":
+      case "enum_declaration":
+      case "record_declaration":
+      case "annotation_type_declaration":
+        return typeDecl(node);
+      case "method_declaration":
+      case "constructor_declaration":
+      case "compact_constructor_declaration":
+      case "annotation_type_element_declaration":
+        return method(node);
+      // An interface constant and an enum constant's arguments run on the
+      // type itself, as a static initializer does.
+      case "constant_declaration":
+      case "enum_constant": {
+        const leave = blockFrame();
+        staticInit++;
+        return () => {
+          staticInit--;
+          leave();
+        };
+      }
+      // A case's pattern variables (`case Circle c ->`) end with the case.
+      case "switch_rule":
+      case "switch_block_statement_group": {
+        const leave = blockFrame();
+        const frame = ctx.top.decl;
+        return () => endPatterns(leave, frame);
+      }
+      // `case Circle c`, and each component of a record pattern
+      // (`o instanceof Point(int x, Svc y)`): a local of that type.
+      case "type_pattern":
+      case "record_pattern_component": {
+        const typeNode = node.namedChildren[0] ?? null;
+        const name = node.namedChildren[node.namedChildren.length - 1];
+        typeUses(typeNode, ctx.caller());
+        if (!name || name.type !== "identifier" || name === typeNode) return;
+        bindPattern(node, name.text, declared(javaTypeRef(typeNode)));
+        return;
+      }
+      case "field_declaration":
+      case "static_initializer": {
+        // A field's initializers have a scope of their own: a pattern
+        // variable there never reaches the rest of the class.
+        const leave = node.type === "field_declaration" ? blockFrame() : null;
+        const isStatic = node.type === "static_initializer" || javaModifiers(node).has("static");
+        if (isStatic) staticInit++;
+        return () => {
+          if (isStatic) staticInit--;
+          leave?.();
+        };
+      }
+      case "class_body": {
+        const parent = node.parent;
+        if (parent?.type !== "enum_constant" && parent?.type !== "object_creation_expression") return;
+        const outer = ctx.cls()?.cls ?? null;
+        const constant = parent.type === "enum_constant";
+        const name = constant ? parent.childForFieldName("name")?.text : `$${++anonymous}`;
+        if (!name) return blockFrame();
+        const base = constant && outer
+          ? { name: (ctx.defs[ctx.cls()?.def ?? -1] as DefFact).name, qualifier: (ctx.defs[ctx.cls()?.def ?? -1] as DefFact).owner, ...pos(parent) }
+          : javaTypeRef(parent.childForFieldName("type"));
+        const def = ctx.addDef(node, node, "class", { name, owner: outer, bases: base ? [base] : [], anonymous: true });
+        delete (ctx.defs[def] as DefFact).bodyHash;
+        const saved = staticInit;
+        staticInit = 0;
+        const leave = typeBody(node, node, def, outer ? `${outer}.${name}` : name);
+        return () => {
+          leave();
+          staticInit = saved;
+        };
+      }
+      case "block":
+      case "constructor_body":
+      case "for_statement":
+      case "switch_block": {
+        const leave = blockFrame(branchLocals);
+        const frame = ctx.top.decl;
+        return () => endPatterns(leave, frame);
+      }
+      // Negated patterns bind in the alternative or after a guard that exits.
+      case "if_statement":
+      case "while_statement": {
+        const leave = blockFrame();
+        const frame = ctx.top.decl;
+        const condition = node.childForFieldName("condition");
+        if (!condition) return () => endPatterns(leave, frame);
+        const flow: PatternFlow = {
+          frame, condition, consequence: node.childForFieldName("consequence") ?? node.childForFieldName("body"),
+          alternative: node.childForFieldName("alternative"), patterns: new Map(), phase: "condition",
+        };
+        patternFlows.push(flow);
+        return () => {
+          patternFlows.pop();
+          const surviving = new Map<string, TypeRef | null>();
+          for (const [name, binding] of flow.patterns) {
+            if (binding.negated && binding.supported) surviving.set(name, binding.type);
+          }
+          if (surviving.size > 0) {
+            let container = node.parent;
+            const labels = new Set<string>();
+            while (container?.type === "labeled_statement") {
+              const label = container.namedChildren.find((c) => c.type === "identifier");
+              if (label) labels.add(label.text);
+              container = container.parent;
+            }
+            const inBlock = container !== null && ["block", "constructor_body", "switch_block_statement_group"].includes(container.type);
+            const survives = inBlock && !breaksAnyLabel(flow.consequence, labels)
+              && (node.type === "while_statement" ? !loopCanBreak(flow.consequence) : completesAbruptly(flow.consequence));
+            if (!survives) surviving.clear();
+          }
+          endPatterns(leave, frame, surviving);
+        };
+      }
+      case "explicit_constructor_invocation": {
+        // `this(...)` and `super(...)`: a constructor call on the own class or the superclass.
+        const kw = node.childForFieldName("constructor");
+        const cls = ctx.cls();
+        const owner = cls ? ctx.defs[cls.def] : undefined;
+        if (!kw || !owner) return;
+        const isSuper = kw.type === "super";
+        const name = isSuper ? owner.bases.find((b) => b.rel === undefined)?.name : owner.name;
+        if (name === undefined || (kw.type !== "this" && !isSuper)) return;
+        const index = addCall(kw, isSuper ? { kind: "super" } : { kind: "self", path: [] }, node.childForFieldName("arguments"), node);
+        const call = ctx.calls[index] as CallFact;
+        call.name = name;
+        call.ctor = true;
+        return;
+      }
+      case "enhanced_for_statement": {
+        const leave = blockFrame();
+        const name = node.childForFieldName("name");
+        const typeNode = node.childForFieldName("type");
+        typeUses(typeNode, ctx.caller());
+        if (name) ctx.setLocal(name.text, declared(javaTypeRef(typeNode)), true);
+        return leave;
+      }
+      case "catch_clause": {
+        const leave = blockFrame();
+        const param = node.namedChildren.find((c) => c.type === "catch_formal_parameter");
+        const types = param?.namedChildren.find((c) => c.type === "catch_type")?.namedChildren ?? [];
+        for (const t of types) typeUses(t, ctx.caller());
+        const name = param?.childForFieldName("name");
+        // A multi-catch parameter has no one type.
+        if (name) ctx.setLocal(name.text, types.length === 1 ? declared(javaTypeRef(types[0] as Node)) : null, true);
+        return leave;
+      }
+      case "try_with_resources_statement": {
+        const leave = blockFrame();
+        for (const r of node.childForFieldName("resources")?.namedChildren ?? []) {
+          const name = r.type === "resource" ? r.childForFieldName("name") : null;
+          if (!name) continue;
+          const typeNode = r.childForFieldName("type");
+          typeUses(typeNode, ctx.caller());
+          ctx.setLocal(name.text, typeNode?.text === "var" ? javaValueType(ctx, r.childForFieldName("value")) : declared(javaTypeRef(typeNode)), true);
+        }
+        return leave;
+      }
+      case "local_variable_declaration": {
+        const typeNode = node.childForFieldName("type");
+        typeUses(typeNode, ctx.caller());
+        const isVar = typeNode?.text === "var";
+        const type = isVar ? null : declared(javaTypeRef(typeNode));
+        for (const d of node.childrenForFieldName("declarator")) {
+          const name = d.childForFieldName("name");
+          if (name) ctx.setLocal(name.text, isVar ? javaValueType(ctx, d.childForFieldName("value")) : javaDims(type, d), true);
+        }
+        return;
+      }
+      case "assignment_expression": {
+        // A local given another value; a parameter no longer holds what the caller passed.
+        const left = node.childForFieldName("left");
+        if (left?.type !== "identifier" || javaLocalValue(ctx, left.text) === undefined) return;
+        // A Java local's type is fixed where it is declared (a `var` by its
+        // first value). Reassignment ends the original callable alias.
+        ctx.reassign(left.text);
+        return;
+      }
+      case "instanceof_expression": {
+        const typeNode = node.childForFieldName("right");
+        typeUses(typeNode, ctx.caller());
+        // `o instanceof Svc s`: s is a Svc where the test holds.
+        const name = node.childForFieldName("name");
+        if (name) {
+          bindPattern(node, name.text, declared(javaTypeRef(typeNode)));
+        }
+        return;
+      }
+      case "cast_expression":
+        typeUses(node.childForFieldName("type"), ctx.caller());
+        return;
+      case "lambda_expression": {
+        // A lambda's calls belong to the enclosing method; its `this` is that method's.
+        const locals = new Map<string, TypeRef | null>();
+        const list = node.childForFieldName("parameters");
+        if (list?.type === "identifier") locals.set(list.text, null);
+        else if (list?.type === "inferred_parameters") for (const p of list.namedChildren) locals.set(p.text, null);
+        else params(list, locals, ctx.caller());
+        return ctx.push({ def: -1, cls: null, locals });
+      }
+      case "method_invocation": {
+        const name = node.childForFieldName("name");
+        const object = node.childForFieldName("object");
+        if (!name) return;
+        const recv: Receiver = object ? javaReceiver(ctx, object) : ctx.cls() ? { kind: "self", path: [] } : { kind: "other" };
+        addCall(name, recv, node.childForFieldName("arguments"), node);
+        if (object?.type === "identifier" && javaLocalValue(ctx, object.text) !== undefined) paramCalls.push({ name: object.text, scope: ctx.top });
+        return;
+      }
+      case "object_creation_expression": {
+        // `new T(args)`: a call named T on the receiver that names T.
+        const typeNode = node.childForFieldName("type");
+        typeUses(typeNode, ctx.caller());
+        const chain = javaTypeChain(typeNode);
+        const type = javaTypeRef(typeNode);
+        const scoped = type && chain && type.qualifier !== (chain.names.slice(0, -1).join(".") || null);
+        const recv = scoped ? { kind: "type" as const, type, path: [] } : chain ? javaTypeReceiver(chain) : null;
+        if (chain && recv) (ctx.calls[addCall(chain.last, recv, node.childForFieldName("arguments"), node)] as CallFact).ctor = true;
+        return;
+      }
+      case "method_reference":
+        methodRef(node);
+        return;
+    }
+  } });
+  // A method called on a parameter of its method: the method calls what it is given there.
+  for (const { name, scope } of paramCalls) {
+    const at = ctx.lookup(scope, name);
+    if (!at || at.block || at.def < 0 || at.reassigned?.has(name) || !at.locals?.has(name)) continue;
+    const owner = ctx.defs[at.def] as DefFact;
+    const param = owner.params?.indexOf(name) ?? -1;
+    if (param >= 0 && !owner.invokes?.includes(param)) (owner.invokes ??= []).push(param);
+  }
+  return { ...ctx.facts(), javaPackage };
 }
 
 // ---------- Ruby ----------
@@ -2395,7 +3396,7 @@ function extractRuby(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           const type = ctx.local(recv.text);
           if (type) r = { kind: "type", type, path: [] };
         }
-        ctx.addCall(method, r);
+        ctx.addCall(method, r, false, recv.type === "identifier" ? recv.text : undefined);
         // The receiver identifier is a value, never a call of its own.
         return;
       }
@@ -2418,5 +3419,6 @@ export function extract(tree: Tree, lang: Lang, readers: readonly TreeVisitor[] 
   if (lang === "python") return extractPython(tree, readers);
   if (lang === "go") return extractGo(tree, readers);
   if (lang === "ruby") return extractRuby(tree, readers);
+  if (lang === "java") return extractJava(tree, readers);
   return extractJs(tree, lang, readers);
 }

@@ -1,0 +1,22 @@
+{
+  "guards": "substitutes Java class arguments in method results without binding raw or external generic results",
+  "callers": [
+    { "to": "generic/Repo.java#Repo.find", "site": "generic/Host.java:5", "tier": "certain", "kind": "calls" },
+    { "to": "generic/Repo.java#Repo.find", "site": "generic/Host.java:8", "tier": "certain", "kind": "calls" },
+    { "to": "generic/Repo.java#Repo.find", "site": "generic/Host.java:11", "tier": "certain", "kind": "calls" }
+  ],
+  "notReached": [
+    { "to": "generic/Repo.java#Repo.find", "site": "generic/Host.java:14" },
+    { "to": "generic/Repo.java#Repo.find", "site": "generic/Host.java:23" },
+    { "to": "generic/Box.java#Other.find", "site": "generic/Host.java:26" },
+    { "to": "generic/Box.java#Other.find", "site": "generic/Host.java:29" }
+  ],
+  "unknowns": [
+    { "file": "generic/Host.java", "line": 14, "cause": "no-receiver-type" },
+    { "file": "generic/Host.java", "line": 17, "cause": "no-receiver-type" },
+    { "file": "generic/Host.java", "line": 26, "cause": "no-receiver-type" },
+    { "file": "generic/Host.java", "line": 29, "cause": "no-receiver-type" }
+  ],
+  "noMiss": ["generic/Host.java:26", "generic/Host.java:29"],
+  "allRead": true
+}

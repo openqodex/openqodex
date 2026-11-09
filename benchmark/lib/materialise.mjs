@@ -124,6 +124,7 @@ import { appendFileSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtemp
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gitEnv } from "./cases.mjs";
+import { checkGreptileChange, greptileEntryProblems } from "./greptile.mjs";
 import { cacheRoot, licenceExclusion } from "./licence.mjs";
 import { takeOverStale } from "./runner.mjs";
 
@@ -198,6 +199,10 @@ function cloneUrlRefusal(c, { allowFileUrl }) {
 export function prRefusal(c, { heldOut = false, allowFileUrl = false } = {}) {
   const m = c?.materialise;
   if (m?.kind !== "pr") return `${c?.id ?? "the case"} is not a pull request case`;
+  if (c.suite === "greptile") {
+    const problems = greptileEntryProblems({ ...c, ...m, prUrl: c.source?.prUrl, repo: c.source?.repo });
+    if (problems.length > 0) return `${c.id}: ${problems.join("; ")}`;
+  }
   if (c.status !== "usable") return `${c.id} is excluded (${c.excludedWhy ?? "no reason recorded"}), so it is never fetched`;
   const licence = licenceExclusion(c.source?.licence ?? { class: "none" });
   if (licence !== null) return `${c.id}: ${licence}; it is never fetched`;
@@ -532,6 +537,7 @@ function recordHeldOut(cache, c) {
 export function caseRepo(c, { cache = cacheRoot(), heldOut = false, allowFileUrl = false } = {}) {
   const why = prRefusal(c, { heldOut, allowFileUrl });
   if (why !== null) throw new Error(why);
+  if (c.suite === "greptile") checkGreptileChange(c, cache);
   if (c.split === "test") recordHeldOut(cache, c);
   const path = caseRepoPath(cache, c);
   if (existsSync(join(path, "materialised.json"))) return { path, record: checkedRecord(path, c), built: false };

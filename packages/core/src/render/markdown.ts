@@ -1,5 +1,5 @@
 import type { Report, ReportFinding } from "../types.js";
-import { SEVERITIES_DESC, candidateLocation, coverageLine, escapeMarkdown, location, lowConfidenceReason, sourceLabel, verdictLine } from "./common.js";
+import { SEVERITIES_DESC, candidateLocation, coverageLine, escapeMarkdown, location, lowConfidenceReason, orderPossible, sourceLabel, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
 import { renderObservations } from "./review.js";
 
@@ -73,6 +73,12 @@ export function renderMarkdown(report: Report): string {
 
   const observations = renderObservations(report);
   if (observations) out.push("", observations.trimEnd());
+
+  const possible = orderPossible(report);
+  if (possible.length > 0) {
+    // wording: session
+    out.push("", "## Possible issues (not counted)", "", ...findingTable(possible));
+  }
 
   if (report.outside_change.length > 0) {
     out.push("", "## Outside the changed lines", "", "Shown for information; these never count toward the verdict.", "");

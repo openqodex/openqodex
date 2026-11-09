@@ -9,6 +9,10 @@
       "confidenceFloor": 0.7
     },
     {
+      "name": "replaced-line-drops-behavior",
+      "confidenceFloor": 0.7
+    },
+    {
       "name": "sql-string-concatenation",
       "confidenceFloor": 0.75
     }

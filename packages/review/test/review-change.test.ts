@@ -243,16 +243,16 @@ describe("a model reviewer through reviewChange", () => {
     expect(b!.reason).toBeNull();
   });
 
-  it("5. a tool call outside the snapshot is refused, logged with its reason, and ends the review incomplete", async () => {
+  it("5. a tool call outside the snapshot is refused, logged with its reason, and incorrectly ends the review incomplete", async () => {
     const r = await run({ fixture: { probes: [{ name: "read_file", args: { path: "../../etc/passwd" } }, { name: "list_files", args: { glob: "src/*" } }] } });
     const [outside, listed] = r.result.trace;
     expect(outside).toMatchObject({ tool: "read_file", path: "../../etc/passwd", inside: false, ok: false, served: true });
     expect(outside!.reason).toMatch(/outside/);
     expect(listed).toMatchObject({ tool: "list_files", inside: true, ok: true });
-    expect(r.result.status).toBe("incomplete");
-    expect(r.result.reason).toMatch(/outside the snapshot: \.\.\/\.\.\/etc\/passwd/);
-    // The conversation ended at once: no further call carried the refusal.
-    expect(r.model.requests).toHaveLength(1);
+    expect(r.result.status).toBe("complete");
+    expect(r.result.completion?.refused).toEqual(["../../etc/passwd"]);
+    expect(r.model.requests).toHaveLength(2);
+    expect(r.model.requests[1]!.messages).toContainEqual(expect.objectContaining({ role: "tool", text: expect.stringContaining("refused:") }));
   });
 
   it("6. a budget refusal on the second authorize ends the review with one transport call and its usage kept", async () => {
@@ -323,8 +323,8 @@ describe("a model reviewer through reviewChange", () => {
   it("9. a server floor above 0.7 reaches the brief and the check", async () => {
     const r = await run({ floor: 0.8, fixture: { findings: [SUBTRACTION] } });
     const brief = r.model.requests[0]!.messages[1]!.text;
-    expect(brief).toContain("with confidence 0.8 or higher");
-    expect(brief).toContain("Findings under 0.8, or under a cited lens's floor, are not counted.");
+    expect(brief).toContain("Findings at 0.8 or higher, and at a cited lens's floor, count toward the verdict.");
+    expect(brief).toContain("Findings under 0.8 are shown as possible issues and never counted.");
     expect(r.result.status).toBe("complete");
     expect(r.result.findings).toEqual([]);
   });
@@ -405,14 +405,15 @@ describe("scoped and incremental reviews through reviewChange", () => {
     expect(existsSync(worktrees) ? readdirSync(worktrees) : []).toEqual([]);
   });
 
-  it("14. a tool call for a path outside the scopes is refused, logged out of scope, and leaves the review incomplete", async () => {
+  it("14. a tool call for a path outside the scopes is refused, logged out of scope, and incorrectly leaves the review incomplete", async () => {
     const repo = changeRepo();
     const model = fixtureModel({ probes: [{ name: "read_file", args: { path: "db/x.sql" } }] });
     const result = await reviewChange({ clonePath: repo.dir, mergeBaseSha: repo.base, headSha: repo.head, scopes: ["src"] }, model, opts());
     expect(result.trace[0]).toMatchObject({ tool: "read_file", path: "db/x.sql", ok: false, inside: true, inScope: false, reason: "outside the review's scopes" });
     expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: "tool", text: "refused: outside the review's scopes" });
-    expect(result.status).toBe("incomplete");
-    expect(result.reason).toContain("the reviewer asked for a path outside the review's scopes: db/x.sql");
+    expect(result.status).toBe("complete");
+    expect(result.completion?.refused).toEqual(["db/x.sql"]);
+    expect(model.requests).toHaveLength(2);
   });
 
   it("14. a previously reviewed ancestor makes the delta the obligation, and a finding on the whole change still counts", async () => {

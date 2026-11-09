@@ -1,0 +1,4095 @@
+{
+  "version": 1,
+  "suite": "greptile",
+  "dataset": {
+    "name": "Greptile's 50 reconstructed pull requests",
+    "repo": "ai-code-review-evaluations/golden_comments",
+    "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+    "url": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+    "readDate": "2026-10-14",
+    "licence": "unverified: no licence file in the pinned tree",
+    "original": {
+      "url": "https://www.greptile.com/benchmarks",
+      "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+      "readDate": "2026-10-14",
+      "page": {
+        "path": "greptile/benchmarks.html",
+        "url": "https://www.greptile.com/benchmarks",
+        "sha256": "b172a31a0da77670994e9c69adbbe39409c0bfa1490f67c4ccda762ee4264c1a"
+      },
+      "asset": {
+        "path": "greptile/b5782ebc1f2b5641.js",
+        "url": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js",
+        "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7"
+      }
+    },
+    "files": [
+      {
+        "path": "greptile/b5782ebc1f2b5641.js",
+        "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7"
+      },
+      {
+        "path": "code_review_benchmarks/cal_dot_com.json",
+        "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44"
+      },
+      {
+        "path": "code_review_benchmarks/discourse.json",
+        "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c"
+      },
+      {
+        "path": "code_review_benchmarks/grafana.json",
+        "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc"
+      },
+      {
+        "path": "code_review_benchmarks/keycloak.json",
+        "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8"
+      },
+      {
+        "path": "code_review_benchmarks/sentry.json",
+        "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143"
+      },
+      {
+        "path": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+        "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+      },
+      {
+        "path": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+        "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+      },
+      {
+        "path": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+        "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+      },
+      {
+        "path": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+        "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+      },
+      {
+        "path": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+        "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+      }
+    ]
+  },
+  "hashCovers": [
+    "name",
+    "prUrl",
+    "repo",
+    "cloneUrl",
+    "prRef",
+    "baseSha",
+    "headSha",
+    "mergeBaseSha",
+    "language",
+    "changeLines",
+    "truthHash",
+    "matchSignatures",
+    "title",
+    "body",
+    "change",
+    "truthSets",
+    "correctedTitle"
+  ],
+  "hash": "0a4ba736cee010825ec2adbca880b028b0070849c19b405fa910a2ca07017f4d",
+  "cases": [
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-10",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b",
+      "hash": "93ec469b4b6210d02c259c913cc12be20d3bc3fb51dcf0d90bc55d827879b32e",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/10",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/10/head",
+      "baseSha": "b004587262e8221083bafbe9a0c515e7becaa7b3",
+      "headSha": "baa9045af7711ea0b86390cb0bf0fdce5430228c",
+      "mergeBaseSha": null,
+      "title": "Add guest management functionality to existing bookings",
+      "body": "Test 10",
+      "correctedTitle": "Add guest management functionality to existing bookings",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:35:44Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/10",
+        "baseSha": "b004587262e8221083bafbe9a0c515e7becaa7b3",
+        "headSha": "baa9045af7711ea0b86390cb0bf0fdce5430228c",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/10",
+          "revision": "baa9045af7711ea0b86390cb0bf0fdce5430228c",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 5
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "b0d76691276cfd3892fe6836ce19714ebd7e4b717d52cc3b78d8338f5f881ab1",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 5,
+          "hash": "01d456c237251db7bacd90215fee00dd505624b3bb89a7cd7266f3d26fc54a48",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "24e2c4f01c53deab37f036e8f4916444bac743644eb8862433b673849fdd52f0",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-11",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938",
+      "hash": "33c9a938c5bfd8ac45d6aa3eda52bf670b59011d13dce80c110b5a86bc61fbf1",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/11",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/11/head",
+      "baseSha": "3784421f025afc3a595fbb4e222916785cc6de0c",
+      "headSha": "cb7869234729f908648af6796ab4082b569daf39",
+      "mergeBaseSha": null,
+      "title": "feat: add calendar cache status and actions (#22532)",
+      "body": "Test 1",
+      "correctedTitle": "feat: add calendar cache status and actions (#22532)",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:36:46Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/11",
+        "baseSha": "3784421f025afc3a595fbb4e222916785cc6de0c",
+        "headSha": "cb7869234729f908648af6796ab4082b569daf39",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/11",
+          "revision": "cb7869234729f908648af6796ab4082b569daf39",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "c4449bace7599073ee3bc7b1f83f2e89882302828e696d29bebb3a6de25a13fc",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "0acc29a68ac911d34565896e6974dd8c3fe30e426a862e61b8c815b1341bdc9c",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "b461b7dbb3cffd61fab4a88e24d765aef4364fcda1fa62eafc64f6dc3d6c3fe2",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-2",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226",
+      "hash": "40eb8226fa08f86e48ff0f0228d6b0fb313b0fc390ce1636756e9e9693059c9d",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/2",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/2/head",
+      "baseSha": "bff28e5d6fef42b4e7c036c688f0bad4410b42a2",
+      "headSha": "e043a5efd872362a3fc146ed0d9ce4393e316c1e",
+      "mergeBaseSha": null,
+      "title": "Async import of the appStore packages",
+      "body": "Test 2",
+      "correctedTitle": "Async import of the appStore packages",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:34:53Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/2",
+        "baseSha": "bff28e5d6fef42b4e7c036c688f0bad4410b42a2",
+        "headSha": "e043a5efd872362a3fc146ed0d9ce4393e316c1e",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/2",
+          "revision": "e043a5efd872362a3fc146ed0d9ce4393e316c1e",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "6e6acb053611ee1c79e77f4fffb7e5c443a66a1cff54335d033cb95a868010d8",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "d57e33db80f467f3294d53a95653269f5b5b51c54c00d51a717f406c02d73915",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "3ee1e0810ef0538191436975a23be8f7820fbab8ad0ee431a31171b8dc31e977",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-3",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f",
+      "hash": "abd5fc4f46b4a8f1a4b3c9f7207f21ee1befc30bb8997b3f2e3f2e864edfbf5f",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/3",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/3/head",
+      "baseSha": "efa6d464a38e60ceeeb88f40668c1c4ac4bfaf54",
+      "headSha": "a308075bc39b77ed7059b0cae9d443d669a7bf98",
+      "mergeBaseSha": null,
+      "title": "feat: 2fa backup codes",
+      "body": "Test 3",
+      "correctedTitle": "feat: 2fa backup codes",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:34:59Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/3",
+        "baseSha": "efa6d464a38e60ceeeb88f40668c1c4ac4bfaf54",
+        "headSha": "a308075bc39b77ed7059b0cae9d443d669a7bf98",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/3",
+          "revision": "a308075bc39b77ed7059b0cae9d443d669a7bf98",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 4
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "3de3ac5ac8fc962151dc74defe3118f1f3d039344d5e467ab2523eac9d2e2e95",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 4,
+          "hash": "54dfadc9b41420dfdd6162db0f9e00e8fd9d1114ed02dcd50e3f543918b3a8a2",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "8061c2203721a789f424514dd9b2424cecb1f8c08f1b8b30ac783b9839ddc575",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-4",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e",
+      "hash": "44275b5e1429b7a86275a996d3f12920169604cb04d9a05b541a500579eefa91",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/4",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/4/head",
+      "baseSha": "500bfb4d82c53c42e7f53250c6715f5fb474dc2b",
+      "headSha": "bd797c1ea00a61425735f2b9fd7ce212ebf8c8ab",
+      "mergeBaseSha": null,
+      "title": "fix: handle collective multiple host on destinationCalendar",
+      "body": "Test 4",
+      "correctedTitle": "fix: handle collective multiple host on destinationCalendar",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:35:06Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/4",
+        "baseSha": "500bfb4d82c53c42e7f53250c6715f5fb474dc2b",
+        "headSha": "bd797c1ea00a61425735f2b9fd7ce212ebf8c8ab",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/4",
+          "revision": "bd797c1ea00a61425735f2b9fd7ce212ebf8c8ab",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 5
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "12607f11512bc0d7034fab3435ff11ff896af9cdc03fec6b491cc2af964629d2",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 5,
+          "hash": "87406a41d3303e6bd2415a0cf9b179b7aa5250861dce5fe5f0e59feec63ada7f",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "7537ea9310318944f2e1a0205ac882c7eee06d57fc04de574711daa53bb17c60",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-5",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf",
+      "hash": "ea3b55cf25c810d082452947a4c248ddd0ea6a9b63241df6b906df694b8a9899",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/5",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/5/head",
+      "baseSha": "202d248ae45f8f2f01324b0d8eb5914e9154112f",
+      "headSha": "56ff75f07b92ba8ef499ff28a2f98c25f339fdae",
+      "mergeBaseSha": null,
+      "title": "feat: convert InsightsBookingService to use Prisma.sql raw queries",
+      "body": "Test 5",
+      "correctedTitle": "feat: convert InsightsBookingService to use Prisma.sql raw queries",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:35:12Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/5",
+        "baseSha": "202d248ae45f8f2f01324b0d8eb5914e9154112f",
+        "headSha": "56ff75f07b92ba8ef499ff28a2f98c25f339fdae",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/5",
+          "revision": "56ff75f07b92ba8ef499ff28a2f98c25f339fdae",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "9135cf29e6c0dd84ae1c62bd4a5f2a9041ae9e6b0e2fb51c14df5b9e5a5b2be2",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "97f62c8559e859954b3d8c6d15e378436b0744a0f9b4b128db976c7f87d3ab7b",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "c12f8ae394b0247c2873c3318b53d7f28b1b2e6722cd8f473e9c7d219e87c031",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-6",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac",
+      "hash": "413167ac46893762832687e3676deed75a3becbd1a279db66f345ff3d8a65aa5",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/6",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/6/head",
+      "baseSha": "235ec0e906a189ceb0843cfa7af585b1d46f699f",
+      "headSha": "2ebfcf448c7e4136ac1b8b9ef9b526a4424fd155",
+      "mergeBaseSha": null,
+      "title": "Comprehensive workflow reminder management for booking lifecycle events",
+      "body": "Test 6",
+      "correctedTitle": "Comprehensive workflow reminder management for booking lifecycle events",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:35:19Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/6",
+        "baseSha": "235ec0e906a189ceb0843cfa7af585b1d46f699f",
+        "headSha": "2ebfcf448c7e4136ac1b8b9ef9b526a4424fd155",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/6",
+          "revision": "2ebfcf448c7e4136ac1b8b9ef9b526a4424fd155",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "5612b37e47275661f68359900e0f492333c3ada8e4093bf028d25d3bf63c1322",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "eafaa4a0eead6e12274b3b3c296a5e898f271f411d52ccecb05759c3b0351979",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "91af92609c93f06f7ac8e3d17a9c71339add0284d17ceb26609d914a4e3672ef",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-7",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde",
+      "hash": "3b4f1ddebd5477ec58ddccde27e58ff3f3faa639250045b1566a00afad7f7050",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/7",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/7/head",
+      "baseSha": "c4fe69d8265ba632c10f3a90ea05e4a74ff14c85",
+      "headSha": "3ef328421f60cd096b7676ef7ee7c32b71593049",
+      "mergeBaseSha": null,
+      "title": "Advanced date override handling and timezone compatibility improvements",
+      "body": "Test 7",
+      "correctedTitle": "Advanced date override handling and timezone compatibility improvements",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:35:25Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/7",
+        "baseSha": "c4fe69d8265ba632c10f3a90ea05e4a74ff14c85",
+        "headSha": "3ef328421f60cd096b7676ef7ee7c32b71593049",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/7",
+          "revision": "3ef328421f60cd096b7676ef7ee7c32b71593049",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "0a62a9fd0f92a3fec347cad08c12e169972bd74b89689b15b121cda6dd67de5a",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "22b110800582a44fe70c439c6ce10fb822d3288b82e8aee059723b6c34729186",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "636e71e4ae098536550b021b5aa9dd6b8410b3b86dfc5813e7f22df95cbfade5",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-8",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7",
+      "hash": "23b277e7ac80ac689897bbece449f05687b1b918b3824ac788d1b3aed0d07a62",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/8",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/8/head",
+      "baseSha": "bc89fe00ea84d20bedcec782f0701b9711dc8201",
+      "headSha": "824145b0e245661875240ed5c8745decd2293d1a",
+      "mergeBaseSha": null,
+      "title": "OAuth credential sync and app integration enhancements",
+      "body": "Test 8",
+      "correctedTitle": "OAuth credential sync and app integration enhancements",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:35:31Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/8",
+        "baseSha": "bc89fe00ea84d20bedcec782f0701b9711dc8201",
+        "headSha": "824145b0e245661875240ed5c8745decd2293d1a",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/8",
+          "revision": "824145b0e245661875240ed5c8745decd2293d1a",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 5
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "bb11035b0595a4e6f1d2e9f8393ba2d90c2efec59acd1802929d3de439847123",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 5,
+          "hash": "350e515f7b5cf75ed17bc9eb3ab2f8d5b3bc10e004dfd011cc2de94b7e32fe96",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "5d6a89bbdc83311ac2ee72e198cab5e2e4246c1c25809803406ec9d9397fcc94",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__cal.com-greptile-9",
+      "id": "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f",
+      "hash": "41bedb6f9cc77ccfa69358270a8bc1ebf2ccd400684a8d5286690d355629c33b",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/9",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile.git",
+      "prRef": "refs/pull/9/head",
+      "baseSha": "917c7b0764f4c6bfdca95db2c5f73dbfdbe11757",
+      "headSha": "2dae0bfb8c72b51aa49260dc1f7f215a6290f3a6",
+      "mergeBaseSha": null,
+      "title": "SMS workflow reminder retry count tracking",
+      "body": "Test 9",
+      "correctedTitle": "SMS workflow reminder retry count tracking",
+      "language": "TypeScript",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T23:35:38Z",
+      "repoGroup": "calcom/cal.com",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/9",
+        "baseSha": "917c7b0764f4c6bfdca95db2c5f73dbfdbe11757",
+        "headSha": "2dae0bfb8c72b51aa49260dc1f7f215a6290f3a6",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/9",
+          "revision": "2dae0bfb8c72b51aa49260dc1f7f215a6290f3a6",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+          "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "3439ab98fe6fce4fa7d501705c6ec9c4b49c5582ab63ed72dee55ee16f8d4c78",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "caffc4aa8a931191dd73a78bda3d7fa728bf6798c22422d3a18618b67f3672f6",
+          "file": "code_review_benchmarks/cal_dot_com.json",
+          "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "e19b71f577cd2a56ad00d8d59ed49f5940f8909ff22419650cd6e80c6285c83d",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-1",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee",
+      "hash": "4bc399ee3a30e6120433cdb81712f2493c654615127415520754eb32854f7f8e",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/1",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/1/head",
+      "baseSha": "3f71fa15c93bb0b751bb92abae1b5dc9a21bd4ca",
+      "headSha": "ffbaf8c54269df2ce510de91245760fddce09896",
+      "mergeBaseSha": null,
+      "title": "FEATURE: automatically downsize large images",
+      "body": "Test 1",
+      "correctedTitle": "FEATURE: automatically downsize large images",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:26:15Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/1",
+        "baseSha": "3f71fa15c93bb0b751bb92abae1b5dc9a21bd4ca",
+        "headSha": "ffbaf8c54269df2ce510de91245760fddce09896",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/1",
+          "revision": "ffbaf8c54269df2ce510de91245760fddce09896",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "c5b68a372e34fa87f23e0ed7104adf95c07d64e427f4414fba84c5b0354b69bf",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "92c79698323121a338172e6f7a25e1a7c2ebf4f2cdee6c9dfe13807c5c3aa4dd",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "4ab5862e45b6484543e45c5c8e934d13f11c3f03f9ef2fe1268f566e99a5487b",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-10",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71",
+      "hash": "c37a2a7164816303861a22ab30ef87fb22daf4ea08ccb69a36de44c6c4afd52b",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/10",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/10/head",
+      "baseSha": "913c3d6f636d02b3dd6c2c022ca1af2bec95d752",
+      "headSha": "d1c69189f3c90ecf56013a8da904da9bff9a8e19",
+      "mergeBaseSha": null,
+      "title": "FEATURE: Can edit category/host relationships for embedding",
+      "body": "Test 10",
+      "correctedTitle": "FEATURE: Can edit category/host relationships for embedding",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:28:16Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/10",
+        "baseSha": "913c3d6f636d02b3dd6c2c022ca1af2bec95d752",
+        "headSha": "d1c69189f3c90ecf56013a8da904da9bff9a8e19",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/10",
+          "revision": "d1c69189f3c90ecf56013a8da904da9bff9a8e19",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 4
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "e71cd57c0a944896036f2fc6f3bcbfef94af76d03f120959063c83022d462b56",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 4,
+          "hash": "fc6503f90cf0b335b267056effde3ad3f84b0e497331dcc3aeaec70d9d31267a",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "b54f0cd183c28194a9157c8f58146bf68a32bcf94c3c9b5d738e4ad01faff851",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-2",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8",
+      "hash": "83bfeca805d55ed8229f147f298f88d039dbc650e9e04347a26d62f13f535b5f",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/2",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/2/head",
+      "baseSha": "56abd247e1829cb6de82dfcc8ce04deb5f0d1e91",
+      "headSha": "6669a2d94d76eea3b99b8c476d12b1eb66726b07",
+      "mergeBaseSha": null,
+      "title": "FEATURE: per-topic unsubscribe option in emails",
+      "body": "Test 2",
+      "correctedTitle": "FEATURE: per-topic unsubscribe option in emails",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:26:50Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/2",
+        "baseSha": "56abd247e1829cb6de82dfcc8ce04deb5f0d1e91",
+        "headSha": "6669a2d94d76eea3b99b8c476d12b1eb66726b07",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/2",
+          "revision": "6669a2d94d76eea3b99b8c476d12b1eb66726b07",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "63284e31f59d9b0a980eb083479b9cfba85927768004db576ead3fe9a951f10a",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "b828054cc53dfde3f26ec1630ba9db1a3124c31fcd2292f490f1fff0344389d4",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "e332c1198c15a08b8fd18642273bdc42efdd5a76aae6519689463e9c3220545c",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-3",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03",
+      "hash": "10f05d03f3142ca17f1c2c48daac35f0272c18d7faad261bdb3bd148920c96a3",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/3",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/3/head",
+      "baseSha": "e25638dab0d4b98f99c8fe8976ccaae8f4fb9db3",
+      "headSha": "5f8a130277dbddc95d133cd2832be639baf89213",
+      "mergeBaseSha": null,
+      "title": "Add comprehensive email validation for blocked users",
+      "body": "Test 3",
+      "correctedTitle": "Add comprehensive email validation for blocked users",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:27:21Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/3",
+        "baseSha": "e25638dab0d4b98f99c8fe8976ccaae8f4fb9db3",
+        "headSha": "5f8a130277dbddc95d133cd2832be639baf89213",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/3",
+          "revision": "5f8a130277dbddc95d133cd2832be639baf89213",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "865d3e6ee66be9493fb374dbe615695dc6dbeee99810256eecd94e1aaee3f525",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "faa3a31557d0200479db7a464d01c731eb4b30ccad46f21fe971cf5806659cc8",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "43d50c711de428dab538fa0c0e689de110f3f0f1b5e323b9e8215ff0da802889",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-4",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e",
+      "hash": "e32a7f6e5b25b05e21dccf27190beca5e861b1cd4fd655fe9492ede047defe36",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/4",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/4/head",
+      "baseSha": "62db063e1e1abe691313ab42682a68f796d63769",
+      "headSha": "4f8aed295a29954023b2849c060ef4fb299d1b5d",
+      "mergeBaseSha": null,
+      "title": "Enhance embed URL handling and validation system",
+      "body": "Test 4",
+      "correctedTitle": "Enhance embed URL handling and validation system",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:27:23Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/4",
+        "baseSha": "62db063e1e1abe691313ab42682a68f796d63769",
+        "headSha": "4f8aed295a29954023b2849c060ef4fb299d1b5d",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/4",
+          "revision": "4f8aed295a29954023b2849c060ef4fb299d1b5d",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 6
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "9aa6c945316cb34c6af463c3d8a8a9e6004010a6824e90f2064607d5554482bb",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 6,
+          "hash": "3b98141807133d7acff60922fa24c735eb9472d5b165112c5ea90809dbc3c640",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "d101c9aa6c7754a470ecae1e64b9da8f6e258d2d8357530009dab75f9a2f22d7",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-5",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6",
+      "hash": "26b3e5b6de73e6c4f63c1eee651a783aedae413a6c06bd5424274cd0c8189fc9",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/5",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/5/head",
+      "baseSha": "98fa098e6fade3097a11fe7f99a98a4e6ffb4728",
+      "headSha": "5b229316ee4c661836ed1161139692a3e8527444",
+      "mergeBaseSha": null,
+      "title": "Optimize header layout performance with flexbox mixins",
+      "body": "Test 5",
+      "correctedTitle": "Optimize header layout performance with flexbox mixins",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:27:25Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/5",
+        "baseSha": "98fa098e6fade3097a11fe7f99a98a4e6ffb4728",
+        "headSha": "5b229316ee4c661836ed1161139692a3e8527444",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/5",
+          "revision": "5b229316ee4c661836ed1161139692a3e8527444",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "72bb52c56ed88ab1a622791f6299b9be2dd4049351a12c1044573c2f2ec9ab9b",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "a1efdfeb1f16b0e69a4aed3d904e0e45b7ece4478dd2a9c819c7ab6d418835ef",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "3f159e85e322f0ff40d19b8c22ff04e06b03c13bb1995a62aff833bc7d6e2272",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-6",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c",
+      "hash": "6ae6cb4c6e66e11777f3ebf86f8b13702baeebcd192fc4ab99cb0ec296efca79",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/6",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/6/head",
+      "baseSha": "7a5fbae060bd0d3e29f3a4b5c6f2bfd8b2914dc7",
+      "headSha": "267d8be1f556ed59639ced396c885bb44586da19",
+      "mergeBaseSha": null,
+      "title": "UX: show complete URL path if website domain is same as instance domain",
+      "body": "Test 6",
+      "correctedTitle": "UX: show complete URL path if website domain is same as instance domain",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:27:27Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/6",
+        "baseSha": "7a5fbae060bd0d3e29f3a4b5c6f2bfd8b2914dc7",
+        "headSha": "267d8be1f556ed59639ced396c885bb44586da19",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/6",
+          "revision": "267d8be1f556ed59639ced396c885bb44586da19",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 1
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "5b9a836765153c43f18531b42ab802a82e8ff7b86b8e96f8062c5cff595d1190",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "9e0d403d88ec8f898bfe357d472dd3a4038288953de96d627f1b70e29f8de1e9",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "1bcc357394d6f3fed2a0e469c60db85ab0db8ff1c4955191be1459b10110c711",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-7",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0",
+      "hash": "e7b1abe0ba8c45a39187a0d14b23e548ade564b4cddb97239e88cd6b1ff45266",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/7",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/7/head",
+      "baseSha": "7554b5e3c458dc79b591d5e874e79ab10cf30c2f",
+      "headSha": "d38c4d5f7443223c81529c22470293771baf9f38",
+      "mergeBaseSha": null,
+      "title": "scale-color $lightness must use $secondary for dark themes",
+      "body": "Test 7",
+      "correctedTitle": "scale-color $lightness must use $secondary for dark themes",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:27:29Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/7",
+        "baseSha": "7554b5e3c458dc79b591d5e874e79ab10cf30c2f",
+        "headSha": "d38c4d5f7443223c81529c22470293771baf9f38",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/7",
+          "revision": "d38c4d5f7443223c81529c22470293771baf9f38",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "8edb515f0098512c8efc3528f52662d47db19a84e40b20f130b43152e04b2d86",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "d1cd6e038345c0d75265a29f9b9fd70feb56136710cb4d7076f2ca0f0ce9a145",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "cf31a682445bdba94a4fe92bc1c327009fb7feac327914dea244983fdec4309b",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-8",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b",
+      "hash": "c2168b7befca0c39d796f2b7f9745c33396f372c4e4bcf912ecc1fa68746e070",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/8",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/8/head",
+      "baseSha": "4975fc28903a84418f546b2809370f19abf10e08",
+      "headSha": "060cda77729cb1c4a827560e09e89a7b22078ba9",
+      "mergeBaseSha": null,
+      "title": "FIX: proper handling of group memberships",
+      "body": "Test 8",
+      "correctedTitle": "FIX: proper handling of group memberships",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:27:37Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/8",
+        "baseSha": "4975fc28903a84418f546b2809370f19abf10e08",
+        "headSha": "060cda77729cb1c4a827560e09e89a7b22078ba9",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/8",
+          "revision": "060cda77729cb1c4a827560e09e89a7b22078ba9",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "dd1da5c1139debfa0e5c3afc9f8c95f2f394293ca530d207f4f1654e99b8e812",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "cce84bc7c3341f664fd22e4c2dac7e8e630e47dc63c22c2d46255c96d765e57f",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "22f4959d6849f3c8d67672ce463e2b288362d2463beb57481056d8211d41b2da",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__discourse-greptile-9",
+      "id": "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1",
+      "hash": "343352b12839b360512a1bb877c2901707d8870ca96581db11d1c45dab32160a",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/9",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile.git",
+      "prRef": "refs/pull/9/head",
+      "baseSha": "728845d008f06828630a632e5c7d67e11bf15deb",
+      "headSha": "ecfa17b5a79dfdc91e7a4d50b42ae78a35d0a293",
+      "mergeBaseSha": null,
+      "title": "FEATURE: Localization fallbacks (server-side)",
+      "body": "Test 9",
+      "correctedTitle": "FEATURE: Localization fallbacks (server-side)",
+      "language": "Ruby",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:27:40Z",
+      "repoGroup": "discourse/discourse",
+      "licence": {
+        "spdx": "GPL-2.0",
+        "chosen": "GPL-2.0",
+        "class": "copyleft",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/9",
+        "baseSha": "728845d008f06828630a632e5c7d67e11bf15deb",
+        "headSha": "ecfa17b5a79dfdc91e7a4d50b42ae78a35d0a293",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/9",
+          "revision": "ecfa17b5a79dfdc91e7a4d50b42ae78a35d0a293",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+          "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "ab5532959bc01cc28ce9d59defe2f13e80eaf4c0777dd2bf72aebdeac8fe6a00",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "2d32f394ad49de79973a2bbab35887389e470cc9622e7e4a1be5c72e2c6b9f2d",
+          "file": "code_review_benchmarks/discourse.json",
+          "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "db1bb261a3fd9082302b190c7aedfd326dbc6d5603661a7706a33967d3fa4b8e",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-1",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd",
+      "hash": "ed8fc9ddde8ad6041a874f4bd44c17a658a8d2dd49bc5499419d43c4ddfc52e2",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/1",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/1/head",
+      "baseSha": "ed865831071a0c0a63c75ad0cfa6661107dabcaf",
+      "headSha": "3647ba7360b8d157e4a294a650a365b6aca070d8",
+      "mergeBaseSha": null,
+      "title": "Anonymous: Add configurable device limit",
+      "body": "Test 1",
+      "correctedTitle": "Anonymous: Add configurable device limit",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:03:17Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/1",
+        "baseSha": "ed865831071a0c0a63c75ad0cfa6661107dabcaf",
+        "headSha": "3647ba7360b8d157e4a294a650a365b6aca070d8",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/1",
+          "revision": "3647ba7360b8d157e4a294a650a365b6aca070d8",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 5
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "4c3bcf9f235a09c880f8e51d9c56bc41ff6aed684a096b6fd3744fd7fb7f705e",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 5,
+          "hash": "ebfcdf6a65be1da154ab547985ba0b39285e55d45f3fadf794cffea6136588a6",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "99a360a0888ec68ff616868a9c4fe5300badbb649befadde8f04bfc57c9722d8",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-10",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b",
+      "hash": "2fa4d65b11de27deca8aa37ee80691155aa6259fd6eed687a0134a0eb4bd805a",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/10",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/10/head",
+      "baseSha": "871af07203177ce59a24e742107119409274f48a",
+      "headSha": "d762a9643618a6ba7c43da27374bd9ffc80889ce",
+      "mergeBaseSha": null,
+      "title": "Unified Storage Performance Optimizations",
+      "body": "Test 10",
+      "correctedTitle": "Unified Storage Performance Optimizations",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:04:06Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/10",
+        "baseSha": "871af07203177ce59a24e742107119409274f48a",
+        "headSha": "d762a9643618a6ba7c43da27374bd9ffc80889ce",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/10",
+          "revision": "d762a9643618a6ba7c43da27374bd9ffc80889ce",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "d1a34e2400ee263308b42fa64e4d7da1bbf9985d3df87bba7b7f957ebc11c41c",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "704e2f29d0e6e8b68ddc53133523df071232491d2f8c2aa2e0ca6213a60d6b7a",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "7f170f01620dafdfeb992fa71695590945e4ef77526b0aeb4bdc4dcf29a7941c",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-2",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208",
+      "hash": "97b8a2089f405582f1149dbc18136437c575a38e6ff50e2806e15ad378725ab9",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/2",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/2/head",
+      "baseSha": "e650fa7b2041c91fbb98ef3432b3969e13bbdac9",
+      "headSha": "d9dc93c4a6c88ef850dbe526cb3226ae99cafa20",
+      "mergeBaseSha": null,
+      "title": "AuthZService: improve authz caching",
+      "body": "Test 2",
+      "correctedTitle": "AuthZService: improve authz caching",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:03:27Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/2",
+        "baseSha": "e650fa7b2041c91fbb98ef3432b3969e13bbdac9",
+        "headSha": "d9dc93c4a6c88ef850dbe526cb3226ae99cafa20",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/2",
+          "revision": "d9dc93c4a6c88ef850dbe526cb3226ae99cafa20",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "2f927721dfd788e0ebbe56df220fe391c8f242e7d0037c4ac54f0e61aa4ba476",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "530738db90b4e388b1cda938d88593ce4d36d585f310426ead019bb142ee2e72",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "3c0a1ff613f15a5461adc0fc09ac95d4bc2477ea9cf7c64017c1a8925635bfd9",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-3",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6",
+      "hash": "23087fd603c91f77ac14fcf6247cc36d46755bbe4d13ed466223123165f9ff64",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/3",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/3/head",
+      "baseSha": "5dac6731cbb99f3374898cf6a1558edb222d323b",
+      "headSha": "00393c2ac9103072bc2194118e455f9248a37816",
+      "mergeBaseSha": null,
+      "title": "Plugins: Chore: Renamed instrumentation middleware to metrics middleware",
+      "body": "Test 3",
+      "correctedTitle": "Plugins: Chore: Renamed instrumentation middleware to metrics middleware",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:03:32Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/3",
+        "baseSha": "5dac6731cbb99f3374898cf6a1558edb222d323b",
+        "headSha": "00393c2ac9103072bc2194118e455f9248a37816",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/3",
+          "revision": "00393c2ac9103072bc2194118e455f9248a37816",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "c9abd8cea3e9b2a0364032296a9163d68407b8ae1ad178e9592b9ddec64b1716",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "c96eef78b75491b92c281051d97564e5d1c7a4bd5da85c821049568a85482b5f",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "02ca440f6b61cd0ff28887c653e2fdd982c6979fcf0c85d3b93c53f6ea7ac630",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-4",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f",
+      "hash": "9c146b7f246a5aa29ef50c5490718d34aee2a457e5d68d78dc8e92cc07cecab5",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/4",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/4/head",
+      "baseSha": "dcb853d3099c08b74370fcc965342f035dd6d6cc",
+      "headSha": "3ba2457a7090b2b76f4b368c8a9db835d0bec66c",
+      "mergeBaseSha": null,
+      "title": "Advanced Query Processing Architecture",
+      "body": "Test 4",
+      "correctedTitle": "Advanced Query Processing Architecture",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:03:37Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/4",
+        "baseSha": "dcb853d3099c08b74370fcc965342f035dd6d6cc",
+        "headSha": "3ba2457a7090b2b76f4b368c8a9db835d0bec66c",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/4",
+          "revision": "3ba2457a7090b2b76f4b368c8a9db835d0bec66c",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 1
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "5930574fdbb34cb855d65fb5027744058f16bf32b59974b90caf53d562bf2c88",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "b3af493056a00f13f592aa4867eaaa2f29b3540bdb7f8556a4d2670781793431",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "dc0720cadf339c04ebb4b555acb6d0f5c5ee9c21f109524304b6f3d25959f4b5",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-5",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8",
+      "hash": "c7de75e8710d5a94e960201d90110e3fce9de71d63885bf272dc942fa9925bb0",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/5",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/5/head",
+      "baseSha": "acdb0e151c9a2abd6e691353de6cc515d316ee76",
+      "headSha": "3e6d620d2c1d1f6c10611fba8b0ee062d6fb2a68",
+      "mergeBaseSha": null,
+      "title": "Notification Rule Processing Engine",
+      "body": "Test 5",
+      "correctedTitle": "Notification Rule Processing Engine",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:03:42Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/5",
+        "baseSha": "acdb0e151c9a2abd6e691353de6cc515d316ee76",
+        "headSha": "3e6d620d2c1d1f6c10611fba8b0ee062d6fb2a68",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/5",
+          "revision": "3e6d620d2c1d1f6c10611fba8b0ee062d6fb2a68",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "6b70d267f2b9fb0a19a23897e4ab15ed7112204768e1d68f8260df315cced6a2",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "13b1f79e54258dd7aa5df0ebc77d08e559a6254f81fc0d408d474b761f592e94",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "414e9832237d315d0c9b92bff84e1bca50ce056e15afcec0968a8f24f00ae5c6",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-6",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12",
+      "hash": "ff73de124d8618aba134af4d7e397c1457f1738e87424c64b021ce46b6b7419a",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/6",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/6/head",
+      "baseSha": "5e3a5b355ef7478d7be86923749e25aebef5226a",
+      "headSha": "67b74e1e8a7d26d24617b7313b90fa4649138318",
+      "mergeBaseSha": null,
+      "title": "Dual Storage Architecture",
+      "body": "Test 6",
+      "correctedTitle": "Dual Storage Architecture",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:03:47Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/6",
+        "baseSha": "5e3a5b355ef7478d7be86923749e25aebef5226a",
+        "headSha": "67b74e1e8a7d26d24617b7313b90fa4649138318",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/6",
+          "revision": "67b74e1e8a7d26d24617b7313b90fa4649138318",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "14b8006d69575fdf69bbceee4ffeb232718685445e5e2a81d03a9bf1cda3d654",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "e6a22d7177b6cffa5d523b01dea03e86bbba53f44d464d436351de518f4fe56a",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "1c7f61198932b5a8979d3c53574581941c9da9aaa75edc9ef17eba5a44da33b7",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-7",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f",
+      "hash": "7ad4f99f990b6c14a93525b96c25a8a021b1edcefa033a80d282e9beb6813dda",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/7",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/7/head",
+      "baseSha": "f84c8f685310cc41b52831c130e700a01b225b58",
+      "headSha": "81c45bfe449584dc7ff50e4fabd5d0c6568999b5",
+      "mergeBaseSha": null,
+      "title": "Database Performance Optimizations",
+      "body": "Test 7",
+      "correctedTitle": "Database Performance Optimizations",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:03:51Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/7",
+        "baseSha": "f84c8f685310cc41b52831c130e700a01b225b58",
+        "headSha": "81c45bfe449584dc7ff50e4fabd5d0c6568999b5",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/7",
+          "revision": "81c45bfe449584dc7ff50e4fabd5d0c6568999b5",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 1
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "46048afd4213a79a5e7ebb995716db793f5198f03f0db457c310db2df2b8d30a",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "e2eeaac4a27976781b6122ffff31e907a7d4fd5cee2fc4a6e5884f86ccee011a",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "526c4335d995bd4b87b4b1a6a5ce138d274d80a99106fc94e79205a49299a73e",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-8",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a",
+      "hash": "1c49bb7ac3eacdfe1cda85cebda1619d1810dab7710336b038fdb84222b39458",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/8",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/8/head",
+      "baseSha": "0a870e6a8855cee9c8ae391767da40dbb1c16cc6",
+      "headSha": "95000f9fc8049d47f837b6e8603c230c2a073ae5",
+      "mergeBaseSha": null,
+      "title": "Frontend Asset Optimization",
+      "body": "Test 8",
+      "correctedTitle": "Frontend Asset Optimization",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:03:56Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/8",
+        "baseSha": "0a870e6a8855cee9c8ae391767da40dbb1c16cc6",
+        "headSha": "95000f9fc8049d47f837b6e8603c230c2a073ae5",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/8",
+          "revision": "95000f9fc8049d47f837b6e8603c230c2a073ae5",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "316531da0c1d4deca83aa1fb765f4257a8f4b5032f9137d9bbb5cad1a7a21d97",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "4f7a0ceb1f56f54fb46b729d975004031afad7dae60f97eee0cdc6bc6fd57fa6",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "686c1d0ed5000b6313ede9526327759f21188cdd25b25221a520aab8936d19b8",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__grafana-greptile-9",
+      "id": "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12",
+      "hash": "d0e8dc122279a1c89a0b98ced64ab78e7999f793a95d8f81f651e49f3bca62d4",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/9",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile.git",
+      "prRef": "refs/pull/9/head",
+      "baseSha": "cbe1e7d63f098e306058c0fbcab2f5c30602fa7d",
+      "headSha": "ea71201ddc66f06a3f16387e85a09c53514aaadd",
+      "mergeBaseSha": null,
+      "title": "Advanced SQL Analytics Framework",
+      "body": "Test 9",
+      "correctedTitle": "Advanced SQL Analytics Framework",
+      "language": "Go",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T22:04:01Z",
+      "repoGroup": "grafana/grafana",
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "chosen": "AGPL-3.0",
+        "class": "copyleft",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+        "at": "the default branch on 2026-10-15",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/9",
+        "baseSha": "cbe1e7d63f098e306058c0fbcab2f5c30602fa7d",
+        "headSha": "ea71201ddc66f06a3f16387e85a09c53514aaadd",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/9",
+          "revision": "ea71201ddc66f06a3f16387e85a09c53514aaadd",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+          "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "d76768243a0a26a47a72df0d343331a48c5e41b113880d8e7cb101fa83f06d5f",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "8184a7a3554621638217e4ea1aa7b6dbd854fcd44c8ae755e7d18501cb4b2c9f",
+          "file": "code_review_benchmarks/grafana.json",
+          "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "08da537fc5ea0715d3fab24ec647be7dbc5ecc699340e80e90b2c52df12cf7c8",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-1",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96",
+      "hash": "57543a966dde5b5dd0e6444c94e08f2b8bf5d125a459a0eb231d1aa70444582b",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/1/head",
+      "baseSha": "30f804af450dec523909a52f2a4b97302d27f5cc",
+      "headSha": "3214b188de808fdb0fff335556b686f1b0a63218",
+      "mergeBaseSha": null,
+      "title": "Fixing Re-authentication with passkeys",
+      "body": "Test 1",
+      "correctedTitle": "Fixing Re-authentication with passkeys",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:18:30Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1",
+        "baseSha": "30f804af450dec523909a52f2a4b97302d27f5cc",
+        "headSha": "3214b188de808fdb0fff335556b686f1b0a63218",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1",
+          "revision": "3214b188de808fdb0fff335556b686f1b0a63218",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "e27342c02d1f8157e44104e09b1f6e63fa4dcb3b456823f0f110d317da7d19b8",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "fcbee8a8a0fb939401848cc0db1787e375a16d1af3209371c9b1875811366dc1",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "86e0c574156b3c78132b099d9d9321acf31a08a8abb5917acfba86bb2c1c2866",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-10",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9",
+      "hash": "9b2036d95394808af50548cdb48a0e70f2d476f927eede766eb4e7f55bf6ac19",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/10",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/10/head",
+      "baseSha": "e92b825a14800e42f42d5f22ee314e94cf7c4e27",
+      "headSha": "332c9b6e4a1288705f173a9b797742859384d1e0",
+      "mergeBaseSha": null,
+      "title": "Fix concurrent group access to prevent NullPointerException",
+      "body": "Test 10",
+      "correctedTitle": "Fix concurrent group access to prevent NullPointerException",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:19:29Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/10",
+        "baseSha": "e92b825a14800e42f42d5f22ee314e94cf7c4e27",
+        "headSha": "332c9b6e4a1288705f173a9b797742859384d1e0",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/10",
+          "revision": "332c9b6e4a1288705f173a9b797742859384d1e0",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "4b53013270d9acc7a3ffb553e7861c4062de8173eb04dcd5b1794b17f026e9b7",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "8c423ceb8a7f7447878abc7cd775d2e065350b9e6de474cdc1faaed4d4135b5b",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "8f5c21cdb29ffc7d37327721a15d41d6153d73dbfdf8e8ee5dc45fc9d4afeb19",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-2",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d",
+      "hash": "e356be7d0f33f2db9c6c08ec115187835cafa1213b24f98d185dc5d43207cdd1",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/2",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/2/head",
+      "baseSha": "5ff9e9147dc08432b3ec7753906467c390b1e6ee",
+      "headSha": "3e597722a9164d145bc46aa1de5bd714fb6ba357",
+      "mergeBaseSha": null,
+      "title": "Add caching support for IdentityProviderStorageProvider.getForLogin operations",
+      "body": "Test 2",
+      "correctedTitle": "Add caching support for IdentityProviderStorageProvider.getForLogin operations",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:18:43Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/2",
+        "baseSha": "5ff9e9147dc08432b3ec7753906467c390b1e6ee",
+        "headSha": "3e597722a9164d145bc46aa1de5bd714fb6ba357",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/2",
+          "revision": "3e597722a9164d145bc46aa1de5bd714fb6ba357",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "90a81345e19e3a1a2c66944da6d63bc07656a6dfd59a733827507c4f661801a8",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "0d492e28d9a18d8467c558064587649b291e5e4b624ae32d28483b11428b7022",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "67bea77656e8768ac0a9d756b3c211c03e1704addb0c636a0639ce6face33e11",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-3",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f",
+      "hash": "53f77f0fc28d2b399eb60efd437e88936f29ffbeedc0fb06ea026bc32916774c",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/3",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/3/head",
+      "baseSha": "10aca5552314d6e5c9226f3c6d0107861c38c693",
+      "headSha": "b95d12a968e8374a93ddcd56f47ab12eb4136ff4",
+      "mergeBaseSha": null,
+      "title": "Add AuthzClientCryptoProvider for authorization client cryptographic operations",
+      "body": "Test 3",
+      "correctedTitle": "Add AuthzClientCryptoProvider for authorization client cryptographic operations",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:18:49Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/3",
+        "baseSha": "10aca5552314d6e5c9226f3c6d0107861c38c693",
+        "headSha": "b95d12a968e8374a93ddcd56f47ab12eb4136ff4",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/3",
+          "revision": "b95d12a968e8374a93ddcd56f47ab12eb4136ff4",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "d60fa7c2bedd80c3f76c9b9f87d56a5fd1a1f1a32e15230c21e33d27336f5c98",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "c829b66949b4ba56904d98fa3654d920c4f146ae8f2a7162e58dac60f1ba4915",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "d4a3d3c0fe59cdfc47e357427a29e5c533cd7b3871d94e875aecabc54c448773",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-4",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a",
+      "hash": "77387c5a3b3636d2fc84e94465d78f7f6a13efd687212a32b8e277783e47f8d0",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/4",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/4/head",
+      "baseSha": "690b0e4bef15654ea9037b0a26b3337e548c6b48",
+      "headSha": "0f91e67b9025d978059b21b5c41283e5000a509c",
+      "mergeBaseSha": null,
+      "title": "Add rolling-updates feature flag and compatibility framework",
+      "body": "Test 4",
+      "correctedTitle": "Add rolling-updates feature flag and compatibility framework",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:18:55Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/4",
+        "baseSha": "690b0e4bef15654ea9037b0a26b3337e548c6b48",
+        "headSha": "0f91e67b9025d978059b21b5c41283e5000a509c",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/4",
+          "revision": "0f91e67b9025d978059b21b5c41283e5000a509c",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 1
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "170bafa1541b1c5fe19589b60cb6c8cf6d84b483828013bb2d4167ad9c6dec25",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "0c206e36e128014dd3fc8c2537366ffe6792f95d3dcb28e9b440adac8a8b7564",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "40c795e907f2e08481874f8d38ec4938100a96e7e6a500bb9b24a9a074e50ded",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-5",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf",
+      "hash": "b9e8a6cf74a1dcc20eb9c27a3f7a352c55fe21a82a770e67adb59b54cb634aa0",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/5",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/5/head",
+      "baseSha": "baa6ebbeb8791017c01ce9fa63965f8dc584ddfe",
+      "headSha": "7e5540896bbbafc02234b6ea2b15215dc24cb972",
+      "mergeBaseSha": null,
+      "title": "Add Client resource type and scopes to authorization schema",
+      "body": "Test 5",
+      "correctedTitle": "Add Client resource type and scopes to authorization schema",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:19:01Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/5",
+        "baseSha": "baa6ebbeb8791017c01ce9fa63965f8dc584ddfe",
+        "headSha": "7e5540896bbbafc02234b6ea2b15215dc24cb972",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/5",
+          "revision": "7e5540896bbbafc02234b6ea2b15215dc24cb972",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "d6393ad5b24c922bb363134a6a5a0f24b971e7c6b1d8c6016a7727ad379853dd",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "2bd47c832f28407e2014c4cf484079d19f64fca383509e6c80269222c2589a9c",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "31ac0d2047a477c06ffc14d6501fc1396701d88948312318a381ef74d28bd959",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-6",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81",
+      "hash": "8cacaa8179fb96a7b9ea9c50d3e56be95d80347db47fe494c769747d3d1d9bfc",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/6",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/6/head",
+      "baseSha": "7a8d18122aea42278332120093d5cefce9748356",
+      "headSha": "679f44692dbc288bedc8f1535071c8467dbaf70c",
+      "mergeBaseSha": null,
+      "title": "Add Groups resource type and scopes to authorization schema",
+      "body": "Test 6",
+      "correctedTitle": "Add Groups resource type and scopes to authorization schema",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:19:07Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/6",
+        "baseSha": "7a8d18122aea42278332120093d5cefce9748356",
+        "headSha": "679f44692dbc288bedc8f1535071c8467dbaf70c",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/6",
+          "revision": "679f44692dbc288bedc8f1535071c8467dbaf70c",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "bf1d6d63fc417e7fd3e5a56a9d5a5b7e9156f0e82908143de6ac58ce390a10d3",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "f316420dc969e589e011fc0437adf28e1640cd9915dab4921c81155652b36ff5",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "f5faf808d1ee21eeac3e7d48b23fadd79ea75b49a16d9d22d88c903940edc439",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-7",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b",
+      "hash": "64b6916b67c75e93c8510b8c8c1781fb71b927a0e99186eea700cae48e3a3233",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/7",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/7/head",
+      "baseSha": "21d53112849fe55f328f3de2f071989b8763de61",
+      "headSha": "5d77e7ea7d431aa0a6b65904457b7471bd050e81",
+      "mergeBaseSha": null,
+      "title": "Add HTML sanitizer for translated message resources",
+      "body": "Test 7",
+      "correctedTitle": "Add HTML sanitizer for translated message resources",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:19:12Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/7",
+        "baseSha": "21d53112849fe55f328f3de2f071989b8763de61",
+        "headSha": "5d77e7ea7d431aa0a6b65904457b7471bd050e81",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/7",
+          "revision": "5d77e7ea7d431aa0a6b65904457b7471bd050e81",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 4
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "3949d0db9e6756bdf03e90dbdd2219e0de0e0a4e2c55eb88eeda2d429c858042",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 4,
+          "hash": "a0efaae98b098c220d9df2e4f2052c91ad5f5882c1f904022b0c4b8199388938",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "d881d15f60a031aefb2e1601c40470c71013ef1e5822adfa4eb955d31ab3d927",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-8",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5",
+      "hash": "bdb6c3b589568804435b24fdd27e1c9d56eb8bb6ffe85e0e9b626ca98e9ba00e",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/8",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/8/head",
+      "baseSha": "b545339e2c924263a498653f348610de0c09059c",
+      "headSha": "c8738721df2cd2d16fe16adec571b4192354a771",
+      "mergeBaseSha": null,
+      "title": "Implement access token context encoding framework",
+      "body": "Test 8",
+      "correctedTitle": "Implement access token context encoding framework",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:19:18Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/8",
+        "baseSha": "b545339e2c924263a498653f348610de0c09059c",
+        "headSha": "c8738721df2cd2d16fe16adec571b4192354a771",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/8",
+          "revision": "c8738721df2cd2d16fe16adec571b4192354a771",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 4
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "f845383fcd2a0f3c23b5e1f594829512b4216e1142bc83cad7a986647df7bc4c",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 4,
+          "hash": "694a4f698979916145a67b744cb31e2397f2251029a1ab1664794284f66581e0",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "0a5a867bef799ee91c5268a604e6ce24411b6084aff27ee8efd69f8a56b26923",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__keycloak-greptile-9",
+      "id": "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b",
+      "hash": "ab97b00bc9fb350dacf324a9f121a051d09329a662c9e5a1064a8d156f254232",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/9",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile.git",
+      "prRef": "refs/pull/9/head",
+      "baseSha": "a0852eaa2ed19408ecf8ad02652802d00529a085",
+      "headSha": "134437a5a7e31472763ffa2ac3cc91030e7ee389",
+      "mergeBaseSha": null,
+      "title": "Implement recovery key support for user storage providers",
+      "body": "Test 9",
+      "correctedTitle": "Implement recovery key support for user storage providers",
+      "language": "Java",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-28T21:19:23Z",
+      "repoGroup": "keycloak/keycloak",
+      "licence": {
+        "spdx": "Apache-2.0",
+        "chosen": "Apache-2.0",
+        "class": "permissive",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "full"
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/9",
+        "baseSha": "a0852eaa2ed19408ecf8ad02652802d00529a085",
+        "headSha": "134437a5a7e31472763ffa2ac3cc91030e7ee389",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/9",
+          "revision": "134437a5a7e31472763ffa2ac3cc91030e7ee389",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+          "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "0f226b3cc747f5f0a0d641549c9451ac938d7c1a4c5b4d7cdcd958bdecf896c0",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "6c9032d39ba1c5e44cfac29de77dd573426139bfe7161fd8c18245ef51e0acc4",
+          "file": "code_review_benchmarks/keycloak.json",
+          "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "746b83566b6dd4bba77c76077839ec210ea91da1fdc5f73cde9be831375cc1bb",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-1",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd",
+      "hash": "ec55cdfdcba6d50d107cebba4f9d7dd49b0ea2a557cdd858954b84aedb447dc5",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/1/head",
+      "baseSha": "a5d290951def84afdcc4c88d2f1f20023fc36e2a",
+      "headSha": "8ab88145113dd23a930e23b9cbbcf8b30e4c0b17",
+      "mergeBaseSha": null,
+      "title": "Enhanced Pagination Performance for High-Volume Audit Logs",
+      "body": "Test 1",
+      "correctedTitle": "Enhanced Pagination Performance for High-Volume Audit Logs",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:29:31Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1",
+        "baseSha": "a5d290951def84afdcc4c88d2f1f20023fc36e2a",
+        "headSha": "8ab88145113dd23a930e23b9cbbcf8b30e4c0b17",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1",
+          "revision": "8ab88145113dd23a930e23b9cbbcf8b30e4c0b17",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 4
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "8b432c59a84febf3235e1e67905161c07e778beb53f11b25ec347b8510feed9a",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 4,
+          "hash": "e476a30ee17f906139a138e6ac097bce4603d9d48c9960cba85e72b544793bba",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "35fccf84cc2cabf07eafb4b4cc448167470ee4db58382c13c1764289e66ae2a0",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-10",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273",
+      "hash": "cfbb4273cec9addbe4e41dc76537458fea33a2fcf14f37b4f7af49b299d65a28",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/10",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/10/head",
+      "baseSha": "7249010ca8fea2bbc9ae58e7352861c2d17c2ef2",
+      "headSha": "de60b7fb01a1df4ecca82cc842a8b5fb16d92794",
+      "mergeBaseSha": null,
+      "title": "feat(workflow_engine): Add in hook for producing occurrences from the stateful detector",
+      "body": "Test [new PR number opened]",
+      "correctedTitle": "feat(workflow_engine): Add in hook for producing occurrences from the stateful detector",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:32:59Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/10",
+        "baseSha": "7249010ca8fea2bbc9ae58e7352861c2d17c2ef2",
+        "headSha": "de60b7fb01a1df4ecca82cc842a8b5fb16d92794",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/10",
+          "revision": "de60b7fb01a1df4ecca82cc842a8b5fb16d92794",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "e2ecba4f6252913a4ab5e4a898b70bf3281b0f86a62355380912159172d91976",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "ca7bf994615d8aaa7f9b59e972366d4293f9ab97ad426039958c8ceddd7ff1f0",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "e81a1edba5b767a2d54e78a5c20a7c7eab07a7ace1c36b1b9aadd8be573186b5",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-2",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c",
+      "hash": "26f5d73cac6d2578b70094aa5b9b56e89514df9aed29253ebb01ed38fc8d15ce",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/2/head",
+      "baseSha": "28e3db2520d4ea28c57b08da57b83917ba7b2e15",
+      "headSha": "8ab88145113dd23a930e23b9cbbcf8b30e4c0b17",
+      "mergeBaseSha": null,
+      "title": "Optimize spans buffer insertion with eviction during insert",
+      "body": "Test 2",
+      "correctedTitle": "Optimize spans buffer insertion with eviction during insert",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:29:50Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2",
+        "baseSha": "28e3db2520d4ea28c57b08da57b83917ba7b2e15",
+        "headSha": "8ab88145113dd23a930e23b9cbbcf8b30e4c0b17",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2",
+          "revision": "8ab88145113dd23a930e23b9cbbcf8b30e4c0b17",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "2ad09e73c68e77050f18f23f7da2a462a31902aaf1d2e4e3a25efac9e8b9e455",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "bfe307d8a902cb6e088b5791b65111c7cfaa8d6c2132e84a1fe5731075151c04",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "79721f02c2f6c337184ac59f5d29be556d4c41de78409f605750905483f7747b",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-3",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c",
+      "hash": "82aa2d7ca6e91488b9208c7434f4742229966e2e1ec0fe905ef50640be116506",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/3/head",
+      "baseSha": "a5d290951def84afdcc4c88d2f1f20023fc36e2a",
+      "headSha": "6ad6fe3899f630ccf922ce7ac681147dc7987435",
+      "mergeBaseSha": null,
+      "title": "feat(upsampling) - Support upsampled error count with performance optimizations",
+      "body": "Test 3",
+      "correctedTitle": "feat(upsampling) - Support upsampled error count with performance optimizations",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:30:32Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3",
+        "baseSha": "a5d290951def84afdcc4c88d2f1f20023fc36e2a",
+        "headSha": "6ad6fe3899f630ccf922ce7ac681147dc7987435",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3",
+          "revision": "6ad6fe3899f630ccf922ce7ac681147dc7987435",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "7e5760633654ff93104e24f537e217cc3452c9e61ff1e49fc2028456de4316fc",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "67d2f899ac6bd47956a0704881e55b68d7fa868609ced46fe4387bef71d66941",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "53d4697508f244b64465ff5a30e8c6f229c09a5f04e4f1f00ef148d974900480",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-4",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d",
+      "hash": "b56ee62da77719aa356ae169be1678575ff10a52c9933cd0cbc93cbdc56b46e2",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/4",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/4/head",
+      "baseSha": "ccd14e450fcefa5b286c06221775f50a49059f6d",
+      "headSha": "843d7c71926b03f0c5847a0740ac3f7fb3c5fbad",
+      "mergeBaseSha": null,
+      "title": "GitHub OAuth Security Enhancement",
+      "body": "Test 4",
+      "correctedTitle": "GitHub OAuth Security Enhancement",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:30:53Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/4",
+        "baseSha": "ccd14e450fcefa5b286c06221775f50a49059f6d",
+        "headSha": "843d7c71926b03f0c5847a0740ac3f7fb3c5fbad",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/4",
+          "revision": "843d7c71926b03f0c5847a0740ac3f7fb3c5fbad",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "1a32abb43e064dd48354c47b3ae4283eca14e69750cfd119d93756455e29acc7",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "8cbdf96daad752cdf1fb47fcb0a938c5a8d49215a63df0909b3c8e3d5bd33f00",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "a3c358f974c0e77ba178039f59726b9302ef2b9a6aacad81ea8b9aff1b4daf97",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-5",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0",
+      "hash": "89b5cfa0c790e6268e4afbfd224f209ddaa1f8511b6bd7f9082162eb04633914",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/5/head",
+      "baseSha": "49a275847631e231672d01b5dcd66558c069d25b",
+      "headSha": "ea188e2d736fd6ed27c1dba8aae63b7268e2a7a9",
+      "mergeBaseSha": null,
+      "title": "Replays Self-Serve Bulk Delete System",
+      "body": "Test 5",
+      "correctedTitle": "Replays Self-Serve Bulk Delete System",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:31:05Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5",
+        "baseSha": "49a275847631e231672d01b5dcd66558c069d25b",
+        "headSha": "ea188e2d736fd6ed27c1dba8aae63b7268e2a7a9",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5",
+          "revision": "ea188e2d736fd6ed27c1dba8aae63b7268e2a7a9",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "6d735250234d82ae6ba20988af591e553435e9bdcf41403b3be12f71ad1c9983",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "1b8476851f2f622f231497b5b868f4fce9e34dc2a7b815b68c798bbd00d423ee",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "e58ae43677222d1e72253cfa65638267ee3aebe526a43ca681cdc15862264e2f",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-6",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664",
+      "hash": "a9bd36645768a0bb20dbaad0db8f03cf770365929aa532525668098c28f373bc",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/6",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/6/head",
+      "baseSha": "c2c41b0db17dafbcf901412623e874b48ae37a6e",
+      "headSha": "9bf83b05423beff6dcc542f93e903c562e97469b",
+      "mergeBaseSha": null,
+      "title": "Span Buffer Multiprocess Enhancement with Health Monitoring",
+      "body": "Test 6",
+      "correctedTitle": "Span Buffer Multiprocess Enhancement with Health Monitoring",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:31:19Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/6",
+        "baseSha": "c2c41b0db17dafbcf901412623e874b48ae37a6e",
+        "headSha": "9bf83b05423beff6dcc542f93e903c562e97469b",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/6",
+          "revision": "9bf83b05423beff6dcc542f93e903c562e97469b",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 5
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "9d1ec62dae41004ec9996079a74fb480bc30c885babb77780231034204cfdfa9",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 5,
+          "hash": "ae9d7832b15e9cfc2710997403b33c23da7badefa780ce9ce3745fc0cc01624b",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "f16054bfe0672c4924180dbcb394c3c7e71f4768247c5cbf6f673552cec29c73",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-7",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c",
+      "hash": "a9b46a2c706f50240a37d537ef2961edf20e5c47095df5dafbcee804016f0102",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/7",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/7/head",
+      "baseSha": "19c92a4345beecc750245775de2b3ab9f4f59473",
+      "headSha": "f9919d789416dd32549d7bb9e238d5df55d5265a",
+      "mergeBaseSha": null,
+      "title": "feat(ecosystem): Implement cross-system issue synchronization",
+      "body": "Test 7",
+      "correctedTitle": "feat(ecosystem): Implement cross-system issue synchronization",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:31:35Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/7",
+        "baseSha": "19c92a4345beecc750245775de2b3ab9f4f59473",
+        "headSha": "f9919d789416dd32549d7bb9e238d5df55d5265a",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/7",
+          "revision": "f9919d789416dd32549d7bb9e238d5df55d5265a",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 4
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "312c6efef22d93b2b6f83a2bf01f3bec38ffa85947febc1c2403194f54ccbdc6",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 4,
+          "hash": "3e7f49cadf14aed3c133b8909fa126fcb300c336cc72843f0cd0f892f043baa1",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "0f3e952df5568d91c87b967718bc84c58822dfe0f5eb0bd4253c4f186b482391",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-8",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca",
+      "hash": "95dd22ca9ae038a173da15a6b52905297e0eedf4ebc1a2463017a1fd0ae27888",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/8",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/8/head",
+      "baseSha": "5fc9f67c1bd6a50d6c6eb3270b1e6fb7938c5865",
+      "headSha": "c3b32a7babfcf62b91553388bcd9e9fbfd30a690",
+      "mergeBaseSha": null,
+      "title": "ref(crons): Reorganize incident creation / issue occurrence logic",
+      "body": "Test 8",
+      "correctedTitle": "ref(crons): Reorganize incident creation / issue occurrence logic",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:32:09Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/8",
+        "baseSha": "5fc9f67c1bd6a50d6c6eb3270b1e6fb7938c5865",
+        "headSha": "c3b32a7babfcf62b91553388bcd9e9fbfd30a690",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/8",
+          "revision": "c3b32a7babfcf62b91553388bcd9e9fbfd30a690",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 2
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "a5c6fee9524eec9d2e11129259023b0d982ec1be7659be7c3adfe50bd3fb2959",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 2,
+          "hash": "63651de6ebc099c298802717b52ad642dc35937ec0d3e094abc1e3f72784e969",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "3ae515510008b7f1855774094dd1e80b5ffff6af3e92371ee89f430832244007",
+      "matchSignatures": null
+    },
+    {
+      "name": "ai-code-review-evaluation__sentry-greptile-9",
+      "id": "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279",
+      "hash": "acbcc279a5f884c87b4a2e1798563b631d3aa0533f927c3c6d20a729a2efeff4",
+      "status": "usable",
+      "excludedWhy": null,
+      "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/9",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "cloneUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile.git",
+      "prRef": "refs/pull/9/head",
+      "baseSha": "5c94383dd49b567fb086ad594b40af066f426858",
+      "headSha": "33f4fddf64465f75308957c4431e56fd0443eca3",
+      "mergeBaseSha": null,
+      "title": "feat(uptime): Add ability to use queues to manage parallelism",
+      "body": "Test 9",
+      "correctedTitle": "feat(uptime): Add ability to use queues to manage parallelism",
+      "language": "Python",
+      "changeLines": null,
+      "prCreatedAt": "2025-07-29T00:32:22Z",
+      "repoGroup": "getsentry/sentry",
+      "licence": {
+        "spdx": "NOASSERTION",
+        "chosen": null,
+        "class": "unverified",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc",
+        "at": "the default branch on 2026-10-11",
+        "source": "the GitHub licence API",
+        "use": "local review and scoring",
+        "excerpts": "omit",
+        "reading": {
+          "spdx": "FSL-1.1-Apache-2.0",
+          "by": "Sid",
+          "on": "2026-10-11"
+        }
+      },
+      "change": {
+        "kind": "defect-bearing",
+        "prUrl": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/9",
+        "baseSha": "5c94383dd49b567fb086ad594b40af066f426858",
+        "headSha": "33f4fddf64465f75308957c4431e56fd0443eca3",
+        "source": {
+          "url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/9",
+          "revision": "33f4fddf64465f75308957c4431e56fd0443eca3",
+          "readDate": "2026-10-14",
+          "file": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+          "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648"
+        }
+      },
+      "truth": {
+        "kind": "prose",
+        "greptile": 1,
+        "augment": 3
+      },
+      "truthSets": {
+        "greptile": {
+          "kind": "prose",
+          "items": 1,
+          "hash": "6cf9257c50518124fa13c15c923e6ff03f1a08b5c98e214714ef1c12253cc212",
+          "file": "greptile/b5782ebc1f2b5641.js",
+          "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+          "source": {
+            "url": "https://www.greptile.com/benchmarks",
+            "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+            "readDate": "2026-10-14",
+            "assetUrl": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js"
+          }
+        },
+        "augment": {
+          "kind": "prose",
+          "items": 3,
+          "hash": "b12d57bdf3fad88393547cc4ac74e413e9c707cfe61c08e9b87878b936680e39",
+          "file": "code_review_benchmarks/sentry.json",
+          "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143",
+          "source": {
+            "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+            "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+            "readDate": "2026-10-14"
+          }
+        }
+      },
+      "truthHash": "6f48a4f99001e951a5378444eb90d066a05caa1df092cea942978e6140455bdb",
+      "matchSignatures": null
+    }
+  ]
+}

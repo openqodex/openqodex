@@ -46,9 +46,9 @@
 // 4. A failed or never-started review vanishes from Martian's denominators:
 //    every planned review's first attempt is a review, with no comment when
 //    it failed or never started; a retry never replaces it.
-// 5. A case whose licence nobody verified, a sample of a case the run did
-//    not plan, a case outside Martian, or a changed case is converted: each
-//    refuses the whole run, named, before anything is written.
+// 5. A sample of a case the run did not plan, a case outside Martian, a
+//    changed case, or a case with an excluded licence class is converted:
+//    each refuses the whole run, named, before anything is written.
 // 6. Two configurations go by one tool name, or one with the graph off goes
 //    by the name of the product as it ships: refused (lib/martian-board.mjs
 //    boardConfigOf).
@@ -62,48 +62,26 @@
 //    convert.json records the sha256 of the manifest it converted and the
 //    access line it wrote, which martian-judge.mjs checks before it judges.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { benchCache, boardFolder, outsideRepo } from "../../lib/board-files.mjs";
-import { benchRoot, parseCaseId, repoRoot } from "../../lib/cases.mjs";
+import { benchRoot, repoRoot } from "../../lib/cases.mjs";
 import { heldOutAccessPath } from "../../lib/index.mjs";
+import { martianConversion, readBoardReviews } from "../../lib/board-reviews.mjs";
 import * as licence from "../../lib/licence.mjs";
-import { boardConfigOf, MARTIAN_BOARD, martianBody, martianToolName, npmRegistryAnswer, REGISTRY, releaseGate } from "../../lib/martian-board.mjs";
-import { attemptOf, findingId, judgeFieldsMissing, normPath, population, shownFindings } from "../../lib/score.mjs";
-import { readCase, readPinned, truthOf } from "../../lib/suites.mjs";
+import { MARTIAN_BOARD, npmRegistryAnswer, REGISTRY, releaseGate } from "../../lib/martian-board.mjs";
+import { PURPOSES, needsPurpose, readSuite } from "../../lib/suites.mjs";
 
-const readJsonOr = (path) => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null);
-const dirs = (path) => (existsSync(path) ? readdirSync(path, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort() : []);
 const firstLine = (error) => String(error?.message ?? error).split("\n")[0];
-const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-
-// Every saved attempt of the run, as lib/score.mjs population reads them.
-function readAttempts(folder) {
-  const out = [];
-  for (const c of dirs(join(folder, "samples"))) {
-    for (const config of dirs(join(folder, "samples", c))) {
-      for (const n of dirs(join(folder, "samples", c, config))) {
-        const dir = join(folder, "samples", c, config, n);
-        const which = attemptOf(n);
-        if (which === null) throw new Error(`${dir} is not an attempt folder (<repeat> or <repeat>-attempt<n>)`);
-        out.push({ case: c, config, ...which, row: readJsonOr(join(dir, "sample.json")), report: readJsonOr(join(dir, "report", "report.json")) });
-      }
-    }
-  }
-  return out;
-}
-
-// What happened to a planned review's first attempt, as our scorer reads it.
-const statusOf = (first) => (first === null ? "unstarted" : first.report === null ? "failed" : first.report.completion?.status === "complete" ? "complete" : "incomplete");
 
 /**
  * Converts the release run in `folder`: writes <folder>/outside/martian/
  * and returns { out, record, data } (record is convert.json, data
  * benchmark_data.json). Throws, writing and logging nothing, on a run that
- * is not a release run, a run of another suite, a case whose licence a
- * board refuses, a sample the run did not plan, a configuration the board
+ * is not a release run, a run of another suite, a case with an excluded
+ * licence class, a sample the run did not plan, a configuration the board
  * cannot name, or a run converted before. `root` and `cache` are the suite
  * root and the bench cache the cases and golden files are read from;
  * `accessLog` the held-out access log; `by` who converts; `registry`
@@ -115,48 +93,25 @@ export async function convertRun(folder, { root = benchRoot, cache = licence.cac
   const manifestBytes = readFileSync(join(folder, "manifest.json"));
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const suite = manifest.suite ?? "planted";
+  if (suite === "greptile") throw new Error("Greptile uses benchmark/outside/boards/greptile-run.mjs, with caught or missed per case against the chosen truth set");
   if (suite !== "martian") throw new Error(`${folder}: the run is of suite ${suite}, not martian; only a run on Martian's cases is converted for its board`);
   if (manifest.mode === "scan") throw new Error(`${folder}: a scanner-only run shows the developer no finding, so it has nothing to convert for the board`);
-  const gate = await releaseGate(manifest, { registry });
+  // A run on a split with exposure on record names its purpose; only the
+  // half it reads is converted (lib/board-reviews.mjs readBoardReviews).
+  const suiteNow = readSuite("martian", { root });
+  if (needsPurpose(suiteNow.split) && manifest.splitHash === suiteNow.splitHash && !PURPOSES.includes(manifest.purpose)) throw new Error(`${folder}: the run names no purpose, and ${suiteNow.split.name} has exposure on record: convert a tune, score or diagnostic run`);
+  const gate = await releaseGate(manifest, { registry, root });
   const out = boardFolder(folder, "martian");
   if (existsSync(out)) throw new Error(`${out} exists already: the run was converted before (and maybe judged). Move that folder to the Trash to convert it again.`);
 
   // Everything that refuses the run, before anything is read of the truth.
-  const attempts = readAttempts(folder);
-  const pop = population(manifest, attempts);
-  const problems = [...pop.problems];
-  if (pop.jobs.length === 0) problems.push("the run plans no review");
-  const planned = new Set(pop.jobs.map((j) => j.case));
-  for (const j of pop.jobs) if (parseCaseId(j.caseId)?.suite !== "martian") problems.push(`${j.caseId}: not a Martian case`);
-  for (const a of attempts) if (!planned.has(a.case)) problems.push(`samples/${a.case}/${a.config}: a sample of ${a.case}, which the run did not plan`);
-  for (const a of pop.unplanned) if (planned.has(a.case)) problems.push(`samples/${a.case}/${a.config}/${a.repeat}: a review the run did not plan`);
-  const tools = new Map();
-  for (const j of pop.jobs) {
-    let tool;
-    try {
-      tool = martianToolName(j.config, j.repeat);
-    } catch (error) {
-      problems.push(error.message);
-      continue;
-    }
-    const was = tools.get(tool);
-    if (was !== undefined && was !== j.config) problems.push(`${was} and ${j.config} would both go by the tool name ${tool}`);
-    else tools.set(tool, j.config);
-  }
-  const cases = new Map();
-  for (const id of [...new Set(pop.jobs.map((j) => j.caseId))].sort(byName)) {
-    if (parseCaseId(id)?.suite !== "martian") continue;
-    let c;
-    try {
-      c = readCase(id, { root });
-    } catch (error) {
-      problems.push(firstLine(error));
-      continue;
-    }
+  const run = readBoardReviews(folder, { root, heading: `${folder} is not converted for Martian's board:` });
+  const cases = new Map(run.cases.map((c) => [c.id, c]));
+  const problems = [];
+  for (const c of cases.values()) {
     const record = c.source?.licence ?? null;
-    const why = record === null ? "its suite entry holds no licence record" : (licence.licenceExclusion(record) ?? licence.publishRefusal([{ name: c.name, licence: record.class }]));
-    if (why !== null) problems.push(`${c.name}: ${why}; a case whose licence is not verified is never converted for a board`);
-    cases.set(id, c);
+    const why = record === null ? "its suite entry holds no licence record" : licence.licenceExclusion(record);
+    if (why !== null) problems.push(`${c.name}: ${why}`);
   }
   if (problems.length > 0) throw new Error(`${folder} is not converted for Martian's board:\n${[...new Set(problems)].join("\n")}`);
 
@@ -169,45 +124,7 @@ export async function convertRun(folder, { root = benchRoot, cache = licence.cac
     throw new Error(`the held-out access log ${accessLog} cannot be written (${firstLine(error)}), so no Martian case is read`);
   }
 
-  // Each pull request's golden comments, from the pinned file, checked against the frozen truth.
-  const data = {};
-  const caseRows = [];
-  for (const c of [...cases.values()].sort((a, b) => byName(a.name, b.name))) {
-    const truth = truthOf(c, { cache });
-    const row = readPinned(cache, "martian", { path: c.source.dataset.file, sha256: c.source.dataset.sha256 }).find((r) => r.url === c.source.prUrl);
-    data[c.source.prUrl] = { pr_title: row.pr_title ?? null, original_url: row.original_url ?? null, source_repo: basename(c.source.dataset.file, ".json"), golden_comments: row.comments, golden_source_file: basename(c.source.dataset.file), openqodex: { caseId: c.id, case: c.name }, reviews: [] };
-    caseRows.push({ caseId: c.id, case: c.name, goldenUrl: c.source.prUrl, golden: truth.items.length, licence: c.source.licence.class });
-  }
-
-  // One review per planned review's first attempt, by tool name and case.
-  const jobs = pop.jobs.map((j) => ({ ...j, tool: martianToolName(j.config, j.repeat) })).sort((a, b) => byName(a.tool, b.tool) || byName(a.case, b.case));
-  const held = [];
-  const reviews = [];
-  for (const job of jobs) {
-    const url = cases.get(job.caseId).source.prUrl;
-    const first = job.first;
-    const shown = shownFindings(first?.report ?? null);
-    const ids = shown.map((f) => findingId(job.caseId, f));
-    shown.forEach((f, index) => {
-      const lacking = judgeFieldsMissing(f);
-      if (lacking.length > 0) held.push({ tool: job.tool, caseId: job.caseId, case: job.case, goldenUrl: url, index, findingId: ids[index], lacking });
-    });
-    const comments = shown.map((f) => ({ path: normPath(f.file_path) || null, line: Number.isInteger(f.line_number) ? f.line_number : null, body: martianBody(f), created_at: first?.row?.started_at ?? null, tier: f.tier ?? "finding" }));
-    reviews.push({ url, review: { tool: job.tool, repo_name: null, pr_url: url, review_comments: comments, openqodex: { caseId: job.caseId, case: job.case, config: job.config, repeat: job.repeat, attempt: 1, status: statusOf(first), findingIds: ids } } });
-  }
-  const heldTools = new Set(held.map((h) => h.tool));
-  for (const { url, review } of reviews) if (!heldTools.has(review.tool)) data[url].reviews.push(review);
-
-  const toolRows = [...tools.entries()]
-    .sort((a, b) => byName(a[0], b[0]))
-    .map(([tool, config]) => {
-      const mine = jobs.filter((j) => j.tool === tool);
-      const statuses = {};
-      for (const j of mine) statuses[statusOf(j.first)] = (statuses[statusOf(j.first)] ?? 0) + 1;
-      const lack = held.filter((h) => h.tool === tool);
-      const why = lack.length === 0 ? null : `${lack.length} finding${lack.length === 1 ? " lacks" : "s lack"} what Martian's judge reads (${lack.map((h) => `${h.case} index ${h.index}: ${h.lacking.join(", ")}`).join("; ")}); none of this tool name's reviews is sent, since judging it without one of its pull requests would shrink Martian's denominators`;
-      return { tool, config, boardConfig: boardConfigOf(config), repeat: mine[0].repeat, reviews: mine.length, findings: mine.reduce((n, j) => n + shownFindings(j.first?.report ?? null).length, 0), statuses, held: lack.length > 0, why };
-    });
+  const { data, caseRows, jobs, held, failures, toolRows } = martianConversion(run, { cache });
   const dataset = [...cases.values()][0].source.dataset;
   const record = {
     version: 1,
@@ -220,15 +137,19 @@ export async function convertRun(folder, { root = benchRoot, cache = licence.cac
     suite,
     split: manifest.split ?? null,
     splitHash: manifest.splitHash ?? null,
+    // The half the run's purpose reads, and its size, when it names one.
+    ...(run.suite.subset ? { half: { purpose: run.suite.purpose, subset: run.suite.subset, cases: run.suite.size } } : {}),
     // What a judging checks before it judges (failure 9): the manifest converted, by its bytes.
     manifestSha256: createHash("sha256").update(manifestBytes).digest("hex"),
-    package: { spec: gate.package.spec, version: gate.package.version, sha256: gate.package.sha256, integrity: gate.package.integrity },
-    registry: REGISTRY,
+    package: gate.package.spec === "local" ? gate.package : { spec: gate.package.spec, version: gate.package.version, sha256: gate.package.sha256, integrity: gate.package.integrity },
+    ...(gate.buildLabel ? { build: gate.buildLabel, comparison: gate.comparison } : { registry: REGISTRY }),
     tool: "openqodex-<config>-r<repeat>",
     access,
     cases: caseRows,
     tools: toolRows,
+    failures,
     held,
+    notRun: jobs.filter((j) => j.status === "not-run").map((j) => ({ tool: j.tool, caseId: j.caseId })),
   };
   mkdirSync(out, { recursive: true });
   writeFileSync(join(out, "benchmark_data.json"), `${JSON.stringify(data, null, 2)}\n`);

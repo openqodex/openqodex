@@ -1,6 +1,6 @@
 {
   "name": "openqodex",
-  "version": "0.13.0",
+  "version": "0.16.0",
   "description": "Code review before you push, in Claude Code, Codex, Cursor and Cline. Scanners check your change and keep the findings on the lines you changed. Then a separate Claude Code or Codex reviewer answers every scanner finding. You or your agent can add a compatible scanner from GitHub.",
   "type": "module",
   "license": "Apache-2.0",

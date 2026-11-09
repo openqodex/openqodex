@@ -1,0 +1,1150 @@
+{
+  "version": 1,
+  "runId": "2026-10-23-8b51d43-planted-scan-ci",
+  "date": "2026-10-23",
+  "startedAt": "2026-10-23T14:49:34.624Z",
+  "draft": false,
+  "suite": "planted",
+  "split": "dev",
+  "splitHash": null,
+  "mode": "scan",
+  "path": "laptop",
+  "build": {
+    "commit": "8b51d43fadc5b87e7928edc38923a6d55a5d44c1",
+    "short": "8b51d43",
+    "cliVersion": "0.13.0",
+    "dirty": false,
+    "bundleHash": "77c738393c8f345bfdc54df5064c5aad227a61784f680ab8f8219cf3ab13c3fb"
+  },
+  "reviewers": {},
+  "configs": [
+    "scan"
+  ],
+  "repeat": 1,
+  "web": null,
+  "caseSetHash": "ad0e0df010b721b09e3316bae133256d33cf6bae6b67c490e41514a794c801b8",
+  "caseIds": [
+    "planted/clean-python-feature@f4a96617",
+    "planted/clean-ts-refactor@203def17",
+    "planted/demo-polyglot@8784029f",
+    "planted/django-model-view@1e2d2658",
+    "planted/django-renamed-view@88fe20f5",
+    "planted/express-admin-routes@168bf064",
+    "planted/express-route-param@f6a2194a",
+    "planted/flask-path-traversal@72a23ef7",
+    "planted/go-http-handler@2f14de78",
+    "planted/js-dynamic-dispatch-gap@525683c5",
+    "planted/kubernetes-host-access@6411d9ba",
+    "planted/nextjs-react-hooks@cf5c787f",
+    "planted/postgres-migration-locks@ffcde742",
+    "planted/python-caller-break@2689ff22",
+    "planted/rails-controller-model@71515c07",
+    "planted/suppression-comments@e47d5270",
+    "planted/terraform-open-ingress@11c4fe95",
+    "planted/ts-interface-dispatch-break@e6a6512f",
+    "planted/ts-removed-export@5e705346",
+    "planted/ts-workspace-caller-break@ee94f473",
+    "planted/workflow-untrusted-checkout@aba74846"
+  ],
+  "rulesVersion": 2,
+  "rulesHash": "3260fdcec7129a5bcdc427285e210475fbb7c83ee16de25e2c9e7888bfad5d86",
+  "decisionsHash": null,
+  "scannersComplete": true,
+  "external": {
+    "toolchainHash": "ace0de7ba932d26b85726e309df42119c34c9affcd7b5bf804cca265026e3ad0",
+    "semgrepPacks": [
+      {
+        "pack": "p/default",
+        "sha256": "bb857745dc8b25be6e1143505148bd7d00cb62708691f367a187ff380d7e0d21"
+      },
+      {
+        "pack": "p/secrets",
+        "sha256": "87d10cb23eb54cba69a9c79c3e5a1165884cbcb97169c7193973d6cedc18963b"
+      },
+      {
+        "pack": "p/security-audit",
+        "sha256": "d16bdf619eb374f8f564baea17c1fc9d3118979b6bcb3818431734ef35803753"
+      }
+    ],
+    "osvAdvisories": {
+      "sha256": "35c1ff02b7bc759aafd8f0dae875901783ab82b7a2e41c5edf4ae17c4abffd12",
+      "advisories": 63,
+      "basis": "sha256 over each sample's osv-scanner status and what osv-scanner returned there: each raw finding in the scan trail by advisory id and severity, and each kept candidate's message. osv-scanner's modified times are not in the scan record."
+    },
+    "osvQueriedAt": {
+      "from": "2026-10-23T14:49:51.042Z",
+      "to": "2026-10-23T14:50:40.364Z"
+    },
+    "scannerVersions": {
+      "actionlint": "1.7.7",
+      "bandit": "1.9.4",
+      "brakeman": "6.2.1",
+      "cargo-deny": "0.20.2",
+      "checkov": "3.3.22",
+      "gitleaks": "8.21.2",
+      "golangci": "2.14.0",
+      "hadolint": "2.15.1",
+      "kube-linter": "0.8.3",
+      "kubeconform": "0.8.0",
+      "osv-scanner": "2.6.0",
+      "oxlint": "1.86.0",
+      "rubocop": "1.69.2",
+      "ruff": "0.8.4",
+      "semgrep": "1.94.0",
+      "shellcheck": "0.10.0",
+      "sqlfluff": "4.3.0",
+      "sqllint": "built in",
+      "squawk": "2.66.0",
+      "tflint": "0.64.0",
+      "trivy": "0.75.0",
+      "zizmor": "1.30.1"
+    }
+  },
+  "ended": {
+    "how": "finished",
+    "why": null
+  },
+  "release": null,
+  "scores": {
+    "scan": {
+      "population": {
+        "planned": 21,
+        "complete": 21,
+        "incomplete": 0,
+        "failed": 0,
+        "unstarted": 0,
+        "retries": 0,
+        "retryCostUsd": 0
+      },
+      "issueRecall": {
+        "all": {
+          "hit": 32,
+          "of": 51,
+          "ci": [
+            0.38461538461538464,
+            0.7727272727272727
+          ]
+        },
+        "criticalMajor": {
+          "hit": 26,
+          "of": 45,
+          "ci": [
+            0.375,
+            0.7307692307692307
+          ]
+        }
+      },
+      "precision": {
+        "lower": {
+          "hit": 35,
+          "of": 40,
+          "ci": [
+            0.7333333333333333,
+            0.9705882352941176
+          ]
+        },
+        "upper": {
+          "hit": 40,
+          "of": 40,
+          "ci": [
+            1,
+            1
+          ]
+        }
+      },
+      "uniqueIssuePrecision": {
+        "lower": {
+          "hit": 35,
+          "of": 40,
+          "ci": null
+        },
+        "upper": {
+          "hit": 40,
+          "of": 40,
+          "ci": null
+        }
+      },
+      "redundancy": {
+        "hit": 50,
+        "of": 90
+      },
+      "f1": 0.7308319738988581,
+      "controls": {
+        "hit": 2,
+        "of": 2
+      },
+      "cleanFindingsPerCase": {
+        "findings": 0,
+        "cases": 2
+      },
+      "location": {
+        "precision": {
+          "hit": 34,
+          "of": 90
+        },
+        "recall": {
+          "hit": 34,
+          "of": 51
+        },
+        "knownNoise": 0
+      },
+      "plantedLegacy": null,
+      "wallMsMean": 8471.238095238095,
+      "costUsdMean": null,
+      "costUsdTotal": null
+    }
+  },
+  "perCase": {
+    "scan": {
+      "planted/clean-python-feature@f4a96617": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 1,
+          "of": 1
+        }
+      },
+      "planted/clean-ts-refactor@203def17": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 1,
+          "of": 1
+        }
+      },
+      "planted/demo-polyglot@8784029f": {
+        "issueRecall": {
+          "hit": 13,
+          "of": 15
+        },
+        "precision": {
+          "lower": {
+            "hit": 13,
+            "of": 13
+          },
+          "upper": {
+            "hit": 13,
+            "of": 13
+          }
+        },
+        "findings": 37,
+        "criticalMajor": {
+          "hit": 8,
+          "of": 10
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/django-model-view@1e2d2658": {
+        "issueRecall": {
+          "hit": 1,
+          "of": 4
+        },
+        "precision": {
+          "lower": {
+            "hit": 1,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 1,
+          "of": 4
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/django-renamed-view@88fe20f5": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 1
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/express-admin-routes@168bf064": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 2
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/express-route-param@f6a2194a": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 1
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/flask-path-traversal@72a23ef7": {
+        "issueRecall": {
+          "hit": 1,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 1,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 1,
+          "of": 2
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/go-http-handler@2f14de78": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 3,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 8,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/js-dynamic-dispatch-gap@525683c5": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 1
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/kubernetes-host-access@6411d9ba": {
+        "issueRecall": {
+          "hit": 2,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 2,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 2,
+          "of": 2
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/nextjs-react-hooks@cf5c787f": {
+        "issueRecall": {
+          "hit": 2,
+          "of": 4
+        },
+        "precision": {
+          "lower": {
+            "hit": 2,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 1,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/postgres-migration-locks@ffcde742": {
+        "issueRecall": {
+          "hit": 2,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 3,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 2,
+          "of": 2
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/python-caller-break@2689ff22": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 1
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/rails-controller-model@71515c07": {
+        "issueRecall": {
+          "hit": 2,
+          "of": 4
+        },
+        "precision": {
+          "lower": {
+            "hit": 2,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 2,
+          "of": 4
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/suppression-comments@e47d5270": {
+        "issueRecall": {
+          "hit": 2,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 2,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 2,
+          "of": 2
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/terraform-open-ingress@11c4fe95": {
+        "issueRecall": {
+          "hit": 2,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 4,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 15,
+        "criticalMajor": {
+          "hit": 2,
+          "of": 2
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/ts-interface-dispatch-break@e6a6512f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 1
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/ts-removed-export@5e705346": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 1
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/ts-workspace-caller-break@ee94f473": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 1
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/workflow-untrusted-checkout@aba74846": {
+        "issueRecall": {
+          "hit": 2,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 2,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 2,
+          "of": 2
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      }
+    }
+  },
+  "perBug": {
+    "scan": {
+      "planted/clean-python-feature@f4a96617": {},
+      "planted/clean-ts-refactor@203def17": {},
+      "planted/demo-polyglot@8784029f": {
+        "secret": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "sql-injection": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "docker-latest-base": {
+          "found": [
+            true
+          ],
+          "severity": "minor",
+          "cause": null
+        },
+        "docker-apt-install": {
+          "found": [
+            true
+          ],
+          "severity": "minor",
+          "cause": null
+        },
+        "docker-add": {
+          "found": [
+            true
+          ],
+          "severity": "minor",
+          "cause": null
+        },
+        "docker-pip-cache": {
+          "found": [
+            true
+          ],
+          "severity": "minor",
+          "cause": null
+        },
+        "docker-root": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "vulnerable-lodash": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "shell-rm-unquoted": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "shell-ls-loop": {
+          "found": [
+            true
+          ],
+          "severity": "minor",
+          "cause": null
+        },
+        "workflow-injection": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "migration-index-lock": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "terraform-ssh-open": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "kubernetes-privileged": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "pagination-off-by-one": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/django-model-view@1e2d2658": {
+        "decimal-times-float": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "missing-migration": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "order-detail-any-owner": {
+          "found": [
+            false
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "csrf-exempt-redeem": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/django-renamed-view@88fe20f5": {
+        "route-names-missing-view": {
+          "found": [
+            false
+          ],
+          "severity": "critical",
+          "cause": null
+        }
+      },
+      "planted/express-admin-routes@168bf064": {
+        "delete-without-admin": {
+          "found": [
+            false
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "foreach-async-not-awaited": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/express-route-param@f6a2194a": {
+        "param-name-not-in-route": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/flask-path-traversal@72a23ef7": {
+        "download-path-traversal": {
+          "found": [
+            false
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "debug-on-all-interfaces": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/go-http-handler@2f14de78": {
+        "sprintf-sql": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "mutex-held-on-return": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "defer-close-before-err": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/js-dynamic-dispatch-gap@525683c5": {
+        "async-handler-sync-caller": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/kubernetes-host-access@6411d9ba": {
+        "docker-socket-mount": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "host-network": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/nextjs-react-hooks@cf5c787f": {
+        "hook-after-early-return": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "effect-without-deps": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "query-as-html": {
+          "found": [
+            false
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "list-without-key": {
+          "found": [
+            true
+          ],
+          "severity": "minor",
+          "cause": null
+        }
+      },
+      "planted/postgres-migration-locks@ffcde742": {
+        "not-null-column-without-default": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        },
+        "index-without-concurrently": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/python-caller-break@2689ff22": {
+        "none-return-breaks-callers": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/rails-controller-model@71515c07": {
+        "where-interpolation": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "destroy-skips-admin": {
+          "found": [
+            false
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "permit-all": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "welcome-on-every-save": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/suppression-comments@e47d5270": {
+        "nosec-shell-injection": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "suppressed-eval": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        }
+      },
+      "planted/terraform-open-ingress@11c4fe95": {
+        "ssh-open-to-internet": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "database-publicly-accessible": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/ts-interface-dispatch-break@e6a6512f": {
+        "cache-get-throws-on-miss": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/ts-removed-export@5e705346": {
+        "removed-export-still-imported": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/ts-workspace-caller-break@ee94f473": {
+        "safegit-return-shape": {
+          "found": [
+            false
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      },
+      "planted/workflow-untrusted-checkout@aba74846": {
+        "pull-request-code-with-secrets": {
+          "found": [
+            true
+          ],
+          "severity": "critical",
+          "cause": null
+        },
+        "spoofable-dependabot-check": {
+          "found": [
+            true
+          ],
+          "severity": "major",
+          "cause": null
+        }
+      }
+    }
+  },
+  "intervals": {
+    "method": "Percentile bootstrap over clusters drawn with replacement; each metric is a ratio of sums recomputed on every resample, and a cluster keeps all its truth items, findings and repeats together. A cluster with nothing to count for a metric is left out of it. The interval describes this run and decides nothing: the trend's alarm and the acceptance rule compare two runs with a paired sign-flip test. With fewer than minClusters clusters it is null, listed under tooFewClusters.",
+    "cluster": "case",
+    "groups": null,
+    "resamples": 10000,
+    "level": 0.95,
+    "minClusters": 8,
+    "seed": "mulberry32 seeded with the first 32 bits of sha256 over the run id, the configuration and the metric name, joined by NUL",
+    "runId": "2026-10-23-8b51d43-planted-scan-ci",
+    "tooFewClusters": {}
+  },
+  "asset": {
+    "url": "https://github.com/openqodex/openqodex/releases/download/benchmark-data/2026-10-23-8b51d43-planted-scan-ci.tar.gz",
+    "sha256": "028ee83c48e91d15c1428195d7749b1e53c756e3f0b23ddbba7ffc33e979b3ff",
+    "bytes": 94238,
+    "files": 132,
+    "listHash": "3c5d529ef19ed2af7ee882afb003476e505847a85d6381145ba76644f6b9f1e0"
+  },
+  "accepted": true,
+  "acceptedAt": "2026-10-23T16:31:09.422Z",
+  "acceptedBy": "Sid",
+  "legacy": false,
+  "privateListHash": "d301897465772a6b3b3eb5a9490a1d89e5334b89163ada692f7e6d0a5926dc45"
+}

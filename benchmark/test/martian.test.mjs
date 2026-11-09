@@ -16,18 +16,56 @@
 // published in full, as unverified, with a person's reading of that very
 // file noted; official totals missing a field of their shape, and a match
 // across two pull requests, are refused.
+// A plain ingest must preserve the report saved by --verify-published.
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
-import { ingestMartian, writeMartianIngest } from "../ingest/martian.mjs";
-import { LICENCE_READINGS, saveCommitAnswer, savePullAnswer, saveRepoAnswer } from "../lib/licence.mjs";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ingestMartian, verifyMartianMapping, verifyPublishedMartian, writeMartianIngest } from "../ingest/martian.mjs";
+import { benchRoot } from "../lib/cases.mjs";
+import { LICENCE_READINGS, cacheRoot, saveCommitAnswer, savePullAnswer, saveRepoAnswer } from "../lib/licence.mjs";
 import { martianFindings, martianGolden, readMartianEvaluation } from "../lib/score.mjs";
-import { listCases, martianTruth, materialise, readCase, truthOf } from "../lib/suites.mjs";
-import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
+import { listCases, martianTruth, materialise, rawPath, readCase, truthOf } from "../lib/suites.mjs";
+// These tests use synchronous subprocesses, so cleanup needs no process scan.
+const tempDirs = [];
+const tempDir = (prefix) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  tempDirs.push(dir);
+  return dir;
+};
+afterAll(() => { for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true }); });
 
-afterAll(removeTempDirs);
+// Round 1 and 2 failure list: greptile-failures.md, items 11 and 12.
+const cache = cacheRoot();
+const suite = JSON.parse(readFileSync(join(benchRoot, "suites/martian/cases.json"), "utf8"));
+const publishedSource = JSON.parse(readFileSync(join(benchRoot, "suites/martian/verification-source.json"), "utf8"));
+const hasPublishedData = [publishedSource, ...suite.dataset.files].every((pin) => existsSync(rawPath(cache, "martian", pin)));
+describe.skipIf(!hasPublishedData)("published Martian tree proofs (needs pinned Martian data in the bench cache; skipped without it)", () => {
+  let verified;
+  beforeAll(async () => { verified = await verifyPublishedMartian({ cache, offline: true }); });
+
+  it.each(["all", "mergeBase", "builtBase", "head", "builtHead"])("refuses absent %s trees", (field) => {
+    const proofs = structuredClone(verified.proofs);
+    const proof = proofs.find((p) => p.name === suite.cases[0].name);
+    if (field === "all") delete proof.trees;
+    else delete proof.trees[field];
+    const check = verifyMartianMapping({ suite, published: verified.published, rows: verified.rows, proofs });
+    expect(check.differences).toContain(`${proof.name}: committed tree proof differs from the suite's frozen commits or is not proved`);
+    expect(check.counts.mappedProofs).toBe(49);
+  });
+
+  it.each([null, "", "bad", "z".repeat(40)])("refuses equal invalid tree hashes %j", (tree) => {
+    const proofs = structuredClone(verified.proofs);
+    const proof = proofs.find((p) => p.name === suite.cases[0].name);
+    proof.trees = { mergeBase: tree, builtBase: tree, head: tree, builtHead: tree };
+    const check = verifyMartianMapping({ suite, published: verified.published, rows: verified.rows, proofs });
+    expect(check.differences).toContain(`${proof.name}: committed tree proof differs from the suite's frozen commits or is not proved`);
+    expect(check.counts.mappedProofs).toBe(49);
+  });
+});
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const COMMIT = "d".repeat(40);
@@ -200,6 +238,40 @@ describe("the Martian ingest", () => {
       for (const row of Object.values(GOLDEN).flat()) for (const g of row.comments) expect(text).not.toContain(g.comment);
     }
   });
+
+  it("preserves the published verification report through a plain ingest", async () => {
+    const path = "offline/golden_comments/alpha.json";
+    const rows = Array.from({ length: 50 }, (_, i) => ({ pr_title: `Change ${i}`, url: `https://github.com/alpha/app/pull/${101 + i}`, comments: Array.from({ length: i < 23 ? 4 : 3 }, (_, j) => ({ comment: `Bug ${i}.${j}`, severity: "High", category: "bug" })) }));
+    const ctx = setup({ [path]: rows });
+    const parent = tempDir("oq-martian-verification-");
+    const { root, cases, report } = await ingestInto(ctx, join(parent, "benchmark"));
+    for (const dir of ["ingest", "lib"]) {
+      mkdirSync(join(root, dir));
+      for (const file of readdirSync(join(benchRoot, dir)).filter((f) => f.endsWith(".mjs"))) cpSync(join(benchRoot, dir, file), join(root, dir, file));
+    }
+    for (const file of ["score.mjs", "legacy"]) cpSync(join(benchRoot, file), join(root, file), { recursive: true });
+    mkdirSync(join(parent, "packages"));
+    symlinkSync(join(benchRoot, "../packages/scanners"), join(parent, "packages/scanners"));
+    mkdirSync(join(root, "outside"));
+    writeFileSync(join(root, "outside/boards.json"), encode(ctx.boards));
+    const published = encode(Object.fromEntries(rows.map(({ comments, ...row }) => [row.url, { ...row, golden_source_file: "alpha.json", golden_comments: comments }])));
+    const sourcePath = "offline/results/benchmark_data.json";
+    mkdirSync(dirname(join(ctx.cache, "raw/martian", sourcePath)), { recursive: true });
+    writeFileSync(join(ctx.cache, "raw/martian", sourcePath), published);
+    writeFileSync(join(root, "suites/martian/verification-source.json"), encode({ path: sourcePath, url: raw(sourcePath), revision: COMMIT, readDate: "2026-10-14", sha256: sha256(published) }));
+    mkdirSync(join(root, "index/proof"), { recursive: true });
+    writeFileSync(join(root, "index/proof/martian.json"), encode({ cases: cases.cases.map((c) => ({ name: c.name, caseId: c.id, baseSha: c.baseSha, headSha: c.headSha, mergeBaseSha: c.baseSha, ok: true, ancestorOfHead: true, trees: { mergeBase: c.baseSha, builtBase: c.baseSha, head: c.headSha, builtHead: c.headSha } })) }));
+    const run = (...args) => spawnSync(process.execPath, [join(root, "ingest/martian.mjs"), ...args, "--offline"], { env: { ...process.env, OPENQODEX_BENCH_CACHE: ctx.cache }, encoding: "utf8" });
+    const verified = run("--verify-published");
+    expect(verified.status, verified.stderr).toBe(0);
+    const verificationPath = join(root, "suites/martian/verification-report.txt");
+    const verification = readFileSync(verificationPath);
+    expect(verification.toString()).toBe(verified.stdout);
+    const plain = run();
+    expect(plain.status, plain.stderr).toBe(0);
+    expect(readFileSync(verificationPath)).toEqual(verification);
+    expect(readFileSync(join(root, "suites/martian/ingest-report.txt"), "utf8")).toBe(report);
+  });
 });
 
 // The fixture's findings, golden comments and evaluation, read the way a
@@ -297,7 +369,18 @@ describe("one finding extracted into two issues, or matched to two golden commen
   it("counts a golden comment once when two candidates of two findings match it, judged by the first finding in report order", () => {
     const { evaluation, findings, golden } = fixtureInputs();
     // The third finding of alpha/app#1 (minor) also matched g1, and a match line is repeated.
-    const more = { ...evaluation, matches: [...evaluation.matches, { candidateId: "https://github.com/alpha/app/pull/1#3", goldenId: "martian/alpha__app-1@0a1b2c3d#g1", verdict: "match", confidence: 0.7 }, evaluation.matches[0]] };
+    // That candidate was a false positive before this added match. Keep
+    // the official totals consistent with the matches the reader checks.
+    const totals = structuredClone(evaluation.totals);
+    evaluation.candidates.find((c) => c.candidateId === "https://github.com/alpha/app/pull/1#3").officialFp = false;
+    for (const profile of ["strict", "core", "all"]) {
+      const t = totals[profile];
+      t.fp = 1;
+      t.precision = t.tp / (t.tp + t.fp);
+      t.f1 = 2 * t.precision / (t.precision + 1);
+      t.fbeta = 5 * t.precision / (4 * t.precision + 1);
+    }
+    const more = { ...evaluation, totals, matches: [...evaluation.matches, { candidateId: "https://github.com/alpha/app/pull/1#3", goldenId: "martian/alpha__app-1@0a1b2c3d#g1", verdict: "match", confidence: 0.7 }, evaluation.matches[0]] };
     const read = readMartianEvaluation(more, { findings, golden });
     expect(read.matches).toEqual(more.matches);
     expect(read.ours.golden).toEqual({ found: 5, of: 5 });

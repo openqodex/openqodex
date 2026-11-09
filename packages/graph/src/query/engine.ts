@@ -35,7 +35,7 @@ export type { Budget, Item } from "./traverse.js";
 export { budgetOf, checksBudget } from "./traverse.js";
 export { edgeId } from "./ids.js";
 
-const LANGUAGES = ["typescript", "tsx", "javascript", "python", "go", "ruby"];
+const LANGUAGES = ["typescript", "tsx", "javascript", "python", "go", "ruby", "java"];
 
 // What this build can answer, and what it cannot yet.
 function capabilities(s: Session): Record<string, unknown> {

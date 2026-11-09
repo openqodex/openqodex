@@ -325,8 +325,31 @@ describe("generations", () => {
       if (waiting === "") await sleep(5);
     }
     expect(waiting).not.toBe("");
-    rmSync(lock);
-    expect((await store.collect()).removedGenerations).toEqual([]);
+    // The publisher is stopped before the lock is freed, so the collection
+    // below runs with its folder written and unpublished, every time: freed
+    // with the publisher running, the publisher could take the lock first
+    // and publish, and the collection would then judge another state
+    // (issues 91 and 294). Stopped is read from ps, which macOS and Linux
+    // both have: its state starts with T.
+    const pid = run.proc.pid!;
+    let resumed = false;
+    try {
+      process.kill(pid, "SIGSTOP");
+      const stopBy = Date.now() + 10_000;
+      const state = () => spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+      while (!state().startsWith("T") && Date.now() < stopBy) await sleep(5);
+      expect(state()).toMatch(/^T/);
+      rmSync(lock);
+      const collected = await store.collect();
+      expect(collected.removedGenerations).not.toContain(waiting);
+      expect(collected.removedGenerations).toEqual([]);
+      expect(readdirSync(join(gens, waiting)).length).toBeGreaterThanOrEqual(53);
+      process.kill(pid, "SIGCONT");
+      resumed = true;
+    } finally {
+      // A check that failed leaves no stopped publisher behind.
+      if (!resumed) run.proc.kill("SIGKILL");
+    }
     const done = await run.done;
     const result = (done.out?.results as PublishResult[] | undefined)?.[0];
     expect(result, done.stderr).toMatchObject({ ok: true, id: waiting });

@@ -57,6 +57,12 @@ import type { TreeVisitor } from "../walk.js";
 // node types it is entered for and the ancestors it reads as nodes.
 export const PLUGIN_API_VERSION = 4;
 
+// The most entities and edges one plugin keeps per application (null: the
+// registrations no application reaches). Past either cap the rest are left
+// out and one unknown with cause "fan-out-capped" says how many.
+export const MAX_ENTITIES_PER_APP = 20_000;
+export const MAX_EDGES_PER_APP = 100_000;
+
 // ---------- the facts a plugin reads from one file ----------
 
 // Every fact a plugin emits has a kind of its own choosing and the position

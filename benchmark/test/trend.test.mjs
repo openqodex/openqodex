@@ -37,7 +37,7 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { extractAsset } from "../fetch-run.mjs";
 import { assetUrl, boardHash, entryProblems, groupKeys, listEntries } from "../lib/index.mjs";
 import { mulberry32, seedOf } from "../lib/interval.mjs";
@@ -45,10 +45,13 @@ import { executeRun, planJobs, runManifest, sampleRecord } from "../lib/runner.m
 import { RULES_VERSION } from "../lib/score.mjs";
 import { publishRun } from "../publish-run.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
+import { aacrOutside } from "./outside-fixture.mjs";
 import { compareConfig } from "../trend.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
+beforeEach(() => vi.stubEnv("OPENQODEX_BENCH_CACHE", tempDir("oq-empty-cache-")));
+afterEach(() => vi.unstubAllEnvs());
 
 const SCORE = fileURLToPath(new URL("../score.mjs", import.meta.url));
 const TREND = fileURLToPath(new URL("../trend.mjs", import.meta.url));
@@ -335,6 +338,42 @@ describe("a run that cannot be a baseline is accepted, or the accepted entry cha
     expect(readEntryAt(index, ACCEPTED.runId).accepted).toBe(true);
   });
 
+  it("accepts an entry whose exception file still excuses the recorded hits, and refuses one whose file or entry has changed since the publish", async () => {
+    const root = tempDir("oq-bench-exceptions-");
+    const index = join(root, "index");
+    const folder = await savedRun({ parent: root, ...NEWER, cases: TWENTY.slice(0, 1), repeat: 1, found: () => true });
+    const rule = { text: "/home/emailteam/", label: "a home folder path", reason: "The reviewer wrote an example path inside a finding." };
+    write(join(folder, "rows.jsonl"), `${JSON.stringify({ findings: [{ text: "/home/emailteam/x" }] })}\n`);
+    write(join(index, "exceptions", `${NEWER.runId}.json`), JSON.stringify([rule]));
+    const { entry } = await publish(folder, index);
+    const recorded = { file: "rows.jsonl", line: 1, label: rule.label, reason: rule.reason };
+    expect(entry.publishExceptions).toEqual([recorded]);
+    const variants = [
+      { rules: [rule], accepted: true },
+      { rules: [{ ...rule, file: recorded.file, line: recorded.line }], accepted: true },
+      { rules: [rule], changed: { reason: "A reason the exception file does not hold." } },
+      { rules: [rule], changed: { label: "the home folder path" } },
+      { rules: [{ ...rule, file: "outside/greptile/input.json" }] },
+      { rules: [{ ...rule, line: 2 }] },
+      { rules: [{ ...rule, text: "/home/other/" }] },
+      { rules: [{ ...rule, text: "/home/emailteam/x" }], accepted: true },
+      { rules: [rule], dropped: true },
+      { rules: null },
+    ];
+    for (const variant of variants) {
+      const target = tempDir("oq-bench-exception-index-");
+      const candidate = { ...entry, publishExceptions: [{ ...recorded, ...variant.changed }] };
+      if (variant.dropped) delete candidate.publishExceptions;
+      putEntry(target, candidate);
+      if (variant.rules !== null) write(join(target, "exceptions", `${NEWER.runId}.json`), JSON.stringify(variant.rules));
+      const result = trend(["--accept", NEWER.runId, "--by", "Sid", "--index", target, "--results", root]);
+      expect(result.status, result.stdout + result.stderr).toBe(variant.accepted ? 0 : 2);
+      expect(readEntryAt(target, NEWER.runId).accepted).toBe(variant.accepted === true);
+      expect(existsSync(join(target, "accepted.json"))).toBe(variant.accepted === true);
+      if (!variant.accepted) expect(result.stderr).toMatch(new RegExp(`(publishExceptions do not match|the run cannot be packaged again under) \\S*exceptions/${NEWER.runId}\\.json`));
+    }
+  });
+
   it("refuses a legacy run, a draft, a dirty build, a stopped run, a run with scanners missing, and a run already accepted", async () => {
     const { index, root } = await indexWith({ before: (c) => c < 15, after: (c) => c < 15 });
     const base = readEntryAt(index, NEWER.runId);
@@ -456,14 +495,21 @@ describe("per-review models at accept", () => {
   });
 });
 
+it("the AACR fixture preserves the reader's counts and reports no line-count mismatch", () => {
+  const block = aacrOutside(CONFIG).aacr;
+  expect(block.problems).toEqual([]);
+  expect(block.folders[0]).toMatchObject({ ours: { matches: 2, generated: 5, expected: 4 }, lineEqual: true, judged: false });
+  expect(block.byConfig[CONFIG].mean).toEqual({ line: { matches: 2, generated: 5, expected: 4, precision: 0.4, recall: 0.5, f1: expect.closeTo(4 / 9) }, semantic: null });
+});
+
 it("refuses acceptance of a stale board copy in one line naming the run", async () => {
   const { root, index } = await indexWith({ before: () => true, after: () => true });
   const scoreFile = join(root, NEWER.runId, "score.json");
   const score = JSON.parse(readFileSync(scoreFile, "utf8"));
-  score.outside = { aacr: { fresh: true } };
+  score.outside = aacrOutside(CONFIG);
   write(scoreFile, `${JSON.stringify(score, null, 2)}\n`);
   const entry = readEntryAt(index, NEWER.runId);
-  entry.outside = { aacr: { stale: true } };
+  entry.outside = aacrOutside(CONFIG, { generated: 10, expected: 6, matched: 3 });
   putEntry(index, entry);
   const result = trend(["--accept", NEWER.runId, "--by", "Sid", "--index", index, "--results", root]);
   expect(result.status).toBe(2);
@@ -474,7 +520,7 @@ it("refuses acceptance of a stale board copy in one line naming the run", async 
 it("refuses to accept a board-scored entry from a copy fetched from its asset", async () => {
   const { index, published } = await indexWith({ before: () => true, after: () => true });
   const entry = readEntryAt(index, NEWER.runId);
-  entry.outside = { aacr: { byConfig: { [CONFIG]: { mean: { line: { precision: 0.4, recall: 0.5 }, semantic: null } } } } };
+  entry.outside = aacrOutside(CONFIG);
   putEntry(index, entry);
   const fetched = tempDir("oq-bench-fetched-");
   extractAsset(published.next.asset.tarPath, entry.asset, fetched, NEWER.runId);
@@ -486,7 +532,7 @@ it("refuses to accept a board-scored entry from a copy fetched from its asset", 
 
 it("records the board numbers' hash at accept, and refuses the index once they are edited", async () => {
   const { root, index } = await indexWith({ before: () => true, after: () => true });
-  const outside = { aacr: { byConfig: { [CONFIG]: { mean: { line: { precision: 0.4, recall: 0.5 }, semantic: null } } } } };
+  const outside = aacrOutside(CONFIG);
   const scoreFile = join(root, NEWER.runId, "score.json");
   write(scoreFile, `${JSON.stringify({ ...JSON.parse(readFileSync(scoreFile, "utf8")), outside }, null, 2)}\n`);
   putEntry(index, { ...readEntryAt(index, NEWER.runId), outside });

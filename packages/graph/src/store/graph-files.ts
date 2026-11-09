@@ -9,6 +9,10 @@ import { projectFolder } from "../resolve.js";
 import type { DispatchSite, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, UnknownSite } from "../types.js";
 import type { OpenGeneration } from "./types.js";
 
+// How an index is read back: a file of it by its name, or null when the
+// file is not there.
+export type ReadIndexFile = (name: string) => string | null;
+
 type Plain = Record<string, unknown>;
 
 export function serializeModel(m: ProjectModel): Plain {
@@ -21,6 +25,8 @@ export function serializeModel(m: ProjectModel): Plain {
     pyDeclared: [...m.pyDeclared],
     goRequires: m.goRequires,
     gems: [...m.gems],
+    javaProjects: m.javaProjects,
+    javaDeps: [...m.javaDeps],
     pnpmLinks: [...m.pnpmLinks].map(([k, v]) => [k, [...v]]),
     npmLock: [...m.npmLock],
     yarnWorkspace: [...m.yarnWorkspace],
@@ -41,6 +47,8 @@ export function deserializeModel(v: Plain): ProjectModel {
     pyDeclared: new Set(v.pyDeclared as string[]),
     goRequires: v.goRequires as string[],
     gems: new Set(v.gems as string[]),
+    javaProjects: (v.javaProjects as string[] | undefined) ?? [],
+    javaDeps: new Set((v.javaDeps as string[] | undefined) ?? []),
     pnpmLinks: new Map((v.pnpmLinks as [string, [string, "workspace" | "published" | "unknown"][]][]).map(([k, list]) => [k, new Map(list)])),
     npmLock: new Map(v.npmLock as [string, "workspace" | "published" | "unknown"][]),
     yarnWorkspace: new Set(v.yarnWorkspace as string[]),
@@ -116,6 +124,7 @@ export function writeIndex(g: Graph): Record<string, string> {
   const dispatch = g.dispatch.map((x) => [e.s(x.file), x.line, x.column, e.s(x.caller), e.s(x.name), x.declared.map(e.s), x.candidates.map(e.s), x.total, e.s(x.rule)]);
   const summaries = [...g.summaries].map(([id, x]) => [e.s(id), x.params.map(e.s), x.invokes, x.returns.map(e.s), x.returnsOther ? 1 : 0]);
   return {
+    "projects.json": JSON.stringify({ model: serializeModel(g.model), goModules: g.goModules }),
     "index/format.json": JSON.stringify({ format: INDEX_FORMAT }),
     "index/strings.json": JSON.stringify(e.table),
     "index/nodes.jsonl": lines(nodes),
@@ -135,16 +144,24 @@ export function writeIndex(g: Graph): Record<string, string> {
 // has no index, it is in another format, or a file of it does not parse.
 export function readIndex(gen: OpenGeneration): (Omit<Graph, "repoRoot"> & { repoRoot: string }) | null {
   if (!gen.manifest.hasIndex) return null;
+  return readIndexFrom((name) => gen.read(name), "");
+}
+
+// The same graph from the files `writeIndex` returned, wherever a program
+// kept them: `read` gives a file by its name (null when it has none) and
+// `repoRoot` is the folder the graph was built from. Null when a file is
+// missing, in another format or does not parse.
+export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | null {
   let table: string[];
   try {
-    if ((JSON.parse(gen.read("index/format.json") ?? "null") as { format?: number } | null)?.format !== INDEX_FORMAT) return null;
-    table = JSON.parse(gen.read("index/strings.json") ?? "null") as string[];
+    if ((JSON.parse(read("index/format.json") ?? "null") as { format?: number } | null)?.format !== INDEX_FORMAT) return null;
+    table = JSON.parse(read("index/strings.json") ?? "null") as string[];
     if (!Array.isArray(table)) return null;
   } catch {
     return null;
   }
   const d = decoder(table);
-  const rows = (name: string) => parseLines<Row>(gen.read(name));
+  const rows = (name: string) => parseLines<Row>(read(name));
   const nodeRows = rows("index/nodes.jsonl");
   const edgeRows = rows("index/edges.jsonl");
   const importerRows = rows("index/importers.jsonl");
@@ -153,8 +170,8 @@ export function readIndex(gen: OpenGeneration): (Omit<Graph, "repoRoot"> & { rep
   const referenceRows = rows("index/references.jsonl");
   const dispatchRows = rows("index/dispatch.jsonl");
   const summaryRows = rows("index/summaries.jsonl");
-  const statusText = gen.read("index/status.json");
-  const projectsText = gen.read("projects.json");
+  const statusText = read("index/status.json");
+  const projectsText = read("projects.json");
   if (!nodeRows || !edgeRows || !importerRows || !missRows || !unknownRows || !referenceRows || !dispatchRows || !summaryRows || statusText === null || projectsText === null) return null;
   let status: GraphStatus;
   let projects: { model: Plain; goModules: [string, string][] };
@@ -189,7 +206,8 @@ export function readIndex(gen: OpenGeneration): (Omit<Graph, "repoRoot"> & { rep
     const summaries = new Map<string, InvocationSummary>(summaryRows.map((r) => [d.s(r[0] as number), { params: (r[1] as number[]).map(d.s), invokes: r[2] as number[], returns: (r[3] as number[]).map(d.s), returnsOther: r[4] === 1 }]));
     const extra = { references: referenceRows.map(d.edge), dispatch, summaries };
     const graph = assemble(nodes, edgeRows.map(d.edge), importerRows.map(d.edge), misses, unknowns, status, deserializeModel(projects.model), projects.goModules, extra);
-    const frameworks = JSON.parse(gen.read("index/frameworks.json") ?? "null") as FrameworkData | null;
+    graph.repoRoot = repoRoot;
+    const frameworks = JSON.parse(read("index/frameworks.json") ?? "null") as FrameworkData | null;
     if (frameworks !== null) {
       if (typeof frameworks !== "object" || frameworks.version !== FRAMEWORK_DATA_VERSION || !Array.isArray(frameworks.edges) || !Array.isArray(frameworks.entities)) return null;
       graph.frameworks = frameworks;
@@ -258,6 +276,7 @@ export function assemble(
     unknownNames,
     valueCalls,
     model,
+    goModules,
     projectOf,
     exportChanges: [],
     status,

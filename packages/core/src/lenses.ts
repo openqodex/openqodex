@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "yaml";
+import { unquoteDiffPath } from "./diff.js";
 import { matchesGlob, MAX_GLOB } from "./glob.js";
 import type { Change, SelectedLens } from "./types.js";
 
@@ -17,6 +18,8 @@ export type LensTriggers = {
   // Regex run, case-insensitive, against the changed-line text of the diff
   // (the `+` and `-` lines, file headers stripped). Unset means any text.
   hunkRegex?: string;
+  // Require adjacent removed and added lines in a matching file's hunk.
+  replacedLines?: boolean;
 };
 
 // `coveredBy`: scanner rules ("<source>:<ruleId>") that check what the lens
@@ -70,6 +73,10 @@ export function parseLens(text: string): Lens {
     }
   }
   const hunkRegex = typeof triggersRaw.hunk_regex === "string" ? triggersRaw.hunk_regex : undefined;
+  if (triggersRaw.replaced_lines !== undefined && typeof triggersRaw.replaced_lines !== "boolean") {
+    throw new Error(`lens ${name}: replaced_lines must be a boolean`);
+  }
+  const replacedLines = triggersRaw.replaced_lines as boolean | undefined;
   const confidenceFloor =
     typeof obj.confidence_floor === "number" && Number.isFinite(obj.confidence_floor)
       ? Math.max(0, Math.min(1, obj.confidence_floor))
@@ -83,7 +90,7 @@ export function parseLens(text: string): Lens {
   }
   if (!body) throw new Error(`lens ${name}: body is empty`);
   const coveredBy = Array.isArray(obj.covered_by) ? obj.covered_by.filter((x): x is string => typeof x === "string") : undefined;
-  return { name, description, triggers: { files, hunkRegex }, confidenceFloor, body, ...(coveredBy ? { coveredBy } : {}), ...(obj.security === true ? { security: true as const } : {}) };
+  return { name, description, triggers: { files, hunkRegex, replacedLines }, confidenceFloor, body, ...(coveredBy ? { coveredBy } : {}), ...(obj.security === true ? { security: true as const } : {}) };
 }
 
 // The first candidate that is a directory holding at least one `.md` file.
@@ -160,10 +167,39 @@ function hunkTriggerMatches(text: string, hunkRegex?: string): boolean {
   return new RegExp(hunkRegex, "i").test(text);
 }
 
-// How targeted a lens is: one point for a content regex, one for file globs.
+// Files with adjacent removed and added lines in the same hunk. Headers,
+// context and hunk boundaries cannot pair lines from separate edits.
+function replacedLineFiles(diff: string): string[] {
+  const files = new Set<string>();
+  let file: string | null = null;
+  let inHunk = false;
+  let previous = "";
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      file = null;
+      inHunk = false;
+      previous = "";
+    } else if (!inHunk && line.startsWith("+++ ")) {
+      const target = unquoteDiffPath(line.slice(4).replace(/\t$/, ""));
+      file = target === "/dev/null" ? null : target.startsWith("b/") ? target.slice(2) : target;
+    } else if (line.startsWith("@@")) {
+      inHunk = true;
+      previous = "";
+    } else if (inHunk && file) {
+      if (line.startsWith("\\")) continue;
+      const marker = line[0] ?? "";
+      if ((marker === "+" && previous === "-") || (marker === "-" && previous === "+")) files.add(file);
+      previous = marker === "+" || marker === "-" ? marker : "";
+    }
+  }
+  return [...files];
+}
+
+// How targeted a lens is: one point for a content or replacement trigger,
+// one for file globs.
 function specificity(lens: Lens): number {
   let score = 0;
-  if (lens.triggers.hunkRegex) score += 1;
+  if (lens.triggers.hunkRegex || lens.triggers.replacedLines) score += 1;
   if (lens.triggers.files && lens.triggers.files.length > 0) score += 1;
   return score;
 }
@@ -182,10 +218,14 @@ function coveredByScanner(lens: Lens, files: string[], covered?: RuleCoverage): 
 // lens raises its own floor), then by name, capped at four.
 export function selectLensesForDiff(args: { diff: string; files: string[]; catalog: Lens[]; covered?: RuleCoverage }): SelectedLens[] {
   const text = extractChangedLineText(args.diff);
+  const replacements = args.catalog.some((lens) => lens.triggers.replacedLines)
+    ? replacedLineFiles(args.diff).filter((file) => args.files.includes(file))
+    : [];
   const matched = args.catalog.filter(
     (lens) =>
       fileTriggerMatches(args.files, lens.triggers.files) &&
       hunkTriggerMatches(text, lens.triggers.hunkRegex) &&
+      (!lens.triggers.replacedLines || (replacements.length > 0 && fileTriggerMatches(replacements, lens.triggers.files))) &&
       !coveredByScanner(lens, args.files, args.covered),
   );
   const ranked = [...matched].sort((a, b) => {

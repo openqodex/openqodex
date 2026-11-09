@@ -8,7 +8,32 @@
 // no environment variable is written, no signal handler is added and no
 // update check starts. Every function does its work only when called.
 import { createToolResolver, isFixturePath, loadToolchain, preinstallScanners, ruleClassFor, runScanners, toolchainHash } from "@openqodex/scanners";
-import { buildGraph, detectImpact, extractFacts, PacketCollision, PacketLeak, writePacket } from "@openqodex/graph";
+import {
+  assemble,
+  buildGraph,
+  deserializeModel,
+  detectImpact,
+  extractFacts,
+  floorReasons,
+  graphOf,
+  hotSymbols,
+  INDEX_FORMAT,
+  isTestPath,
+  OPERATIONS,
+  PacketCollision,
+  PacketLeak,
+  parseTarget,
+  prepareIndexes,
+  query,
+  querySliced,
+  readIndex,
+  readIndexFrom,
+  resolveTarget,
+  serializeModel,
+  SLICE_CHECKS,
+  writeIndex,
+  writePacket,
+} from "@openqodex/graph";
 import {
   defaultLensDir,
   loadConfig,
@@ -48,6 +73,27 @@ export {
   writePacket,
   PacketCollision,
   PacketLeak,
+  // the graph's questions
+  query,
+  querySliced,
+  OPERATIONS,
+  SLICE_CHECKS,
+  parseTarget,
+  resolveTarget,
+  prepareIndexes,
+  // a graph as files, and back
+  writeIndex,
+  readIndex,
+  readIndexFrom,
+  assemble,
+  INDEX_FORMAT,
+  serializeModel,
+  deserializeModel,
+  // a kept build, and what a change's blast radius rests on
+  graphOf,
+  floorReasons,
+  hotSymbols,
+  isTestPath,
   // the lenses
   loadLensCatalog,
   selectLenses,
@@ -67,7 +113,32 @@ export {
 
 // The same functions grouped by what they belong to.
 export const scanners = { runScanners, createToolResolver, loadToolchain, toolchainHash, preinstallScanners, isFixturePath, ruleClassFor };
-export const graph = { buildGraph, detectImpact, extractFacts, writePacket, PacketCollision, PacketLeak };
+export const graph = {
+  buildGraph,
+  detectImpact,
+  extractFacts,
+  writePacket,
+  PacketCollision,
+  PacketLeak,
+  query,
+  querySliced,
+  OPERATIONS,
+  SLICE_CHECKS,
+  parseTarget,
+  resolveTarget,
+  prepareIndexes,
+  writeIndex,
+  readIndex,
+  readIndexFrom,
+  assemble,
+  INDEX_FORMAT,
+  serializeModel,
+  deserializeModel,
+  graphOf,
+  floorReasons,
+  hotSymbols,
+  isTestPath,
+};
 export const lenses = { loadLensCatalog, selectLenses, selectLensesForDiff, defaultLensDir };
 export const render = { renderMarkdown, renderSarif, renderJson, renderReview };
 
@@ -112,7 +183,33 @@ export type {
   Disagreement,
 } from "@openqodex/core";
 export type { RunScannersResult, Recipe, Toolchain, PreinstallOptions, PreinstallResult, PreinstallTool } from "@openqodex/scanners";
-export type { BuildArgs, FileFacts, Graph, Lang } from "@openqodex/graph";
+export type {
+  // the build
+  BuildArgs,
+  FileFacts,
+  Graph,
+  Lang,
+  // the questions
+  Session,
+  Request,
+  Answer,
+  Operation,
+  Target,
+  Item,
+  Extra,
+  ErrorCode,
+  // the evidence behind an edge and an unknown
+  Tier,
+  Evidence,
+  Unknown,
+  Cause,
+  // a kept build and its files
+  GenerationManifest,
+  OpenGeneration,
+  GraphStore,
+  ProjectModel,
+  ReadIndexFile,
+} from "@openqodex/graph";
 export type {
   // the reviewer contract
   Reviewer,

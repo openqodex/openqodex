@@ -7,7 +7,7 @@ import { PACKET_DIR, writePacket } from "../src/review/packet.js";
 import { buildGraph, detectImpact, frameworkLayer, openStore, renderImpactBlock } from "../src/index.js";
 import type { Graph, Registration } from "../src/index.js";
 import { django } from "../src/frameworks/django/index.js";
-import { expectLinear, readerCpuMs, stageCpuMs } from "../src/test-timing.js";
+import { expectLinear, growthTests, readerCpuMs, stageCpuMs } from "../src/test-timing.js";
 import { commitAll, git, makeHome, makeRepo, symbol, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -170,21 +170,47 @@ describe("the Django plugin on hostile input", () => {
     commitAll(root);
     return root;
   };
-  // The frameworks stage's CPU time on the quarter and on the whole, measured once for the two tests that read it.
-  let growth: Promise<[number, number]> | undefined;
-  const frameworksGrowth = () => (growth ??= (async (): Promise<[number, number]> => [await stageCpuMs(build(committed(quarter.files)), "frameworks"), await stageCpuMs(build(committed(files)), "frameworks")])());
+  // At `q` = 1/4 a quarter of each count, for the timing check.
+  const shop = (q: number) => {
+    const models = `from django.db import models\n\n${Array.from({ length: 25_000 * q }, (_, i) => `class C${i}: pass\n`).join("")}\nclass MoneyField(models.DecimalField): pass\n\n\nclass Price(models.Model):\n${Array.from({ length: 1_900 * q }, (_, i) => `    p${i} = MoneyField()\n`).join("")}`;
+    const related = `from django.db import models\n\n\nclass Link(models.Model):\n${Array.from({ length: 1_900 * q }, (_, i) => `    l${i} = models.ForeignKey("Missing${i}", on_delete=models.CASCADE)\n`).join("")}`;
+    const files: Record<string, string> = { "requirements.txt": "Django==5.0\n", "mysite/__init__.py": "", "mysite/settings.py": 'INSTALLED_APPS = []\nROOT_URLCONF = "mysite.urls"\n', "mysite/urls.py": "urlpatterns = []\n", "shop/models.py": models };
+    for (let i = 0; i < 8; i++) files[`links${i}/models.py`] = related;
+    for (let i = 0; i < 4_000 * q; i++) files[`shop/templates/t${i}.html`] = "";
+    return committed(files);
+  };
+  // At `q` = 1/4 a quarter of each count and of the depth, for the timing check.
+  const project = (q: number) => {
+    const models = `from django.db import models\n\n\nclass First(models.Model):\n    f = models.IntegerField()\n${Array.from({ length: 25_000 * q }, (_, i) => `class M${i}(models.Model): pass\n`).join("")}`;
+    const deep = `from django.conf import settings\n\n\ndef f():\n    return ${"(".repeat(200 * q)}settings.KEY${")".repeat(200 * q)}\n`;
+    const reads = `from django.conf import settings\n\n\ndef g():\n${Array.from({ length: 5_000 * q }, (_, i) => `    x${i} = settings.KEY_${i % 50}\n`).join("")}`;
+    return committed({ "requirements.txt": "Django==5.0\n", "mysite/__init__.py": "", "mysite/settings.py": 'INSTALLED_APPS = []\nROOT_URLCONF = "mysite.urls"\nKEY = 1\n', "mysite/urls.py": "urlpatterns = []\n", "mysite/models.py": models, "mysite/deep.py": deep, "mysite/reads.py": reads });
+  };
 
-  it("reads the facts of a 1 MiB hostile urls module and test module in time that grows with each", async () => {
-    const read = (root: Parameters<typeof django.facts>[0]) => django.facts(root, "python");
-    expectLinear("the Django fact reader on urls modules of 256 KiB and of 1 MiB", await readerCpuMs("python", [quarter.urls], read), await readerCpuMs("python", [urls], read));
-    expectLinear("the Django fact reader on test modules of 256 KiB and of 1 MiB", await readerCpuMs("python", [quarter.tests], read), await readerCpuMs("python", [tests], read));
-  }, 120_000);
+  growthTests("in time that grows with it", () => {
+    it("reads the facts of a 1 MiB hostile urls module and test module in time that grows with each", async () => {
+      const read = (root: Parameters<typeof django.facts>[0]) => django.facts(root, "python");
+      expectLinear("the Django fact reader on urls modules of 256 KiB and of 1 MiB", await readerCpuMs("python", [quarter.urls], read), await readerCpuMs("python", [urls], read));
+      expectLinear("the Django fact reader on test modules of 256 KiB and of 1 MiB", await readerCpuMs("python", [quarter.tests], read), await readerCpuMs("python", [tests], read));
+    }, 120_000);
 
-  it("resolves hostile routes, multiplying includes and backtracking requests in time that grows with them, with every cap named as a gap", async () => {
+    it("resolves hostile routes, multiplying includes and backtracking requests, under one work budget, in time that grows with them", async () => {
+      expectLinear("the frameworks stage on the hostile Django input", await stageCpuMs(build(committed(quarter.files)), "frameworks"), await stageCpuMs(build(committed(files)), "frameworks"));
+    }, 120_000);
+
+    it("resolves fields built by a field class among 25,000 classes, and string relations to absent models among 4,000 paths, in time that grows with them", async () => {
+      expectLinear("the frameworks stage on a quarter of the classes, fields and paths and on all of them", await stageCpuMs(build(shop(1 / 4)), "frameworks"), await stageCpuMs(build(shop(1)), "frameworks"));
+    }, 120_000);
+
+    it("resolves a models module of 25,000 classes and one field, and settings reads nested deep, in time that grows with them", async () => {
+      expectLinear("the frameworks stage on 6,250 and on 25,000 models", await stageCpuMs(build(project(1 / 4)), "frameworks"), await stageCpuMs(build(project(1)), "frameworks"));
+    }, 120_000);
+  });
+
+  it("resolves hostile routes, multiplying includes and backtracking requests, with every cap named as a gap", async () => {
     const graph = await build(committed(files))();
     const data = graph.frameworks;
     expect(data?.plugins.find((p) => p.id === "django")?.status).toBe("ok");
-    expectLinear("the frameworks stage on the hostile Django input", ...(await frameworksGrowth()));
     // The includes multiply past the cap: the cap stops the walk and says so.
     const capped = data?.unknowns.filter((u) => u.plugin === "django" && (u.cause === "fan-out-capped" || u.cause === "budget")) ?? [];
     expect(capped.length).toBeGreaterThan(0);
@@ -242,22 +268,11 @@ describe("the Django plugin on hostile input", () => {
     expect(held.routes.map((r) => r.pattern).sort()).toEqual(Array.from({ length: 50 }, (_, i) => `n${i}/`).sort());
   }, 120_000);
 
-  it("resolves fields built by a field class among 25,000 classes, and string relations to absent models among 4,000 paths, in time that grows with them", async () => {
-    // At `q` = 1/4 a quarter of each count, for the timing check.
-    const shop = (q: number) => {
-      const models = `from django.db import models\n\n${Array.from({ length: 25_000 * q }, (_, i) => `class C${i}: pass\n`).join("")}\nclass MoneyField(models.DecimalField): pass\n\n\nclass Price(models.Model):\n${Array.from({ length: 1_900 * q }, (_, i) => `    p${i} = MoneyField()\n`).join("")}`;
-      const related = `from django.db import models\n\n\nclass Link(models.Model):\n${Array.from({ length: 1_900 * q }, (_, i) => `    l${i} = models.ForeignKey("Missing${i}", on_delete=models.CASCADE)\n`).join("")}`;
-      const files: Record<string, string> = { "requirements.txt": "Django==5.0\n", "mysite/__init__.py": "", "mysite/settings.py": 'INSTALLED_APPS = []\nROOT_URLCONF = "mysite.urls"\n', "mysite/urls.py": "urlpatterns = []\n", "shop/models.py": models };
-      for (let i = 0; i < 8; i++) files[`links${i}/models.py`] = related;
-      for (let i = 0; i < 4_000 * q; i++) files[`shop/templates/t${i}.html`] = "";
-      return committed(files);
-    };
-    const root = shop(1);
-    const graph = await build(root)();
+  it("resolves fields built by a field class among 25,000 classes, and string relations to absent models among 4,000 paths", async () => {
+    const graph = await build(shop(1))();
     expect(graph.frameworks?.plugins.find((p) => p.id === "django")?.status).toBe("ok");
     expect(graph.frameworks?.edges.filter((e) => e.kind === "declares_field").length).toBe(17_100);
     expect(graph.frameworks?.unknowns.filter((u) => u.cause === "miss" && u.note.startsWith("no model named Missing")).length).toBe(15_200);
-    expectLinear("the frameworks stage on a quarter of the classes, fields and paths and on all of them", await stageCpuMs(build(shop(1 / 4)), "frameworks"), await stageCpuMs(build(root), "frameworks"));
   }, 120_000);
 
   it("draws the whole resolve from one work budget and says once per project when it runs out", async () => {
@@ -265,21 +280,11 @@ describe("the Django plugin on hostile input", () => {
     const spent = graph.frameworks?.unknowns.filter((u) => u.plugin === "django" && u.cause === "budget" && u.site === null && "project" in u.scope) ?? [];
     expect(spent.length).toBe(1);
     expect(spent[0]?.note).toContain("work budget");
-    expectLinear("the frameworks stage on the hostile Django input", ...(await frameworksGrowth()));
   }, 120_000);
 
-  it("resolves a models module of 25,000 classes and one field, and settings reads nested deep, in time that grows with them", async () => {
-    // At `q` = 1/4 a quarter of each count and of the depth, for the timing check.
-    const project = (q: number) => {
-      const models = `from django.db import models\n\n\nclass First(models.Model):\n    f = models.IntegerField()\n${Array.from({ length: 25_000 * q }, (_, i) => `class M${i}(models.Model): pass\n`).join("")}`;
-      const deep = `from django.conf import settings\n\n\ndef f():\n    return ${"(".repeat(200 * q)}settings.KEY${")".repeat(200 * q)}\n`;
-      const reads = `from django.conf import settings\n\n\ndef g():\n${Array.from({ length: 5_000 * q }, (_, i) => `    x${i} = settings.KEY_${i % 50}\n`).join("")}`;
-      return committed({ "requirements.txt": "Django==5.0\n", "mysite/__init__.py": "", "mysite/settings.py": 'INSTALLED_APPS = []\nROOT_URLCONF = "mysite.urls"\nKEY = 1\n', "mysite/urls.py": "urlpatterns = []\n", "mysite/models.py": models, "mysite/deep.py": deep, "mysite/reads.py": reads });
-    };
-    const root = project(1);
-    const graph = await build(root)();
+  it("resolves a models module of 25,000 classes and one field, and settings reads nested deep", async () => {
+    const graph = await build(project(1))();
     expect(graph.frameworks?.plugins.find((p) => p.id === "django")?.status).toBe("ok");
     expect(graph.frameworks?.roles.filter((r) => r.role === "model").length).toBe(25_001);
-    expectLinear("the frameworks stage on 6,250 and on 25,000 models", await stageCpuMs(build(project(1 / 4)), "frameworks"), await stageCpuMs(build(root), "frameworks"));
   }, 120_000);
 });

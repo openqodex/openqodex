@@ -39,6 +39,7 @@ import {
   REVIEWER_WEB_TOOLS,
   completionRecord,
   configHash,
+  findingKey,
   getChange,
   getTreeChange,
   getWholeRepo,
@@ -359,7 +360,7 @@ function incompleteReport(change: Change, scan: ScanResult, config: Config, now:
     findings: [],
     below_threshold: 0,
     outside_change: outsideFromScan(scan),
-    low_confidence: [],
+    possible: [], low_confidence: [],
     not_reviewed: requiredCandidates(scan, config),
     dropped: [],
     scanners: scan.scanners,
@@ -923,6 +924,7 @@ function stoppedResult(status: "complete" | "incomplete", reason: string, scope:
     reason,
     scope,
     findings: [],
+    possible: [],
     dispositions: [],
     summary: null,
     coverage: null,
@@ -946,8 +948,8 @@ function stoppedResult(status: "complete" | "incomplete", reason: string, scope:
 
 // The findings that passed every check, in the result's shape; `foundBy[i]`
 // names the reviewers that raised the i-th.
-function resultFindings(report: Report, foundBy: string[][]): ResultFinding[] {
-  return report.findings.map((f, i) => ({
+function resultFindings(findings: Report["findings"], foundBy: string[][]): ResultFinding[] {
+  return findings.map((f, i) => ({
     file: f.file_path,
     lineStart: f.line_number,
     lineEnd: f.line_end ?? f.line_number,
@@ -1146,7 +1148,8 @@ async function reviewInScope(
       // A candidate the second reviewer raised or dropped is no longer
       // unchecked, even when the primary never answered.
       const disposed = new Set(theirs.map((d) => d.candidate));
-      checked = { ...r.report, findings: merged.findings, not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
+      const countedKeys = new Set(merged.findings.map(findingKey));
+      checked = { ...r.report, findings: merged.findings, possible: r.report.possible.filter((f) => !countedKeys.has(findingKey(f))), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
       foundBy = merged.foundBy;
       if (answered) disagreements = disagreementsOf({ name: model.model, dispositions }, { name: second.name, dispositions: theirs });
       dispositions.push(...theirs);
@@ -1163,6 +1166,7 @@ async function reviewInScope(
       {
         ...checked,
         findings: r.evidence.sessions && !second ? checked.findings : checked.findings.map((f, i) => ({ ...f, found_by: foundBy[i] ?? [] })),
+        possible: r.evidence.sessions && !second ? checked.possible : checked.possible.map((f) => ({ ...f, found_by: [model.model] })),
         ...(secondDropped ? { second_dropped: secondDropped } : {}),
         ...(notes.length > 0 ? { notes } : {}),
       },
@@ -1175,7 +1179,8 @@ async function reviewInScope(
     status: complete ? (report.verdict === "blocked" ? "complete_blocking" : "complete") : "incomplete",
     ...(complete ? {} : { reason: completion.missing.join("; ") }),
     scope: decision.scope,
-    findings: resultFindings(report, foundBy),
+    findings: resultFindings(report.findings, foundBy),
+    possible: resultFindings(report.possible, report.possible.map((f) => f.found_by ?? [model.model])),
     dispositions: redactStored(dispositions, r.secrets),
     summary: report.summary,
     coverage: r.evidence.coverage,

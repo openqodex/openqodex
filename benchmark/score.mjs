@@ -75,12 +75,11 @@
 //    truth copy that lacks an accepted comment its suite lists is scored:
 //    a real suite's spec copy is checked with lib/suites.mjs
 //    realSpecProblems, against its own count and the committed suite.
-// 12. An outside board's numbers change our score: --outside aacr reads what
-//    AACR-Bench's own evaluator wrote under <run>/outside/aacr/
-//    (lib/aacr-board.mjs readAacrOutside) after the run is scored, and adds
-//    it as outside.aacr only; every other field of score.json, the rules
+// 12. An outside board's numbers change our score: --outside reads each
+//    board's output through lib/outside-boards.mjs after the run is scored,
+//    and adds only outside; every other field of score.json, the rules
 //    block and the exit code are what they are without the flag. Their
-//    files that cannot be read leave outside.aacr null, with one line on
+//    files that cannot be read leave that board null, with one line on
 //    stderr naming why, never a failed scoring.
 // 13. Adding board diagnostics replaces a reviewed score or its queue files:
 //    an existing score gets only the outside block on an in-place board refresh.
@@ -97,7 +96,7 @@ import { readDecisions, resolveRulings } from "./lib/rulings.mjs";
 import { SCAN_RULES, scanRegressions, scoreScanAttempts } from "./lib/scan-score.mjs";
 import { RULES, SEVERITY_ORDER, attemptOf, bugStability, caseSetHash, groupBy, originOf, regressions, runDifferences, scoreAttempts, scoreSample, specDifferences, summarize, value, wordingBlock } from "./lib/score.mjs";
 import { readRecipes } from "./legacy/rescore.mjs";
-import { readAacrOutside } from "./lib/aacr-board.mjs";
+import { BOARDS, readOutside } from "./lib/outside-boards.mjs";
 import { claudeRunModels } from "./lib/runner.mjs";
 
 const readJson = (path) => {
@@ -521,6 +520,14 @@ export function renderAacrOutside(b) {
   return out.join("\n");
 }
 
+export function renderOutside(outside) {
+  return Object.entries(outside ?? {}).filter(([, b]) => b !== null).map(([name, b]) => {
+    if (name === "aacr") return renderAacrOutside(b);
+    if (name === "martian") return [`Martian's core profile (${b.board.repo} at ${b.board.commit.slice(0, 12)}, judge ${b.judge.deployment}). A board output, never an acceptance metric.`, table(["Tool", "TP", "FP", "FN", "F1", "Sent empty"], Object.entries(b.perTool).map(([tool, t]) => [tool, t.official?.core.tp ?? "held", t.official?.core.fp ?? "held", t.official?.core.fn ?? "held", t.official?.core.f1 ?? "held", t.empty.length]))].join("\n");
+    return [`${name}'s caught rate (${b.board.repository} at ${b.board.commit.slice(0, 12)}, judge ${b.judgeModel ?? "no model call"}). A board output, never an acceptance metric.`, table(["Tool", "Caught", "Missed", "Of", "Not run", "Rate"], Object.entries(b.perTool).map(([tool, t]) => [tool, t.caught ?? "held", t.missed ?? "held", t.of, t.notRun, t.rate === null ? `held: ${t.held.map((h) => `${h.case}: lacks ${h.lacking.join(", ")}`).join("; ")}` : `${Math.round(t.rate * 1000) / 10}%`]))].join("\n");
+  }).join("\n\n");
+}
+
 // Everything besides the build that differs between two runs, the
 // external inputs their scans consumed included.
 export function differences(older, newer) {
@@ -659,11 +666,11 @@ function main() {
   let outDir = null;
   let decisionsFile = decisionsPath;
   let json = false;
-  let outside = null;
+  const outside = [];
   const pos = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--against") against = args[++i];
-    else if (args[i] === "--outside") outside = args[++i];
+    else if (args[i] === "--outside") outside.push(...(args[++i]?.split(",") ?? [undefined]));
     else if (args[i] === "--json") json = true;
     else if (args[i] === "--specs") specsDir = args[++i];
     else if (args[i] === "--judge") judgeFile = args[++i];
@@ -671,8 +678,8 @@ function main() {
     else if (args[i] === "--decisions") decisionsFile = args[++i];
     else pos.push(args[i]);
   }
-  if (pos.length !== 1 || against === undefined || specsDir === undefined || judgeFile === undefined || outDir === undefined || decisionsFile === undefined || (outside !== null && outside !== "aacr")) {
-    console.error("usage: node benchmark/score.mjs <results folder> [--against <earlier results folder>] [--specs <folder of <case>.json>] [--judge <judge.json>] [--out <folder>] [--decisions <file>] [--outside aacr] [--json]");
+  if (pos.length !== 1 || against === undefined || specsDir === undefined || judgeFile === undefined || outDir === undefined || decisionsFile === undefined || outside.some((name) => name !== "all" && !Object.hasOwn(BOARDS, name))) {
+    console.error(`usage: node benchmark/score.mjs <results folder> [--against <earlier results folder>] [--specs <folder of <case>.json>] [--judge <judge.json>] [--out <folder>] [--decisions <file>] [--outside <${Object.keys(BOARDS).join("|")}>[,<board>|all]] [--json]`);
     process.exit(2);
   }
   let run;
@@ -705,17 +712,10 @@ function main() {
     process.exit(2);
   }
   const regs = older ? (scanOnly ? scanRegressions(olderScored.jobs, jobs) : regressions(olderScored.jobs, jobs)) : [];
-  const boardOnly = outside === "aacr" && against === null && specsDir === null && judgeFile === null && outDir === null && decisionsFile === decisionsPath && existsSync(join(dest, "score.json"));
+  const boardOnly = outside.length > 0 && against === null && specsDir === null && judgeFile === null && outDir === null && decisionsFile === decisionsPath && existsSync(join(dest, "score.json"));
   const doc = boardOnly ? readJson(join(dest, "score.json")) : { ...score, comparedWith: older ? { run: older.name, build: older.manifest.build, differences: differences(older, run), regressions: regs } : null };
   // An outside board's own evaluator, read after the scoring and added beside it (failure 12).
-  if (outside === "aacr") {
-    try {
-      doc.outside = { aacr: readAacrOutside(run.folder, jobs, run.specs) };
-    } catch (error) {
-      doc.outside = { aacr: null };
-      console.error(`outside.aacr is null: ${String(error.message).split("\n")[0]}`);
-    }
-  }
+  if (outside.length > 0) doc.outside = { ...doc.outside, ...readOutside(run.folder, jobs, run.specs, [...new Set(outside.flatMap((name) => name === "all" ? Object.keys(BOARDS) : [name]))]) };
   // Scored against other specs, the score gets its own files, so the score
   // against the run's own specs is never overwritten.
   const suffix = specsDir === null ? "" : `-${basename(resolve(specsDir))}`;
@@ -729,11 +729,11 @@ function main() {
   if (json) console.log(JSON.stringify(doc, null, 2));
   else if (boardOnly) {
     // The fresh score is not the saved one, so only the board numbers are shown.
-    if (doc.outside.aacr) console.log(renderAacrOutside(doc.outside.aacr));
+    console.log(renderOutside(doc.outside));
     console.log(`\nBoard numbers added to ${shown(join(dest, "score.json"))}. The rest of the score and its queue files are unchanged.`);
   } else {
     console.log(scanOnly ? renderScan(score, run.manifest) : renderV3(score));
-    if (doc.outside?.aacr) console.log(`\n${renderAacrOutside(doc.outside.aacr)}`);
+    if (doc.outside) console.log(`\n${renderOutside(doc.outside)}`);
     if (older) console.log(`\n${scanOnly ? renderScanCompare(older, run, regs) : renderCompare(older, run, olderScored.score, score, regs)}`);
     console.log(`\nScore saved: ${shown(join(dest, `score${suffix}.json`))}, with ${outcomes.length} finding outcomes in ${shown(join(dest, `outcomes${suffix}.jsonl`))} and ${unresolved.length} findings for the review queue in ${shown(join(dest, `unresolved${suffix}.jsonl`))} (node benchmark/queue.mjs add ${shown(join(dest, `unresolved${suffix}.jsonl`))})`);
   }

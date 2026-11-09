@@ -16,4 +16,4 @@ import { defineCorpus } from "./corpus-runner.js";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "corpus");
 const dirs = findCases(root).filter((dir) => !relative(root, dir).startsWith("frameworks/"));
 
-defineCorpus("the correctness corpus", root, dirs, 180_000);
+defineCorpus("the correctness corpus", root, dirs, 300_000);

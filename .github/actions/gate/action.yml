@@ -3,7 +3,21 @@ description: >-
   Node 22 and the workspace, Go 1.26, Rust on macOS, the scanner cache, and
   the steps scripts/gate.sh runs, one for one. The one recipe for the Linux
   and the macOS gate jobs in ci.yml. The calling job checks the repository
-  out first.
+  out first. With full set to "true" it is the real-programs tier, pnpm gate:
+  every step, the growth tests, and the required scanners checked before the
+  unit tests. With full set to "false" (the fast gate an ordinary pull
+  request and its merge queue run get) the scanner check, the end-to-end
+  tests, the golden run, the growth tests, the scanner cache and the Rust
+  install are left out, and every unit test still runs; ci.yml says where
+  each gate runs. Neither runs the cases that call a real model: that is
+  the real-model tier, pnpm gate:model, on a logged-in Mac and never in CI.
+inputs:
+  full:
+    description: >-
+      "true" runs every step of scripts/gate.sh; "false" runs the fast gate,
+      without the scanner check, the end-to-end tests and the golden run.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -21,17 +35,19 @@ runs:
         cache: false
     # cargo-deny needs Cargo, and the macOS runner image has no Rust
     # toolchain; the end-to-end tests fail in CI when any scanner is missing.
-    - if: runner.os == 'macOS'
+    - if: runner.os == 'macOS' && inputs.full == 'true'
       shell: bash
       run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
     - shell: bash
       run: pnpm install --frozen-lockfile
     # The end-to-end tests install the pinned scanners once into this folder.
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: inputs.full == 'true'
       with:
         path: ${{ runner.temp }}/openqodex-e2e-home
         key: scanners-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/scanners/toolchain.json', 'packages/scanners/locks/**') }}
-    # The steps below mirror scripts/gate.sh one for one.
+    # The steps below mirror scripts/gate.sh one for one; the fast gate
+    # skips the three steps marked full.
     - name: Shipped instruction templates
       shell: bash
       run: node scripts/instruction-sections.mjs --check
@@ -44,15 +60,29 @@ runs:
     - name: Lint
       shell: bash
       run: pnpm lint
-    # Only the two test steps get the token: the custom scanner tests read a
-    # release from the GitHub API, and hosted runners share addresses, so the
-    # anonymous rate limit is often spent. Install and build never see it.
+    # The unit tests' secret cases run the real gitleaks from the end-to-end
+    # home; this fills the cached home (doctor --install) and fails when
+    # gitleaks is not ready, so on the full gate those cases cannot skip.
+    - name: Required scanners
+      if: inputs.full == 'true'
+      shell: bash
+      run: node scripts/require-scanners.mjs
+      env:
+        OPENQODEX_E2E_HOME: ${{ runner.temp }}/openqodex-e2e-home
+        GITHUB_TOKEN: ${{ github.token }}
+    # Only the test steps and the scanner install get the token: the custom
+    # scanner tests read a release from the GitHub API, and hosted runners
+    # share addresses, so the anonymous rate limit is often spent. Install
+    # and build never see it. The growth tests run on the full gate only.
     - name: Unit tests
       shell: bash
       run: pnpm test
       env:
+        OPENQODEX_E2E_HOME: ${{ runner.temp }}/openqodex-e2e-home
+        OPENQODEX_GROWTH_TESTS: ${{ inputs.full == 'true' && '1' || '' }}
         GITHUB_TOKEN: ${{ github.token }}
     - name: End-to-end tests
+      if: inputs.full == 'true'
       shell: bash
       run: pnpm test:e2e
       env:
@@ -61,6 +91,7 @@ runs:
     # The review of the demo's planted change with both reviewer drivers,
     # compared file by file with tests/golden/expected.
     - name: Golden run
+      if: inputs.full == 'true'
       shell: bash
       run: pnpm golden:check
     - name: Skill and plugin manifests

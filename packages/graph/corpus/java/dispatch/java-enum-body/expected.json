@@ -1,0 +1,90 @@
+{
+  "guards": "Enum constants are instance receivers. Abstract calls dispatch to their bodies.",
+  "callers": [
+    {
+      "to": "src/main/java/j3/Host.java#Choice.run",
+      "site": "src/main/java/j3/Host.java:15",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.FIRST.run",
+      "site": "src/main/java/j3/Host.java:15",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.SECOND.run",
+      "site": "src/main/java/j3/Host.java:15",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.FIRST.work",
+      "site": "src/main/java/j3/Host.java:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.SECOND.work",
+      "site": "src/main/java/j3/Host.java:8",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.FIRST.run",
+      "site": "src/main/java/j3/Host.java:12",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.SECOND.run",
+      "site": "src/main/java/j3/Host.java:12",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.FIRST.run",
+      "site": "src/main/java/j3/Constants.java:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.SECOND.run",
+      "site": "src/main/java/j3/Constants.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Constants.java#Plain.run",
+      "site": "src/main/java/j3/Constants.java:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Constants.java#Plain.run",
+      "site": "src/main/java/j3/Constants.java:12",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/main/java/j3/Host.java:15",
+      "candidates": [
+        "src/main/java/j3/Host.java#Choice.FIRST.run",
+        "src/main/java/j3/Host.java#Choice.SECOND.run"
+      ]
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/j3/Host.java#Choice.FIRST.work",
+      "site": "src/main/java/j3/Host.java:8"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Choice.SECOND.work",
+      "site": "src/main/java/j3/Host.java:4"
+    }
+  ]
+}

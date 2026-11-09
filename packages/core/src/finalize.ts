@@ -29,6 +29,7 @@ import { OpenQodexError } from "./types.js";
 // The lowest confidence a finding may have unless the caller sets its own
 // floor (checkSubmission's confidenceFloor); a lens's higher floor still wins.
 export const GLOBAL_CONFIDENCE_FLOOR = 0.7;
+export const POSSIBLE_CONFIDENCE_FLOOR = 0.5;
 
 const severity = z.enum(["critical", "major", "minor", "nitpick", "info"]);
 const category = z.enum(["bug", "security", "performance", "maintainability", "style"]);
@@ -294,6 +295,7 @@ export function finalizeReview(args: {
   const floors = new Map(manifest.lenses.map((l) => [l.name, l.confidenceFloor]));
 
   const findings: ReportFinding[] = [];
+  const possible: ReportFinding[] = [];
   const outside: ReportFinding[] = outsideFromScan(scan);
   const lowConfidence: Report["low_confidence"] = [];
   const raised = new Set<string>();
@@ -303,7 +305,7 @@ export function finalizeReview(args: {
     if (disabled(f.source, config)) continue;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
-    if (f.confidence < floor) {
+    if (f.confidence < floor && f.confidence < POSSIBLE_CONFIDENCE_FLOOR) {
       lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor });
       continue;
     }
@@ -323,7 +325,12 @@ export function finalizeReview(args: {
       candidate: f.candidate ?? null,
       notes: [...(outsideReason ? [outsideReason] : []), ...fixedNotes(scan.candidates.find((c) => c.id === f.candidate))],
     };
-    (outsideReason ? outside : findings).push(entry);
+    if (outsideReason && f.confidence < floor) {
+      entry.floor = floor;
+      // wording: session
+      entry.notes.push("confidence under the floor, not counted");
+    }
+    (outsideReason ? outside : f.confidence < floor ? possible : findings).push(entry);
   }
 
   const droppedIds = new Map((sub.dropped ?? []).map((d) => [d.candidate, d.reason]));
@@ -334,8 +341,16 @@ export function finalizeReview(args: {
     .map((c) => ({ candidate: c, reason: droppedIds.get(c.id) ?? "" }));
 
   const deduped = dedup(findings);
+  const countedKeys = new Set(deduped.map(findingKey));
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
+  const keptPossible = dedup(possible.filter((f) => !countedKeys.has(findingKey(f)))).filter((f) => {
+    if (shown(f, config, own)) return true;
+    const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
+    const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
+    lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence!, floor });
+    return false;
+  });
   const verdict = verdictFor(config.blockOnSeverity, [
     ...kept.map((f) => f.severity),
     ...notReviewed.map((c) => c.reviewSeverity),
@@ -353,6 +368,7 @@ export function finalizeReview(args: {
     block_on_severity: config.blockOnSeverity,
     summary: summaryWithReviewer(sub),
     findings: kept,
+    possible: keptPossible,
     below_threshold: deduped.length - kept.length,
     outside_change: outside,
     low_confidence: lowConfidence,
@@ -392,7 +408,7 @@ const submissionV2Schema = z.object({
 });
 
 export const MAX_SENTENCE_WORDS = 20;
-const MAX_SENTENCES = 2;
+export const FIELD_SENTENCE_LIMITS = { problem: 3, consequence: 2, fix: 2 } as const;
 const EM_DASH = String.fromCharCode(0x2014);
 // Every C0 and C1 control character, line breaks and tabs included: a prose
 // field is one line of plain text.
@@ -404,7 +420,10 @@ const BUILTIN_SCANNERS = ["semgrep", "gitleaks", "sqllint", "osv-scanner", "acti
 export function sentences(text: string): string[] {
   return text
     .trim()
-    .split(/(?<=[.!?])\s+(?=\S)/)
+    // A full stop ends a sentence before any text. A bang or a question mark ends one only before a
+    // capital, a digit, a quote, a backtick or a bracket: Ruby names such as destroy! and admin? sit
+    // mid-sentence before a lowercase word.
+    .split(/(?:(?<=\.)\s+(?=\S)|(?<=[!?])\s+(?=[\p{Lu}\p{N}"'`([]))/u)
     .map((s) => s.trim())
     .filter((s) => s !== "");
 }
@@ -503,7 +522,7 @@ export function checkSubmission(args: {
     const at = `findings[${i}] ("${f.title}")`;
     if (f.line_end !== undefined && f.line_end < f.line_number) errors.push(`${at}.line_end: it is before line_number`);
     errors.push(...proseErrors(`${at}.title`, f.title, banned, null));
-    for (const field of ["problem", "consequence", "fix"] as const) errors.push(...proseErrors(`${at}.${field}`, f[field], banned, MAX_SENTENCES));
+    for (const field of ["problem", "consequence", "fix"] as const) errors.push(...proseErrors(`${at}.${field}`, f[field], banned, FIELD_SENTENCE_LIMITS[field]));
     const src = f.source ?? null;
     if (src !== null && !tokens.has(src) && !(src.startsWith("lens:") && lenses.has(src.slice("lens:".length)))) {
       errors.push(`${at}.source: "${src}" is neither a candidate token in this review nor a listed pattern; use one of those or null`);
@@ -531,7 +550,7 @@ export function checkSubmission(args: {
     const at = `dropped[${j}] (${d.candidate})`;
     if (!byId.has(d.candidate)) errors.push(`${at}: "${d.candidate}" is not a candidate in this review`);
     else dispose(d.candidate);
-    errors.push(...proseErrors(`${at}.reason`, d.reason, null, MAX_SENTENCES));
+    errors.push(...proseErrors(`${at}.reason`, d.reason, null, 2));
     const count = args.lineCount(d.file_path);
     if (count === null) errors.push(`${at}: ${d.file_path} is not a file in the code under review; cite the line that shows why`);
     else if (d.line_number > count) errors.push(`${at}: it cites line ${d.line_number} of ${d.file_path}, which has ${count} lines`);
@@ -547,17 +566,18 @@ export function checkSubmission(args: {
 
   const floors = new Map(manifest.lenses.map((l) => [l.name, l.confidenceFloor]));
   const findings: ReportFinding[] = [];
+  const possible: ReportFinding[] = [];
   const lowConfidence: Report["low_confidence"] = [];
   for (const f of sub.findings) {
     const source = f.source ?? null;
     if (disabled(source, config)) continue;
     const lensFloor = source?.startsWith("lens:") ? floors.get(source.slice("lens:".length)) : undefined;
     const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
-    if (f.confidence < floor) {
+    if (f.confidence < floor && f.confidence < POSSIBLE_CONFIDENCE_FLOOR) {
       lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor });
       continue;
     }
-    findings.push({
+    (f.confidence < floor ? possible : findings).push({
       origin: "agent",
       severity: f.severity,
       category: f.category,
@@ -578,8 +598,16 @@ export function checkSubmission(args: {
   }
   const droppedBy = new Map(sub.dropped.map((d) => [d.candidate, d]));
   const deduped = dedup(findings);
+  const countedKeys = new Set(deduped.map(findingKey));
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
+  const keptPossible = dedup(possible.filter((f) => !countedKeys.has(findingKey(f)))).filter((f) => {
+    if (shown(f, config, own)) return true;
+    const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
+    const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
+    lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence!, floor });
+    return false;
+  });
   const report: Report = {
     version: 1,
     kind: "review",
@@ -591,6 +619,7 @@ export function checkSubmission(args: {
     block_on_severity: config.blockOnSeverity,
     summary: sub.summary,
     findings: kept,
+    possible: keptPossible,
     below_threshold: deduped.length - kept.length,
     outside_change: outsideFromScan(scan),
     low_confidence: lowConfidence,
@@ -682,6 +711,7 @@ export function scanReport(args: { change: Change; scan: ScanResult; config: Con
     findings,
     below_threshold: live.length - findings.length,
     outside_change: outsideFromScan(scan),
+    possible: [],
     low_confidence: [],
     not_reviewed: [],
     dropped: [],

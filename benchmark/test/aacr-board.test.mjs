@@ -10,7 +10,8 @@
 // 2. A sample on a case outside AACR-Bench is converted for the board.
 // 3. A failed or never-started review vanishes from AACR's denominators
 //    (their evaluator leaves out an instance with no result file).
-// 4. A case whose licence nobody verified is converted for a board.
+// 4. A case whose licence nobody verified reaches a board submission, or
+//    an excluded licence class is converted.
 // 5. The wrapper echoes the judge's key or base URL: a dry run with a fake
 //    settings file, traced by bash -x, leaves neither in any output or file.
 // 6. AACR's mock judge scores a run as if a model judged it.
@@ -33,6 +34,9 @@
 //     or a dry run starts without checking an existing evaluator.
 // 15. A split or URL-encoded key reaches output; sharing a buffer between
 //     stdout and stderr hides the pieces from the redactor.
+// 16. A failed native body's error text reaches the judge, or the failed
+//     review leaves the denominator or loses its failure in convert.json.
+// 17. An empty native body becomes a comment rather than an empty review.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -50,9 +54,17 @@ import { aacrTruth, readCase, readSuite, specCopy } from "../lib/suites.mjs";
 import * as judgeRunner from "../outside/boards/aacr-judge.mjs";
 import { commentOf, convertRun, filterDataset, instanceIdOf, readAacrOutside } from "../outside/convert/aacr.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
+import { newWave } from "../lib/wave.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
+
+// A wave of its own for each judging that pays, in a temporary journal
+// folder (lib/wave.mjs): the --wave flags and the environment naming it.
+const waveRoot = tempDir("oq-aacr-waves-");
+let waves = 0;
+const waveFor = () => ["--wave", newWave(`aacr-${++waves}`, { root: waveRoot }).id];
+const WAVES_ENV = { OPENQODEX_BENCH_WAVES: join(waveRoot, "index/waves") };
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(here, "fixtures", "aacr-board");
@@ -182,8 +194,8 @@ const BUILD = { commit: "a".repeat(40), short: "aaaaaaa", dirty: false, cliVersi
 // `suite` is the suite the manifest names.
 async function savedRun({ names = SMOKE, plan = PLAN, specs = {}, suite = "aacr", configs = [MODEL, CLAUDE], repeat = 2 } = {}) {
   const cases = names.map(caseOf);
-  const reviewers = configs.map((c) => (c === MODEL ? "model:scripted" : "claude"));
-  const { jobs } = planJobs({ cases: names, caseIds: Object.fromEntries(cases.map((c) => [c.name, c.id])), reviewers, graph: ["on"], repeat });
+  const reviewers = configs.map((c) => (c === MODEL ? "model:scripted" : c === "control-graph-off" ? "control" : "claude"));
+  const { jobs } = planJobs({ cases: names, caseIds: Object.fromEntries(cases.map((c) => [c.name, c.id])), reviewers, graph: configs.every((c) => c.endsWith("-off")) ? ["off"] : ["on"], repeat });
   const root = tempDir("oq-aacr-board-");
   const out = join(root, "run");
   for (const c of cases) write(join(root, "specs", `${c.name}.json`), `${JSON.stringify(specs[c.name] ?? specCopy(c, aacrTruth({ comments: TRUTH[c.name] ?? [] }, null)), null, 2)}\n`);
@@ -196,10 +208,14 @@ async function savedRun({ names = SMOKE, plan = PLAN, specs = {}, suite = "aacr"
     runJob: async (job) => {
       const saved = plan[`${job.config}/${job.repeat}`]?.[job.case] ?? report([]);
       if (saved === "unstarted") return;
+      if (saved.reviewer === "control") {
+        write(join(attemptDir(out, job, 1), "sample.json"), JSON.stringify({ ...job, attempt: 1, ...saved }));
+        return;
+      }
       const result = { code: 0, signal: null, wallMs: 90_000 };
       const attempt = (n, rep) => {
         const dir = attemptDir(out, job, n);
-        write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: n, result, report: rep, who: null, startedAt: "t", failure: rep ? null : { cause: "no report.json" }, stopped: null })));
+        write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: n, result, report: rep, who: null, startedAt: "t", failure: rep ? null : { cause: "no report.json" }, stopped: null })));
         if (rep) write(join(dir, "report", "report.json"), JSON.stringify(rep));
       };
       if (saved === "failed") attempt(1, null);
@@ -211,6 +227,34 @@ async function savedRun({ names = SMOKE, plan = PLAN, specs = {}, suite = "aacr"
   });
   return out;
 }
+
+// Failure: a native comment is written but omitted from its folder's total.
+it("counts the native review comment in the AACR folder total", async () => {
+  const name = SMOKE[0];
+  const nativeBody = "The native review found an incorrect task index.";
+  const out = await savedRun({ names: [name], configs: ["control-graph-off"], repeat: 1, plan: { "control-graph-off/1": { [name]: { reviewer: "control", status: "complete", nativeBody, failure: null } } } });
+  const { out: board, record } = convertRun(out);
+  expect(readJson(join(board, "control-graph-off/r1", `${instanceIdOf(caseOf(name))}.json`)).review.comments).toEqual([{ path: null, start_line: null, end_line: null, content: nativeBody }]);
+  expect(record.folders[0]).toMatchObject({ files: 1, comments: 1, statuses: { complete: 1 } });
+});
+
+it("converts failed native reviews to empty AACR files and records their failures", async () => {
+  const name = SMOKE[0];
+  const failure = "Review failed while reading src/core/task.ts:10.";
+  const out = await savedRun({ names: [name], configs: ["control-graph-off"], repeat: 1, plan: { "control-graph-off/1": { [name]: { reviewer: "control", status: "failed", nativeBody: failure, failure } } } });
+  const { out: board, record } = convertRun(out);
+  expect(readJson(join(board, "control-graph-off/r1", `${instanceIdOf(caseOf(name))}.json`))).toMatchObject({ review: { comments: [] }, openqodex: { status: "failed", findings: 0 } });
+  expect(record.folders[0]).toMatchObject({ files: 1, comments: 0, statuses: { failed: 1 } });
+  expect(record.failures).toEqual([{ caseId: caseOf(name).id, config: "control-graph-off", repeat: 1, failure }]);
+});
+
+it("keeps an empty native AACR review in the denominator without a comment", async () => {
+  const name = SMOKE[0];
+  const out = await savedRun({ names: [name], configs: ["control-graph-off"], repeat: 1, plan: { "control-graph-off/1": { [name]: { reviewer: "control", status: "complete", nativeBody: "", failure: null } } } });
+  const { out: board, record } = convertRun(out);
+  expect(readJson(join(board, "control-graph-off/r1", `${instanceIdOf(caseOf(name))}.json`))).toMatchObject({ review: { comments: [] }, openqodex: { status: "complete", findings: 0 } });
+  expect(record.folders[0]).toMatchObject({ files: 1, comments: 0, statuses: { complete: 1 } });
+});
 
 // Our location numbers per configuration and repeat, from the scored jobs.
 function ourLineCounts(out) {
@@ -344,14 +388,39 @@ describe("a failed or never-started review vanishes from AACR's denominators", (
   });
 });
 
-describe("a case whose licence nobody verified is converted for a board", () => {
+describe("an unverified licence reaches a board submission, or an excluded licence is converted", () => {
   // A licence record as the ingest writes it for a repository whose licence
   // file the licence API cannot name: class unverified, used and published in full,
-  // but refused for a board; unknown, the class before that; and for one
+  // but refused for a board submission; unknown, the class before that; and for one
   // with no licence file, class none.
   const licence = (cls) => ({ spdx: cls === "none" ? null : "NOASSERTION", chosen: null, class: cls, file: cls === "none" ? null : "LICENSE.txt", fileSha256: null, at: "the default branch on 2026-10-11", source: "the licence API", use: "local review and scoring", excerpts: "omit" });
 
-  it.each(["unverified", "unknown", "none"])("refuses a run holding a case whose licence class is %s, naming the case, and writes nothing", async (cls) => {
+  it("an unverified-licence case converts for the local judge and is still refused at submission", async () => {
+    const [name, other] = SMOKE;
+    const c = caseOf(name);
+    const spec = specCopy(c, aacrTruth({ comments: TRUTH[name] }, null));
+    const out = await savedRun({ names: [name, other], specs: { [name]: { ...spec, source: { ...spec.source, licence: licence("unverified") } } }, configs: [MODEL], repeat: 1 });
+    const manifest = readJson(join(out, "manifest.json"));
+    write(join(out, "manifest.json"), JSON.stringify({ ...manifest, reviewer: { model: "scripted" } }));
+    const { out: board, record } = convertRun(out);
+    expect(record.instances.map((i) => i.case).sort()).toEqual([name, other].sort());
+    expect(record.folders[0].files).toBe(2);
+    expect(readJson(join(board, MODEL, "r1", `${instanceIdOf(c)}.json`)).review.comments.length).toBeGreaterThan(0);
+    expect(readJson(join(out, "cases", `${name}.json`)).source.licence.class).toBe("unverified");
+
+    // Saved judge metadata lets submission reach its licence check without a model call.
+    write(join(board, "eval.json"), JSON.stringify({ folders: record.folders.map((f) => ({ config: f.config, repeat: f.repeat, mode: "llm", exit: 0, judgeErrors: 0 })) }));
+    write(join(board, "dataset.jsonl"), "");
+    const submission = join(out, "submission");
+    const result = spawnSync(process.execPath, [join(benchRoot, "outside/submit/aacr.mjs"), out, "--out", submission], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toMatch(/unverified licence/);
+    expect(result.stderr).toContain(name);
+    expect(result.stderr).not.toContain(other);
+    expect(existsSync(submission)).toBe(false);
+  });
+
+  it.each(["unknown", "none"])("refuses a run holding a case whose licence class is %s, naming the case, and writes nothing", async (cls) => {
     const [name, other] = SMOKE;
     const c = caseOf(name);
     const spec = specCopy(c, aacrTruth({ comments: TRUTH[name] }, null));
@@ -366,7 +435,7 @@ describe("a case whose licence nobody verified is converted for a board", () => 
     })();
     expect(refusal).toContain(name);
     expect(refusal).not.toContain(other);
-    expect(refusal).toMatch(/never converted for a board/);
+    expect(refusal).toContain(`licence ${cls}`);
     expect(existsSync(join(out, "outside"))).toBe(false);
   });
 });
@@ -647,11 +716,11 @@ describe("the wrapper runs their evaluation stage with a model as judge", () => 
       const provider = await fakeJudge({ status });
       const home = tempDir("oq-aacr-relay-refused-");
       write(join(home, "azure.env"), `AZURE_OPENAI_BASE_URL=${provider.base}\nAZURE_OPENAI_KEY=test-key\n`);
-      const env = { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env") };
+      const env = { ...process.env, ...WAVES_ENV, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env") };
       delete env.JUDGE_USE_MOCK;
       try {
         const r = await new Promise((done) => {
-          const child = spawn(process.execPath, [join(benchRoot, "outside", "boards", "aacr-judge.mjs"), out, "--evaluation", EVALUATION, "--python", PYTHON], { env });
+          const child = spawn(process.execPath, [join(benchRoot, "outside", "boards", "aacr-judge.mjs"), out, "--evaluation", EVALUATION, "--python", PYTHON, ...waveFor()], { env });
           let stdout = "";
           let stderr = "";
           child.stdout.on("data", (c) => (stdout += c));
@@ -676,10 +745,10 @@ describe("the wrapper runs their evaluation stage with a model as judge", () => 
     const key = `fake-judge-key-${randomBytes(16).toString("hex")}`;
     const home = tempDir("oq-aacr-judged-");
     writeFileSync(join(home, "azure.env"), `AZURE_OPENAI_BASE_URL=${judge.base}\nAZURE_OPENAI_KEY=${key}\n`);
-    const env = { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), TMPDIR: home };
+    const env = { ...process.env, ...WAVES_ENV, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), TMPDIR: home };
     delete env.JUDGE_USE_MOCK;
     const r = await new Promise((done) => {
-      const child = spawn(process.execPath, [join(benchRoot, "outside", "boards", "aacr-judge.mjs"), out, "--rounds", "1", "--evaluation", EVALUATION, "--python", PYTHON], { env });
+      const child = spawn(process.execPath, [join(benchRoot, "outside", "boards", "aacr-judge.mjs"), out, "--rounds", "1", "--evaluation", EVALUATION, "--python", PYTHON, ...waveFor()], { env });
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (c) => (stdout += c));
@@ -697,7 +766,7 @@ describe("the wrapper runs their evaluation stage with a model as judge", () => 
     // Azure receives the original token limit under its reasoning model parameter.
     expect(judge.seen.every((s) => s.request.max_completion_tokens === 40000)).toBe(true);
     expect(judge.seen.every((s) => ["chat_template_kwargs", "temperature", "top_p", "max_tokens"].every((name) => !(name in s.request)))).toBe(true);
-    expect(record.relay).toEqual({ relay: true, requests: judge.seen.length, stripped: judge.seen.length, parameterChanges: { chat_template_kwargs: judge.seen.length, temperature: judge.seen.length, top_p: judge.seen.length, max_tokens: judge.seen.length }, upstreamStatuses: { 200: judge.seen.length } });
+    expect(record.relay).toEqual({ relay: true, requests: judge.seen.length, stripped: judge.seen.length, usage: expect.objectContaining({ responses: judge.seen.length }), parameterChanges: { chat_template_kwargs: judge.seen.length, temperature: judge.seen.length, top_p: judge.seen.length, max_tokens: judge.seen.length }, upstreamStatuses: { 200: judge.seen.length } });
     const leaks = [["stdout", r.stdout], ["stderr", r.stderr], ...filesUnder(out).map((p) => [p, readFileSync(p, "utf8")])].filter(([, text]) => endpointSecrets(judge.base, key).some((s) => text.includes(s)));
     expect(leaks.map(([where]) => where)).toEqual([]);
     // Semantic numbers are reported now. Their line count drops below ours where the judge's yes on a

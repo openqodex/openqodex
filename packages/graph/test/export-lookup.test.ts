@@ -17,7 +17,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import type { Graph } from "../src/index.js";
 import { EXPORT_LOOKUP_STEPS } from "../src/resolve.js";
-import { expectLinear, stageCpuMs } from "../src/test-timing.js";
+import { expectLinear, growthTests, stageCpuMs } from "../src/test-timing.js";
 import { makeRepo, symbol } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -51,25 +51,30 @@ function diamond(layers: number, width: number, extra = ""): Record<string, stri
 }
 
 describe("looking up an exported name", () => {
-  it("binds through seven layers of 20 barrels in time that grows with the re-exports, not the paths (1)", async () => {
-    const root = makeRepo(diamond(7, 20));
-    const g = await buildOf(root)();
+  it("binds through seven layers of 20 barrels (1)", async () => {
+    const g = await buildOf(makeRepo(diamond(7, 20)))();
     expect(tiers(g, symbol(g, "x.ts", "f"))).toEqual(["use.ts:3 certain"]);
-    // Ten barrels a layer are a quarter of the re-exports and 1/128 of the paths.
-    const narrow = makeRepo(diamond(7, 10));
-    expectLinear("the resolve stage on seven layers of 10 and of 20 barrels", await stageCpuMs(buildOf(narrow), "resolve"), await stageCpuMs(buildOf(root), "resolve"));
   }, 120_000);
 
   it("stops a web of export * cycles at its step budget and records the cut (2)", async () => {
     // Every barrel also re-exports the top barrel: every path meets a cycle.
-    const root = makeRepo(diamond(5, 20, 'export * from "./l5b0";\n'));
-    const g = await buildOf(root)();
-    const narrow = makeRepo(diamond(5, 10, 'export * from "./l5b0";\n'));
-    expectLinear("the resolve stage on webs of five layers of 10 and of 20 barrels", await stageCpuMs(buildOf(narrow), "resolve"), await stageCpuMs(buildOf(root), "resolve"));
+    const g = await buildOf(makeRepo(diamond(5, 20, 'export * from "./l5b0";\n')))();
     const cut = g.status.cuts.find((c) => c.by === "export-walk");
     expect(cut?.note).toContain(EXPORT_LOOKUP_STEPS.toLocaleString("en-US"));
     expect(cut).toMatchObject({ exact: false, omitted: null });
   }, 120_000);
+
+  growthTests("in time that grows with the re-exports", () => {
+    it("binds through seven layers of 20 barrels in time that grows with the re-exports, not the paths (1)", async () => {
+      // Ten barrels a layer are a quarter of the re-exports and 1/128 of the paths.
+      expectLinear("the resolve stage on seven layers of 10 and of 20 barrels", await stageCpuMs(buildOf(makeRepo(diamond(7, 10))), "resolve"), await stageCpuMs(buildOf(makeRepo(diamond(7, 20))), "resolve"));
+    }, 120_000);
+
+    it("stops a web of export * cycles in time that grows with the re-exports (2)", async () => {
+      const web = (width: number) => makeRepo(diamond(5, width, 'export * from "./l5b0";\n'));
+      expectLinear("the resolve stage on webs of five layers of 10 and of 20 barrels", await stageCpuMs(buildOf(web(10)), "resolve"), await stageCpuMs(buildOf(web(20)), "resolve"));
+    }, 120_000);
+  });
 
   it("keeps a name another export * may also bring from being certain (3)", async () => {
     const g = await graphOf({

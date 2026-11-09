@@ -11,8 +11,8 @@
 //    or an id on none of the lists below, is class unverified. The case is
 //    used and published in full like any other (Sid, 2026-10-12). A person's
 //    reading is noted only for the licence file read (its sha256); the
-//    class stays unverified. Outside converters and board submissions
-//    still refuse it through publishRefusal.
+//    class stays unverified. Local board conversion accepts it; board
+//    submissions still refuse it through publishRefusal.
 // 2. Two ingests read the licence differently (a new day, a changed
 //    repository), so the same dataset gives two suites: the first answer is
 //    cached with the day it was read, and the cache is the only source after
@@ -228,13 +228,12 @@ export function licenceExclusion(record) {
 // person's reading when there is one.
 export const licenceNote = (l) => `${l.spdx ?? "none"}, ${l.file ?? "no file"}${l.reading ? `; read by ${l.reading.by} on ${l.reading.on} as ${l.reading.spdx}` : ""}`;
 
-// Why an outside conversion or board submission refuses a run because of
-// its cases' licences, or null. Published runs include unverified cases.
-// `cases` are { name, licence } with licence the class. An outside
-// converter and anything that writes a board submission call this
-// before writing anything.
+// Why a board submission refuses a run because of its cases' licences,
+// or null. Published runs and local board conversions include unverified
+// cases. `cases` are { name, licence } with licence the class. Anything
+// that writes a board submission calls this before writing anything.
 export function publishRefusal(cases) {
   const names = cases.filter((c) => c.licence === "unverified").map((c) => c.name).sort();
   if (names.length === 0) return null;
-  return `refused: ${names.length} case${names.length === 1 ? "" : "s"} of this run hold${names.length === 1 ? "s" : ""} an unverified licence, which outside converters and board submissions still refuse (GitHub names no licence it can classify): ${names.join(", ")}`;
+  return `refused: ${names.length} case${names.length === 1 ? "" : "s"} of this run hold${names.length === 1 ? "s" : ""} an unverified licence, which board submissions still refuse (GitHub names no licence it can classify): ${names.join(", ")}`;
 }

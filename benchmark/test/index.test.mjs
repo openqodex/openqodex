@@ -13,13 +13,19 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { acceptedPath, assetUrl, buildEntry, entryProblems, groupKeys, listEntries } from "../lib/index.mjs";
+import { acceptedPath, acceptedProblems, assetUrl, buildEntry, entryProblems, groupKeys, listEntries } from "../lib/index.mjs";
 import { planJobs, sampleRecord } from "../lib/runner.mjs";
 import { RULES_VERSION } from "../lib/score.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
+
+it("the committed accepted pointer records every accepted entry's current board hash", () => {
+  const pointer = JSON.parse(readFileSync(acceptedPath(), "utf8"));
+  const entries = new Map(listEntries().map(({ entry }) => [entry.runId, entry]));
+  expect(acceptedProblems(pointer, entries)).toEqual([]);
+});
 
 const write = (path, text) => {
   mkdirSync(dirname(path), { recursive: true });
@@ -63,7 +69,7 @@ function scoredRun(extra = {}) {
   write(join(out, "manifest.json"), JSON.stringify(manifest));
   write(join(out, "cases", "one.json"), JSON.stringify(spec));
   const dir = join(out, "samples", "one", "claude-graph-on", "1");
-  write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job: jobs[0], attempt: 1, result: { code: 0, signal: null, wallMs: 20_000 }, report, who: null, startedAt: "t", failure: null, stopped: null })));
+  write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job: jobs[0], attempt: 1, result: { code: 0, signal: null, wallMs: 20_000 }, report, who: null, startedAt: "t", failure: null, stopped: null })));
   write(join(dir, "report", "report.json"), JSON.stringify(report));
   write(join(dir, "report", "scan.json"), JSON.stringify({ candidates: [] }));
   const { score } = scoreRun(loadRun(out));

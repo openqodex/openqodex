@@ -265,6 +265,7 @@ export type ReviewResult = {
   reason?: string;
   scope: ReviewScope | null;
   findings: ResultFinding[];
+  possible: ResultFinding[];
   dispositions: Disposition[];
   summary: string | null;
   coverage: Coverage | null;

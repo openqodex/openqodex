@@ -1,0 +1,32 @@
+{
+  "guards": "keeps both a Java class's own overload and the one it inherits as possible callees when the argument count cannot choose",
+  "callers": [
+    {
+      "to": "src/main/java/inh/A.java#A.m",
+      "site": "src/main/java/inh/Run.java:5",
+      "tier": "possible",
+      "kind": "calls",
+      "note": "members named m take 1 argument"
+    },
+    {
+      "to": "src/main/java/inh/B.java#B.m",
+      "site": "src/main/java/inh/Run.java:5",
+      "tier": "possible",
+      "kind": "calls",
+      "note": "members named m take 1 argument"
+    }
+  ],
+  "notCertain": [
+    {
+      "to": "src/main/java/inh/A.java#A.m",
+      "site": "src/main/java/inh/Run.java:5"
+    },
+    {
+      "to": "src/main/java/inh/B.java#B.m",
+      "site": "src/main/java/inh/Run.java:5"
+    }
+  ],
+  "floor": {
+    "src/main/java/inh/A.java#A.m": true
+  }
+}

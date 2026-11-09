@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FINDER_CONFIDENCE_FLOOR, proseErrors, scannerTerms } from "@openqodex/core";
+import { FIELD_SENTENCE_LIMITS, FINDER_CONFIDENCE_FLOOR, proseErrors, scannerTerms } from "@openqodex/core";
 import type { Change, EvidenceCitation, FindAnswer, FindCandidate, ReviewUnit, ScanResult, VerifyAnswer, VerifyBatch } from "@openqodex/core";
 
 type SnapshotText = (path: string) => string | null;
@@ -60,7 +60,7 @@ export function checkFindAnswer(value: unknown, unit: ReviewUnit, change: Change
   const rejected: RejectedEvidence[] = [];
   answer.candidates.forEach((c, i) => {
     if (c.lens && !lenses.includes(c.lens)) c.lens = null;
-    const candidateErrors: string[] = [];
+    const candidateErrors = proseErrors(`candidates[${i}].claim`, c.claim, null, FIELD_SENTENCE_LIMITS.problem);
     if (!change.files.some((f) => f.path === c.file_path && f.status === "deleted") && snapshotText(c.file_path) === null) candidateErrors.push(`candidates[${i}].file_path: ${c.file_path} is not a text file in the snapshot`);
     if (c.line_end !== undefined && c.line_end < c.line_number) candidateErrors.push(`candidates[${i}].line_end: it is before line_number`);
     for (const e of c.evidence) {
@@ -112,7 +112,7 @@ export function checkVerifyAnswer(value: unknown, batch: VerifyBatch, change: Ch
     if (v.verdict === "confirmed") {
       for (const field of ["title", "problem", "consequence", "fix"] as const) {
         if (v[field].trim() === "") errors.push(`${at}.${field}: must not be empty`);
-        errors.push(...proseErrors(`${at}.${field}`, v[field], banned, field === "title" ? null : 2));
+        errors.push(...proseErrors(`${at}.${field}`, v[field], banned, field === "title" ? null : FIELD_SENTENCE_LIMITS[field]));
       }
       if (!change.files.some((f) => f.path === v.file_path && f.status === "deleted") && snapshotText(v.file_path) === null) errors.push(`${at}: ${v.file_path} is not a text file in the snapshot`);
       const wrong = citesChange(v.file_path, v.line_number, v.line_end ?? v.line_number, change, lineCount);

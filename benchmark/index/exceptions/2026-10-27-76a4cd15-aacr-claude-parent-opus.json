@@ -1,0 +1,7 @@
+[
+  {
+    "text": "/home/projects/",
+    "label": "a home folder path",
+    "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+  }
+]

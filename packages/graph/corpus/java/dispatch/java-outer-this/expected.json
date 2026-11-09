@@ -1,0 +1,33 @@
+{
+  "guards": "A qualified this receiver selects the enclosing type.",
+  "callers": [
+    {
+      "to": "src/main/java/j3/Host.java#Host.work",
+      "site": "src/main/java/j3/Host.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.Inner.work",
+      "site": "src/main/java/j3/Host.java:8",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/j3/Host.java#Host.Inner.work",
+      "site": "src/main/java/j3/Host.java:7"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.work",
+      "site": "src/main/java/j3/Host.java:8"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/main/java/j3/Host.java",
+      "line": 7
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "guards": "ignores platform star imports when proving a JUnit annotation",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 1,
+    "roles": [
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "role": "test"
+      }
+    ],
+    "edges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "to": "src/main/java/shop/Service.java#Service.read",
+        "tier": "certain",
+        "category": "direct-call"
+      }
+    ],
+    "notUnknowns": [
+      {
+        "file": "src/test/java/shop/ServiceTest.java",
+        "line": 6,
+        "cause": "ambiguous"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:6",
+      "tier": "certain"
+    }
+  ]
+}

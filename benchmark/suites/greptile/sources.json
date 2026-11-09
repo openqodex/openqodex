@@ -1,0 +1,995 @@
+{
+  "version": 1,
+  "original": {
+    "url": "https://www.greptile.com/benchmarks",
+    "revision": "sha256:da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7",
+    "readDate": "2026-10-14",
+    "page": {
+      "path": "greptile/benchmarks.html",
+      "url": "https://www.greptile.com/benchmarks",
+      "sha256": "b172a31a0da77670994e9c69adbbe39409c0bfa1490f67c4ccda762ee4264c1a"
+    },
+    "asset": {
+      "path": "greptile/b5782ebc1f2b5641.js",
+      "url": "https://www.greptile.com/_next/static/chunks/b5782ebc1f2b5641.js",
+      "sha256": "da3d1355f073689ee0ed9ccad27a5164545645164e48a83ba586796469d786b7"
+    }
+  },
+  "corrected": {
+    "repo": "ai-code-review-evaluations/golden_comments",
+    "url": "https://github.com/ai-code-review-evaluations/golden_comments/tree/3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+    "revision": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+    "readDate": "2026-10-14",
+    "licence": "unverified: no licence file in the pinned tree",
+    "files": [
+      {
+        "path": "code_review_benchmarks/cal_dot_com.json",
+        "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/cal_dot_com.json",
+        "sha256": "4a904f1be6acd5954ff75e7cdb4ce949f8ed04c9aa08174b5e90ca17ea422a44"
+      },
+      {
+        "path": "code_review_benchmarks/discourse.json",
+        "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/discourse.json",
+        "sha256": "f8b34984f0462f409d8098d24e1b8d374eb6283916cfa7e8ad04841da8924b2c"
+      },
+      {
+        "path": "code_review_benchmarks/grafana.json",
+        "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/grafana.json",
+        "sha256": "711a508f538432d75e698d06d29a596a82a2ec9f4dfb082dd951c714997215cc"
+      },
+      {
+        "path": "code_review_benchmarks/keycloak.json",
+        "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/keycloak.json",
+        "sha256": "1dce5d3917a2b9d6fa68510017bea1ce64727f26030a0c767ec02bbf37ae66c8"
+      },
+      {
+        "path": "code_review_benchmarks/sentry.json",
+        "url": "https://raw.githubusercontent.com/ai-code-review-evaluations/golden_comments/3f2c8ab794b4ed71c099cbf0a7670555e90906dc/code_review_benchmarks/sentry.json",
+        "sha256": "08b80183e3b47128130f09c6cfef2a60eca5bc804bb02567a5b555c30e7a9143"
+      }
+    ]
+  },
+  "pullFiles": [
+    {
+      "path": "pulls/ai-code-review-evaluation__cal.com-greptile.json",
+      "url": "https://api.github.com/repos/ai-code-review-evaluation/cal.com-greptile/pulls?state=all&per_page=100",
+      "sha256": "b93a4f122db03128fcc49901531abdc37d3657f210cbb23e52309614a963db4a",
+      "repo": "ai-code-review-evaluation/cal.com-greptile",
+      "readDate": "2026-10-14",
+      "snapshot": [
+        {
+          "number": 11,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/11",
+          "title": "feat: add calendar cache status and actions (#22532)",
+          "body": "Test 1",
+          "base": {
+            "sha": "3784421f025afc3a595fbb4e222916785cc6de0c",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "cb7869234729f908648af6796ab4082b569daf39"
+          },
+          "created_at": "2025-07-28T23:36:46Z"
+        },
+        {
+          "number": 10,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/10",
+          "title": "Add guest management functionality to existing bookings",
+          "body": "Test 10",
+          "base": {
+            "sha": "b004587262e8221083bafbe9a0c515e7becaa7b3",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "baa9045af7711ea0b86390cb0bf0fdce5430228c"
+          },
+          "created_at": "2025-07-28T23:35:44Z"
+        },
+        {
+          "number": 9,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/9",
+          "title": "SMS workflow reminder retry count tracking",
+          "body": "Test 9",
+          "base": {
+            "sha": "917c7b0764f4c6bfdca95db2c5f73dbfdbe11757",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "2dae0bfb8c72b51aa49260dc1f7f215a6290f3a6"
+          },
+          "created_at": "2025-07-28T23:35:38Z"
+        },
+        {
+          "number": 8,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/8",
+          "title": "OAuth credential sync and app integration enhancements",
+          "body": "Test 8",
+          "base": {
+            "sha": "bc89fe00ea84d20bedcec782f0701b9711dc8201",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "824145b0e245661875240ed5c8745decd2293d1a"
+          },
+          "created_at": "2025-07-28T23:35:31Z"
+        },
+        {
+          "number": 7,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/7",
+          "title": "Advanced date override handling and timezone compatibility improvements",
+          "body": "Test 7",
+          "base": {
+            "sha": "c4fe69d8265ba632c10f3a90ea05e4a74ff14c85",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "3ef328421f60cd096b7676ef7ee7c32b71593049"
+          },
+          "created_at": "2025-07-28T23:35:25Z"
+        },
+        {
+          "number": 6,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/6",
+          "title": "Comprehensive workflow reminder management for booking lifecycle events",
+          "body": "Test 6",
+          "base": {
+            "sha": "235ec0e906a189ceb0843cfa7af585b1d46f699f",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "2ebfcf448c7e4136ac1b8b9ef9b526a4424fd155"
+          },
+          "created_at": "2025-07-28T23:35:19Z"
+        },
+        {
+          "number": 5,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/5",
+          "title": "feat: convert InsightsBookingService to use Prisma.sql raw queries",
+          "body": "Test 5",
+          "base": {
+            "sha": "202d248ae45f8f2f01324b0d8eb5914e9154112f",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "56ff75f07b92ba8ef499ff28a2f98c25f339fdae"
+          },
+          "created_at": "2025-07-28T23:35:12Z"
+        },
+        {
+          "number": 4,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/4",
+          "title": "fix: handle collective multiple host on destinationCalendar",
+          "body": "Test 4",
+          "base": {
+            "sha": "500bfb4d82c53c42e7f53250c6715f5fb474dc2b",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "bd797c1ea00a61425735f2b9fd7ce212ebf8c8ab"
+          },
+          "created_at": "2025-07-28T23:35:06Z"
+        },
+        {
+          "number": 3,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/3",
+          "title": "feat: 2fa backup codes",
+          "body": "Test 3",
+          "base": {
+            "sha": "efa6d464a38e60ceeeb88f40668c1c4ac4bfaf54",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "a308075bc39b77ed7059b0cae9d443d669a7bf98"
+          },
+          "created_at": "2025-07-28T23:34:59Z"
+        },
+        {
+          "number": 2,
+          "html_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/2",
+          "title": "Async import of the appStore packages",
+          "body": "Test 2",
+          "base": {
+            "sha": "bff28e5d6fef42b4e7c036c688f0bad4410b42a2",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/cal.com-greptile"
+            }
+          },
+          "head": {
+            "sha": "e043a5efd872362a3fc146ed0d9ce4393e316c1e"
+          },
+          "created_at": "2025-07-28T23:34:53Z"
+        }
+      ],
+      "responseSha256": "95485b897517cbd64982d0da435435fe836fa633959980179871891bd5315fcb",
+      "encoding": "selected GitHub pull request metadata, with upstream punctuation normalised"
+    },
+    {
+      "path": "pulls/ai-code-review-evaluation__discourse-greptile.json",
+      "url": "https://api.github.com/repos/ai-code-review-evaluation/discourse-greptile/pulls?state=all&per_page=100",
+      "sha256": "2603a23996eee54a9e3df360dbbd8bde2da6ca9db5efdf23c58ba9aa51d45941",
+      "repo": "ai-code-review-evaluation/discourse-greptile",
+      "readDate": "2026-10-14",
+      "snapshot": [
+        {
+          "number": 10,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/10",
+          "title": "FEATURE: Can edit category/host relationships for embedding",
+          "body": "Test 10",
+          "base": {
+            "sha": "913c3d6f636d02b3dd6c2c022ca1af2bec95d752",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "d1c69189f3c90ecf56013a8da904da9bff9a8e19"
+          },
+          "created_at": "2025-07-29T00:28:16Z"
+        },
+        {
+          "number": 9,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/9",
+          "title": "FEATURE: Localization fallbacks (server-side)",
+          "body": "Test 9",
+          "base": {
+            "sha": "728845d008f06828630a632e5c7d67e11bf15deb",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "ecfa17b5a79dfdc91e7a4d50b42ae78a35d0a293"
+          },
+          "created_at": "2025-07-29T00:27:40Z"
+        },
+        {
+          "number": 8,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/8",
+          "title": "FIX: proper handling of group memberships",
+          "body": "Test 8",
+          "base": {
+            "sha": "4975fc28903a84418f546b2809370f19abf10e08",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "060cda77729cb1c4a827560e09e89a7b22078ba9"
+          },
+          "created_at": "2025-07-29T00:27:37Z"
+        },
+        {
+          "number": 7,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/7",
+          "title": "scale-color $lightness must use $secondary for dark themes",
+          "body": "Test 7",
+          "base": {
+            "sha": "7554b5e3c458dc79b591d5e874e79ab10cf30c2f",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "d38c4d5f7443223c81529c22470293771baf9f38"
+          },
+          "created_at": "2025-07-29T00:27:29Z"
+        },
+        {
+          "number": 6,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/6",
+          "title": "UX: show complete URL path if website domain is same as instance domain",
+          "body": "Test 6",
+          "base": {
+            "sha": "7a5fbae060bd0d3e29f3a4b5c6f2bfd8b2914dc7",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "267d8be1f556ed59639ced396c885bb44586da19"
+          },
+          "created_at": "2025-07-29T00:27:27Z"
+        },
+        {
+          "number": 5,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/5",
+          "title": "Optimize header layout performance with flexbox mixins",
+          "body": "Test 5",
+          "base": {
+            "sha": "98fa098e6fade3097a11fe7f99a98a4e6ffb4728",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "5b229316ee4c661836ed1161139692a3e8527444"
+          },
+          "created_at": "2025-07-29T00:27:25Z"
+        },
+        {
+          "number": 4,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/4",
+          "title": "Enhance embed URL handling and validation system",
+          "body": "Test 4",
+          "base": {
+            "sha": "62db063e1e1abe691313ab42682a68f796d63769",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "4f8aed295a29954023b2849c060ef4fb299d1b5d"
+          },
+          "created_at": "2025-07-29T00:27:23Z"
+        },
+        {
+          "number": 3,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/3",
+          "title": "Add comprehensive email validation for blocked users",
+          "body": "Test 3",
+          "base": {
+            "sha": "e25638dab0d4b98f99c8fe8976ccaae8f4fb9db3",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "5f8a130277dbddc95d133cd2832be639baf89213"
+          },
+          "created_at": "2025-07-29T00:27:21Z"
+        },
+        {
+          "number": 2,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/2",
+          "title": "FEATURE: per-topic unsubscribe option in emails",
+          "body": "Test 2",
+          "base": {
+            "sha": "56abd247e1829cb6de82dfcc8ce04deb5f0d1e91",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "6669a2d94d76eea3b99b8c476d12b1eb66726b07"
+          },
+          "created_at": "2025-07-29T00:26:50Z"
+        },
+        {
+          "number": 1,
+          "html_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/1",
+          "title": "FEATURE: automatically downsize large images",
+          "body": "Test 1",
+          "base": {
+            "sha": "3f71fa15c93bb0b751bb92abae1b5dc9a21bd4ca",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/discourse-greptile"
+            }
+          },
+          "head": {
+            "sha": "ffbaf8c54269df2ce510de91245760fddce09896"
+          },
+          "created_at": "2025-07-29T00:26:15Z"
+        }
+      ],
+      "responseSha256": "7027af65393399cbebde874a6ccda3a00094909a5c14bc1a70989e9e924f90ab",
+      "encoding": "selected GitHub pull request metadata, with upstream punctuation normalised"
+    },
+    {
+      "path": "pulls/ai-code-review-evaluation__grafana-greptile.json",
+      "url": "https://api.github.com/repos/ai-code-review-evaluation/grafana-greptile/pulls?state=all&per_page=100",
+      "sha256": "b073ae3becadfd33ea494da3cd0a7a7e335db5cd772e023650dcf43a275118de",
+      "repo": "ai-code-review-evaluation/grafana-greptile",
+      "readDate": "2026-10-14",
+      "snapshot": [
+        {
+          "number": 10,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/10",
+          "title": "Unified Storage Performance Optimizations",
+          "body": "Test 10",
+          "base": {
+            "sha": "871af07203177ce59a24e742107119409274f48a",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "d762a9643618a6ba7c43da27374bd9ffc80889ce"
+          },
+          "created_at": "2025-07-28T22:04:06Z"
+        },
+        {
+          "number": 9,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/9",
+          "title": "Advanced SQL Analytics Framework",
+          "body": "Test 9",
+          "base": {
+            "sha": "cbe1e7d63f098e306058c0fbcab2f5c30602fa7d",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "ea71201ddc66f06a3f16387e85a09c53514aaadd"
+          },
+          "created_at": "2025-07-28T22:04:01Z"
+        },
+        {
+          "number": 8,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/8",
+          "title": "Frontend Asset Optimization",
+          "body": "Test 8",
+          "base": {
+            "sha": "0a870e6a8855cee9c8ae391767da40dbb1c16cc6",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "95000f9fc8049d47f837b6e8603c230c2a073ae5"
+          },
+          "created_at": "2025-07-28T22:03:56Z"
+        },
+        {
+          "number": 7,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/7",
+          "title": "Database Performance Optimizations",
+          "body": "Test 7",
+          "base": {
+            "sha": "f84c8f685310cc41b52831c130e700a01b225b58",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "81c45bfe449584dc7ff50e4fabd5d0c6568999b5"
+          },
+          "created_at": "2025-07-28T22:03:51Z"
+        },
+        {
+          "number": 6,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/6",
+          "title": "Dual Storage Architecture",
+          "body": "Test 6",
+          "base": {
+            "sha": "5e3a5b355ef7478d7be86923749e25aebef5226a",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "67b74e1e8a7d26d24617b7313b90fa4649138318"
+          },
+          "created_at": "2025-07-28T22:03:47Z"
+        },
+        {
+          "number": 5,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/5",
+          "title": "Notification Rule Processing Engine",
+          "body": "Test 5",
+          "base": {
+            "sha": "acdb0e151c9a2abd6e691353de6cc515d316ee76",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "3e6d620d2c1d1f6c10611fba8b0ee062d6fb2a68"
+          },
+          "created_at": "2025-07-28T22:03:42Z"
+        },
+        {
+          "number": 4,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/4",
+          "title": "Advanced Query Processing Architecture",
+          "body": "Test 4",
+          "base": {
+            "sha": "dcb853d3099c08b74370fcc965342f035dd6d6cc",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "3ba2457a7090b2b76f4b368c8a9db835d0bec66c"
+          },
+          "created_at": "2025-07-28T22:03:37Z"
+        },
+        {
+          "number": 3,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/3",
+          "title": "Plugins: Chore: Renamed instrumentation middleware to metrics middleware",
+          "body": "Test 3",
+          "base": {
+            "sha": "5dac6731cbb99f3374898cf6a1558edb222d323b",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "00393c2ac9103072bc2194118e455f9248a37816"
+          },
+          "created_at": "2025-07-28T22:03:32Z"
+        },
+        {
+          "number": 2,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/2",
+          "title": "AuthZService: improve authz caching",
+          "body": "Test 2",
+          "base": {
+            "sha": "e650fa7b2041c91fbb98ef3432b3969e13bbdac9",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "d9dc93c4a6c88ef850dbe526cb3226ae99cafa20"
+          },
+          "created_at": "2025-07-28T22:03:27Z"
+        },
+        {
+          "number": 1,
+          "html_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/1",
+          "title": "Anonymous: Add configurable device limit",
+          "body": "Test 1",
+          "base": {
+            "sha": "ed865831071a0c0a63c75ad0cfa6661107dabcaf",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/grafana-greptile"
+            }
+          },
+          "head": {
+            "sha": "3647ba7360b8d157e4a294a650a365b6aca070d8"
+          },
+          "created_at": "2025-07-28T22:03:17Z"
+        }
+      ],
+      "responseSha256": "184d1bae82bb4a9dd3d4975f9a0901731aa97cc070f93244fd742cb0ccf52062",
+      "encoding": "selected GitHub pull request metadata, with upstream punctuation normalised"
+    },
+    {
+      "path": "pulls/ai-code-review-evaluation__keycloak-greptile.json",
+      "url": "https://api.github.com/repos/ai-code-review-evaluation/keycloak-greptile/pulls?state=all&per_page=100",
+      "sha256": "9ff69b440972568da5650aa6071a58e213d13994f5ec90ef93a96388359414c0",
+      "repo": "ai-code-review-evaluation/keycloak-greptile",
+      "readDate": "2026-10-14",
+      "snapshot": [
+        {
+          "number": 10,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/10",
+          "title": "Fix concurrent group access to prevent NullPointerException",
+          "body": "Test 10",
+          "base": {
+            "sha": "e92b825a14800e42f42d5f22ee314e94cf7c4e27",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "332c9b6e4a1288705f173a9b797742859384d1e0"
+          },
+          "created_at": "2025-07-28T21:19:29Z"
+        },
+        {
+          "number": 9,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/9",
+          "title": "Implement recovery key support for user storage providers",
+          "body": "Test 9",
+          "base": {
+            "sha": "a0852eaa2ed19408ecf8ad02652802d00529a085",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "134437a5a7e31472763ffa2ac3cc91030e7ee389"
+          },
+          "created_at": "2025-07-28T21:19:23Z"
+        },
+        {
+          "number": 8,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/8",
+          "title": "Implement access token context encoding framework",
+          "body": "Test 8",
+          "base": {
+            "sha": "b545339e2c924263a498653f348610de0c09059c",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "c8738721df2cd2d16fe16adec571b4192354a771"
+          },
+          "created_at": "2025-07-28T21:19:18Z"
+        },
+        {
+          "number": 7,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/7",
+          "title": "Add HTML sanitizer for translated message resources",
+          "body": "Test 7",
+          "base": {
+            "sha": "21d53112849fe55f328f3de2f071989b8763de61",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "5d77e7ea7d431aa0a6b65904457b7471bd050e81"
+          },
+          "created_at": "2025-07-28T21:19:12Z"
+        },
+        {
+          "number": 6,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/6",
+          "title": "Add Groups resource type and scopes to authorization schema",
+          "body": "Test 6",
+          "base": {
+            "sha": "7a8d18122aea42278332120093d5cefce9748356",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "679f44692dbc288bedc8f1535071c8467dbaf70c"
+          },
+          "created_at": "2025-07-28T21:19:07Z"
+        },
+        {
+          "number": 5,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/5",
+          "title": "Add Client resource type and scopes to authorization schema",
+          "body": "Test 5",
+          "base": {
+            "sha": "baa6ebbeb8791017c01ce9fa63965f8dc584ddfe",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "7e5540896bbbafc02234b6ea2b15215dc24cb972"
+          },
+          "created_at": "2025-07-28T21:19:01Z"
+        },
+        {
+          "number": 4,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/4",
+          "title": "Add rolling-updates feature flag and compatibility framework",
+          "body": "Test 4",
+          "base": {
+            "sha": "690b0e4bef15654ea9037b0a26b3337e548c6b48",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "0f91e67b9025d978059b21b5c41283e5000a509c"
+          },
+          "created_at": "2025-07-28T21:18:55Z"
+        },
+        {
+          "number": 3,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/3",
+          "title": "Add AuthzClientCryptoProvider for authorization client cryptographic operations",
+          "body": "Test 3",
+          "base": {
+            "sha": "10aca5552314d6e5c9226f3c6d0107861c38c693",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "b95d12a968e8374a93ddcd56f47ab12eb4136ff4"
+          },
+          "created_at": "2025-07-28T21:18:49Z"
+        },
+        {
+          "number": 2,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/2",
+          "title": "Add caching support for IdentityProviderStorageProvider.getForLogin operations",
+          "body": "Test 2",
+          "base": {
+            "sha": "5ff9e9147dc08432b3ec7753906467c390b1e6ee",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "3e597722a9164d145bc46aa1de5bd714fb6ba357"
+          },
+          "created_at": "2025-07-28T21:18:43Z"
+        },
+        {
+          "number": 1,
+          "html_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1",
+          "title": "Fixing Re-authentication with passkeys",
+          "body": "Test 1",
+          "base": {
+            "sha": "30f804af450dec523909a52f2a4b97302d27f5cc",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/keycloak-greptile"
+            }
+          },
+          "head": {
+            "sha": "3214b188de808fdb0fff335556b686f1b0a63218"
+          },
+          "created_at": "2025-07-28T21:18:30Z"
+        }
+      ],
+      "responseSha256": "3405922aab3e7a62399e9d9c92c6b60c1fed4b4c7cc9f3d44b9a985e3550c59d",
+      "encoding": "selected GitHub pull request metadata, with upstream punctuation normalised"
+    },
+    {
+      "path": "pulls/ai-code-review-evaluation__sentry-greptile.json",
+      "url": "https://api.github.com/repos/ai-code-review-evaluation/sentry-greptile/pulls?state=all&per_page=100",
+      "sha256": "7e548478cf9e5a87f8474f33c463d4b0a4eb09bfa039ee19805243540c12c648",
+      "repo": "ai-code-review-evaluation/sentry-greptile",
+      "readDate": "2026-10-14",
+      "snapshot": [
+        {
+          "number": 10,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/10",
+          "title": "feat(workflow_engine): Add in hook for producing occurrences from the stateful detector",
+          "body": "Test [new PR number opened]",
+          "base": {
+            "sha": "7249010ca8fea2bbc9ae58e7352861c2d17c2ef2",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "de60b7fb01a1df4ecca82cc842a8b5fb16d92794"
+          },
+          "created_at": "2025-07-29T00:32:59Z"
+        },
+        {
+          "number": 9,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/9",
+          "title": "feat(uptime): Add ability to use queues to manage parallelism",
+          "body": "Test 9",
+          "base": {
+            "sha": "5c94383dd49b567fb086ad594b40af066f426858",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "33f4fddf64465f75308957c4431e56fd0443eca3"
+          },
+          "created_at": "2025-07-29T00:32:22Z"
+        },
+        {
+          "number": 8,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/8",
+          "title": "ref(crons): Reorganize incident creation / issue occurrence logic",
+          "body": "Test 8",
+          "base": {
+            "sha": "5fc9f67c1bd6a50d6c6eb3270b1e6fb7938c5865",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "c3b32a7babfcf62b91553388bcd9e9fbfd30a690"
+          },
+          "created_at": "2025-07-29T00:32:09Z"
+        },
+        {
+          "number": 7,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/7",
+          "title": "feat(ecosystem): Implement cross-system issue synchronization",
+          "body": "Test 7",
+          "base": {
+            "sha": "19c92a4345beecc750245775de2b3ab9f4f59473",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "f9919d789416dd32549d7bb9e238d5df55d5265a"
+          },
+          "created_at": "2025-07-29T00:31:35Z"
+        },
+        {
+          "number": 6,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/6",
+          "title": "Span Buffer Multiprocess Enhancement with Health Monitoring",
+          "body": "Test 6",
+          "base": {
+            "sha": "c2c41b0db17dafbcf901412623e874b48ae37a6e",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "9bf83b05423beff6dcc542f93e903c562e97469b"
+          },
+          "created_at": "2025-07-29T00:31:19Z"
+        },
+        {
+          "number": 5,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5",
+          "title": "Replays Self-Serve Bulk Delete System",
+          "body": "Test 5",
+          "base": {
+            "sha": "49a275847631e231672d01b5dcd66558c069d25b",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "ea188e2d736fd6ed27c1dba8aae63b7268e2a7a9"
+          },
+          "created_at": "2025-07-29T00:31:05Z"
+        },
+        {
+          "number": 4,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/4",
+          "title": "GitHub OAuth Security Enhancement",
+          "body": "Test 4",
+          "base": {
+            "sha": "ccd14e450fcefa5b286c06221775f50a49059f6d",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "843d7c71926b03f0c5847a0740ac3f7fb3c5fbad"
+          },
+          "created_at": "2025-07-29T00:30:53Z"
+        },
+        {
+          "number": 3,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3",
+          "title": "feat(upsampling) - Support upsampled error count with performance optimizations",
+          "body": "Test 3",
+          "base": {
+            "sha": "a5d290951def84afdcc4c88d2f1f20023fc36e2a",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "6ad6fe3899f630ccf922ce7ac681147dc7987435"
+          },
+          "created_at": "2025-07-29T00:30:32Z"
+        },
+        {
+          "number": 2,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2",
+          "title": "Optimize spans buffer insertion with eviction during insert",
+          "body": "Test 2",
+          "base": {
+            "sha": "28e3db2520d4ea28c57b08da57b83917ba7b2e15",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "8ab88145113dd23a930e23b9cbbcf8b30e4c0b17"
+          },
+          "created_at": "2025-07-29T00:29:50Z"
+        },
+        {
+          "number": 1,
+          "html_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1",
+          "title": "Enhanced Pagination Performance for High-Volume Audit Logs",
+          "body": "Test 1",
+          "base": {
+            "sha": "a5d290951def84afdcc4c88d2f1f20023fc36e2a",
+            "repo": {
+              "full_name": "ai-code-review-evaluation/sentry-greptile"
+            }
+          },
+          "head": {
+            "sha": "8ab88145113dd23a930e23b9cbbcf8b30e4c0b17"
+          },
+          "created_at": "2025-07-29T00:29:31Z"
+        }
+      ],
+      "responseSha256": "9ddda346524381e8c1b775f6d36ce006c0e7746e1e394309f7ed6251d1c1ab6e",
+      "encoding": "selected GitHub pull request metadata, with upstream punctuation normalised"
+    }
+  ],
+  "titleAliases": {
+    "sentry-3": "feat(upsampling) - Support upsampled error count with performance optimizations",
+    "sentry-7": "feat(ecosystem): Implement cross-system issue synchronization",
+    "sentry-8": "ref(crons): Reorganize incident creation / issue occurrence logic",
+    "sentry-9": "feat(uptime): Add ability to use queues to manage parallelism",
+    "sentry-10": "feat(workflow_engine): Add in hook for producing occurrences from the stateful detector",
+    "keycloak-2": "Add caching support for IdentityProviderStorageProvider.getForLogin operations"
+  },
+  "repositories": [
+    {
+      "v": 1,
+      "asked": "ai-code-review-evaluation/cal.com-greptile",
+      "readOn": "2026-10-15",
+      "found": true,
+      "fullName": "ai-code-review-evaluation/cal.com-greptile",
+      "fork": false,
+      "source": null,
+      "licence": {
+        "spdx": "NOASSERTION",
+        "key": "other",
+        "file": "LICENSE",
+        "fileSha256": "c9994f45ec2263f363fe66c457b5ce3bdcb139982a271dd102406ce279f6f676"
+      }
+    },
+    {
+      "v": 1,
+      "asked": "ai-code-review-evaluation/discourse-greptile",
+      "readOn": "2026-10-15",
+      "found": true,
+      "fullName": "ai-code-review-evaluation/discourse-greptile",
+      "fork": false,
+      "source": null,
+      "licence": {
+        "spdx": "GPL-2.0",
+        "key": "gpl-2.0",
+        "file": "LICENSE.txt",
+        "fileSha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+      }
+    },
+    {
+      "v": 1,
+      "asked": "ai-code-review-evaluation/grafana-greptile",
+      "readOn": "2026-10-15",
+      "found": true,
+      "fullName": "ai-code-review-evaluation/grafana-greptile",
+      "fork": false,
+      "source": null,
+      "licence": {
+        "spdx": "AGPL-3.0",
+        "key": "agpl-3.0",
+        "file": "LICENSE",
+        "fileSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+      }
+    },
+    {
+      "v": 1,
+      "asked": "ai-code-review-evaluation/keycloak-greptile",
+      "readOn": "2026-10-11",
+      "found": true,
+      "fullName": "ai-code-review-evaluation/keycloak-greptile",
+      "fork": false,
+      "source": null,
+      "licence": {
+        "spdx": "Apache-2.0",
+        "key": "apache-2.0",
+        "file": "LICENSE.txt",
+        "fileSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      }
+    },
+    {
+      "v": 1,
+      "asked": "ai-code-review-evaluation/sentry-greptile",
+      "readOn": "2026-10-11",
+      "found": true,
+      "fullName": "ai-code-review-evaluation/sentry-greptile",
+      "fork": false,
+      "source": null,
+      "licence": {
+        "spdx": "NOASSERTION",
+        "key": "other",
+        "file": "LICENSE.md",
+        "fileSha256": "1f2a39da390f36830e83d88b17f7720527a7c95f8f137b16ebb68f283cbbfabc"
+      }
+    }
+  ],
+  "repositoriesSha256": "54d5abfba9250944991c2c03dcba4a86e95f38f4920c3a9b403deefb04d643a3"
+}

@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import type { Candidate, ImpactEdge, ImpactSummary, Report, ReportFinding } from "../types.js";
 import type { Display, DisplayFile, DisplayHunk } from "./display.js";
-import { coverageLine, lowConfidenceReason, observationsOmittedLine, orderObservations, verdictLine } from "./common.js";
+import { coverageLine, lowConfidenceReason, observationsOmittedLine, orderObservations, orderPossible, verdictLine } from "./common.js";
 import { REPORT_CSS } from "./html-style.js";
 import { modelReviewerLine, product } from "./review.js";
 
@@ -270,7 +270,7 @@ function entryOf(f: DisplayFile, excerpt: boolean): Entry {
 
 const severityBadge = (severity: unknown): string => `<span class="severity ${sevClass(severity)}">${text(severity)}</span>`;
 
-function findingCard(f: ReportFinding, n: number | string, observation = false): string {
+function findingCard(f: ReportFinding, n: number | string, section: "observations" | "possible" | null = null): string {
   const sev = sevClass(f.severity);
   const source = f.source || (f.origin === "agent" ? "the reviewer" : "scanner");
   const rows: string[] = [];
@@ -282,7 +282,9 @@ function findingCard(f: ReportFinding, n: number | string, observation = false):
   const suggested = f.suggested_change ? `<details class="suggested"><summary>Suggested change</summary><pre>${block(f.suggested_change)}</pre></details>` : "";
   const conf = typeof f.confidence === "number" ? `<span class="finding-confidence">confidence ${num(f.confidence)}</span>` : "";
   const candidate = f.candidate ? `<span class="finding-candidate">raises ${text(f.candidate)}</span>` : "";
-  const back = observation ? "observations" : `index-f${n}`;
+  const back = section ?? `index-f${n}`;
+  // wording: session
+  const backLabel = section === "possible" ? "possible issues" : section ?? "the findings list";
   return `<article class="finding-card ${sev}" id="f${n}">
 <header class="finding-head">
 <a class="finding-id" href="#${back}">${n}</a>
@@ -298,8 +300,8 @@ ${suggested}
 <footer class="finding-foot">
 <span class="finding-source">Source: ${text(source)}</span>
 ${conf}
-${candidate}${observation && f.found_by?.length ? `\n<span>Found by: ${text(f.found_by.join(", "))}</span>` : ""}
-<a class="finding-back" href="#${back}">Back to ${observation ? "observations" : "the findings list"}</a>
+${candidate}${section && f.found_by?.length ? `\n<span>Found by: ${text(f.found_by.join(", "))}</span>` : ""}
+<a class="finding-back" href="#${back}">Back to ${backLabel}</a>
 </footer>
 </article>`;
 }
@@ -581,8 +583,17 @@ function observationsSection(report: Report): string {
   const ordered = orderObservations(report);
   const omitted = observationsOmittedLine(report);
   if (ordered.length === 0 && omitted === null) return "";
-  const cards = ordered.map((f, i) => findingCard(f, report.findings.length + i + 1, true)).join("\n");
+  const cards = ordered.map((f, i) => findingCard(f, report.findings.length + i + 1, "observations")).join("\n");
   return `\n<section id="observations"><h2 class="muted">Observations</h2><p class="muted">These do not count toward the verdict.</p><div class="review-main">${cards}</div>${omitted ? `<p class="muted">${text(omitted)}</p>` : ""}</section>`;
+}
+
+function possibleSection(report: Report): string {
+  const ordered = orderPossible(report);
+  if (ordered.length === 0) return "";
+  const offset = report.findings.length + orderObservations(report).length;
+  const cards = ordered.map((f, i) => findingCard(f, offset + i + 1, "possible")).join("\n");
+  // wording: session
+  return `\n<section id="possible"><h2 class="muted">Possible issues (not counted)</h2><div class="review-main">${cards}</div></section>`;
 }
 
 function accounting(report: Report): string {
@@ -602,6 +613,8 @@ function accounting(report: Report): string {
     // An incomplete review counts nothing: the candidates it lists are unchecked.
     [!isComplete(report) && notReviewed.length > 0 ? "Unchecked scanner candidates, not a review" : "Not reviewed, counted at scanner severity", num(notReviewed.length), notReviewed.length === 0 ? esc("none") : notReviewed.map((c) => `${text(c.id)} ${text(c.token)} at ${text(candidateLocation(c))}`).join("; ")],
     ["Below the confidence floor", num(low.length), low.length === 0 ? esc("none") : low.map((l) => `${text(l.file_path)}: ${text(l.title)} (${num(l.confidence)}, floor ${num(l.floor)})${text(lowConfidenceReason(l))}`).join("; ")],
+    // Only when there are any, so a report without them keeps the reference renderer's table.
+    ...((report.possible ?? []).length > 0 ? [["Possible issues", num(report.possible!.length), esc("shown under the floor, never counted")]] : []),
     ["Below the severity threshold", num(report.below_threshold || 0), esc("left out of the findings, never counted")],
     ["Outside the changed lines", num(outsideChange.length), outsideChange.length > 0 ? esc("shown for information, never counted") : esc("none")],
     ["Scanner results not kept", num(notKept.reduce((n, [, k]) => n + k, 0)), notKept.length > 0 ? esc(`a result is kept only when it sits on a changed line; ${notKept.map(([name, k]) => `${name} ${k}`).join(", ")}`) : esc("none")],
@@ -656,7 +669,7 @@ function blastRadius(report: Report): string {
 
   const touched = impact.touched ?? [];
   if (touched.length === 0 && c.removed.length === 0) {
-    out.push("<p>The change touches no function, method, class or type in a TypeScript, JavaScript, Python, Go or Ruby file, so there is no caller to trace.</p>");
+    out.push("<p>The change touches no function, method, class or type in a TypeScript, JavaScript, Python, Go, Ruby or Java file, so there is no caller to trace.</p>");
   } else {
     if (c.removed.length > 0) {
       const called = new Map<string, number>();
@@ -820,7 +833,7 @@ ${coverage(report)}
 ${filesNav(entries, findingsByPath, filesTotal)}
 <div class="review-main">
 ${findingsIndex(findings, complete)}
-${sections}${observationsSection(report)}
+${sections}${observationsSection(report)}${possibleSection(report)}
 </div>
 </div>
 ${accounting(report)}

@@ -1,7 +1,7 @@
 // One brief per finder session and one per verifier batch.
-import { conventionsBlock, contextBlocks, fenceFor, header, instructionsBlock, lensBlock, MAX_DIFF_BYTES, SEVERITY_RULES, targetBlock, writingRules } from "./brief.js";
+import { conventionsBlock, contextBlocks, copyBlock, fenceFor, header, instructionsBlock, lensBlock, MAX_DIFF_BYTES, SEVERITY_RULES, targetBlock, writingRules } from "./brief.js";
 import { removedRuns } from "./diff.js";
-import { GLOBAL_CONFIDENCE_FLOOR, scannerCategory } from "./finalize.js";
+import { GLOBAL_CONFIDENCE_FLOOR, POSSIBLE_CONFIDENCE_FLOOR, scannerCategory } from "./finalize.js";
 import { redactSecrets, redactSecretsKeepingLines } from "./redact.js";
 import type { Change, Config, ContextItem, DeletionPoint, FindAnswer, FindPass, HunkRef, InstructionFile, ReviewUnit, RunTarget, ScanResult, SelectedLens, VerifyAnswer, VerifyCandidate } from "./types.js";
 
@@ -28,7 +28,7 @@ export type StagedBriefArgs = {
 
 // The lowest confidence a finder's candidate may have. The verifier decides
 // what is kept; finalize's floor applies to the verifier's confidence.
-export const FINDER_CONFIDENCE_FLOOR = 0.5;
+export const FINDER_CONFIDENCE_FLOOR = POSSIBLE_CONFIDENCE_FLOOR;
 
 // One verifier batch: the candidates of one file, at most VERIFY_BATCH_SIZE.
 export type VerifyBatch = { file: string; hunks: HunkRef[]; candidates: VerifyCandidate[] };
@@ -41,6 +41,7 @@ export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: Fi
   const hunks = hunksBlock(args.change, unit.hunks, args.secrets);
   const blocks = [
     header(args.change, args.scan, args.config, args.target, "# OpenQodex review brief: find pass"),
+    copyBlock,
     targetBlock(args.target, true),
     instructionsBlock(args.instructions ?? "", args.instructionsFrom, "find"),
     conventionsBlock(args.instructionFiles ?? [], "find"),
@@ -64,6 +65,7 @@ export function buildFindBrief(args: StagedBriefArgs, unit: ReviewUnit, pass: Fi
 export function buildVerifyBrief(args: StagedBriefArgs, batch: VerifyBatch): { text: string } {
   const blocks = [
     header(args.change, args.scan, args.config, args.target, "# OpenQodex review brief: verify pass"),
+    copyBlock,
     targetBlock(args.target, true),
     instructionsBlock(args.instructions ?? "", args.instructionsFrom, "verify"),
     conventionsBlock(args.instructionFiles ?? [], "verify"),
@@ -176,6 +178,15 @@ function hunksBlock(change: Change, hunks: HunkRef[], secrets: string[]): { text
   // larger. A hunk over the brief's diff budget is read through the tools
   // instead, and its file must then be read to count.
   for (const ref of hunks) {
+    if (ref.deletion && change.files.some((file) => file.path === ref.path && file.binary && file.status === "deleted")) {
+      blocks.push([
+        `### ${ref.id} ${ref.path} ${ref.start}-${ref.end}`,
+        "",
+        "The file is binary and was deleted. There are no lines to read; the deletion is the change.",
+      ].join("\n"));
+      shown.add(ref.path);
+      continue;
+    }
     let file = files.get(ref.path);
     if (!file) {
       const text = redactSecretsKeepingLines(change.diffs?.find((diff) => diff.path === ref.path)?.text ?? "", secrets);
@@ -225,6 +236,9 @@ const FIND_WORK = [
   "## How to work",
   "",
   "For each hunk, write what changed and what it could break before anything else.",
+  // wording: session
+  "Then follow each changed condition, mutation, async completion and cleanup through the whole flow it belongs to.",
+  "Look across the other hunks of this unit and the code around the change.",
   "Before judging a changed call, contract, default or fallback, read the other side in the other file.",
   'Use "Code around the change" first, then your tools. Name the question you are answering before each read.',
   `Raise every defect you can show with a line of code at confidence ${FINDER_CONFIDENCE_FLOOR} or higher.`,
@@ -266,7 +280,9 @@ function findAnswerBlock(change: Change, unit: ReviewUnit): string {
     "- `file_path` and `line_number`: the file and line showing the problem.",
     "- `line_end`: optional end of the range, at least `line_number`.",
     "- `title`: a short noun phrase naming the problem.",
-    "- `claim`: what is wrong and why it matters, in one or two sentences.",
+    // wording: session
+    "- `claim`: what is wrong and why it matters. Name the code that makes it happen at each step, from the changed line to the effect.",
+    "  When the evidence line itself is the defect, quote its words (a bare `pass`, an empty handler).",
     "- `evidence`: one to three citations. Each has `file_path`, `line_number` and `quote`.",
     "- `quote`: the line's text, copied exactly without the diff marker. Set `removed: true` when the change removed it.",
     "- `lens`: the listed pattern's name when it led to the candidate. Otherwise omit it or set null.",
@@ -306,7 +322,12 @@ const VERIFY_WORK = [
   'Use "Code around the change" first, then your tools. Name the question you are answering before each read.',
   "Confirm when the code shows the claim is true. Cite the line where the defect manifests.",
   "That line must be one this change added or modified, or an anchor of a deletion. The finding starts there.",
+  // wording: session
+  "When you confirm, keep the candidate's cause and consequence as its claim and evidence show them.",
+  "Name each step by its code: the call, the exception, the keyword, the field.",
+  "Correct a detail only when you cite the line that refutes it, and say so in `reason`.",
   "Refute when the code shows the claim is wrong or the path cannot happen. Cite the line that shows why.",
+  "A claim that a value is a placeholder, missing or redacted, where the copy reads `[redacted]`, is refuted.",
   'Check for an upstream guard, an unreachable branch, an already validated value, or generic "missing X" without a concrete path.',
   "Use unresolved when the code does not settle a finder candidate. Doubt alone is not a refutation.",
   "A scanner candidate is always confirmed or refuted, never unresolved.",
@@ -354,12 +375,17 @@ function verifyAnswerBlock(change: Change, batch: VerifyBatch, floor = GLOBAL_CO
     "- `severity`: impact according to the scale above.",
     "- `category`: `bug`, `security`, `performance`, `maintainability` or `style`: the kind of the problem as the code shows it, whatever the candidate said.",
     "- `confidence`: 0 to 1, set honestly from the code.",
-    `- Findings under ${floor}, or under a cited lens's floor, are not counted.`,
+    // wording: session
+    `- Findings at ${floor} or higher, and at a cited lens's floor, count toward the verdict.${floor > POSSIBLE_CONFIDENCE_FLOOR ? ` Findings from ${POSSIBLE_CONFIDENCE_FLOOR} up to the floor are shown as possible issues and never counted. Findings under ${POSSIBLE_CONFIDENCE_FLOOR} are dropped.` : ` Findings under ${floor} are dropped. A finding under its cited lens's floor is a possible issue at ${POSSIBLE_CONFIDENCE_FLOOR} or higher, and dropped under ${POSSIBLE_CONFIDENCE_FLOOR}.`}`,
     "- `file_path` and `line_number`: the manifestation line for a confirmed defect, or the line explaining another verdict.",
     "- A confirmed finding starts on an added or modified line or a deletion anchor. Overlapping the change is insufficient.",
     "- `line_end`: optional end of the range, at least `line_number`. It must exist and span at most 200 lines.",
     "- `title`: a short noun phrase naming the problem.",
     "- `problem`: what is wrong. `consequence`: why it matters, and to whom. `fix`: what to change.",
+    // wording: session
+    "  When you confirm, keep the candidate's cause and consequence as its claim and evidence show them.",
+    "  Name each step by its code: the call, the exception, the keyword, the field.",
+    "  Correct a detail only when you cite the line that refutes it, and say so in `reason`.",
     "- `suggested_change`: the literal replacement for the cited lines when the fix fits in them, else null.",
     "- `tier`: `finding` for defects, `observation` for style, naming, docs, clarity, conventions and test coverage.",
     "- Supply every required field for every verdict. For refuted or unresolved items, use empty problem, consequence and fix strings.",

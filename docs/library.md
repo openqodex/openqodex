@@ -68,7 +68,8 @@ const result = await reviewChange(
 
 - `status`: `complete`, `complete_blocking` (complete, with a finding at or above `block_on_severity`) or `incomplete`.
 - `reason`: why the review is incomplete, one line per missing proof. A complete review has a reason only when there was nothing to review.
-- `findings`: every finding that passed every check, in the finding shape below.
+- `findings`: counted findings that passed every check, in the finding shape below.
+- `possible`: confirmed issues with confidence at least 0.5 and below their effective floor. Each uses the same finding shape. This array is always present, including when empty. These issues never affect the verdict.
 - `dispositions`: what the reviewer did with each scanner candidate: `raised` with the finding's file and line, or `dropped` with the reason and the line that shows why.
 - `summary`: the reviewer's summary, or null.
 - `coverage`: which changed lines the reviewer was shown, and how.
@@ -86,6 +87,8 @@ const result = await reviewChange(
 - `render`: `markdown()`, `sarif()` and `json()`, the report in each format.
 
 An incomplete review keeps every finding already checked.
+
+Observations remain outside `ReviewResult.findings` and `ReviewResult.possible`. Rendered reports still include them. The second reviewer's possible issues are not merged into the primary result.
 
 ### The finding shape
 
@@ -140,7 +143,7 @@ The brain runs these over the frozen snapshot, never over the clone:
 - `read_diff_for_file`: one changed file's diff against the merge base.
 - `find_callers`: the callers of a function, method or class, from the code graph built for the review.
 
-Each call is checked before it runs. A path outside the snapshot is refused and logged as outside. With `scopes`, a path outside them is refused as outside the review's scopes, and a listing or a search returns only files inside them; the graph files the brief names, under `.openqodex-review/graph/`, stay readable. Either refusal leaves the review incomplete. A link is never followed, and the snapshot's `.git` entry is never read. Every reply is at most 32 KB, cut only at a whole line, and says so when it was cut. Every reply is redacted of the secrets the scanners found. No tool starts a program. Every call is logged with its path, its range and whether its result was sent to the model in a later request.
+Each call is checked before it runs. A path outside the snapshot is refused and logged as outside. With `scopes`, a path outside them is refused as outside the review's scopes, and a listing or a search returns only files inside them; the graph files the brief names, under `.openqodex-review/graph/`, stay readable. These refused attempts, and calls to tools the brain did not define, are listed in `completion.refused` and on the receipt. The model receives the refusal text and can continue the review. A read outside the snapshot or scopes, or a successful call to an undefined tool, makes the review incomplete. A link is never followed, and the snapshot's `.git` entry is never read. Every reply is at most 32 KB, cut only at a whole line, and says so when it was cut. Every reply is redacted of the secrets the scanners found. No tool starts a program. Every call is logged with its path, its range and whether its result was sent to the model in a later request.
 
 ## What the server profile never does
 
@@ -270,7 +273,7 @@ In the result, `scan.candidates` are the findings and `scan.scanners` has one su
 
 ## graph
 
-`buildGraph(args)` reads the code of a git work tree and returns `Promise<Graph>`: the definitions, calls and imports of its TypeScript, JavaScript, Python, Go and Ruby files, and how they connect. `args` is a `BuildArgs`:
+`buildGraph(args)` reads the code of a git work tree and returns `Promise<Graph>`: the definitions, calls and imports of its TypeScript, JavaScript, Python, Go, Ruby and Java files, and how they connect. `args` is a `BuildArgs`:
 
 - `repoRoot`: the folder to read. It must be a git work tree, because the list of files comes from git.
 - `files` (optional): paths to read first, such as the changed files, so a cut never leaves them out.
@@ -282,13 +285,28 @@ In the result, `scan.candidates` are the findings and `scan.scanners` has one su
 
 `detectImpact(graph, change)` returns the blast radius of a change as an `ImpactSummary`. `change` needs `files` (the changed files) and `coverage` (the changed lines). The summary lists the symbols the change touches or removes, their callers and callees with how certain each link is, the files that import a changed file, what the graph could not see, and a risk level.
 
-`extractFacts(lang, text)` parses the text of one file and returns `Promise<FileFacts | null>`: its definitions, calls and imports, extracted the same way a build does it. `lang` is one of `typescript`, `tsx`, `javascript`, `python`, `go` and `ruby`. It returns `null` when the parse takes longer than two seconds.
+`extractFacts(lang, text)` parses the text of one file and returns `Promise<FileFacts | null>`: its definitions, calls and imports, extracted the same way a build does it. `lang` is one of `typescript`, `tsx`, `javascript`, `python`, `go`, `ruby` and `java`. It returns `null` when the parse takes longer than two seconds.
+
+`writeIndex(graph)` returns the graph as files: a map of file name to content, with the project model in `projects.json`. Save them anywhere. `readIndexFrom(read, repoRoot)` gives the same graph back. `read` returns a file by its name, or `null`. `repoRoot` is the folder the graph was built from. It returns `null` when a file is missing or in another format. `readIndex(generation)` reads a build the graph folder kept. `graphOf(store, generation)` reads one with or without an index.
+
+`prepareIndexes(graph)` builds the lookups the questions read. Call it once after a build or a load, before the first question. A question is a `Request` over a `Session` (`{ graph, generation, treeSha, builtAt, laterEditsKnown }`). `query(session, request)` answers it at once. `querySliced(session, request)` answers it in slices of `SLICE_CHECKS` checks, so a long walk yields to the event loop. `OPERATIONS` lists every `kind` a request can ask: `search`, `symbol`, `callers`, `callees`, `importers`, `implementers`, `references`, `routes`, `tests`, `path`, `impact`, `outline`, `packages`, `cycles`, `changes`, `unknowns`, `explain`, `status` and `capabilities`. `parseTarget(text)` reads a target from its text form. `resolveTarget(graph, target)` finds the definitions it names. `floorReasons`, `hotSymbols` and `isTestPath` are what `detectImpact` rests on. `assemble`, `serializeModel`, `deserializeModel` and `INDEX_FORMAT` are the parts of the index.
 
 `writePacket({ root, repoRoot, graph, impact, baseSha, secrets })` writes the graph's view of a change as files under `.openqodex-review/graph/` in `root`, for a reviewer to read, and returns `Promise<{ dir, files }>`. Every secret in `secrets` is redacted from every file. It throws `PacketCollision` when `root` already holds `.openqodex-review`, and `PacketLeak` when a secret is still found in a written file.
 
 ## lenses
 
-A lens is a named bug pattern, one markdown file, that the review hands to the reviewer when a change matches it. The package ships 48.
+A lens is a named bug pattern, one markdown file, that the review hands to the reviewer when a change matches it. The package ships 49. The `replaced-line-drops-behavior` lens checks adjacent removed and added lines for lost effects. It triggers on files with these extensions:
+
+- `.c`, `.cc`, `.cpp`, `.cxx`, `.C`, `.h`, `.hh`, `.hpp`, `.hxx`, `.rs`, `.cs`, `.php`
+- `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`, `.py`, `.pyi`, `.go`, `.rb`
+- `.java`, `.kt`, `.kts`, `.swift`, `.m`, `.mm`, `.scala`, `.sc`, `.sh`, `.bash`, `.zsh`, `.sql`
+- `.lua`, `.pl`, `.pm`, `.r`, `.R`, `.dart`, `.ex`, `.exs`, `.erl`, `.hrl`, `.hs`, `.clj`
+- `.cljs`, `.cljc`, `.vue`, `.svelte`, `.vb`, `.fs`, `.fsx`, `.ps1`, `.psm1`, `.groovy`, `.gradle`, `.asm`
+- `.s`, `.S`, `.zig`, `.jl`, `.ml`, `.mli`, `.nim`, `.v`, `.vhd`, `.vhdl`, `.f`, `.f90`
+- `.f95`, `.for`, `.cob`, `.cbl`, `.coffee`, `.elm`, `.el`, `.lisp`, `.lsp`, `.scm`, `.ss`, `.rkt`
+- `.d`, `.pas`, `.p`, `.raku`, `.tcl`, `.awk`
+
+The library exposes these lens helpers:
 
 - `loadLensCatalog(dir)` returns every lens as a `Lens`. `dir` is optional; without it the lenses come from the installed package.
 - `defaultLensDir()` returns the folder of the installed package's lenses.
@@ -312,4 +330,4 @@ Each renderer takes a `Report`, the shape `report.json` holds, and returns a str
 
 ## Types
 
-The library exports the types its functions take and return. The finding, report and completion types are `Report`, `ReportFinding`, `Verdict`, `CompletionRecord`, `ReviewerRecord`, `StaticFinding`, `Candidate`, `Severity` and `Category`. A review by a model reviewer has its own completion record, `ModelCompletionRecord` (contract `openqodex-model-review-1`). Its parts are `ModelToolEntry`, `ModelAttempt` and `ModelCallUsage`. `Report.completion` holds either record; its type is `AnyCompletionRecord`. `Report.timings` and `ReviewResult.timings` are `RunTimings`; `ReviewResult.scan` is a `ScanResult` without `secretFingerprints`. The others are `ScannerSource`, `ScannerRunSummary`, `ScanResult`, `RunScannersResult`, `ResolveTool`, `ToolResolution`, `Toolchain`, `Recipe`, `PreinstallOptions`, `PreinstallResult`, `PreinstallTool`, `DiffCoverage`, `Change`, `ChangedFile`, `Config`, `LoadedConfig`, `ParseOptions`, `Lens`, `SelectedLens`, `ImpactSummary`, `Graph`, `BuildArgs`, `FileFacts` and `Lang`.
+The library exports the types its functions take and return. The finding, report and completion types are `Report`, `ReportFinding`, `Verdict`, `CompletionRecord`, `ReviewerRecord`, `StaticFinding`, `Candidate`, `Severity` and `Category`. A review by a model reviewer has its own completion record, `ModelCompletionRecord` (contract `openqodex-model-review-1`). Its parts are `ModelToolEntry`, `ModelAttempt` and `ModelCallUsage`. `Report.completion` holds either record; its type is `AnyCompletionRecord`. `Report.timings` and `ReviewResult.timings` are `RunTimings`; `ReviewResult.scan` is a `ScanResult` without `secretFingerprints`. The others are `ScannerSource`, `ScannerRunSummary`, `ScanResult`, `RunScannersResult`, `ResolveTool`, `ToolResolution`, `Toolchain`, `Recipe`, `PreinstallOptions`, `PreinstallResult`, `PreinstallTool`, `DiffCoverage`, `Change`, `ChangedFile`, `Config`, `LoadedConfig`, `ParseOptions`, `Lens`, `SelectedLens`, `ImpactSummary`, `Graph`, `BuildArgs`, `FileFacts` and `Lang`. The graph's questions use `Session`, `Request`, `Answer`, `Operation`, `Target`, `Item`, `Extra` and `ErrorCode`. An edge's evidence is a `Tier` and an `Evidence`; what the graph could not bind is an `Unknown` with its `Cause`. A kept build is a `GenerationManifest`, read through an `OpenGeneration` of a `GraphStore`. Its files hold a `ProjectModel` and are read back through a `ReadIndexFile`.

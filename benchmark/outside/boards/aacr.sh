@@ -8,7 +8,7 @@
 #       venv beside it (aacr-bench@<commit>.venv) with uv and Python 3.11, so
 #       the checkout holds nothing but the pinned tree; nothing is installed
 #       globally.
-#   benchmark/outside/boards/aacr.sh <run folder> [--rounds N] [--dry-run]
+#   benchmark/outside/boards/aacr.sh <run folder> [--rounds N] (--wave <id> | --dry-run)
 #       1. converts the run (outside/convert/aacr.mjs) into
 #          <run>/outside/aacr/, unless it holds a conversion already;
 #       2. with --dry-run, checks the judge settings and prints the
@@ -17,7 +17,9 @@
 #          pinned dataset file in the cache, and keeps the run's pull
 #          requests (checked against our truth copies);
 #       4. runs their evaluation stage on each configuration and repeat,
-#          N rounds (default 3), with a model as judge (aacr-judge.mjs);
+#          N rounds (default 3), with a model as judge (aacr-judge.mjs),
+#          which reserves the judging's forecast in the wave named by
+#          --wave (benchmark/lib/wave.mjs);
 #       5. leaves eval.json for node benchmark/score.mjs <run> --outside aacr.
 #
 # The judge's base URL and key never pass through this script: aacr-judge.mjs
@@ -41,6 +43,7 @@ die() {
 }
 
 rounds=3
+wave=""
 dry=0
 prepare_only=0
 run=""
@@ -51,6 +54,11 @@ while [ $# -gt 0 ]; do
     --rounds)
       [ $# -ge 2 ] || die "--rounds needs a number"
       rounds=$2
+      shift
+      ;;
+    --wave)
+      [ $# -ge 2 ] || die "--wave needs a wave id"
+      wave=$2
       shift
       ;;
     -*) die "unknown option $1" ;;
@@ -94,7 +102,8 @@ if [ "$prepare_only" = 1 ]; then
   exit 0
 fi
 
-[ -n "$run" ] || die "usage: aacr.sh --prepare | aacr.sh <run folder> [--rounds N] [--dry-run]"
+[ -n "$run" ] || die "usage: aacr.sh --prepare | aacr.sh <run folder> [--rounds N] (--wave <id> | --dry-run)"
+[ "$dry" = 1 ] || [ -n "$wave" ] || die "--wave <id> is required: the judging pays a model (node benchmark/lib/wave.mjs --wave-new <id> starts one)"
 [ -f "$run/manifest.json" ] || die "$run holds no manifest.json; it is not a benchmark run"
 run=$(cd "$run" && pwd)
 out="$run/outside/aacr"
@@ -113,4 +122,4 @@ prepare
 raw=$(node "$convert" raw)
 (cd "$evaluation" && "$python" -B -m converters.aacr_bench --input "$raw" --output "$out/upstream-dataset.jsonl" --validate)
 node "$convert" dataset "$run" "$out/upstream-dataset.jsonl"
-exec node "$judge" "$run" --rounds "$rounds" --evaluation "$evaluation" --python "$python"
+exec node "$judge" "$run" --rounds "$rounds" --evaluation "$evaluation" --python "$python" --wave "$wave"

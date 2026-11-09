@@ -1,0 +1,89 @@
+{
+  "source": {
+    "repo": "withmartian/code-review-benchmark",
+    "commit": "e616e849755441da38f18bf3adba2c9583b03803",
+    "results": "offline/results/openai_gpt-5.2"
+  },
+  "url": "https://github.com/grafana/grafana/pull/94942",
+  "tool": "devin",
+  "candidates": [
+    {
+      "text": "enableSqlExpressions uses an inverted feature-flag check by negating IsEnabledGlobally(featuremgmt.FlagSqlExpressions), causing enabled to be false when the flag is actually enabled",
+      "path": null,
+      "line": null,
+      "source": "extracted"
+    },
+    {
+      "text": "enableSqlExpressions returns false in both branches / has no code path that returns true, so SQL expressions can never be enabled",
+      "path": null,
+      "line": null,
+      "source": "extracted"
+    },
+    {
+      "text": "Because enableSqlExpressions always returns false, the caller rejects all SQL expression queries with \"sqlExpressions is not implemented\" even when the sqlExpressions feature flag is enabled",
+      "path": null,
+      "line": null,
+      "source": "extracted"
+    }
+  ],
+  "dedup": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ]
+  ],
+  "evaluation": {
+    "skipped": false,
+    "true_positives": [
+      {
+        "golden_comment": "The enableSqlExpressions function has flawed logic that always returns false, effectively disabling SQL expressions unconditionally:",
+        "severity": "Critical",
+        "category": "bug",
+        "matched_candidate": "enableSqlExpressions returns false in both branches / has no code path that returns true, so SQL expressions can never be enabled",
+        "confidence": 0.98,
+        "reasoning": "The candidate states that enableSqlExpressions returns false on all code paths, meaning SQL expressions can never be enabled. This is the same underlying flaw described in the golden comment (logic always returns false, disabling SQL expressions unconditionally)."
+      }
+    ],
+    "false_positives": [
+      {
+        "candidate": "Because enableSqlExpressions always returns false, the caller rejects all SQL expression queries with \"sqlExpressions is not implemented\" even when the sqlExpressions feature flag is enabled"
+      }
+    ],
+    "false_negatives": [
+      {
+        "golden_comment": "The DB methods NewInMemoryDB().RunCommands, DB.QueryFramesInto, and DB.TablesList in pkg/expr/sql/db.go return hardcoded 'not implemented' errors after removing the go-duck dependency.",
+        "severity": "High",
+        "category": "api"
+      }
+    ],
+    "errors": [],
+    "total_candidates": 3,
+    "total_golden": 2,
+    "tp": 1,
+    "fp": 1,
+    "fn": 1,
+    "errors_count": 0,
+    "precision": 0.3333333333333333,
+    "recall": 0.5,
+    "tool": "devin",
+    "repo_name": "grafana__grafana__devin__PR94942__20260302",
+    "pr_url": "https://github.com/code-review-benchmark/grafana__grafana__devin__PR94942__20260302/pull/1"
+  },
+  "golden": [
+    {
+      "comment": "The enableSqlExpressions function has flawed logic that always returns false, effectively disabling SQL expressions unconditionally:",
+      "severity": "Critical",
+      "category": "bug"
+    },
+    {
+      "comment": "The DB methods NewInMemoryDB().RunCommands, DB.QueryFramesInto, and DB.TablesList in pkg/expr/sql/db.go return hardcoded 'not implemented' errors after removing the go-duck dependency.",
+      "severity": "High",
+      "category": "api"
+    }
+  ]
+}

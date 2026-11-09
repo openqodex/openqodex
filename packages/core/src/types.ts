@@ -715,6 +715,8 @@ export type CompletionRecord = {
   contract: "openqodex-review-2";
   status: "complete" | "incomplete";
   missing: string[];
+  // Outside paths and tools not given whose calls were refused.
+  refused: string[];
   reviewer: ReviewerRecord | null;
   // The change id, the git tree the change and the snapshot were made from
   // (null for a target, whose head commit is in the change), and a hash of
@@ -790,6 +792,8 @@ export type ModelCompletionRecord = {
   contract: "openqodex-model-review-1";
   status: "complete" | "incomplete";
   missing: string[];
+  // Outside paths and tools not given whose calls were refused.
+  refused: string[];
   reviewer: { kind: "model"; model: string; servedModels: string[]; calls: number };
   snapshot: { change_id: string; tree: string | null; before: string; after: string | null };
   candidates: { total: number; disposed: number };
@@ -820,6 +824,8 @@ export type ReportFinding = {
   severity: Severity;
   category: Category;
   confidence: number | null; // null for a scanner finding
+  // Effective confidence floor for an under-floor outside-change entry.
+  floor?: number;
   file_path: string;
   line_number: number;
   line_end: number;
@@ -853,6 +859,9 @@ export type Report = {
   // Findings on lines the developer changed. Only these and `not_reviewed`
   // count toward the verdict.
   findings: ReportFinding[];
+  // Confirmed issues below the effective floor, at confidence 0.5 or higher.
+  // Shown separately and never counted toward the verdict.
+  possible: ReportFinding[];
   // How many findings on changed lines were left out of `findings` because
   // they sit below review.severity_threshold (and below block_on_severity).
   below_threshold: number;

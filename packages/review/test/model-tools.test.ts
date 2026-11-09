@@ -374,11 +374,14 @@ describe("15. the bounds on the work one call may ask for", () => {
     expect(r.ok).toBe(true);
   });
 
-  it("stops a listing and a search of 20,000 files at the walk's bound and records the cut", async () => {
+  it("stops a listing and a search one file past the walk's bound and records the cut", async () => {
+    // The walk keeps WALK_FILES files and stops at the next one, so
+    // WALK_FILES + 1 files is the smallest tree that trips the cut.
     const dir = tempDir("oq-tools-many-");
-    for (let f = 0; f < 100; f++) {
-      mkdirSync(join(dir, `d${String(f).padStart(3, "0")}`));
-      for (let k = 0; k < 200; k++) writeFileSync(join(dir, `d${String(f).padStart(3, "0")}`, `f${k}.txt`), "a line of text\n");
+    for (let n = 0; n <= WALK_FILES; n++) {
+      const folder = join(dir, `d${String(Math.floor(n / 200)).padStart(3, "0")}`);
+      if (n % 200 === 0) mkdirSync(folder);
+      writeFileSync(join(folder, `f${n % 200}.txt`), "a line of text\n");
     }
     const many: ToolBox = { ...box, snapshotDir: dir };
     const listed = await timed("list_files", {}, many);
@@ -396,10 +399,9 @@ describe("15. the bounds on the work one call may ask for", () => {
     expect(none.ms).toBeLessThan(15_000);
     expect(none.r.text).toBe(`0 matches in ${WALK_FILES} or more files; the file walk stopped after ${WALK_FILES} files`);
     expect(none.r.reason).toBe(`the file walk stopped after ${WALK_FILES} files; narrow the pattern or the glob`);
-    // The cap trips only past WALK_FILES (10,000) files, so the fixture keeps
-    // its 20,000 files. Writing them is most of this test's time: 87 to 271 s
-    // on a loaded Mac against the 30 s default. Each tool call keeps its own
-    // limit above; only the room to write the fixture is raised here.
+    // Writing the fixture is most of this test's time on a loaded Mac. Each
+    // tool call keeps its own limit above; only the room to write the
+    // fixture is raised here.
   }, 600_000);
 
   it("a glob means what core's glob matcher says it means", () => {

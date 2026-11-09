@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../../index.js";
 import type { Graph } from "../../index.js";
-import { cpuMs, expectLinear, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
+import { cpuMs, expectLinear, growthTests, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
 import { readFacts } from "./facts.js";
 import { MAX_SOURCE_BYTES } from "./js.js";
 import { matches, MAX_MIDDLEWARE_CHAIN, MAX_MOUNTS, MAX_REGISTRATIONS } from "./resolve.js";
@@ -119,15 +119,25 @@ afterAll(() => {
 });
 
 describe("the Express plugin on a hostile repository", () => {
-  it("reads the facts of more than 1 MiB of crafted route files in time that grows with their size and no faster", async () => {
-    expectLinear("the Express fact reader on the hostile files", await readerCpuMs("typescript", sources(hostile(1)), readFacts), await readerCpuMs("typescript", sources(files), readFacts));
-  }, 300_000);
+  growthTests("in time that grows with it", () => {
+    it("reads the facts of more than 1 MiB of crafted route files in time that grows with their size and no faster", async () => {
+      expectLinear("the Express fact reader on the hostile files", await readerCpuMs("typescript", sources(hostile(1)), readFacts), await readerCpuMs("typescript", sources(files), readFacts));
+    }, 300_000);
 
-  it("resolves a crafted repository in time that grows with it and no faster, so a route file cannot hang the build", async () => {
+    it("resolves a crafted repository in time that grows with it and no faster, so a route file cannot hang the build", async () => {
+      expectLinear("the Express plugin on the hostile repository", await pluginCpuMs(build(quarter), "express"), await pluginCpuMs(build(root), "express"));
+    }, 300_000);
+
+    it("matches a request path against a pattern of hundreds of wildcards in linear time", async () => {
+      const both = (segments: number) => () => matches(STARS, wildcardPath(segments)) || matches("/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*", wildcardPath(segments));
+      expectLinear("matching a path of 1,250 and of 5,000 segments", await cpuMs(both(1250)), await cpuMs(both(5000)));
+    });
+  });
+
+  it("resolves a crafted repository", () => {
     const run = graph.frameworks?.plugins.find((p) => p.id === "express");
     expect(run?.status).toBe("ok");
-    expectLinear("the Express plugin on the hostile repository", await pluginCpuMs(build(quarter), "express"), await pluginCpuMs(build(root), "express"));
-  }, 300_000);
+  });
 
   it("does not read a file over the byte cap, and says so with an unknown", () => {
     const gap = graph.frameworks?.unknowns.find((u) => u.plugin === "express" && u.cause === "file-not-parsed" && u.site?.file === "src/huge.ts");
@@ -157,12 +167,10 @@ describe("the Express plugin on a hostile repository", () => {
     expect(loop.length).toBeLessThanOrEqual(1);
   });
 
-  it("matches a request path against a pattern of hundreds of wildcards in linear time, with no regular expression", async () => {
-    const path = (segments: number) => `/${"a/".repeat(segments)}b`;
-    expect(matches(STARS, path(5000))).toBe(false);
-    expect(matches("/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*", path(5000))).toBe(false);
-    const both = (segments: number) => () => matches(STARS, path(segments)) || matches("/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*", path(segments));
-    expectLinear("matching a path of 1,250 and of 5,000 segments", await cpuMs(both(1250)), await cpuMs(both(5000)));
+  const wildcardPath = (segments: number) => `/${"a/".repeat(segments)}b`;
+  it("matches a request path against a pattern of hundreds of wildcards, with no regular expression", () => {
+    expect(matches(STARS, wildcardPath(5000))).toBe(false);
+    expect(matches("/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*", wildcardPath(5000))).toBe(false);
   });
 
   it("still matches the patterns Express serves: a parameter, an optional parameter and a wildcard segment", () => {
@@ -215,9 +223,14 @@ describe("the Express plugin on work split over hundreds of small applications",
     expect(notes).toContain(`${MAX_REGISTRATIONS} registrations in this build`);
   });
 
-  it("finishes the split work in time that grows with the number of applications and no faster", async () => {
+  it("finishes the split work", () => {
     const run = split.frameworks?.plugins.find((p) => p.id === "express");
     expect(run?.status).toBe("ok");
-    expectLinear("the Express plugin on 75 and on 300 small applications", await pluginCpuMs(splitBuild(splitQuarter), "express"), await pluginCpuMs(splitBuild(splitRoot), "express"));
-  }, 300_000);
+  });
+
+  growthTests("in time that grows with the applications", () => {
+    it("finishes the split work in time that grows with the number of applications and no faster", async () => {
+      expectLinear("the Express plugin on 75 and on 300 small applications", await pluginCpuMs(splitBuild(splitQuarter), "express"), await pluginCpuMs(splitBuild(splitRoot), "express"));
+    }, 300_000);
+  });
 });

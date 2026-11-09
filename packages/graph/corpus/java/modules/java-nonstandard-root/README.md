@@ -1,0 +1,1 @@
+The repository has no pom.xml and no Gradle file. `lib/java/A.java` declares `package a.b;` and `tools/Run.java` imports `a.b.A` and calls `A.go()`. The change edits A.go. A graph that finds packages from source roots such as `src/main/java` finds no root here and reports no caller. The declared package is the index, so the call must bind certain without any root.

@@ -10,13 +10,29 @@
 [![CI](https://github.com/openqodex/openqodex/actions/workflows/ci.yml/badge.svg)](https://github.com/openqodex/openqodex/actions/workflows/ci.yml)
 [![Discussions](https://img.shields.io/github/discussions/openqodex/openqodex)](https://github.com/openqodex/openqodex/discussions)
 
+Open source AI code review for coding agents. A separate reviewer checks every change your agent writes before you push. A code graph gives your agent a map of your codebase. Works in Claude Code, Codex, Cursor and Cline.
+
+For people, in your terminal:
+
+```
+npx openqodex init
+```
+
+After the install, say to your agent: "review my change with openqodex".
+
+![The report page of an OpenQodex review, scrolled to its list of findings](https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/report-findings.png)
+
+The report page of an OpenQodex review at its findings, captured 2026-10-25 with openqodex 0.14.0 and reviewer claude 2.1.310, on the openqodex/openqodex-lp repository.
+
+The landing page: https://openqodex.com
+
 AI agents: read the [agent guide](https://github.com/openqodex/openqodex/blob/main/docs/for-agents.md). After the install, `~/.openqodex/bin/openqodex guide for-agents` prints the guide for the installed version.
 
 OpenQodex reviews your code change before you push it. Your change is the commits you have not pushed plus everything uncommitted. OpenQodex runs on your machine, from your coding agent or your terminal.
 
-First, OpenQodex runs the scanners that fit the files you changed. A scanner is a program that checks code without a model, such as gitleaks or semgrep. A finding is one problem at one place in the code, with a severity. OpenQodex keeps the scanner findings on the lines you changed. It drops findings in test fixtures and in rules you switched off. Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. Advisories outside the changed lines are shown, never counted, and kept out of the reviewer's brief. Each advisory names its fixed versions, or says no fixed version is published.
+First, OpenQodex runs the scanners that fit the files you changed. A scanner is a program that checks code without a model, such as gitleaks or semgrep. A finding is one problem at one place in the code, with a severity. OpenQodex keeps the scanner findings on the lines you changed. It drops findings in test fixtures and in rules you switched off. Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. It skips the paths you exclude. Advisories outside the changed lines are shown, never counted, and kept out of the reviewer's brief. Each advisory names its fixed versions, or says no fixed version is published.
 
-Then OpenQodex starts reviewers: separate Claude Code or Codex processes on your own login. By default, the agent that wrote the code does not review it. Finder sessions read each part of the change, with the code that calls it, and propose candidates with a quoted line as evidence. A script checks every quote against the code. Verifier sessions then judge each candidate and each scanner finding against the code, and must confirm or refute every one with a reason. Scripts check that every scanner finding was answered and that every changed line was given to a reviewer. Style and naming notes are shown as observations and do not block. Then you choose which findings your agent fixes.
+Then OpenQodex starts reviewers: separate Claude Code or Codex processes on your own login. By default, a reviewer is a fresh process of the agent you work in, with no memory of your session. When that agent cannot review, or you run `review` in a terminal, OpenQodex starts the first agent that can. Finder sessions read each part of the change, with the code that calls it, and propose candidates with a quoted line as evidence. A script checks every quote against the code. Verifier sessions then judge each candidate and each scanner finding against the code, and must confirm or refute every one with a reason. Scripts check that every scanner finding was answered and that every changed line was given to a reviewer. Style and naming notes are shown as observations and do not block. Then you choose which findings your agent fixes.
 
 ## Where it runs
 
@@ -38,20 +54,14 @@ In Cursor and Cline, the review needs Claude Code or Codex installed as the revi
 
 ## Install
 
-For people, in your terminal:
-
-```
-npx openqodex init
-```
-
 In a terminal, `init` finds Claude Code, Cursor, Codex CLI and Cline on your machine. It lists the files it will write. It asks you once. It starts the scanner downloads that your repository needs. Then it reviews your current change when a reviewer can start.
 
-After the install, say to your agent: "review my change with openqodex". In your own terminal, run `~/.openqodex/bin/openqodex review`. That path is the launcher, a small script that `init` writes. An `npx` install puts no `openqodex` on your `PATH`.
+In your own terminal, run `~/.openqodex/bin/openqodex review`. That path is the launcher, a small script that `init` writes. An `npx` install puts no `openqodex` on your `PATH`.
 
 For agents, the same install with no question:
 
 ```
-npx -y openqodex@0.13.0 init --yes --agent <host>
+npx -y openqodex@0.16.0 init --yes --agent <host>
 ```
 
 `<host>` is `claude-code`, `codex`, `cursor` or `cline`. In its default sandbox mode, Codex gives commands no network. From Codex, run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent.
@@ -85,7 +95,7 @@ OpenQodex itself collects no usage data. The built-in scanners, as OpenQodex run
 - Inside the Codex sandbox, a second Codex process does not start. So Codex cannot be the reviewer there. OpenQodex tested this with codex-cli 0.160.0 on macOS.
 - No review on your own API key, except in the GitHub Action.
 - No Homebrew formula, no install script and no Docker image in this version. Install through npm.
-- No offline copy of the vulnerability databases. osv-scanner checks every lockfile at every review and scan of a change, through osv.dev. cargo-deny downloads the RustSec advisory database.
+- No offline copy of the vulnerability databases. osv-scanner checks every lockfile at every review and scan of a change, through osv.dev. It skips the paths you exclude. cargo-deny downloads the RustSec advisory database.
 - No review finds every problem. The report names each stage that did not run.
 
 <!-- benchmark-results:start -->
@@ -93,22 +103,25 @@ OpenQodex itself collects no usage data. The built-in scanners, as OpenQodex run
 
 | Reviewer | Model | Cases | Issue recall | Precision | Clean rate | Cost per review |
 | --- | --- | --- | --- | --- | --- | --- |
-| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split | 129/153 (84.3%) | 142/146 (97.3%) to 146/146 (100.0%) | 6/6 (100.0%) | $0.0870 |
-| Codex (codex-graph-on) | gpt-6.1-sol | Planted bugs, dev split | 115/153 (75.2%) | 125/146 (85.6%) to 146/146 (100.0%) | 6/6 (100.0%) | not measured |
-| Scanner only (scan) | no model | Planted bugs, dev split | 32/51 (62.7%) | 35/45 (77.8%) to 40/45 (88.9%) | 1/2 (50.0%) | not measured |
+| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split, scoring rules 11 | 150/153 (98.0%) | 249/295 (84.4%) to 295/295 (100.0%) | 6/6 (100.0%) | $0.4371 |
+| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split, scoring rules 12 | 150/153 (98.0%) | 254/302 (84.1%) to 301/302 (99.7%) | 5/6 (83.3%) | $0.4248 |
+| Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split, scoring rules 7 | 129/153 (84.3%) | 142/146 (97.3%) to 146/146 (100.0%) | 6/6 (100.0%) | $0.0870 |
+| Codex (codex-graph-on) | gpt-6.1-sol | Planted bugs, dev split, scoring rules 7 | 115/153 (75.2%) | 125/146 (85.6%) to 146/146 (100.0%) | 6/6 (100.0%) | not measured |
+| Scanner only (scan) | no model | Planted bugs, dev split, scoring rules 1 | 32/51 (62.7%) | 35/45 (77.8%) to 40/45 (88.9%) | 1/2 (50.0%) | not measured |
+| Scanner only (scan) | no model | Planted bugs, dev split, scoring rules 2 | 32/51 (62.7%) | 35/40 (87.5%) to 40/40 (100.0%) | 2/2 (100.0%) | not measured |
 
 AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.
 
 | Reviewer | Model | Cases | Issue recall | Semantic precision | Semantic recall | Semantic F1 | Noise rate | Line precision | Line recall | Cost per review |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Library (model-gpt-6.1-sol-graph-on) | gpt-6.1-sol | AACR-Bench, dev split, dev-laptop subset | not yet ruled | 22.8% | 5.2% | 8.5% | 77.2% | 49.4% | 11.3% | $0.0839 |
+| Library (model-gpt-6.1-sol-graph-on) | gpt-6.1-sol | AACR-Bench, dev split, dev-laptop subset, scoring rules 7 | not yet ruled | 22.8% | 5.2% | 8.5% | 77.2% | 49.4% | 11.3% | $0.0839 |
 
 [Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)
 <!-- benchmark-results:end -->
 
 ## Built-in scanners
 
-OpenQodex has 22 built-in scanners. Most scanners run when your change holds a file they read. osv-scanner checks every supported lockfile in the repository at every review and scan of a change. Some scanners also read the project or folder around a changed file. Each scanner that needs a download gets it on first use. OpenQodex pins each download to one version.
+OpenQodex has 22 built-in scanners. Most scanners run when your change holds a file they read. osv-scanner checks every supported lockfile in the repository at every review and scan of a change. It skips the paths you exclude. Some scanners also read the project or folder around a changed file. Each scanner that needs a download gets it on first use. OpenQodex pins each download to one version.
 
 | What it checks | Built-in scanners |
 |---|---|

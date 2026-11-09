@@ -114,7 +114,7 @@ async function savedRun(reviews, caseSpec = spec) {
     const r = reviews[job.repeat - 1];
     if (r === null) return;
     const dir = attemptDir(out, job, 1);
-    write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: 1, result: { code: 0, signal: null, wallMs: 1000 }, report: r.report, who: null, startedAt: "t", failure: null, stopped: null })));
+    write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, signal: null, wallMs: 1000 }, report: r.report, who: null, startedAt: "t", failure: null, stopped: null })));
     write(join(dir, "report", "report.json"), JSON.stringify(r.report));
     // A file set to null was not saved, as by an older review.
     if (r.submission !== null) write(join(dir, "report", "submission.json"), JSON.stringify(r.submission));
