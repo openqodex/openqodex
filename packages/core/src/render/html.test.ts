@@ -433,6 +433,10 @@ describe("the standard report", () => {
 //     secret that the cut splits is not found by redaction, so part of it
 //     shows: when it starts near character 5,000, or when redacting longer
 //     secrets before it pulls it into the first 5,000 characters.
+// 25. A row the reader cut is not known as cut, or keeps part of a secret at
+//     its end: invalid UTF-8 or a cut inside a character changes its length;
+//     a shorter secret inside the kept part grows when redacted; or a whole
+//     secret at the end overlaps the start of a cut one.
 describe("bounds", () => {
   const ms = (f: () => void): number => {
     const t = performance.now();
@@ -589,6 +593,36 @@ describe("bounds", () => {
     const rows = buildDisplay({ change, secrets: [SECRET] }).files[0]!.hunks.flatMap((h) => h.rows);
     const added = rows.find((r) => r.kind === "add")!;
     expect(leaked(added.text)).toBe(0);
+    expect(added.cut).toBe(true);
+  });
+
+  // Each row starts with 260 copies of a 40-character secret, which redact to
+  // one marker and pull the row's end into the shown 5,000 characters. The
+  // reader keeps READ bytes of the row; the head is built so the cut lands
+  // where each case needs it. Secrets are capitals and one emoji; the filler,
+  // a replacement character and "[redacted]" hold neither.
+  const fromDisk = (head: Buffer, secrets: string[]): DisplayRow => {
+    const dir = mkdtempSync(join(tmpdir(), "oq-html-cut-"));
+    roots.push(dir);
+    const file = join(dir, "min.patch");
+    writeFileSync(file, Buffer.concat([Buffer.from("diff --git a/min.js b/min.js\n--- a/min.js\n+++ b/min.js\n@@ -1 +1 @@\n-old\n+"), head, Buffer.from(`${"\u20AC".repeat(200_000)}\n`)]));
+    const change: Change = { ...fixtureChange(), files: [{ path: "min.js", status: "modified", oldPath: null, binary: false }], diffs: [{ path: "min.js", file }] };
+    return buildDisplay({ change, secrets }).files[0]!.hunks.flatMap((h) => h.rows).find((r) => r.kind === "add")!;
+  };
+  const secretChars = (row: string) => (row.match(/[A-Z]|\u{1F600}/gu) ?? []).length;
+  const EMOJI = `${"QZXW".repeat(5)}${"\u{1F600}".repeat(10)}`;
+  const LONG = `${"QZXW".repeat(2)}KJVYKJ${"QZXW".repeat(6)}QZ`;
+  const A = `${"QZXW".repeat(8)}KJVYKJVY`;
+  const B = `KJVYKJVY${"QZXW".repeat(8)}`;
+  const bytes = (...parts: (string | Buffer)[]) => Buffer.concat(parts.map((p) => (typeof p === "string" ? Buffer.from(p) : p)));
+  it.each<[string, Buffer, string[]]>([
+    ["invalid UTF-8 bytes before a secret the cut splits", bytes(SECRET.repeat(260), Buffer.alloc(10, 0xff), "a".repeat(READ - 10_400 - 10 - 20), SECRET), [SECRET]],
+    ["the cut lands inside a four-byte character of a secret", bytes(SECRET.repeat(260), "a".repeat(READ - 10_400 - 34), EMOJI), [SECRET, EMOJI]],
+    ["the kept part of a cut secret holds a shorter secret", bytes(LONG.repeat(260), "a".repeat(READ - 10_400 - 39), LONG), [LONG, "KJVYKJ"]],
+    ["a whole secret at the cut ends with the start of another", bytes(A.repeat(260), "a".repeat(READ - 10_400 - 40), A, B), [A, B]],
+  ])("25. shows no character of a known secret on a row the reader cut: %s", (_, head, secrets) => {
+    const added = fromDisk(head, secrets);
+    expect(secretChars(added.text)).toBe(0);
     expect(added.cut).toBe(true);
   });
 });

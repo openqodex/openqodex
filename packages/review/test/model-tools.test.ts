@@ -294,6 +294,7 @@ describe("read_diff_for_file", () => {
     const text = "diff --git a/a.ts b/a.ts\ndeleted file mode 120000\n--- a/a.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-target\n\\ No newline at end of file\ndiff --git a/a.ts b/a.ts\nnew file mode 100644\n--- /dev/null\n+++ b/a.ts\n@@ -0,0 +1 @@\n+content\n";
     const r = await runTool(handBuilt(text), "read_diff_for_file", { path: "a.ts" });
     const rows = r.text.split("\n");
+    for (const row of ["deleted file mode 120000", "-target", "new file mode 100644", "+content"]) expect(rows).toContain(row);
     expect(rows.indexOf("new file mode 100644")).toBeGreaterThan(rows.indexOf("-target"));
     expect(rows.indexOf("+content")).toBeGreaterThan(rows.indexOf("new file mode 100644"));
   });

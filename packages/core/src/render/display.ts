@@ -169,25 +169,39 @@ function redactHunk(hunk: DisplayHunk, secrets: string[], texts: string[]): Disp
 // the whole page alive; each is copied to a string of its own, so only the
 // page being read is held beside the cut rows.
 //
-// `readCut`: the bytes the reader keeps of a row on a page over the page
-// limit (cutRowBytes). Such a row may end in part of a secret, which
-// redaction cannot match, and replacing earlier secrets with the shorter
-// marker can pull that part into the shown characters. So after redaction
-// a row the reader cut loses its last characters, one fewer than the
-// longest text redaction looks for, and is marked cut.
-export function* displayHunks(pages: Iterable<string>, secrets: string[], texts: string[], readCut?: number): Generator<DisplayHunk> {
-  const drop = Math.max(0, ...texts.map((t) => t.length - 1));
-  // A cut row holds readCut bytes less its marker, and a character the cut
-  // splits becomes one three-byte replacement character.
-  const readerCut = (text: string) => readCut !== undefined && text.length <= readCut + 1 && 3 * text.length >= readCut - 1 && Math.abs(Buffer.byteLength(text) - readCut) <= 1;
-  for (const page of pages) for (const h of parseHunks(page)) {
-    const wasCut = h.rows.map((r) => readerCut(r.text));
-    const red = redactHunk(h, secrets, texts);
-    const rows = red.rows.map((r, k) => {
-      const cut = cutRow(wasCut[k] ? { ...r, text: r.text.slice(0, r.text.length - drop), cut: true } : r);
-      return { ...cut, text: own(cut.text) };
-    });
-    yield { ...red, section: own(red.section), rows };
+// `cutOf`: the rows of the page just read that the reader cut at its byte
+// cap (cutRowBytes), counted over the page's rows. Such a row may end in
+// part of a secret, which redaction cannot match, so it loses that end
+// before redaction (withoutPartialSecret) and is marked cut.
+export function* displayHunks(pages: Iterable<string>, secrets: string[], texts: string[], cutOf?: () => ReadonlySet<number>): Generator<DisplayHunk> {
+  for (const page of pages) {
+    const cut = cutOf?.();
+    let row = 0;
+    for (const h of parseHunks(page)) {
+      const rows = h.rows.map((r) => (cut?.has(row++) ? { ...r, text: withoutPartialSecret(r.text, texts), cut: true as const } : r));
+      const red = redactHunk({ ...h, rows }, secrets, texts);
+      yield { ...red, section: own(red.section), rows: red.rows.map((r) => { const shown = cutRow(r); return { ...shown, text: own(shown.text) }; }) };
+    }
+  }
+}
+
+// A row the reader cut, without any end that is the start of a text
+// redaction looks for. A character the cut split decodes to a replacement
+// character, which goes first. Cutting one end can leave the front of a
+// whole secret that overlapped it, so the check runs until no end is the
+// start of a text.
+function withoutPartialSecret(text: string, texts: string[]): string {
+  let out = text.replace(/\uFFFD+$/, "");
+  // Whether `out` ends with the first k units of `t`.
+  const endsWithStart = (t: string, k: number) => {
+    for (let j = 1; j <= k; j++) if (out.charCodeAt(out.length - j) !== t.charCodeAt(k - j)) return false;
+    return true;
+  };
+  for (;;) {
+    let longest = 0;
+    for (const t of texts) for (let k = Math.min(t.length - 1, out.length); k > longest; k--) if (endsWithStart(t, k)) { longest = k; break; }
+    if (longest === 0) return out;
+    out = out.slice(0, out.length - longest);
   }
 }
 
@@ -290,8 +304,9 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
       files.push({ ...meta, ...sums });
       continue;
     }
-    const readCut = cutRowBytes(Math.max(0, ...texts.map((t) => t.length)));
-    const hunks = [...displayHunks(diffHunks(change, f.path, undefined, 512 * 1024, { cutRows: readCut }), secrets, texts, readCut)];
+    let cutNow: ReadonlySet<number> = new Set();
+    const pages = diffHunks(change, f.path, undefined, 512 * 1024, { cutRows: cutRowBytes(Math.max(0, ...texts.map((t) => t.length))), onCutRows: (rows) => { cutNow = rows; } });
+    const hunks = [...displayHunks(pages, secrets, texts, () => cutNow)];
     const shownCount = hunks.reduce((n, h) => n + h.rows.length, 0);
     if (!budget.take(hunks, shownCount)) {
       files.push({ ...meta, ...sums, note: BYTES_NOTE });

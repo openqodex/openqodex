@@ -213,7 +213,9 @@ function selected(spans: Span[], range?: DiffRange): [number, number][] {
 
 // cutRows: a page over maxBytes is read with each row cut to its first
 // cutRows bytes, instead of skipped; for a reader that cuts long rows anyway.
-export type DiffReadOptions = { oldRanges?: readonly (readonly [number, number])[]; exact?: boolean; sections?: boolean; original?: boolean; join?: boolean; groups?: ReadonlySet<number>; onLimit?: () => void; cutRows?: number };
+// onCutRows: called before each page is yielded, with the rows of that page
+// the reader cut, counted from 0 over its rows other than "\" lines.
+export type DiffReadOptions = { oldRanges?: readonly (readonly [number, number])[]; exact?: boolean; sections?: boolean; original?: boolean; join?: boolean; groups?: ReadonlySet<number>; onLimit?: () => void; cutRows?: number; onCutRows?: (rows: ReadonlySet<number>) => void };
 
 // A hunk may itself be hundreds of MB. Pages retain its cursors, so a
 // selected range reads only nearby bytes, and full walks release each page.
@@ -329,14 +331,17 @@ export function* indexedHunks(entry: DiffEntry, range?: DiffRange, maxBytes = In
         return out;
       };
       let body: Buffer;
+      const cutRows = new Set<number>();
       if (size > maxBytes) {
         // Each row up to cutRows bytes, ending with its line feed.
         const parts: Buffer[] = [];
+        let row = 0;
         for (let r = span.rowFrom; r < last.rowTo; r++) {
           const from = index.rows.offsets[2 * r]!;
           const end = index.rows.offsets[2 * r + 1]!;
           if (end - from <= options.cutRows!) parts.push(read(from, end - from));
-          else parts.push(read(from, options.cutRows!), Buffer.from("\n"));
+          else { parts.push(read(from, options.cutRows!), Buffer.from("\n")); cutRows.add(row); }
+          if (index.rows.marks[r] !== 92) row++;
         }
         body = Buffer.concat(parts);
       } else body = read(span.offset, size);
@@ -350,6 +355,7 @@ export function* indexedHunks(entry: DiffEntry, range?: DiffRange, maxBytes = In
       previousGroup = span.group;
       const sectionHeader = options.sections && span.sectionHeader !== previousSection ? span.sectionHeader ?? "" : "";
       previousSection = span.sectionHeader ?? "";
+      options.onCutRows?.(cutRows);
       yield `${sectionHeader}${prefix}${body.toString("utf8")}`;
     }
   } finally { if (fd !== null) closeSync(fd); }
