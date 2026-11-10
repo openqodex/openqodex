@@ -211,7 +211,9 @@ function selected(spans: Span[], range?: DiffRange): [number, number][] {
   return out;
 }
 
-export type DiffReadOptions = { oldRanges?: readonly (readonly [number, number])[]; exact?: boolean; sections?: boolean; original?: boolean; join?: boolean; groups?: ReadonlySet<number>; onLimit?: () => void };
+// cutRows: a page over maxBytes is read with each row cut to its first
+// cutRows bytes, instead of skipped; for a reader that cuts long rows anyway.
+export type DiffReadOptions = { oldRanges?: readonly (readonly [number, number])[]; exact?: boolean; sections?: boolean; original?: boolean; join?: boolean; groups?: ReadonlySet<number>; onLimit?: () => void; cutRows?: number };
 
 // A hunk may itself be hundreds of MB. Pages retain its cursors, so a
 // selected range reads only nearby bytes, and full walks release each page.
@@ -309,19 +311,35 @@ export function* indexedHunks(entry: DiffEntry, range?: DiffRange, maxBytes = In
         continue;
       }
       const size = last.end - span.offset;
-      if (size > maxBytes) {
+      if (size > maxBytes && !options.cutRows) {
         if (!options.onLimit) throw new DiffReadLimit();
         options.onLimit();
         continue;
       }
       if (entry.text !== undefined) cached.buffer ??= Buffer.from(entry.text, "utf8");
-      const body = cached.buffer?.subarray(span.offset, last.end) ?? Buffer.allocUnsafe(size);
-      if (fd !== null) for (let at = 0; at < size;) {
-        const n = readSync(fd, body, at, size - at, span.offset + at);
-        if (n === 0) throw new Error("the retained patch ended before its indexed hunk");
-        at += n;
-      }
-      index.readBytes += size;
+      // Reads `length` bytes at `from` of the patch.
+      const read = (from: number, length: number): Buffer => {
+        const out = cached.buffer?.subarray(from, from + length) ?? Buffer.allocUnsafe(length);
+        if (fd !== null) for (let at = 0; at < length;) {
+          const n = readSync(fd, out, at, length - at, from + at);
+          if (n === 0) throw new Error("the retained patch ended before its indexed hunk");
+          at += n;
+        }
+        index.readBytes += length;
+        return out;
+      };
+      let body: Buffer;
+      if (size > maxBytes) {
+        // Each row up to cutRows bytes, ending with its line feed.
+        const parts: Buffer[] = [];
+        for (let r = span.rowFrom; r < last.rowTo; r++) {
+          const from = index.rows.offsets[2 * r]!;
+          const end = index.rows.offsets[2 * r + 1]!;
+          if (end - from <= options.cutRows!) parts.push(read(from, end - from));
+          else parts.push(read(from, options.cutRows!), Buffer.from("\n"));
+        }
+        body = Buffer.concat(parts);
+      } else body = read(span.offset, size);
       const oldCount = last.oldEnd - span.old;
       const newCount = last.nextEnd - span.next;
       const section = / @@(.*)$/.exec(span.header)?.[1] ?? "";

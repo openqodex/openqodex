@@ -279,6 +279,36 @@ function sniff(text: string | null): string {
   } catch { /* Code and licence text are expected not to parse as JSON. */ }
   return /\b(?:function\s*\w*\s*\(|(?:const|let|var|import|export|class|def|package|fn)\s+\w|module\.exports\s*=)/.test(text) ? "JavaScript or other code" : "text";
 }
+
+// The text of the first `name` block of `text`, or null when it has none.
+// The opener stops at the next "<" and the closer is found with indexOf, so
+// an opener never closed costs one scan, not one per opener.
+function block(text: string, name: string): string | null {
+  const open = new RegExp(`<${name}\\b[^<>]*>`).exec(text);
+  if (!open) return null;
+  const close = text.indexOf(`</${name}>`, open.index + open[0].length);
+  return close === -1 ? null : text.slice(open.index + open[0].length, close);
+}
+
+// `text` without its `names` blocks, each from its opener to the first
+// closer of its name. A name whose closer is not found after an opener is
+// never searched for again, so the work stays linear in the text.
+function withoutBlocks(text: string, names: string[]): string {
+  const opener = new RegExp(`<(${names.join("|")})\\b[^<>]*>`, "g");
+  const unclosed = new Set<string>();
+  let out = "";
+  let at = 0;
+  for (let m = opener.exec(text); m !== null; m = opener.exec(text)) {
+    const name = m[1]!;
+    if (unclosed.has(name)) continue;
+    const close = text.indexOf(`</${name}>`, opener.lastIndex);
+    if (close === -1) { unclosed.add(name); continue; }
+    out += text.slice(at, m.index);
+    at = opener.lastIndex = close + name.length + 3;
+  }
+  return out + text.slice(at);
+}
+
 function manifest(file: StoreFile): string | null {
   const text = file.text;
   if (text === null) return null;
@@ -300,10 +330,12 @@ function manifest(file: StoreFile): string | null {
   if (name.endsWith(".pom")) {
     // The parent and the nested blocks of the POM schema carry coordinates
     // of their own; the parent's version is used only when the project has none.
-    const own = text.replace(/<(parent|dependencyManagement|dependencies|build|profiles|reporting|distributionManagement)\b[^>]*>[\s\S]*?<\/\1>/g, "");
-    const parent = /<parent\b[^>]*>([\s\S]*?)<\/parent>/.exec(text)?.[1] ?? "";
-    const pkg = /<artifactId>\s*([^<]+)<\/artifactId>/.exec(own)?.[1] ?? /<name>\s*([^<]+)<\/name>/.exec(own)?.[1];
-    const version = /<version>\s*([^<]+)<\/version>/.exec(own)?.[1] ?? /<version>\s*([^<]+)<\/version>/.exec(parent)?.[1];
+    const own = withoutBlocks(text, ["parent", "dependencyManagement", "dependencies", "build", "profiles", "reporting", "distributionManagement"]);
+    const parent = block(text, "parent") ?? "";
+    // A value is read up to the next "<" with no leading \s*, which would
+    // backtrack over a long run of spaces; it is trimmed below.
+    const pkg = /<artifactId>([^<]+)<\/artifactId>/.exec(own)?.[1] ?? /<name>([^<]+)<\/name>/.exec(own)?.[1];
+    const version = /<version>([^<]+)<\/version>/.exec(own)?.[1] ?? /<version>([^<]+)<\/version>/.exec(parent)?.[1];
     return pkg && version ? `${pkg.trim()} ${version.trim()}` : null;
   }
   return null;

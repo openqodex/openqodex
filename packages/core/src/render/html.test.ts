@@ -36,6 +36,8 @@
 //     number or text, or other code in a diff cell.
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -422,6 +424,11 @@ describe("the standard report", () => {
 //     its rows fit once cut, and its note names the line limit, not bytes.
 // 21. Every uncut page of a file is held at once before any row is cut, so
 //     a file of long lines whose cut rows fit can take hundreds of MB.
+// 22. A cut row is a view that keeps its whole uncut page alive, so the
+//     bound of 21 does not hold; or the copy that frees it changes the text,
+//     such as a cut between the two halves of a surrogate pair.
+// 23. A row over the 512 KB page limit, the usual minified bundle, is
+//     skipped instead of shown cut.
 describe("bounds", () => {
   const ms = (f: () => void): number => {
     const t = performance.now();
@@ -516,6 +523,48 @@ describe("bounds", () => {
     }
     for (const hunk of displayHunks(pages(), [], [])) log.push(`cut ${hunk.rows.map((r) => r.text.length).join()}`);
     expect(log).toEqual(["read 1", "cut 5000", "read 2", "cut 5000", "read 3", "cut 5000"]);
+  });
+
+  it("22. keeps under a quarter of the uncut pages alive once their rows are cut", () => {
+    // Collect garbage first, so the count is what the cut rows keep.
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    const used = () => { gc(); const m = process.memoryUsage(); return m.heapUsed + m.arrayBuffers; };
+    const uncut = 200 * 400_000;
+    function* pages(): Generator<string> {
+      for (let k = 0; k < 200; k++) yield `@@ -0,0 +${k + 1},1 @@\n+${String(k).padStart(6, "0")}${"x".repeat(400_000 - 6)}\n`;
+    }
+    const before = used();
+    const hunks = [...displayHunks(pages(), [], [])];
+    const grown = used() - before;
+    console.log(`22. 200 cut rows of 400 KB pages keep ${(grown / 1024 / 1024).toFixed(1)} MB`);
+    expect(hunks.flatMap((h) => h.rows).every((r) => r.cut === true && r.text.length === 5_000)).toBe(true);
+    expect(grown).toBeLessThan(uncut / 4);
+  }, 60_000);
+
+  it("22. keeps a cut that falls between the halves of a surrogate pair as the cut gave it", () => {
+    const text = `${"a".repeat(4_999)}\u{1F600}b`;
+    const short = `short \u{1F600} row`;
+    const rows = [...displayHunks([`@@ -0,0 +1,2 @@\n+${text}\n+${short}\n`], [], [])].flatMap((h) => h.rows);
+    expect(rows.map((r) => [r.text, r.cut])).toEqual([[text.slice(0, 5_000), true], [short, undefined]]);
+  });
+
+  it.each(["z", "\u20AC", "a\u{1F600}"])("23. shows a row over the 512 KB page limit cut, from memory and from a patch on disk (%s)", (unit) => {
+    const row = unit.repeat(Math.ceil((600 * 1024) / Buffer.byteLength(unit)));
+    const text = `diff --git a/min.js b/min.js\n--- a/min.js\n+++ b/min.js\n@@ -1,2 +1,2 @@\n-old\n+${row}\n same\n`;
+    const dir = mkdtempSync(join(tmpdir(), "oq-html-patch-"));
+    roots.push(dir);
+    writeFileSync(join(dir, "min.patch"), text);
+    for (const entry of [{ path: "min.js", text }, { path: "min.js", file: join(dir, "min.patch") }]) {
+      const change: Change = { ...fixtureChange(), files: [{ path: "min.js", status: "modified", oldPath: null, binary: false }], diffs: [entry] };
+      const file = buildDisplay({ change, secrets: [] }).files[0]!;
+      expect(file.hunks.flatMap((h) => h.rows).map((r) => [r.kind, r.old, r.new, r.text, r.cut])).toEqual([
+        ["del", 1, null, "old", undefined],
+        ["add", null, 1, row.slice(0, 5_000), true],
+        ["context", 2, 2, "same", undefined],
+      ]);
+      expect(file.note).toBeNull();
+    }
   });
 });
 

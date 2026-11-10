@@ -12,6 +12,8 @@
 // 12. A scalar or array that becomes an object gets no type change entry.
 // 13. A POM manifest names its parent's coordinates instead of its own.
 // 14. A verifier digest lists an omission once per page it spans.
+// 15. A POM with many openers left unclosed, or a long run of spaces after
+//     one, makes the manifest scan rescan the text: quadratic time.
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, expect, it } from "vitest";
@@ -21,6 +23,7 @@ import { makeLineSet } from "../../../tests/line-set.mjs";
 import { jsonDigest, storeSections } from "../src/digest.js";
 import { MAX_BRIEF_BYTES, citedDigest, obligations, unitsOf } from "../src/units.js";
 import { runStagedReview } from "../src/stages.js";
+import { expectLinearRepeated, growthTests, repeatedCpuMs } from "../../graph/src/test-timing.js";
 import { cleanupFixtures, fixture, candidate, verdict } from "./staged-fixture.js";
 afterAll(cleanupFixtures);
 const ref = (end: number): HunkRef => ({ id: "h1", path: "runs.json", start: 1, end, deletion: false });
@@ -196,4 +199,22 @@ it("lists an omission that spans several pages once in a verifier digest", () =>
   expect(f.units.length).toBeGreaterThan(1);
   const omitted = citedDigest(f.units, "runs.json", [[1, 12002]])!.omitted;
   expect(omitted).toEqual([{ path: "runs.json", lines: [1, 12002], why: "old side unavailable" }]);
+});
+
+it("reads a POM's coordinates past nested openers that are never closed", () => {
+  const text = "<project><dependencies><build><parent><artifactId>java-pkg</artifactId><version>4.5</version></project>";
+  expect(storeSections("node_modules", [{ path: "node_modules/p/a.pom", text, status: "added", changed: [] }]).summary).toContain("node_modules/p/a.pom: java-pkg 4.5");
+});
+
+growthTests("the POM manifest scan stays linear (15)", () => {
+  const KB = 1024;
+  const pom = (body: string) => ({ path: "node_modules/p/a.pom", text: Buffer.from(`<project>${body}</project>`, "utf8").toString("utf8"), status: "added" as const, changed: [] });
+  const shapes: [string, (size: number) => string][] = [
+    ["many openers never closed", (size) => "<parent><build><dependencies>".repeat(Math.ceil(size / 29))],
+    ["one opener and a long run of spaces", (size) => `<artifactId>${" ".repeat(size)}`],
+  ];
+  it.each(shapes)("on a POM of %s", async (what, body) => {
+    const at = (size: number) => { const file = pom(body(size)); return repeatedCpuMs(() => storeSections("node_modules", [file])); };
+    await expectLinearRepeated(`a POM of ${what}, at 64 KB and at 256 KB`, at(64 * KB), at(256 * KB));
+  }, 180_000);
 });

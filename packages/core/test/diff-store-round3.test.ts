@@ -1,6 +1,6 @@
 // 1. Concurrent cleanup removes the diff folder before exclusive creation.
 // 2. Repeated file sections put all headers ahead of the first section's rows.
-// 3. Display readers materialise an oversized page instead of skipping it.
+// 3. Display readers materialise an oversized page instead of reading its rows cut.
 import fs, { readFileSync, rmdirSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
@@ -46,13 +46,14 @@ it("2. preserves each type-change section header before its own hunk", () => {
   expect(rows).toContain("deleted file mode 120000\n--- a/a.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-target");
   expect(rows).toContain("new file mode 100644\n--- /dev/null\n+++ b/a.ts\n@@ -0,0 +1,1 @@\n+code");
 });
-it("3. skips an oversized display page with a note and preserves later rows", () => {
+it("3. shows an oversized display page's rows cut and preserves later rows", () => {
   const file = join(tempDir("oq-round3-display-"), "retained.patch");
   writeFileSync(file, `@@ -1 +1 @@\n-${"x".repeat(600 * 1024)}\n+fresh\n@@ -10 +10 @@\n-old\n+later\n`);
   const display = buildDisplay({ change: change(file), secrets: [] });
-  expect(display.files[0]!.note).toMatch(/skipped.*byte budget/i);
-  expect(display.files[0]!.hunks.flatMap((h) => h.rows).map((r) => r.text)).toContain("later");
-  expect(display.files[0]!.hunks.flatMap((h) => h.rows).some((r) => r.text.startsWith("xxx"))).toBe(false);
+  const rows = display.files[0]!.hunks.flatMap((h) => h.rows);
+  expect(display.files[0]!.note).toBeNull();
+  expect(rows.map((r) => [r.text.length, r.cut])).toEqual([[5_000, true], [5, undefined], [3, undefined], [5, undefined]]);
+  expect(rows.map((r) => r.text)).toContain("later");
 });
 
 it("2b. keeps the new section header when selecting a later page or hunk", () => {

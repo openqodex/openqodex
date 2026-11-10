@@ -163,15 +163,27 @@ function redactHunk(hunk: DisplayHunk, secrets: string[], texts: string[]): Disp
 }
 
 // The hunks of a file's diff pages, each page parsed, redacted and cut
-// before the next is read, so at most one uncut page is held beside the
-// cut rows. Redaction works on one hunk at a time, so this order gives the
-// same rows as parsing every page first.
+// before the next is read. Redaction works on one hunk at a time, so this
+// order gives the same rows as parsing every page first. A row's text and
+// a hunk's section are parts of their page until copied, and a part keeps
+// the whole page alive; each is copied to a string of its own, so only the
+// page being read is held beside the cut rows.
 export function* displayHunks(pages: Iterable<string>, secrets: string[], texts: string[]): Generator<DisplayHunk> {
   for (const page of pages) for (const h of parseHunks(page)) {
     const red = redactHunk(h, secrets, texts);
-    yield { ...red, rows: red.rows.map(cutRow) };
+    yield { ...red, section: own(red.section), rows: red.rows.map((r) => { const cut = cutRow(r); return { ...cut, text: own(cut.text) }; }) };
   }
 }
+
+// A copy of `text` that shares no memory with it. UTF-16 copies each code
+// unit as it is, so half of a surrogate pair left by a cut stays as it was.
+const own = (text: string): string => Buffer.from(text, "utf16le").toString("utf16le");
+
+// The bytes of a diff row read from a page over the 512 KB page limit: the
+// marker, then three bytes for each UTF-16 unit kept (UTF-8 never takes
+// more), and four more for a character the read cuts, so the units cutRow
+// keeps all come from whole characters and the row is still marked cut.
+const CUT_ROW_BYTES = 1 + 3 * DISPLAY_MAX_ROW_CHARS + 4;
 
 function cutRow(row: DisplayRow): DisplayRow {
   return row.text.length > DISPLAY_MAX_ROW_CHARS ? { ...row, text: row.text.slice(0, DISPLAY_MAX_ROW_CHARS), cut: true } : row;
@@ -260,7 +272,7 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
       continue;
     }
     let skipped = false;
-    const hunks = [...displayHunks(diffHunks(change, f.path, undefined, 512 * 1024, { onLimit: () => { skipped = true; } }), secrets, texts)];
+    const hunks = [...displayHunks(diffHunks(change, f.path, undefined, 512 * 1024, { cutRows: CUT_ROW_BYTES, onLimit: () => { skipped = true; } }), secrets, texts)];
     const shownCount = hunks.reduce((n, h) => n + h.rows.length, 0);
     if (!budget.take(hunks, shownCount)) {
       files.push({ ...meta, ...sums, note: BYTES_NOTE });
