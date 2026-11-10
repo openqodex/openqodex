@@ -429,6 +429,10 @@ describe("the standard report", () => {
 //     such as a cut between the two halves of a surrogate pair.
 // 23. A row over the 512 KB page limit, the usual minified bundle, is
 //     skipped instead of shown cut.
+// 24. A row over the page limit is read only up to a byte cut, and a known
+//     secret that the cut splits is not found by redaction, so part of it
+//     shows: when it starts near character 5,000, or when redacting longer
+//     secrets before it pulls it into the first 5,000 characters.
 describe("bounds", () => {
   const ms = (f: () => void): number => {
     const t = performance.now();
@@ -565,6 +569,27 @@ describe("bounds", () => {
       ]);
       expect(file.note).toBeNull();
     }
+  });
+
+  // The secret's characters are in neither the euro filler nor "[redacted]".
+  const SECRET = "QZXW".repeat(10);
+  const leaked = (row: string) => [...row].filter((c) => "QZXW".includes(c)).length;
+  // The reader's cut for a 40-character secret, in bytes after the row's
+  // marker: three bytes for each of 5,000 shown and 40 more characters, and
+  // four for a cut character.
+  const READ = 3 * (5_000 + 40) + 4;
+  it.each<[string, string]>([
+    ["the secret straddles the old cut, 4,990 three-byte characters in", `${"\u20AC".repeat(4_990)}${SECRET}`],
+    ["the secret ends exactly at the cut", `${"a".repeat(READ - 40 - 3 * 4_990)}${"\u20AC".repeat(4_990)}${SECRET}`],
+    ["the secret starts just past character 5,000", `${"\u20AC".repeat(5_000)}${SECRET}`],
+    ["redacting earlier secrets pulls a secret the cut splits into view", `${SECRET.repeat(20)}${"\u20AC".repeat((READ - 800 - 20) / 3)}${SECRET}`],
+  ])("24. shows no character of a known secret on a row over the page limit: %s", (_, head) => {
+    const text = `diff --git a/min.js b/min.js\n--- a/min.js\n+++ b/min.js\n@@ -1 +1 @@\n-old\n+${head}${"\u20AC".repeat(200_000)}\n`;
+    const change: Change = { ...fixtureChange(), files: [{ path: "min.js", status: "modified", oldPath: null, binary: false }], diffs: [{ path: "min.js", text }] };
+    const rows = buildDisplay({ change, secrets: [SECRET] }).files[0]!.hunks.flatMap((h) => h.rows);
+    const added = rows.find((r) => r.kind === "add")!;
+    expect(leaked(added.text)).toBe(0);
+    expect(added.cut).toBe(true);
   });
 });
 
