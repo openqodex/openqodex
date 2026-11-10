@@ -1,5 +1,76 @@
 # openqodex
 
+## 0.17.0
+
+### Minor Changes
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`d8232eb`](https://github.com/openqodex/openqodex/commit/d8232ebcd77b2af3b1bdbb6a532685d92a7ee542) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Keep changed-line coverage for every text file, including changes over 500,000 lines. Coverage uses compact intervals instead of one entry per line. Library callers that pass `coverage` to `runScanners` must build it with the exported `LineSet` (`new LineSet().addRange(start, end)`); a `Map` of `Set<number>` is no longer accepted.
+
+### Patch Changes
+
+- [#301](https://github.com/openqodex/openqodex/pull/301) [`46b1207`](https://github.com/openqodex/openqodex/commit/46b1207257f7c2548b4e7e69543b08237572d80d) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Benchmark model reviews retry a dropped connection once, sharing the rate-limit retry. Resuming a run keeps the saved failure and finishes its pending retry; two failures of the same class in one job halt the run and name both failures.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`0608e28`](https://github.com/openqodex/openqodex/commit/0608e28417c4a2d5512cb096a9a32d6c10e6249f) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Review large changed ranges in measured parts, each with fresh finder sessions. Keep verifier briefs within their byte budget by carrying the nearest parts and splitting candidate batches when needed. Credit only the exact ranges carried or read, and record how each range reached the reviewer in coverage.given. Keep unreadable ranges incomplete and record oversized brief entries or verifier candidates without crashing.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`e010f0f`](https://github.com/openqodex/openqodex/commit/e010f0f080e3844fb17552bb198545fe241ed4ec) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Name every unexamined changed range separately in saved reports, including part and deletion fragment labels. Show coverage by file and range in Markdown and HTML, and print coverage counts on every review receipt. The receipt names the first ten unexamined ranges and points to the report for the rest.
+
+  Count each original range once in the receipt, name unread deletions, sort deletion fragments by old lines, and include files without changed lines in coverage. Keep coverage failures identifiable in benchmark runs and push messages.
+
+  Keep single-pass deletion ids accurate, omit repeated or reversed missing range ends, and label credited parts with their part numbers. Shorten incomplete reasons, second reviewer notes, SARIF notifications and benchmark failure summaries to ten unread entries while the completion record keeps every entry.
+
+- [#301](https://github.com/openqodex/openqodex/pull/301) [`57ad915`](https://github.com/openqodex/openqodex/commit/57ad91547f406730778578734b87b8267fd94011) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - A deleted binary file no longer leaves a review incomplete. The staged brief explains that the deletion is the change, with no lines to read, and both staged and single-pass reviews count its hunk as covered.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`07c2809`](https://github.com/openqodex/openqodex/commit/07c2809ba0f6b78c1af5e938027fcc823f05d9fc) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The report page shows the cut rows of a changed file with a few very long lines, such as a minified bundle, when they fit once cut. A file whose rows still do not fit gets a note naming the page's byte limit instead of its line limit.
+
+- [#301](https://github.com/openqodex/openqodex/pull/301) [`429dfd0`](https://github.com/openqodex/openqodex/commit/429dfd0433c627a9acd3d2672fa477326709f0df) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The privacy page says osv-scanner reads every supported lockfile in the repository. The skill and the Claude Code plugin page say the same about osv-scanner. The README says the reviewer is a fresh process of the agent you work in.
+
+- [#301](https://github.com/openqodex/openqodex/pull/301) [`57ad915`](https://github.com/openqodex/openqodex/commit/57ad91547f406730778578734b87b8267fd94011) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Every reviewer brief explains the frozen copy and values masked as `[redacted]`. Verifiers refute placeholder claims about masked values. The docs explain how a repository's `.gitleaks.toml` allowlist removes both matching candidates and redaction, and name the current limit for a literal `"[redacted]"` committed by the repository.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`7e55ad0`](https://github.com/openqodex/openqodex/commit/7e55ad0eb1d6ebfa1fddc252dc76623c55976695) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The Claude Code review page defines parts, units, delivery pages and structural summaries once, with the code's numbers.
+  The same page lists each coverage label, the receipt's Changed ranges forms and every reason a review is incomplete.
+  The CLI page shows the timeout line again and says how the receipt shortens unexamined ranges.
+  The config page states the single pass's limits beside `review.stages` and the part budgets beside `review.paths.exclude`.
+  The library page again starts its incomplete-review reasons with a changed range the reviewer was never shown.
+  The Codex driver notes say what counts as coverage when reads are not traced.
+
+- [#301](https://github.com/openqodex/openqodex/pull/301) [`436f497`](https://github.com/openqodex/openqodex/commit/436f497f6708841a8e5d043208bddf6980024683) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - golangci no longer fails when a module's dependencies are listed in `go.sum` but are not in the Go module cache. The report names the packages it did not check and the fix, `go mod download`. When it checked no package, it lists `golangci` as skipped. A changed `.go` file with no `go.mod` above it is also a skip, not a failure. A changed file that does not compile is still a failure. A problem report for a golangci failure now names each reason.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`0608e28`](https://github.com/openqodex/openqodex/commit/0608e28417c4a2d5512cb096a9a32d6c10e6249f) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Build staged review units efficiently for files with thousands of hunks. Keep verifier briefs bounded with compact omitted ranges, retain replacement ownership labels, and leave oversized finder briefs unread without sending them.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`25154c8`](https://github.com/openqodex/openqodex/commit/25154c88a885d849066719fb228d2083e7d3440c) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Keep every changed file in large reviews. Patches that overflow memory stream to temporary files, so removed lines remain available to reviewers. The temporary patches are removed when the review ends.
+
+  Keep large files visible in agent briefs and lens selection. Read retained patches by indexed hunks, and release temporary patches after scans and failed or cancelled reviews. Push checks compute only the change id.
+
+  Remove the public `DIFF_CAP_BYTES` export. Library callers must stop importing it; changed-file diffs are retained without that size cap.
+
+  `Change.diffs[].text` is now optional: spilled entries provide a `file` path instead. `Change.diff` holds only the patches kept in memory. Library callers should read retained diffs by range with `diffHunks`.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`15e2c0a`](https://github.com/openqodex/openqodex/commit/15e2c0a2cca32ea66c530ddc41d9bf2b5dc5831c) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Keep snapshot files of every size in the review. Large files are redacted by streaming, read by indexed line ranges and hashed by content, so their changed lines and evidence remain available.
+
+  Send a file that is not UTF-8 text by its bytes, line by line, with long lines in byte fragments. Keep line indexes small for files with many short lines and fast for wide rows. Search reports how many oversized rows it skipped. Display reads only excerpt lines, and an oversized neighbour no longer blocks valid evidence. Name an oversized cited line explicitly, avoid promising pages no round can carry, and preserve file permissions during redaction even with long file names. Paging stops at the last actual line: a final newline no longer adds an empty context row numbered one past the line count.
+
+  Accept findings on wide changed lines when their evidence comes from another line. Clip report excerpts at the file's end and keep earlier excerpts when the display budget fills. A tool read stopped by an oversized row names the next line to request.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`1c6fde6`](https://github.com/openqodex/openqodex/commit/1c6fde68dda0cf4016ff2bcf193f7c080bdfd661) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Carry changed lines of any length in labelled UTF-8 byte fragments across bounded briefs and pages. Credit a line only after every fragment reaches the reviewer, and name missing bytes when delivery is incomplete.
+
+  The visible label changes from "part 1 of 2" to the byte form, such as "a.js: line 7, bytes 1 to 2,000 of 6,000".
+
+  A reviewer's Read of a cut line no longer counts as reading the whole line; only the bytes it returned count.
+
+  Files that are not UTF-8 text are reviewed by bytes, and a Read credits none of their long lines.
+
+- [#301](https://github.com/openqodex/openqodex/pull/301) [`4bc5348`](https://github.com/openqodex/openqodex/commit/4bc53484beb9d7a1f03b8ee1d25ecf3fe0d4e5c5) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Each README benchmark row names its scoring rules version. Two runs of one reviewer and model now read apart. The full results page's group label now says scoring rules and shows the purpose when present.
+
+- [#301](https://github.com/openqodex/openqodex/pull/301) [`49ee4fe`](https://github.com/openqodex/openqodex/commit/49ee4fe98eaa7efdbcd93cba84178921a006f9ac) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - A reviewer request refused by its own rules no longer makes the review incomplete. The receipt and completion record list refused paths and tools. A read outside the snapshot or a successful call to a tool the reviewer was not given still fails the review. When both verifier attempts fail, the missing reason now names each attempt's failure.
+
+- [#301](https://github.com/openqodex/openqodex/pull/301) [`151b9c0`](https://github.com/openqodex/openqodex/commit/151b9c00ff1733dcb6645be4eef309a317351fea) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The scanner preinstall check no longer leaves a probe folder in the OpenQodex home.
+
+- [#317](https://github.com/openqodex/openqodex/pull/317) [`f337a2d`](https://github.com/openqodex/openqodex/commit/f337a2d740baf594e43ea5795fac4d6746b96411) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Review oversized JSON changes and dependency stores through structural summaries built by code. Keep short changed values, unusual record shapes, counts, outliers and store manifests visible, and paginate JSON entries and store listings without losing changed ranges. Redact decoded secrets before shortening values, compare moved records by content, name unavailable old sides, and keep verifier summaries limited to their citations. Credit structural summary coverage only after the summary reaches a reviewer, require source evidence for findings, and save developer copies under digests/ in the review folder.
+
+  Bound structural-summary metadata, keep unchanged anomalies with changed ranges, and use parts when a JSON group cannot fit.
+
+  Keep folded records beside deletions, compare keyed JSON records across shape changes, skip summary parsing for small JSON files, and bound cited source text so wide lines still reach verification.
+
 ## 0.16.0
 
 ### Minor Changes
