@@ -13,6 +13,8 @@
 //  4. The `.git` entry of the snapshot (it names the clone's folder) is read.
 //  5. A reply passes the 32 KB bound, or a cut reply does not say which lines
 //     it carried.
+//  5b. read_diff_for_file measures a shorter header than it sends, so a
+//     full reply passes the bound and its last row is cut with no word.
 //  6. A single line longer than the bound is cut in the middle instead of
 //     refused.
 //  7. A secret the scanners found reaches a reply: through read_file,
@@ -32,6 +34,8 @@
 // 10. list_files lists `.git` or a link.
 // 11. read_diff_for_file serves a file outside the change, or the diff of a
 //     file in the change is missing.
+// 11b. read_diff_for_file drops the file header of a diff's second section
+//     (a type change), so the rows read as one side of the file.
 // 12. find_callers answers from anything but the graph's query layer, or
 //     pretends to answer when there is no graph.
 // 13. A tool name the brain did not define is run or is logged as inside.
@@ -278,6 +282,31 @@ describe("read_diff_for_file", () => {
     expect(other.reason).toMatch(/not a changed file/);
     const out = await runTool(box, "read_diff_for_file", { path: "../x.ts" });
     expect(out).toMatchObject({ ok: false, inside: false });
+  });
+
+  const handBuilt = (text: string): ToolBox => {
+    const diffs = [{ path: "a.ts", text }];
+    const c: Change = { repoRoot: ".", baseRef: "HEAD", baseSha: "a".repeat(40), id: "b".repeat(64), shortId: "b".repeat(12), files: [{ path: "a.ts", oldPath: null, status: "modified", binary: false }], changedPaths: ["a.ts"], coverage: new Map(), deletionPoints: new Map(), diff: "", diffs, notReviewed: [], stats: { files: 1, additions: 0, deletions: 0 } };
+    return { snapshotDir: tempDir("oq-tools-diff-"), change: c, secrets: [], graph: null, graphNote: null };
+  };
+
+  it("11b. keeps the file header of a type change's second section", async () => {
+    const text = "diff --git a/a.ts b/a.ts\ndeleted file mode 120000\n--- a/a.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-target\n\\ No newline at end of file\ndiff --git a/a.ts b/a.ts\nnew file mode 100644\n--- /dev/null\n+++ b/a.ts\n@@ -0,0 +1 @@\n+content\n";
+    const r = await runTool(handBuilt(text), "read_diff_for_file", { path: "a.ts" });
+    const rows = r.text.split("\n");
+    expect(rows.indexOf("new file mode 100644")).toBeGreaterThan(rows.indexOf("-target"));
+    expect(rows.indexOf("+content")).toBeGreaterThan(rows.indexOf("new file mode 100644"));
+  });
+
+  it("5b. sends only whole rows within the bound, as many as its header says, however close to the bound they come", async () => {
+    for (let pad = 0; pad < 40; pad++) {
+      const rows = Array.from({ length: 1000 }, (_, i) => `+${String(i).padStart(4, "0")}${"x".repeat(35 + (i === 0 ? pad : 0))}`);
+      const r = await runTool(handBuilt(`@@ -0,0 +1,1000 @@\n${rows.join("\n")}\n`), "read_diff_for_file", { path: "a.ts" });
+      expect(Buffer.byteLength(r.text)).toBeLessThanOrEqual(TOOL_REPLY_BYTES);
+      const lines = r.text.split("\n");
+      expect(lines.length - 1).toBe(Number(/the first (\d+) lines/.exec(lines[0]!)?.[1]));
+      expect(rows).toContain(lines.at(-1));
+    }
   });
 });
 

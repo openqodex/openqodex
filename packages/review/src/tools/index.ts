@@ -470,10 +470,12 @@ function readDiff(box: ToolBox, args: Args): Result {
     return true;
   };
   let skipped = false;
-  if (keep(index.header)) for (const hunk of diffHunks(box.change, rel, undefined, 512 * 1024, { onLimit: () => { skipped = true; } })) if (!keep(hunk)) break;
+  if (keep(index.header)) for (const hunk of diffHunks(box.change, rel, undefined, 512 * 1024, { sections: true, onLimit: () => { skipped = true; } })) if (!keep(hunk)) break;
   const skippedNote = skipped ? "; skipped diff pages over the 512 KB byte budget" : "";
-  const head = (shown: number) => `${rel}: the diff against the base, ${cut || shown < rows.length ? `the first ${shown} lines` : `${rows.length} lines`}${skippedNote}`;
-  const { shown } = fill(head(0), rows);
+  const head = (shown: number, longest = false) => `${rel}: the diff against the base, ${longest || cut || shown < rows.length ? `the first ${shown} lines` : `${rows.length} lines`}${skippedNote}`;
+  // The header is measured at its longest, so the rows that fit under it
+  // still fit once it names how many were sent.
+  const { shown } = fill(head(rows.length, true), rows);
 
   return {
     text: [head(shown), ...rows.slice(0, shown)].join("\n"),

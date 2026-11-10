@@ -598,5 +598,7 @@ export function citedDigest(units: ReviewUnit[], file: string, lines: [number, n
   const pages = units.filter((u) => u.digest?.kind === first.digest!.kind && u.files.some((path) => files.has(path)));
   const entries = pages.flatMap((u) => digestDetails.get(u)?.entries ?? []).filter((e) => files.has(e.path) && (first.digest!.kind === "store" || lines.some(([a, b]) => e.lines[0] <= b && e.lines[1] >= a)));
   const refs = pages.flatMap((u) => u.hunks).filter((h) => h.path === file && lines.some(([a, b]) => h.start <= b && h.end >= a));
-  return { ...first.digest, text: [details.fixed, ...entries.map((e) => e.text)].join("\n"), processed: refs.map((h) => h.id), omitted: pages.flatMap((u) => u.digest!.omitted).filter((o) => files.has(o.path) && (first.digest!.kind === "store" || lines.some(([a, b]) => o.lines[0] <= b && o.lines[1] >= a))) };
+  // An omission that spans several pages is on each of them; it is listed once.
+  const omitted = new Map(pages.flatMap((u) => u.digest!.omitted).filter((o) => files.has(o.path) && (first.digest!.kind === "store" || lines.some(([a, b]) => o.lines[0] <= b && o.lines[1] >= a))).map((o) => [JSON.stringify([o.path, o.lines, o.why]), o]));
+  return { ...first.digest, text: [details.fixed, ...entries.map((e) => e.text)].join("\n"), processed: refs.map((h) => h.id), omitted: [...omitted.values()] };
 }

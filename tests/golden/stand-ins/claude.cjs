@@ -210,7 +210,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     if (process.env.OPENQODEX_STANDIN_TOOL_CUT === "1") {
       // Read lines 1 to 20 of a snapshot file once, cutting each line at 2,000 characters as Claude Code does.
       const full = join(snapshot, extraPath);
-      const rows = readFileSync(full, "utf8").split("\n");
+      const rows = readFileSync(full, "utf8").replace(/\n$/, "").split("\n");
       const content = rows.slice(0, 20).map((row) => row.slice(0, 2000)).join("\n");
       emit({ type: "assistant", session_id, message: { content: [{ type: "tool_use", id: "extra-call", name: "Read", input: { file_path: full, offset: 1, limit: 20 } }] } });
       emit({ type: "user", session_id, message: { content: [{ type: "tool_result", tool_use_id: "extra-call", content }] }, tool_use_result: { type: "text", file: { filePath: full, content, startLine: 1, numLines: Math.min(20, rows.length), totalLines: rows.length } } });

@@ -238,8 +238,12 @@ export function jsonSections(path: string, text: string, changed: HunkRef[], pre
   // cannot manufacture type changes at its former array index.
   const compare = (node: Node, record: Node | undefined) => {
     const owner = node.type === "object" ? node : record;
-    const beforeRecord = owner ? paired.get(owner.path) : undefined;
-    const before = owner ? beforeRecord ? oldByPath.get(beforeRecord.path + node.path.slice(owner.path.length)) : undefined : oldByPath.get(node.path);
+    const lookup = (from: Node | undefined) => {
+      const beforeRecord = from ? paired.get(from.path) : undefined;
+      return from ? beforeRecord ? oldByPath.get(beforeRecord.path + node.path.slice(from.path.length)) : undefined : oldByPath.get(node.path);
+    };
+    // An object with no old record may have been a scalar or an array there.
+    const before = lookup(owner) ?? (owner === node && !paired.get(node.path) ? lookup(record) : undefined);
     if (before && before.type !== node.type && changedNode(node)) entry(node, `type change ${node.path}@${node.line}: ${before.type} -> ${node.type}`);
     for (const child of node.children) compare(child, owner);
   };
@@ -294,8 +298,10 @@ function manifest(file: StoreFile): string | null {
     return pkg && version ? `${pkg} ${version}` : null;
   }
   if (name.endsWith(".pom")) {
-    const pkg = /<artifactId>\s*([^<]+)<\/artifactId>/.exec(text)?.[1] ?? /<name>\s*([^<]+)<\/name>/.exec(text)?.[1];
-    const version = /<version>\s*([^<]+)<\/version>/.exec(text)?.[1];
+    // The parent block comes first in most POMs; its version is used only when the project has none.
+    const own = text.replace(/<parent>[\s\S]*?<\/parent>/, "");
+    const pkg = /<artifactId>\s*([^<]+)<\/artifactId>/.exec(own)?.[1] ?? /<name>\s*([^<]+)<\/name>/.exec(own)?.[1];
+    const version = /<version>\s*([^<]+)<\/version>/.exec(own)?.[1] ?? /<version>\s*([^<]+)<\/version>/.exec(text)?.[1];
     return pkg && version ? `${pkg.trim()} ${version.trim()}` : null;
   }
   return null;

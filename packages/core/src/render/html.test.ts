@@ -418,6 +418,8 @@ describe("the standard report", () => {
 //     added files with long names give a display.json finalize cannot read.
 // 19. Each excerpt walks the file from its start: 5,000 citations near line
 //     two million of a 2.5 million line file cost ten billion steps.
+// 20. A patch of a few very long lines is refused on its uncut bytes, though
+//     its rows fit once cut, and its note names the line limit, not bytes.
 describe("bounds", () => {
   const ms = (f: () => void): number => {
     const t = performance.now();
@@ -479,6 +481,27 @@ describe("bounds", () => {
     let html = "";
     expect(ms(() => (html = renderHtml({ report: report(change, { findings: [] }), display, version: "0.0.0-test" })))).toBeLessThan(1000);
     expect(html).toContain(`Diffs for ${(n - display.files.length).toLocaleString("en-US")} other changed files are not in this report.`);
+  });
+
+  const longLines = (count: number, chars: number): Change => {
+    const lines = Array.from({ length: count }, (_, i) => `+${String(i).padStart(6, "0")}${"x".repeat(chars - 6)}`);
+    const text = `diff --git a/min.js b/min.js\nnew file mode 100644\n--- /dev/null\n+++ b/min.js\n@@ -0,0 +1,${count} @@\n${lines.join("\n")}\n`;
+    return { ...fixtureChange(), files: [{ path: "min.js", status: "added", oldPath: null, binary: false }], diffs: [{ path: "min.js", text }] };
+  };
+
+  it("20. shows the cut rows of a patch of a few very long lines that is over the byte budget uncut", () => {
+    const display = buildDisplay({ change: longLines(20, 400_000), secrets: [] });
+    const rows = display.files[0]?.hunks.flatMap((h) => h.rows) ?? [];
+    expect(rows).toHaveLength(20);
+    expect(rows.every((r) => r.cut === true)).toBe(true);
+    expect(display.files[0]?.note).toBeNull();
+  });
+
+  it("20. names the byte limit, not the line limit, when cut rows still do not fit", () => {
+    const display = buildDisplay({ change: longLines(1_500, 6_000), secrets: [] });
+    expect(display.files[0]?.hunks).toEqual([]);
+    expect(display.files[0]?.note).not.toMatch(/lines of code/);
+    expect(display.files[0]?.note).toMatch(/MB/);
   });
 });
 

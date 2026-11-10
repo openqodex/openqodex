@@ -121,9 +121,9 @@ it("R2.12 credits pages after a stand-in Read returns the 600 KB line cut at 2,0
   expect(result.status, result.stderr).toBe(0);
   const saved = report(dir);
   expect(saved.completion!.status).toBe("complete");
-  // The cut Read is on record with the 2,000 bytes it returned, and credits only those.
+  // The cut Read is on record with the one line and 2,000 bytes it returned, and credits only those.
   const trace = readJson<TraceEntry[]>(join(reportDir(dir), "trace.json"));
-  expect(trace).toContainEqual(expect.objectContaining({ tool: "Read", path: "long.txt", byteRanges: [{ line: 1, from: 1, to: 2000 }] }));
+  expect(trace).toContainEqual(expect.objectContaining({ tool: "Read", path: "long.txt", range: [1, 1], byteRanges: [{ line: 1, from: 1, to: 2000 }] }));
   const given = saved.completion!.coverage.given!.filter((g) => g.path === "long.txt");
   expect(given).toContainEqual(expect.objectContaining({ by: "page", lineBytes: 600000 }));
   const reads = given.filter((g) => g.by === "read");

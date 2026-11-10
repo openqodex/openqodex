@@ -167,6 +167,15 @@ function cutRow(row: DisplayRow): DisplayRow {
 }
 
 const LIMIT_NOTE = `this page holds at most ${DISPLAY_MAX_ROWS.toLocaleString("en-US")} lines of code, the display limit, and this file is past it`;
+const BYTES_NOTE = `this page holds at most ${Math.floor(ROWS_BUDGET / (1024 * 1024))} MB of code, the display limit, and this file is past it`;
+
+// The fewest bytes the file's rows can take once each is cut: a row keeps
+// all its bytes or at least DISPLAY_MAX_ROW_CHARS of them.
+function cutBytes(index: NonNullable<ReturnType<typeof diffIndex>>): number {
+  let n = 0;
+  for (let r = 0; r < index.rows.count; r++) n += Math.min(index.rows.offsets[2 * r + 1]! - index.rows.offsets[2 * r]!, DISPLAY_MAX_ROW_CHARS);
+  return n;
+}
 
 function noteFor(f: ChangedFile, tooLarge: boolean): string | null {
   if (f.binary) return "binary file";
@@ -232,7 +241,7 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
     const sums = { additions: index.hunks.reduce((n, h) => n + h.additions, 0), deletions: index.hunks.reduce((n, h) => n + h.deletions, 0) };
     const count = index.hunks.reduce((n, h) => n + h.rows, 0);
     // Refuse display work before parsing payloads that cannot fit the page.
-    if (index.bytes > ROWS_BUDGET - budget.rowBytes) { files.push({ ...meta, ...sums }); continue; }
+    if (index.bytes > ROWS_BUDGET - budget.rowBytes && cutBytes(index) > ROWS_BUDGET - budget.rowBytes) { files.push({ ...meta, ...sums, note: BYTES_NOTE }); continue; }
     if (!budget.roomFor(count)) {
       files.push({ ...meta, ...sums });
       continue;
@@ -242,7 +251,7 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
     const hunks = parsed.map((h) => redactHunk(h, secrets, texts)).map((h) => ({ ...h, rows: h.rows.map(cutRow) }));
     const shownCount = hunks.reduce((n, h) => n + h.rows.length, 0);
     if (!budget.take(hunks, shownCount)) {
-      files.push({ ...meta, ...sums });
+      files.push({ ...meta, ...sums, note: BYTES_NOTE });
       continue;
     }
     files.push({ ...meta, ...sums, hunks, note: skipped ? "skipped diff pages over the 512 KB byte budget" : null });

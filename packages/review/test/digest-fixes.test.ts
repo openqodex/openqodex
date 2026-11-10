@@ -9,6 +9,9 @@
 // 9. Unbounded manifests and loose generated markers overflow every page.
 // 10. Deleted store files count as binary; changed keys lose multiline values.
 // 11. A long numeric value shows its first 120 digits before redaction.
+// 12. A scalar or array that becomes an object gets no type change entry.
+// 13. A POM manifest names its parent's coordinates instead of its own.
+// 14. A verifier digest lists an omission once per page it spans.
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, expect, it } from "vitest";
@@ -16,7 +19,7 @@ import { buildFindBrief, buildVerifyBrief, readCoverage, stagedDiffCache } from 
 import type { FindAnswer, HunkRef, ReviewUnit, VerifyBatch } from "@openqodex/core";
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { jsonDigest, storeSections } from "../src/digest.js";
-import { MAX_BRIEF_BYTES, obligations, unitsOf } from "../src/units.js";
+import { MAX_BRIEF_BYTES, citedDigest, obligations, unitsOf } from "../src/units.js";
 import { runStagedReview } from "../src/stages.js";
 import { cleanupFixtures, fixture, candidate, verdict } from "./staged-fixture.js";
 afterAll(cleanupFixtures);
@@ -170,4 +173,23 @@ it("keeps a one-line 100 KB store file out of the complete text and names its om
   expect(sections.entries[0]!.text).not.toContain("Complete text");
   expect(Buffer.byteLength(sections.entries[0]!.text)).toBeLessThan(2000);
   expect(sections.entries[0]!.omitted).toHaveLength(1);
+});
+
+it("reports a scalar or an array that becomes an object as a type change", () => {
+  const next = '{\n "a": {\n  "b": 2\n }\n}';
+  expect(jsonDigest("runs.json", next, [ref(5)], '{"a": 1}').text).toContain("type change $.a@2: number -> object");
+  expect(jsonDigest("runs.json", next, [ref(5)], '{"a": [1]}').text).toContain("type change $.a@2: array -> object");
+});
+
+it("names a POM's own coordinates, not its parent's, and takes the parent version only when it has none", () => {
+  const pom = (own: string) => ({ path: "node_modules/p/a.pom", text: `<project><parent><artifactId>parent-pkg</artifactId><version>9.9</version></parent><artifactId>java-pkg</artifactId>${own}</project>`, status: "added" as const, changed: [] });
+  expect(storeSections("node_modules", [pom("<version>4.5</version>")]).summary).toContain("node_modules/p/a.pom: java-pkg 4.5");
+  expect(storeSections("node_modules", [pom("")]).summary).toContain("node_modules/p/a.pom: java-pkg 9.9");
+});
+
+it("lists an omission that spans several pages once in a verifier digest", () => {
+  const f = jsonFixture(JSON.stringify(Array.from({ length: 3000 }, (_, id) => ({ id, value: "v".repeat(100) })), null, 2), "modified");
+  expect(f.units.length).toBeGreaterThan(1);
+  const omitted = citedDigest(f.units, "runs.json", [[1, 12002]])!.omitted;
+  expect(omitted).toEqual([{ path: "runs.json", lines: [1, 12002], why: "old side unavailable" }]);
 });
