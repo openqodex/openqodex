@@ -162,6 +162,17 @@ function redactHunk(hunk: DisplayHunk, secrets: string[], texts: string[]): Disp
   return { ...hunk, section: redactSecrets(hunk.section, secrets), rows };
 }
 
+// The hunks of a file's diff pages, each page parsed, redacted and cut
+// before the next is read, so at most one uncut page is held beside the
+// cut rows. Redaction works on one hunk at a time, so this order gives the
+// same rows as parsing every page first.
+export function* displayHunks(pages: Iterable<string>, secrets: string[], texts: string[]): Generator<DisplayHunk> {
+  for (const page of pages) for (const h of parseHunks(page)) {
+    const red = redactHunk(h, secrets, texts);
+    yield { ...red, rows: red.rows.map(cutRow) };
+  }
+}
+
 function cutRow(row: DisplayRow): DisplayRow {
   return row.text.length > DISPLAY_MAX_ROW_CHARS ? { ...row, text: row.text.slice(0, DISPLAY_MAX_ROW_CHARS), cut: true } : row;
 }
@@ -169,8 +180,10 @@ function cutRow(row: DisplayRow): DisplayRow {
 const LIMIT_NOTE = `this page holds at most ${DISPLAY_MAX_ROWS.toLocaleString("en-US")} lines of code, the display limit, and this file is past it`;
 const BYTES_NOTE = `this page holds at most ${Math.floor(ROWS_BUDGET / (1024 * 1024))} MB of code, the display limit, and this file is past it`;
 
-// The fewest bytes the file's rows can take once each is cut: a row keeps
-// all its bytes or at least DISPLAY_MAX_ROW_CHARS of them.
+// An estimate of the bytes the file's rows take once each is cut, for an
+// early refusal only: it counts patch bytes against a cut measured in
+// characters, and leaves out redaction and the JSON around each row, so it
+// is no bound. budget.take is the exact check.
 function cutBytes(index: NonNullable<ReturnType<typeof diffIndex>>): number {
   let n = 0;
   for (let r = 0; r < index.rows.count; r++) n += Math.min(index.rows.offsets[2 * r + 1]! - index.rows.offsets[2 * r]!, DISPLAY_MAX_ROW_CHARS);
@@ -240,15 +253,14 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
     }
     const sums = { additions: index.hunks.reduce((n, h) => n + h.additions, 0), deletions: index.hunks.reduce((n, h) => n + h.deletions, 0) };
     const count = index.hunks.reduce((n, h) => n + h.rows, 0);
-    // Refuse display work before parsing payloads that cannot fit the page.
+    // A cheap early refusal of a file whose cut rows plainly cannot fit.
     if (index.bytes > ROWS_BUDGET - budget.rowBytes && cutBytes(index) > ROWS_BUDGET - budget.rowBytes) { files.push({ ...meta, ...sums, note: BYTES_NOTE }); continue; }
     if (!budget.roomFor(count)) {
       files.push({ ...meta, ...sums });
       continue;
     }
     let skipped = false;
-    const parsed = [...diffHunks(change, f.path, undefined, 512 * 1024, { onLimit: () => { skipped = true; } })].flatMap(parseHunks);
-    const hunks = parsed.map((h) => redactHunk(h, secrets, texts)).map((h) => ({ ...h, rows: h.rows.map(cutRow) }));
+    const hunks = [...displayHunks(diffHunks(change, f.path, undefined, 512 * 1024, { onLimit: () => { skipped = true; } }), secrets, texts)];
     const shownCount = hunks.reduce((n, h) => n + h.rows.length, 0);
     if (!budget.take(hunks, shownCount)) {
       files.push({ ...meta, ...sums, note: BYTES_NOTE });

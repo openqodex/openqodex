@@ -298,10 +298,12 @@ function manifest(file: StoreFile): string | null {
     return pkg && version ? `${pkg} ${version}` : null;
   }
   if (name.endsWith(".pom")) {
-    // The parent block comes first in most POMs; its version is used only when the project has none.
-    const own = text.replace(/<parent>[\s\S]*?<\/parent>/, "");
+    // The parent and the nested blocks of the POM schema carry coordinates
+    // of their own; the parent's version is used only when the project has none.
+    const own = text.replace(/<(parent|dependencyManagement|dependencies|build|profiles|reporting|distributionManagement)\b[^>]*>[\s\S]*?<\/\1>/g, "");
+    const parent = /<parent\b[^>]*>([\s\S]*?)<\/parent>/.exec(text)?.[1] ?? "";
     const pkg = /<artifactId>\s*([^<]+)<\/artifactId>/.exec(own)?.[1] ?? /<name>\s*([^<]+)<\/name>/.exec(own)?.[1];
-    const version = /<version>\s*([^<]+)<\/version>/.exec(own)?.[1] ?? /<version>\s*([^<]+)<\/version>/.exec(text)?.[1];
+    const version = /<version>\s*([^<]+)<\/version>/.exec(own)?.[1] ?? /<version>\s*([^<]+)<\/version>/.exec(parent)?.[1];
     return pkg && version ? `${pkg.trim()} ${version.trim()}` : null;
   }
   return null;

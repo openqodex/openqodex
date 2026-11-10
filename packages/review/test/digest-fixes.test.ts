@@ -182,9 +182,13 @@ it("reports a scalar or an array that becomes an object as a type change", () =>
 });
 
 it("names a POM's own coordinates, not its parent's, and takes the parent version only when it has none", () => {
-  const pom = (own: string) => ({ path: "node_modules/p/a.pom", text: `<project><parent><artifactId>parent-pkg</artifactId><version>9.9</version></parent><artifactId>java-pkg</artifactId>${own}</project>`, status: "added" as const, changed: [] });
+  const pom = (own: string, before = "") => ({ path: "node_modules/p/a.pom", text: `<project><parent><artifactId>parent-pkg</artifactId><version>9.9</version></parent>${before}<artifactId>java-pkg</artifactId>${own}</project>`, status: "added" as const, changed: [] });
   expect(storeSections("node_modules", [pom("<version>4.5</version>")]).summary).toContain("node_modules/p/a.pom: java-pkg 4.5");
   expect(storeSections("node_modules", [pom("")]).summary).toContain("node_modules/p/a.pom: java-pkg 9.9");
+  // Nested blocks carry their own coordinates, before or after the project's.
+  const dependency = "<dependencies><dependency><artifactId>dep-pkg</artifactId><version>1.2</version></dependency></dependencies>";
+  expect(storeSections("node_modules", [pom(dependency)]).summary).toContain("node_modules/p/a.pom: java-pkg 9.9");
+  expect(storeSections("node_modules", [pom("<version>4.5</version>", `<dependencyManagement>${dependency}</dependencyManagement><build><plugins><plugin><artifactId>plugin-pkg</artifactId><version>3.0</version></plugin></plugins></build>`)]).summary).toContain("node_modules/p/a.pom: java-pkg 4.5");
 });
 
 it("lists an omission that spans several pages once in a verifier digest", () => {

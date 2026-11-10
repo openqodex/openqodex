@@ -44,7 +44,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "../change.js";
 import { makeChange, makeScan } from "../test-fixtures.js";
 import type { Change, CompletionRecord, Report, ReportFinding } from "../types.js";
-import { DISPLAY_MAX_BYTES, DISPLAY_MAX_ROWS, buildDisplay, buildExcerptDisplay, checkDisplay, displayJson } from "./display.js";
+import { DISPLAY_MAX_BYTES, DISPLAY_MAX_ROWS, buildDisplay, buildExcerptDisplay, checkDisplay, displayHunks, displayJson } from "./display.js";
 import type { Display, DisplayRow } from "./display.js";
 import { renderHtml } from "./html.js";
 import { renderMarkdown } from "./markdown.js";
@@ -420,6 +420,8 @@ describe("the standard report", () => {
 //     two million of a 2.5 million line file cost ten billion steps.
 // 20. A patch of a few very long lines is refused on its uncut bytes, though
 //     its rows fit once cut, and its note names the line limit, not bytes.
+// 21. Every uncut page of a file is held at once before any row is cut, so
+//     a file of long lines whose cut rows fit can take hundreds of MB.
 describe("bounds", () => {
   const ms = (f: () => void): number => {
     const t = performance.now();
@@ -502,6 +504,18 @@ describe("bounds", () => {
     expect(display.files[0]?.hunks).toEqual([]);
     expect(display.files[0]?.note).not.toMatch(/lines of code/);
     expect(display.files[0]?.note).toMatch(/MB/);
+  });
+
+  it("21. cuts each page's rows before it reads the next page", () => {
+    const log: string[] = [];
+    function* pages(): Generator<string> {
+      for (let k = 1; k <= 3; k++) {
+        log.push(`read ${k}`);
+        yield `@@ -0,0 +${k},1 @@\n+${"y".repeat(10_000)}\n`;
+      }
+    }
+    for (const hunk of displayHunks(pages(), [], [])) log.push(`cut ${hunk.rows.map((r) => r.text.length).join()}`);
+    expect(log).toEqual(["read 1", "cut 5000", "read 2", "cut 5000", "read 3", "cut 5000"]);
   });
 });
 
