@@ -1,6 +1,7 @@
 // Real binaries on tiny planted inputs, one case per builtin scanner: each
 // guards that scanner's invocation, output parser, changed-line filter and tool
 // resolution together. Run by the end-to-end config, not the unit config.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -154,7 +155,7 @@ describe("builtin scanner subprocesses", () => {
     const result = await runScanners({
       repoDir: repo,
       changedPaths: paths,
-      coverage: new Map(paths.map((p) => [p, new Set(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))])),
+      coverage: new Map(paths.map((p) => [p, makeLineSet(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))])),
       config: parseConfig("").config,
       resolveTool: installedOnly(),
       only: ["golangci"],

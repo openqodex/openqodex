@@ -7,6 +7,7 @@
 // can read, so a scanner that followed it fails with a permission error,
 // and asserts the scanner neither failed on it nor reported anything there.
 // Run by the end-to-end config (tests/e2e/adapters.test.ts).
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseConfig } from "@openqodex/core";
@@ -50,7 +51,7 @@ describe("a changed file that is a link out of the repository", () => {
       const repo = tempDir(`oq-link-${scanner}-`);
       mkdirSync(dirname(join(repo, name)), { recursive: true });
       symlinkSync(sentinel, join(repo, name));
-      const coverage = new Map([[name, new Set(body.split("\n").map((_, i) => i + 1))]]);
+      const coverage = new Map([[name, makeLineSet(body.split("\n").map((_, i) => i + 1))]]);
       const result = await runScanners({ repoDir: repo, changedPaths: [name], coverage, config: parseConfig("").config, resolveTool: installedOnly(), only: [scanner] });
       const status = result.scan.scanners[0]!;
       // A scanner this machine cannot run (no Cargo, no Ruby) proves nothing here.

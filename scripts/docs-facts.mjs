@@ -22,7 +22,9 @@
 //     that get the fast tier, the four cases of the full condition, macOS
 //     and the benchmark only under it, and the required check names; no
 //     sentence in AGENTS.md or CONTRIBUTING.md says less; and the gate
-//     action's steps equal scripts/gate.sh's, one for one.
+//     action's steps equal scripts/gate.sh's, one for one;
+//  8. the staged part and brief budgets, the long-line limits and the
+//     --timeout maximum match the code, on every page that states them.
 // It cannot check what a sentence means, a measured time or a privacy
 // promise. Those are in the manual claims ledger.
 import { execFileSync } from "node:child_process";
@@ -349,6 +351,63 @@ for (let i = 0; i < Math.max(actionSteps.length, gateSteps.length); i++) {
     fail(ACTION, `step ${i + 1} runs ${actionSteps[i] ?? "nothing"}; scripts/gate.sh step ${i + 1} runs ${gateSteps[i] ?? "nothing"}`);
     break;
   }
+}
+
+// 8. The staged part and brief budgets, and the limits beside them, as the
+// built packages export them. The review page names each budget's constant
+// once; every page that states a budget states the code's value, and a
+// paragraph that names a budget holds no other KB or rendered-row number.
+const { MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, DELIVER_LINES, GROUP_DIFF_BYTES } = await import(join(root, "packages/review/dist/index.js"));
+const { DELIVERY_ROW_BYTES, MAX_DIFF_BYTES } = await import(join(root, "packages/core/dist/index.js"));
+const fmt = (n) => n.toLocaleString("en-US");
+const kb = (bytes) => fmt(bytes / 1024);
+const reviewPage = "docs/claude-code-review.md";
+const BUDGET_PAGES = [reviewPage, "docs/cli.md", "docs/config.md", "docs/library.md", "docs/internal-reviewer-drivers.md"];
+const BUDGETS = [
+  { name: "DELIVER_LINES", text: `${fmt(DELIVER_LINES)} rendered rows`, pattern: /\b(\d[\d,]*) rendered rows\b/g },
+  { name: "MAX_UNIT_DIFF_BYTES", text: `${kb(MAX_UNIT_DIFF_BYTES)} KB of rendered diff`, pattern: /\b(\d[\d,]*) KB of rendered diff\b/g },
+  { name: "MAX_BRIEF_BYTES", text: `${kb(MAX_BRIEF_BYTES)} KB`, pattern: /\b(\d[\d,]*) KB brief bound\b|\bbrief holds at most (\d[\d,]*) KB\b/g },
+];
+for (const { name, text } of BUDGETS) {
+  if (!read(reviewPage).includes(`${text} (\`${name}\`)`)) fail(reviewPage, `must say ${text} (\`${name}\`)`);
+}
+// The other KB values a budget paragraph may hold: each is an exported constant.
+const KB_VALUES = new Set([MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, GROUP_DIFF_BYTES, MAX_DIFF_BYTES].map(kb));
+const BUDGET_NAME = /\b(?:DELIVER_LINES|MAX_UNIT_DIFF_BYTES|MAX_BRIEF_BYTES)\b|rendered rows|KB of rendered diff|brief bound/;
+for (const rel of BUDGET_PAGES) {
+  const text = read(rel);
+  for (const { name, text: want, pattern } of BUDGETS) {
+    for (const m of text.matchAll(pattern)) {
+      const got = (m[1] ?? m[2]).replace(/,/g, "");
+      if (got !== want.split(" ")[0].replace(/,/g, "")) fail(rel, `says "${m[0]}"; the code's ${name} is ${want}`);
+    }
+    if (rel !== reviewPage && text.includes(`\`${name}\``)) fail(rel, `names \`${name}\`; only ${reviewPage} names the budget constants`);
+  }
+  for (const paragraph of text.split(/\n\s*\n/)) {
+    if (!BUDGET_NAME.test(paragraph)) continue;
+    for (const m of paragraph.matchAll(/\b(\d[\d,.]*) KB\b/g)) {
+      if (!KB_VALUES.has(m[1])) fail(rel, `says "${m[0]}" beside a budget; the code has no such value (${[...KB_VALUES].join(", ")} KB)`);
+    }
+    for (const m of paragraph.matchAll(/\b(\d[\d,]*) rendered rows\b/g)) {
+      if (m[1] !== fmt(DELIVER_LINES)) fail(rel, `says "${m[0]}" beside a budget; DELIVER_LINES is ${fmt(DELIVER_LINES)}`);
+    }
+  }
+}
+// The long-line byte cut and the single pass's diff cap.
+const LIMITS = [
+  [reviewPage, `line over ${fmt(DELIVERY_ROW_BYTES)} bytes`, "DELIVERY_ROW_BYTES"],
+  [reviewPage, `bytes 2,001 to 4,000 of 50,000,000`, "fragmentLabel"],
+  [reviewPage, `until their diff reaches ${kb(GROUP_DIFF_BYTES)} KB`, "GROUP_DIFF_BYTES"],
+  ["docs/config.md", `at most ${kb(MAX_DIFF_BYTES)} KB of diff text`, "MAX_DIFF_BYTES"],
+  ["docs/config.md", `line over ${fmt(DELIVERY_ROW_BYTES)} bytes`, "DELIVERY_ROW_BYTES"],
+];
+for (const [rel, phrase, name] of LIMITS) if (!read(rel).includes(phrase)) fail(rel, `must say "${phrase}" (${name})`);
+// The longest --timeout, from the expression in the review command's source.
+const maxTimeout = /const MAX_TIMEOUT_SECONDS = Math\.floor\(\(2 \*\* (\d+) - 1\) \/ 1000\);/.exec(read("packages/cli/src/commands/review.ts"));
+if (maxTimeout === null) fail("docs/cli.md", "the --timeout maximum is no longer 2 ** n - 1 milliseconds in commands/review.ts; update this check");
+else {
+  const most = Math.floor((2 ** Number(maxTimeout[1]) - 1) / 1000);
+  if (!read("docs/cli.md").includes(`The maximum is ${most} seconds`)) fail("docs/cli.md", `must say "The maximum is ${most} seconds" (MAX_TIMEOUT_SECONDS)`);
 }
 
 if (errors.length) {

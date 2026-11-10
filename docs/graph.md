@@ -113,6 +113,8 @@ The mode changes only after two builds in a row land on the other side of the li
 
 A large repository may be partial on its first reviews: the `graph.max_files` cap counts new parses only, so cached facts never count toward it and each review adds more. The brief and the report say so, and `openqodex graph build` completes it in one run (no parse cap, a ten-minute budget, the memory bound kept).
 
+The report folder (`.openqodex/reviews/<time>-<id>/`) also saves `impact.json`, the graph summary, and, for a staged review, `units.json`, the obligation inventory with each measured part and its unit.
+
 ## The review's packet
 
 `openqodex review` writes the graph's files into the review's snapshot, under `.openqodex-review/graph/`, before the snapshot is hashed, so the reviewer opens them inside the one folder it may read:

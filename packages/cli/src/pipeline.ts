@@ -9,6 +9,7 @@ import {
   OpenQodexError,
   DEFAULT_CONFIG,
   closeWider,
+  cleanupDiffs,
   findRepoRoot,
   getChange,
   isRepoState,
@@ -46,6 +47,12 @@ export function progress(flags: GlobalFlags): (line: string) => void {
   };
 }
 
+// A temporary patch that cannot be removed never replaces the run's result.
+export function removeDiffs(change: Parameters<typeof cleanupDiffs>[0]): void {
+  try { cleanupDiffs(change); }
+  catch (error) { warn(`openqodex: could not remove a temporary diff file: ${String((error as Error).message ?? error).split("\n")[0]}`); }
+}
+
 export function warn(line: string): void {
   process.stderr.write(`${line}\n`);
 }
@@ -70,14 +77,18 @@ export async function runPipeline(args: {
   skip?: ScannerSource[];
   checkoutSettings?: boolean;
   clock?: PhaseClock;
-}): Promise<PipelineResult> {
+}, use?: (p: PipelineResult) => Promise<void>): Promise<PipelineResult> {
   const { repoRoot, config } = await loadRepo(args.flags, args.checkoutSettings);
   args.clock?.enter("change");
   const change = await getChange({ repoRoot, scope: args.scope, exclude: config.exclude, defaultBase: config.defaultBase });
-  args.clock?.enter("scan");
-  const p = await scanChange({ ...args, repoRoot, config, change });
-  args.clock?.enter(null);
-  return p;
+  try {
+    args.clock?.enter("scan");
+    const p = await scanChange({ ...args, repoRoot, config, change });
+    args.clock?.enter(null);
+    await use?.(p);
+    return p;
+  } finally { removeDiffs(change); }
+
 }
 
 // The scan's parts from the flags: scanners resolved from the pinned table,

@@ -1,3 +1,4 @@
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import {
   filterToChangedLines,
@@ -22,7 +23,7 @@ function finding(over: Partial<StaticFinding>): StaticFinding {
 
 describe("filterToChangedLines", () => {
   it("a finding whose whole span misses the changed lines is dropped", () => {
-    const coverage = new Map([["src/a.ts", new Set([1, 2, 3])]]);
+    const coverage = new Map([["src/a.ts", makeLineSet([1, 2, 3])]]);
     const out = filterToChangedLines(
       [finding({ lineStart: 10, lineEnd: 12 })],
       coverage,
@@ -31,7 +32,7 @@ describe("filterToChangedLines", () => {
   });
 
   it("a multi-line finding that reaches one changed line is kept", () => {
-    const coverage = new Map([["src/a.ts", new Set([12])]]);
+    const coverage = new Map([["src/a.ts", makeLineSet([12])]]);
     const out = filterToChangedLines(
       [finding({ lineStart: 10, lineEnd: 14 })],
       coverage,
@@ -44,7 +45,7 @@ describe("filterToChangedLines with an unsafe line number", () => {
   // A custom scanner's report can carry any number. Past 2^53, n + 1 === n,
   // so a loop over the span never ends.
   it("does not loop forever on a span ending at 2^53", () => {
-    const coverage = new Map([["src/a.ts", new Set([3])]]);
+    const coverage = new Map([["src/a.ts", makeLineSet([3])]]);
     const huge = 9007199254740992;
     const kept = filterToChangedLines(
       [finding({ lineStart: 1, lineEnd: huge }), finding({ lineStart: huge - 1, lineEnd: huge })],

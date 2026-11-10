@@ -12,22 +12,22 @@
 // so. No tool starts a program.
 //
 // Secrets: a tool reads content only through the redacted views below
-// (`redactedLines`, `redactedDiff`), on top of the snapshot the brain already
+// (`readRows`, `redactedDiff`), on top of the snapshot the brain already
 // redacted (redactSnapshot), so no raw secret is ever served, searched or
 // counted. search_code skips every line that holds a redaction, so a pattern
 // aimed at a secret (its prefix, the redaction marker) gets the answer a miss
 // gets. Each reply is redacted once more at the end, and the log keeps each
 // call's arguments redacted the same way.
-import { closeSync, constants, fstatSync, lstatSync, opendirSync, openSync, readFileSync } from "node:fs";
+import { lstatSync, opendirSync } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
-import { REDACTED, redactSecrets, redactSecretsKeepingLines, secretTexts } from "@openqodex/core";
+import { REDACTED, diffEntry, diffHunks, diffIndex, redactSecrets, redactSecretsKeepingLines, secretTexts } from "@openqodex/core";
 import type { Change } from "@openqodex/core";
 import { API_VERSION, PACKET_ROOT, query } from "@openqodex/graph";
 import type { Candidate, Graph, Item } from "@openqodex/graph";
 import { classify } from "../agents/trace.js";
 import type { ToolDefinition } from "../reviewer.js";
 import type { Admit } from "../scopes.js";
-import { MAX_FILE_BYTES } from "../snapshot.js";
+import { lineIndex, readRows } from "../snapshot.js";
 import { compileGlob, compilePattern, matchesLine } from "./pattern.js";
 import type { Program } from "./pattern.js";
 
@@ -231,45 +231,6 @@ function placePath(box: ToolBox, tool: string, raw: string, field: "path" | "glo
   return { rel };
 }
 
-// A snapshot file's text, read without following a link: null when it is
-// over the size bound, holds a NUL byte or is not UTF-8.
-function fileText(full: string): string | null {
-  let fd = -1;
-  try {
-    fd = openSync(full, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const st = fstatSync(fd);
-    if (!st.isFile() || st.size > MAX_FILE_BYTES) return null;
-    const buf = readFileSync(fd);
-    const text = buf.toString("utf8");
-    return buf.includes(0) || !Buffer.from(text, "utf8").equals(buf) ? null : text;
-  } catch {
-    return null;
-  } finally {
-    if (fd !== -1) closeSync(fd);
-  }
-}
-
-// The only way a tool reads a file: its lines with every secret the
-// scanners found redacted, line breaks kept so each line keeps its number
-// (the redaction the snapshot itself went through). Null when the file is
-// not text a tool may read.
-function redactedLines(box: ToolBox, rel: string): string[] | null {
-  const content = fileText(join(box.snapshotDir, rel));
-  if (content === null) return null;
-  if (content === "") return [];
-  const lines = redactSecretsKeepingLines(content, box.secrets).split("\n");
-  if (content.endsWith("\n")) lines.pop();
-  return lines;
-}
-
-// The only way a tool reads a diff: the change's diff of one file with every
-// secret the scanners found redacted, as the brief's diff is. Null when the
-// change holds no diff for it.
-function redactedDiff(box: ToolBox, rel: string): string | null {
-  const diff = box.change.diffs?.find((d) => d.path === rel);
-  return diff === undefined ? null : redactSecrets(diff.text, box.secrets);
-}
-
 const bytes = (s: string) => Buffer.byteLength(s, "utf8");
 
 // Rows after a header, as many whole rows as fit in the bound.
@@ -293,20 +254,36 @@ function readFile(box: ToolBox, args: Args): Result {
   const placed = placePath(box, "read_file", raw as string, "path", true);
   if ("refused" in placed) return placed.refused;
   const { rel } = placed;
-  const all = redactedLines(box, rel);
-  if (all === null) return refusal(`${rel} is not a text file of ${MAX_FILE_BYTES / 1024 / 1024} MB or less`, true, rel);
-  const total = all.length;
+  const index = lineIndex(box.snapshotDir, rel);
+  if (index === null || !index.text) return refusal(`${rel} is not a text file`, true, rel);
+  const total = index.count;
   const first = (start as number | null) ?? 1;
   if (total === 0) return { text: `${rel} is empty`, ok: true, path: rel, inside: true, range: null, reason: null };
   if (first > total) return refusal(`${rel} has ${total} lines`, true, rel);
   const end = count === null ? total : Math.min(total, first + (count as number) - 1);
   const rows: string[] = [];
-  for (let n = first; n <= end; n++) rows.push(`${n}\t${all[n - 1]}`);
+  let rowBytes = 0;
+  let oversized: number | null = null;
+  const oversizedNote = (n: number) => `line ${n} is longer than the ${BOUND} a reply may carry; continue from line ${n + 1}`;
+  try {
+    for (const { line: n, text } of readRows(box.snapshotDir, rel, first, end, TOOL_REPLY_BYTES)) {
+      if (text === null) {
+        if (n === first) return refusal(oversizedNote(n), true, rel);
+        oversized = n;
+        break;
+      }
+      const row = `${n}\t${redactSecretsKeepingLines(text.replace(/\n$/, ""), box.secrets)}`;
+      rows.push(row);
+      rowBytes += bytes(row) + 1;
+      if (rowBytes > TOOL_REPLY_BYTES) break;
+    }
+  } catch { return refusal(`${rel} could not be read as text`, true, rel); }
   // The header is measured at its longest, so the lines that fit under it
   // still fit once it names the last of them.
-  const head = (last: number, cut: boolean) => `${rel} lines ${first} to ${last} of ${total}${cut ? ` (cut at ${BOUND}; ask for line ${last + 1} onward)` : ""}`;
+  const continuation = (last: number) => oversized !== null && last >= oversized - 1 ? oversizedNote(oversized) : `ask for line ${last + 1} onward`;
+  const head = (last: number, cut: boolean) => `${rel} lines ${first} to ${last} of ${total}${cut ? ` (cut at ${BOUND}; ${continuation(last)})` : ""}`;
   const { shown } = fill(head(end, true), rows);
-  if (shown === 0) return refusal(`line ${first} is longer than the ${BOUND} a reply may carry`, true, rel);
+  if (shown === 0) return refusal(oversizedNote(first), true, rel);
   const last = first + shown - 1;
   const cut = last < end;
   return {
@@ -315,7 +292,7 @@ function readFile(box: ToolBox, args: Args): Result {
     path: rel,
     inside: true,
     range: [first, last],
-    reason: cut ? `cut at ${BOUND}: lines ${first} to ${last} of ${total} sent; ask for line ${last + 1} onward` : null,
+    reason: cut ? `cut at ${BOUND}: lines ${first} to ${last} of ${total} sent; ${continuation(last)}` : null,
   };
 }
 
@@ -408,37 +385,46 @@ async function searchCode(box: ToolBox, args: Args): Promise<Result> {
   const budget = { steps: SEARCH_STEPS };
   let bytesLeft = SEARCH_BYTES;
   let searched = 0;
+  let skipped = 0;
   let stop: string | null = walk.cut === null ? null : `the file walk ${walk.cut}`;
   outer: for (const [k, rel] of walk.files.entries()) {
     // A long search lets the rest of the process run between files.
     if (k > 0 && k % 100 === 0) await new Promise<void>((done) => setImmediate(done));
-    const lines = redactedLines(box, rel);
-    if (lines !== null) {
-      const size = lines.reduce((n, l) => n + l.length + 1, 0);
+    const index = lineIndex(box.snapshotDir, rel);
+    if (index !== null && index.text) {
+      const size = index.size;
       if (size > bytesLeft) {
         stop = `the search stopped after ${searched} files, at its ${SEARCH_BYTES / 1024 / 1024} MB read bound`;
         break;
       }
       bytesLeft -= size;
-      for (const [i, line] of lines.entries()) {
-        // Every line takes its steps, a redacted one too, so where a search
-        // stops never depends on where a secret was; a redacted line is
-        // never a result.
-        const hit = matchesLine(program, line, budget);
-        if (hit === null) {
-          stop = `the search stopped in its ${searched + 1}th file, at its ${SEARCH_STEPS} matcher steps`;
-          break outer;
+      try {
+        for (const { line: n, text } of readRows(box.snapshotDir, rel, 1, index.count, 1024 * 1024)) {
+          if (text === null) { skipped++; continue; }
+          const line = redactSecretsKeepingLines(text.replace(/\n$/, ""), box.secrets);
+          // Every line takes its steps, a redacted one too, so where a search
+          // stops never depends on where a secret was; a redacted line is
+          // never a result.
+          const hit = matchesLine(program, line, budget);
+          if (hit === null) {
+            stop = `the search stopped in its ${searched + 1}th file, at its ${SEARCH_STEPS} matcher steps`;
+            break outer;
+          }
+          if (!hit || line.includes(REDACTED)) continue;
+          found.push(`${rel}:${n}: ${line.slice(0, MAX_MATCH_CHARS)}`);
+          if (found.length >= MAX_MATCHES) {
+            stop = `the search stopped at ${MAX_MATCHES} matches`;
+            break outer;
+          }
         }
-        if (!hit || line.includes(REDACTED)) continue;
-        found.push(`${rel}:${i + 1}: ${line.slice(0, MAX_MATCH_CHARS)}`);
-        if (found.length >= MAX_MATCHES) {
-          stop = `the search stopped at ${MAX_MATCHES} matches`;
-          break outer;
-        }
+      } catch {
+        stop = `the search could not read ${rel} as text`;
+        break;
       }
     }
     searched++;
   }
+  if (skipped > 0) stop = [stop, `${skipped} rows over 1 MB were not searched`].filter((r) => r !== null).join("; ");
   const files = `${walk.files.length}${walk.cut !== null ? " or more" : ""} ${walk.files.length === 1 && walk.cut === null ? "file" : "files"}`;
   const header = `${found.length} ${found.length === 1 ? "match" : "matches"} in ${files}${stop !== null ? `; ${stop}` : ""}`;
   const { text, shown } = fill(header, found);
@@ -466,21 +452,38 @@ function readDiff(box: ToolBox, args: Args): Result {
   const placed = placePath(box, "read_diff_for_file", raw as string, "path", false);
   if ("refused" in placed) return placed.refused;
   const { rel } = placed;
-  const diff = redactedDiff(box, rel);
-  if (diff === null) {
+  const entry = diffEntry(box.change, rel);
+  if (!entry) {
     const changed = box.change.files.some((f) => f.path === rel);
-    return refusal(changed ? `the diff of ${rel} is not available: the change is too large for every file's diff` : `${rel} is not a changed file; the brief lists the changed files`, true, rel);
+    return refusal(changed ? `the diff of ${rel} is not available in this change; read the file by range with read_file (path, start and lines)` : `${rel} is not a changed file; the brief lists the changed files`, true, rel);
   }
-  const rows = diff.replace(/\n$/, "").split("\n");
-  const head = (shown: number) => `${rel}: the diff against the base, ${shown === rows.length ? `${rows.length} lines` : `the first ${shown} of ${rows.length} lines`}`;
-  const { shown } = fill(head(0), rows);
+  const index = diffIndex(box.change, rel)!;
+  const rows: string[] = [];
+  let size = 0;
+  let cut = false;
+  const keep = (text: string) => {
+    for (const row of redactSecretsKeepingLines(text.replace(/\n$/, ""), box.secrets).split("\n")) {
+      size += bytes(row) + 1;
+      if (size > TOOL_REPLY_BYTES) { cut = true; return false; }
+      rows.push(row);
+    }
+    return true;
+  };
+  let skipped = false;
+  if (keep(index.header)) for (const hunk of diffHunks(box.change, rel, undefined, 512 * 1024, { sections: true, onLimit: () => { skipped = true; } })) if (!keep(hunk)) break;
+  const skippedNote = skipped ? "; skipped diff pages over the 512 KB byte budget" : "";
+  const head = (shown: number, longest = false) => `${rel}: the diff against the base, ${longest || cut || shown < rows.length ? `the first ${shown} lines` : `${rows.length} lines`}${skippedNote}`;
+  // The header is measured at its longest, so the rows that fit under it
+  // still fit once it names how many were sent.
+  const { shown } = fill(head(rows.length, true), rows);
+
   return {
     text: [head(shown), ...rows.slice(0, shown)].join("\n"),
     ok: true,
     path: rel,
     inside: true,
     range: null,
-    reason: shown < rows.length ? `cut at ${BOUND}: ${shown} of ${rows.length} diff lines sent` : null,
+    reason: cut || shown < rows.length ? `cut at ${BOUND}: ${shown} diff lines sent${skippedNote}` : skipped ? skippedNote.slice(2) : null,
   };
 }
 

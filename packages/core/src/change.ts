@@ -16,20 +16,15 @@ import { constants, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { createCoverageParser, unquoteDiffPath } from "./diff.js";
+import { DiffStore } from "./diff-store.js";
 import { matchesGlob } from "./glob.js";
 import { STATE_DIR } from "./report-files.js";
 import { SERVER_GIT_ENV, safeGitEnv } from "./safe-git.js";
 import type { Change, ChangedFile, ChangeScope, DeletionPoint } from "./types.js";
 import { OpenQodexError } from "./types.js";
 
-// Text handed to the brief is capped; files past the cap are left out whole.
-export const DIFF_CAP_BYTES = 5 * 1024 * 1024;
-
-// Changed-line coverage is held as one number per added line, so it is capped
-// too. A file that would take the total past this gets no coverage and is
-// left out of the brief; it is listed as not reviewed and as uncovered, so
-// a review counts it as read only when the reviewer read all of it.
-export const COVERAGE_MAX_LINES = 500_000;
+// The whole-repo listing keeps its own file-size rule.
+export const WHOLE_REPO_MAX_BYTES = 5 * 1024 * 1024;
 
 // Coverage needs only the first character of a patch line and the headers.
 const COVERAGE_MAX_LINE_BYTES = 64 * 1024;
@@ -330,6 +325,80 @@ async function streamPatch(
   if (deciding) release();
 }
 
+// Payload rows stream as bytes, including a single row larger than memory.
+// Only git's short header lines wait for a newline to determine their path.
+async function streamPatchBytes(cwd: string, args: string[], opts: GitOptions, onBytes: (path: string | null, bytes: Buffer) => void): Promise<void> {
+  const child = spawnGit(cwd, args, opts);
+  const errors: Buffer[] = [];
+  child.stderr.on("data", (b: Buffer) => errors.push(b));
+  const ended = new Promise<void>((done, fail) => {
+    child.on("error", fail);
+    child.on("close", (code) => code === 0 ? done() : fail(failure(args, code ?? 1, Buffer.concat(errors).toString("utf8"))));
+  });
+  // An output write can fail before git exits; still reap that process.
+  void ended.catch(() => {});
+  let path: string | null = null;
+  let deciding = false;
+  let inHunk = false;
+  let held: Buffer[] = [];
+  let header: Buffer[] = [];
+  let atStart = true;
+  let payload = false;
+  const release = () => {
+    deciding = false;
+    for (const bytes of held) onBytes(path, bytes);
+    held = [];
+  };
+  const line = (bytes: Buffer) => {
+    const text = bytes.toString("utf8").replace(/\n$/, "");
+    if (text.startsWith("diff --git ")) {
+      if (deciding) release();
+      inHunk = false;
+      deciding = true;
+      path = samePathFromHeader(text);
+      held = [bytes];
+      return;
+    }
+    if (deciding) {
+      if (text.startsWith("rename to ")) path = unquoteDiffPath(text.slice("rename to ".length));
+      if (EXTENDED_HEADER.test(text)) { held.push(bytes); return; }
+      release();
+    }
+    if (text.startsWith("@@")) inHunk = true;
+    onBytes(path, bytes);
+  };
+  try {
+    for await (const chunk of child.stdout) {
+      const bytes = chunk as Buffer;
+      let payloadStart = -1;
+      for (let at = 0; at < bytes.length;) {
+        const nl = bytes.indexOf(10, at);
+        const end = nl === -1 ? bytes.length : nl + 1;
+        if (atStart) payload = inHunk && [32, 43, 45, 92].includes(bytes[at]!);
+        const part = bytes.subarray(at, end);
+        if (payload) {
+          if (payloadStart === -1) payloadStart = at;
+        } else {
+          // Batch payload by stdout chunk, rather than allocating per row.
+          if (payloadStart !== -1) { onBytes(path, bytes.subarray(payloadStart, at)); payloadStart = -1; }
+          header.push(Buffer.from(part));
+        }
+        if (nl !== -1 && !payload) { line(Buffer.concat(header)); header = []; }
+        atStart = nl !== -1;
+        at = end;
+      }
+      if (payloadStart !== -1) onBytes(path, bytes.subarray(payloadStart));
+    }
+    if (header.length) line(Buffer.concat(header));
+    if (deciding) release();
+    await ended;
+  } catch (error) {
+    child.kill();
+    await ended.catch(() => {});
+    throw error;
+  }
+}
+
 function excluded(path: string, exclude: string[]): boolean {
   if (path === STATE_DIR || path.startsWith(`${STATE_DIR}/`)) return true;
   return exclude.some((g) => matchesGlob(path, g));
@@ -428,6 +497,10 @@ export async function getChange(args: {
   // to the repo and its earlier text, or null for a file that did not exist.
   // `init` passes the files it wrote, so the change is the developer's own.
   overlay?: { path: string; content: string | null }[];
+  // Review state tmp folder, or the host temp folder for library callers.
+  tempRoot?: string;
+  // Identity checks never build coverage or retain a patch.
+  idOnly?: boolean;
 }): Promise<Change> {
   const { repoRoot, scope, exclude } = args;
   const base = await resolveBase(repoRoot, scope, args.defaultBase ?? null);
@@ -481,7 +554,7 @@ export async function getChange(args: {
       await args.onTree({ sha, objects: tmpObjects, alternates: objectsPath });
     }
 
-    return await diffChange({ repoRoot, baseRef: base.ref, baseSha: base.sha, range: ["--cached", base.sha], env, exclude });
+    return await diffChange({ repoRoot, baseRef: base.ref, baseSha: base.sha, range: ["--cached", base.sha], env, exclude, tempRoot: args.tempRoot, idOnly: args.idOnly });
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
@@ -497,6 +570,9 @@ export async function getTreeChange(args: {
   baseSha: string;
   headSha: string;
   exclude: string[];
+  tempRoot?: string;
+  // Identity checks never build coverage or retain a patch.
+  idOnly?: boolean;
 }): Promise<Change> {
   return diffChange({ ...args, range: [args.baseSha, args.headSha], env: process.env });
 }
@@ -583,6 +659,8 @@ export async function getAdmittedTreeChange(args: {
   exclude: string[];
   admit: (path: string) => boolean;
   tempRoot?: string;
+  // Identity checks never build coverage or retain a patch.
+  idOnly?: boolean;
 }): Promise<{ change: Change; renamedIn: string[] }> {
   const { repoRoot, admit } = args;
   const objectsPath = (await gitOk(repoRoot, ["rev-parse", "--git-path", "objects"])).toString("utf8").trim();
@@ -595,7 +673,7 @@ export async function getAdmittedTreeChange(args: {
     const env = await isolatedGit(tmp, format, objects, alternates);
     const base = await admittedTree(tmp, env, args.baseSha, admit, join(tmp, "index-base"));
     const head = await admittedTree(tmp, env, args.headSha, admit, join(tmp, "index-head"));
-    const change = await diffChange({ repoRoot, cwd: tmp, baseRef: args.baseRef, baseSha: args.baseSha, exclude: args.exclude, range: [base.tree, head.tree], env });
+    const change = await diffChange({ repoRoot, cwd: tmp, baseRef: args.baseRef, baseSha: args.baseSha, exclude: args.exclude, range: [base.tree, head.tree], env, tempRoot: args.tempRoot, idOnly: args.idOnly });
     // A file moved in from outside: one the change adds whose object is a
     // refused base file's, where that base path is gone from the head.
     const movedOut = new Set<string>();
@@ -711,6 +789,9 @@ async function diffChange(args: {
   range: string[];
   env: NodeJS.ProcessEnv;
   exclude: string[];
+  tempRoot?: string;
+  // Identity checks never build coverage or retain a patch.
+  idOnly?: boolean;
 }): Promise<Change> {
   const { repoRoot, exclude, env } = args;
   const cwd = args.cwd ?? repoRoot;
@@ -728,13 +809,17 @@ async function diffChange(args: {
     ...skip,
   ];
   let [nameStatus, numstatBuf, raw] = await Promise.all([
-    gitOk(cwd, diffArgs(["--name-status", "-z"]), { env }),
-    gitOk(cwd, diffArgs(["--numstat", "-z"]), { env }),
+    args.idOnly ? Promise.resolve(Buffer.alloc(0)) : gitOk(cwd, diffArgs(["--name-status", "-z"]), { env }),
+    args.idOnly ? Promise.resolve(Buffer.alloc(0)) : gitOk(cwd, diffArgs(["--numstat", "-z"]), { env }),
     gitOk(cwd, diffArgs(["--raw", "-z", "--no-abbrev"]), { env }),
   ]);
 
   // The id stays the first listing's, excluded files included.
   const id = createHash("sha256").update(`${args.baseSha}\n`).update(raw).digest("hex");
+  if (args.idOnly) return {
+    repoRoot, baseRef: args.baseRef, baseSha: args.baseSha, id, shortId: id.slice(0, 12),
+    files: [], changedPaths: [], coverage: new Map(), deletionPoints: new Map(), diff: "", diffs: [], notReviewed: [], uncovered: [], stats: { files: 0, additions: 0, deletions: 0 },
+  };
   const crossing = renameSplit(parseNameStatus(nameStatus), exclude);
   if (crossing !== null) {
     split = crossing;
@@ -742,21 +827,14 @@ async function diffChange(args: {
   }
   const numstat = parseNumstat(numstatBuf);
 
-  // Decide from the counts alone, before any patch is read, which files get
-  // coverage and which may go into the brief.
+  // Counts establish the admitted files before either patch pass.
   const pairs = parseNameStatus(nameStatus);
   const listed = listedPaths(pairs);
   const files: ChangedFile[] = [];
   const skipped: string[] = []; // excluded by the developer
   const covered = new Set<string>();
-  const briefable = new Set<string>();
-  const tooLarge = new Set<string>();
-  // Past the coverage cap: no line of these is mapped.
-  const uncoverable = new Set<string>();
   let additions = 0;
   let deletions = 0;
-  let coveredLines = 0;
-  let briefLowerBound = 0;
   for (const pair of pairs) {
     if (excluded(pair.path, exclude)) {
       skipped.push(pair.path);
@@ -767,22 +845,8 @@ async function diffChange(args: {
     additions += stat.additions;
     deletions += stat.deletions;
     if (pair.status !== "deleted") {
-      if (coveredLines + stat.additions > COVERAGE_MAX_LINES) {
-        tooLarge.add(pair.path);
-        uncoverable.add(pair.path);
-        continue;
-      }
-      coveredLines += stat.additions;
       covered.add(pair.path);
     }
-    // Each added or removed line costs at least two bytes of patch.
-    const minimum = 2 * (stat.additions + stat.deletions);
-    if (briefLowerBound + minimum > DIFF_CAP_BYTES) {
-      tooLarge.add(pair.path);
-      continue;
-    }
-    briefLowerBound += minimum;
-    briefable.add(pair.path);
   }
 
   const textArgs = ["--src-prefix=a/", "--dst-prefix=b/"];
@@ -795,7 +859,7 @@ async function diffChange(args: {
         cwd,
         // A file left out of the brief keeps its coverage: its changed lines
         // must then be read through the tools, or they count as unread.
-        diffArgs(["-U0", ...textArgs], skipPathspecs([...skipped, ...uncoverable], listed)),
+        diffArgs(["-U0", ...textArgs], skipPathspecs(skipped, listed)),
         opts,
         COVERAGE_MAX_LINE_BYTES,
         onLine,
@@ -828,41 +892,19 @@ async function diffChange(args: {
     if (f.status === "deleted") deletionPoints.set(f.path, [{ after: 0, lines: numstat.get(f.path)?.deletions ?? 0, anchors: [1] }]);
   }
 
-  // The brief's diff, kept per path within the cap; a file that does not
-  // fit is dropped whole as soon as it overflows.
-  const text = new Map<string, string[]>();
-  const size = new Map<string, number>();
-  let total = 0;
-  await streamPatch(
-    (onLine) =>
-      gitLines(
-        cwd,
-        diffArgs(["-U3", ...textArgs], skipPathspecs([...skipped, ...tooLarge], listed)),
-        opts,
-        DIFF_CAP_BYTES + 1,
-        onLine,
-      ),
-    (path, line, cut) => {
-      if (path === null || !briefable.has(path) || tooLarge.has(path)) return;
-      const bytes = Buffer.byteLength(line, "utf8") + 1;
-      if (cut || total + bytes > DIFF_CAP_BYTES) {
-        total -= size.get(path) ?? 0;
-        text.delete(path);
-        size.delete(path);
-        tooLarge.add(path);
-        return;
-      }
-      const lines = text.get(path) ?? [];
-      lines.push(line);
-      text.set(path, lines);
-      size.set(path, (size.get(path) ?? 0) + bytes);
-      total += bytes;
-    },
-  );
-
-  const notReviewed = files.filter((f) => tooLarge.has(f.path)).map((f) => f.path);
-  const diffs = files.filter((f) => text.has(f.path)).map((f) => ({ path: f.path, text: `${text.get(f.path)!.join("\n")}\n` }));
-  const diff = diffs.map((d) => d.text).join("");
+  const store = new DiffStore(id, args.tempRoot);
+  const admitted = new Set(files.map((f) => f.path));
+  let diffs: Change["diffs"];
+  try {
+    await streamPatchBytes(cwd, diffArgs(["-U3", ...textArgs], skipPathspecs(skipped, listed)), opts,
+      (path, bytes) => { if (path !== null && admitted.has(path)) store.push(path, bytes); });
+    const retained = new Map(store.finish().map((d) => [d.path, d]));
+    diffs = files.flatMap((f) => retained.has(f.path) ? [retained.get(f.path)!] : []);
+  } catch (error) {
+    store.dispose();
+    throw error;
+  }
+  const diff = diffs.map((d) => d.text ?? "").join("");
   const changedPaths = files.filter((f) => f.status !== "deleted").map((f) => f.path);
 
   return {
@@ -877,8 +919,8 @@ async function diffChange(args: {
     deletionPoints,
     diff,
     diffs,
-    notReviewed,
-    uncovered: files.filter((f) => uncoverable.has(f.path) && !f.binary).map((f) => f.path),
+    notReviewed: [],
+    uncovered: [],
     stats: { files: files.length, additions, deletions },
   };
 }
@@ -1006,7 +1048,7 @@ export async function getWholeRepo(args: { repoRoot: string; exclude: string[] }
         idLines.push(`${name}\t${mode}\tnot a file`);
         continue;
       }
-      if (st.size > DIFF_CAP_BYTES) {
+      if (st.size > WHOLE_REPO_MAX_BYTES) {
         notReviewed.push(name);
         idLines.push(`${name}\t${mode}\t${await streamBlobHash(handle, st.size).catch(() => "unreadable")}`);
         continue;

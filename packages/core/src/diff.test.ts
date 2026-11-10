@@ -33,7 +33,7 @@ describe("unquoteDiffPath", () => {
 describe("parseDiffCoverage", () => {
   it("anchors coverage on the decoded path", () => {
     expect([...parseDiffCoverage(DIFF).keys()]).toEqual([PATH]);
-    expect(parseDiffCoverage(DIFF).get(PATH)).toEqual(new Set([1, 2, 3]));
+    expect(Array.from(parseDiffCoverage(DIFF).get(PATH) ?? [])).toEqual(Array.from([1, 2, 3]));
   });
 
   it("reads an added '++ x' line as content, not as a file header", () => {
@@ -42,7 +42,7 @@ describe("parseDiffCoverage", () => {
       "@@ -1,1 +1,3 @@\n a\n+++ added comment\n+b\n";
     const coverage = parseDiffCoverage(diff);
     expect([...coverage.keys()]).toEqual(["q.sql"]);
-    expect(coverage.get("q.sql")).toEqual(new Set([1, 2, 3]));
+    expect(Array.from(coverage.get("q.sql") ?? [])).toEqual(Array.from([1, 2, 3]));
   });
 
   it("gives a deleted file no coverage", () => {
@@ -60,13 +60,13 @@ describe("parseDiffCoverage", () => {
       "@@ -10,2 +9,0 @@\n-x\n-y\n" +
       "@@ -20,0 +20,2 @@\n+p\n+q\n" +
       "\\ No newline at end of file\n";
-    expect(parseDiffCoverage(diff).get("a.ts")).toEqual(new Set([2, 20, 21]));
+    expect(Array.from(parseDiffCoverage(diff).get("a.ts") ?? [])).toEqual(Array.from([2, 20, 21]));
   });
 
   it("keeps a trailing space in a file name", () => {
     // Real git output for a file named "sp " (git adds a tab after the path).
     const diff = "diff --git a/sp  b/sp \nindex 7898192..422c2b7 100644\n--- a/sp \t\n+++ b/sp \t\n@@ -1,0 +2 @@ a\n+b\n";
     expect([...parseDiffCoverage(diff).keys()]).toEqual(["sp "]);
-    expect(parseDiffCoverage(diff).get("sp ")).toEqual(new Set([2]));
+    expect(Array.from(parseDiffCoverage(diff).get("sp ") ?? [])).toEqual(Array.from([2]));
   });
 });

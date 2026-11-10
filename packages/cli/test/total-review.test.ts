@@ -99,6 +99,7 @@
 // 38. --timeout no longer wins over the default, for a change or for --all;
 //     or a --timeout longer than a timer holds stops the reviewer at once
 //     and reports a cap it never reached.
+// 40. Temporary streamed patches survive review cleanup.
 // 39. A review stopped at its cap does not say which cap it hit and which
 //     flag raises it, on the terminal or in the report; or a reviewer that
 //     never answers is not stopped at the cap it was given.
@@ -863,12 +864,12 @@ describe("28, 29. a reviewer whose trace is not complete (Codex)", () => {
     expect(readFileSync(join(runDir(dir), "trace.json"), "utf8")).toContain("cat /etc/hosts");
   });
 
-  it("29. ranges the rounds could not carry leave it incomplete, named as not given to the reviewer", async () => {
+  it("29. ranges the rounds could not carry leave it incomplete, each named as not examined", async () => {
     const dir = bigChange(DELIVER_LINES * 3);
     expect(await review(dir, untraced([claims]))).toBe(2);
     const report = JSON.parse(out) as Report;
     expect(report.completion?.status).toBe("incomplete");
-    expect(report.completion?.missing.join("\n")).toMatch(/not given to the reviewer: big\.txt:\d+-\d+/);
+    expect(report.completion?.missing).toEqual(["1 changed range was not examined", expect.stringMatching(/^big\.txt:\d+-\d+$/)]);
   });
 });
 
@@ -886,7 +887,7 @@ describe("25. what a correction message may carry", () => {
     expect(r.delivered).toEqual([]);
   });
 
-  it("never delivers a deletion whose removed lines the change does not hold, a dropped file, a binary file or a line over the byte budget, and promises none for a later round", () => {
+  it("never delivers a deletion whose removed lines the change does not hold or a dropped file, but delivers a binary file and a long changed line as labelled bytes", () => {
     const dir = snap();
     writeFileSync(join(dir, "bin.dat"), Buffer.from([0, 1, 2, 10, 3, 10]));
     writeFileSync(join(dir, "long.js"), `${"a".repeat(220_000)}\n`);
@@ -897,10 +898,16 @@ describe("25. what a correction message may carry", () => {
       { path: "bin.dat", start: 3, end: 4, deletion: true },
     ];
     const r = deliverRanges({ snapshotDir: dir, unread, secrets: [], change: { files: [], deletionPoints: new Map([["bin.dat", [{ after: 3, lines: 1, anchors: [3, 4] }]]]), diffs: [] } });
-    expect(r.delivered).toEqual([]);
-    expect(r.left).toHaveLength(4);
+    // Fragments are bytes, so a file that is not text is paged by bytes too.
+    // A route without inventory ids names no fragment owner.
+    expect(r.delivered).toEqual([
+      { ...unread[1], end: 1, lineBytes: 3, fragment: { from: 1, to: 3 } },
+      { ...unread[1], start: 2, lineBytes: 1, fragment: { from: 1, to: 1 } },
+      unread[2],
+    ]);
+    expect(r.left).toEqual([unread[0], unread[3]]);
     expect(r.later).toBe(0);
-    expect(r.text).toBe("");
+    expect(r.text).toContain("long.js: line 1, bytes 1 to 2,000 of 220,000");
   });
 
   it("a range whose lines pass the byte bound before the line bound is sent in a part that fits, not promised for a round that could never carry it", () => {
@@ -909,9 +916,11 @@ describe("25. what a correction message may carry", () => {
     const r = deliverRanges({ snapshotDir: dir, unread: [{ path: "wide.txt", start: 1, end: 1000, deletion: false }], secrets: [] });
     expect(r.delivered.length).toBeGreaterThan(0);
     expect(Buffer.byteLength(r.text, "utf8")).toBeLessThanOrEqual(512 * 1024);
-    expect(r.text).toContain("wide.txt: line 1, part 1 of 2\t");
-    expect(r.text).toContain("wide.txt: line 1, part 2 of 2\t");
-    expect(r.left).toEqual([{ path: "wide.txt", start: r.delivered.at(-1)!.end + 1, end: 1000, deletion: false }]);
+    expect(r.text).toContain("wide.txt: line 1, bytes 1 to 2,000 of 2,502\t");
+    expect(r.text).toContain("wide.txt: line 1, bytes 2,001 to 2,502 of 2,502\t");
+    // Lines 1 to 198 fit whole with their context; the rest waits for a page.
+    expect(r.delivered).toEqual([{ path: "wide.txt", start: 1, end: 198, deletion: false }]);
+    expect(r.left).toEqual([{ path: "wide.txt", start: 199, end: 1000, deletion: false }]);
     expect(r.later).toBe(1);
   });
 
@@ -969,7 +978,7 @@ describe("the snapshot", () => {
     writeFileSync(join(dir, "app/config.py"), `KEY = "${secret}"\n`);
     writeFileSync(join(dir, "app/other.py"), `# copied: ${secret}\nx = 1\n`);
     writeFileSync(join(dir, ".git"), "gitdir: /somewhere\n");
-    expect(redactSnapshot(dir, [secret])).toEqual({ redacted: 2, removed: [], named: 0 });
+    expect(redactSnapshot(dir, [secret])).toEqual({ redacted: 2, named: 0 });
     expect(readFileSync(join(dir, "app/config.py"), "utf8")).not.toContain(secret);
     expect(readFileSync(join(dir, "app/other.py"), "utf8")).toBe("# copied: [redacted]\nx = 1\n");
   });
@@ -1132,7 +1141,7 @@ describe("the Action's review flags", () => {
     writeFileSync(join(planted, "report.md"), "# PLANTED\n");
     const folder = join(tempDir("oq-report-dir-"), "review");
     expect(await withOptions(dir, fake([good]), { reportDir: folder })).toBe(0);
-    expect(readdirSync(folder).sort()).toEqual(["brief.md", "briefs", "impact.json", "manifest.json", "report.html", "report.json", "report.md", "report.sarif", "reviewer.json", "rounds.json", "scan.json", "submission.json", "trace.json", "usage.json"]);
+    expect(readdirSync(folder).sort()).toEqual(["brief.md", "briefs", "impact.json", "manifest.json", "report.html", "report.json", "report.md", "report.sarif", "reviewer.json", "rounds.json", "scan.json", "submission.json", "trace.json", "units.json", "usage.json"]);
     const report = JSON.parse(readFileSync(join(folder, "report.json"), "utf8")) as Report;
     expect(report.completion?.status).toBe("complete");
     expect(report).toEqual(JSON.parse(out) as Report);
@@ -1354,4 +1363,22 @@ describe("37, 38, 39. the review's time cap", () => {
     expect(report.completion?.missing).toContain(capLine("1 second"));
     expect(out).toContain(`Missing: ${capLine("1 second")}`);
   });
+});
+
+it("40. removes streamed patches after the review ends or the reviewer fails", async () => {
+  for (const failed of [false, true]) {
+    const dir = repo();
+    writeFileSync(join(dir, "big.txt"), `${"x".repeat(6299)}\n`.repeat(1000));
+    let patches: string[] = [];
+    const answer: Answer = (text) => {
+      const root = join(home, "tmp");
+      patches = existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((p) => p.endsWith(".patch")) : [];
+      if (failed) throw new Error("reviewer failed");
+      return { finalText: submission(text) };
+    };
+    expect(await review(dir, fake([answer]))).toBe(failed ? 2 : 0);
+    expect(patches.length).toBeGreaterThan(0);
+    const root = join(home, "tmp");
+    expect(existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((p) => p.endsWith(".patch") || p.endsWith("/diff")) : []).toEqual([]);
+  }
 });

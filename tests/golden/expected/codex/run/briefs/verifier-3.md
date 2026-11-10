@@ -45,7 +45,7 @@ index df70b04..bdc39d6 100644
 +RUN pip install -r requirements.txt
 ```
 
-### h5 Dockerfile 9-10
+### h5 Dockerfile 9-10 (old lines 10-10)
 
 Removed lines use the old file's line numbers. Cite deletion anchor 9 or 10.
 
