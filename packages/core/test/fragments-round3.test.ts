@@ -35,10 +35,13 @@ it("R3.4 measures a 4 MB in-memory patch once over 200 cache calls", () => {
 it("R3.5 indexes a 2 million row patch in under 64 MB of extra memory", () => {
   const text = `@@ -0,0 +1,2000000 @@\n${"+x\n".repeat(2_000_000)}`;
   const change = makeChange({ diffs: [{ path: "a.txt", text }] });
-  // Collect garbage first, so the count is what the index keeps.
+  // Collect garbage first, so the count is what the index keeps. V8 frees
+  // the memory of dead typed arrays in a background sweep that the next
+  // collection finishes, so a second one keeps the 32 MB growth array the
+  // index drops out of the count (a Linux runner once read 68.2 MB, not 36.2).
   setFlagsFromString("--expose-gc");
   const gc = runInNewContext("gc") as () => void;
-  const used = () => { gc(); const m = process.memoryUsage(); return m.heapUsed + m.arrayBuffers; };
+  const used = () => { gc(); gc(); const m = process.memoryUsage(); return m.heapUsed + m.arrayBuffers; };
   const before = used();
   const index = diffIndex(change, "a.txt");
   const grown = used() - before;
