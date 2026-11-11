@@ -269,8 +269,8 @@ async function isAncestor(repoRoot: string, older: string, newer: string, env: R
 // (the push is then judged in that folder), and one output trim at the end:
 // `2>&1`, `2>/dev/null`, `| tail -n N`, `| tail -N`, the same with head, or
 // `2>&1` before one of those pipes. The folder is plain words, or one quoted
-// run without `$`, a backtick or a backslash; it never starts with `-` or
-// `~`. Anything else (`src:dst`, `+`, `--no-verify`, a second refspec, any
+// run without `$`, a backtick or a backslash; it is absolute or starts with
+// `./` or `../`, because the shell can find any other name through CDPATH. Anything else (`src:dst`, `+`, `--no-verify`, a second refspec, any
 // other option, other quotes, `$`, `;`, `||`, a second `&&`, a second `cd`,
 // any other pipe or redirect, a newline, `-C`, a wrapper) is not recognised.
 // The hook never works out what a push sends: for a recognised line it asks
@@ -290,7 +290,9 @@ export function plainLine(command: string): { folder: string | null; push: strin
   const cd = CD.exec(push);
   if (cd !== null) {
     folder = cd[1]!.replace(/^(['"])(.*)\1$/s, "$2");
-    if (folder === "" || /^[-~]/.test(folder)) return null;
+    // Only a path the shell cannot look up through CDPATH: absolute, or
+    // starting with `.` or `..` as a whole first part.
+    if (!/^(\/|\.\.?(\/|$))/.test(folder)) return null;
     push = push.slice(cd[0].length);
   }
   push = push.replace(TRIM, "");

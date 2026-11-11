@@ -157,7 +157,7 @@ describe("hook check: which commands are pushes", () => {
     ["git push origin HEAD | head -n 3", null, "HEAD"],
     ["git push 2>&1 | tail -2", null, ""],
     ["git push 2>&1 | head -n 5", null, ""],
-    ["cd sub && git push", "sub", ""],
+    ["cd ./sub && git push", "./sub", ""],
     ["cd /work/tree && git push 2>&1 | tail -2", "/work/tree", ""],
     ["cd ../other-tree && git push -u origin my-branch 2>&1 | tail -5", "../other-tree", "my-branch"],
     ['cd "/work/my tree" && git push', "/work/my tree", ""],
@@ -170,36 +170,39 @@ describe("hook check: which commands are pushes", () => {
 
   // 24. Lines around a push that still hide what runs, or where.
   const hidden = [
+    "cd sub && git push",
+    "cd sub/tree && git push",
+    'cd "sub" && git push',
     "cd $HOME && git push",
     'cd "$DIR" && git push',
     "cd `pwd` && git push",
     "cd $(pwd) && git push",
-    "cd sub && git push $REMOTE",
+    "cd ./sub && git push $REMOTE",
     "git push 2>&1 | tail -$N",
-    "cd 'sub'x && git push",
-    'cd "sub\\x" && git push',
+    "cd './sub'x && git push",
+    'cd "./sub\\x" && git push',
     'cd "" && git push',
-    "cd sub; git push",
-    "cd sub\ngit push",
+    "cd ./sub; git push",
+    "cd ./sub\ngit push",
     "git push\necho done",
-    "cd sub || git push",
+    "cd ./sub || git push",
     "git push || true",
-    "cd sub && git push && gh pr create",
+    "cd ./sub && git push && gh pr create",
     "git push 2>&1 | tail -2 && gh pr create",
-    "cd sub && git push && git push",
+    "cd ./sub && git push && git push",
     "git push origin main:main",
     "git push origin +main",
     "git push --no-verify",
     "git push --tags",
-    "cd sub && git -C sub push",
-    "npm test && cd sub && git push",
-    "cd sub && cd sub && git push",
+    "cd ./sub && git -C sub push",
+    "npm test && cd ./sub && git push",
+    "cd ./sub && cd ./sub && git push",
     "cd - && git push",
     "cd -P sub && git push",
     "cd ~ && git push",
     "cd ~/sub && git push",
     'cd "~/sub" && git push',
-    "cd sub&&git push",
+    "cd ./sub&&git push",
     "git push | tail",
     "git push | tail -n x",
     "git push | grep main",
@@ -224,7 +227,7 @@ describe("hook check: which commands are pushes", () => {
   });
 
   it("says it cannot tell what a push inside a compound line sends", () => {
-    expect(check(s, "cd sub && git push && gh pr create").stdout).toContain(COULD_NOT);
+    expect(check(s, "cd ./sub && git push && gh pr create").stdout).toContain(COULD_NOT);
   });
 
   it("prints nothing for a line that only names git push", () => {
@@ -350,13 +353,13 @@ describe("hook check: decisions", () => {
     const at = (cwd: string, command: string) => check(s, command, { cwd }).stdout;
     expect(at(a, "git push")).toBe("");
     expect(at(a, "git push 2>&1 | tail -2")).toBe("");
-    expect(at(s.root, "cd a && git push")).toBe("");
+    expect(at(s.root, "cd ./a && git push")).toBe("");
     for (const command of [
       "git -C a push",
-      "(cd a && git push)",
+      "(cd ./a && git push)",
       "GIT_DIR=a/.git git push",
-      "cd a && git push && gh pr create",
-      "cd a && git push 2>&1 | sh",
+      "cd ./a && git push && gh pr create",
+      "cd ./a && git push 2>&1 | sh",
     ]) {
       const out = at(s.root, command);
       expect(decision(out), command).toBe("deny");
@@ -393,7 +396,7 @@ describe("hook check: decisions", () => {
   it("24. says it cannot tell when the cd folder is missing or not a checkout", () => {
     const s = sandbox();
     mkdirSync(join(s.root, "plain"));
-    for (const command of ["cd missing && git push 2>&1 | tail -2", "cd plain && git push"]) {
+    for (const command of ["cd ./missing && git push 2>&1 | tail -2", "cd ./plain && git push"]) {
       const out = check(s, command, { cwd: s.root }).stdout;
       expect(out, command).toContain(COULD_NOT);
       expect(decision(out), command).toBeUndefined();

@@ -211,7 +211,7 @@ When Codex is installed and logged in too, a review you run from Claude Code sti
 
 ## The push gate
 
-`init` adds one `PreToolUse` hook to Claude Code. It matches the `Bash` tool and runs only for `git push` commands. The hook looks for the record `review` wrote for your current work. It does not know what a push sends: for a plain `git push` (also after one leading `cd <folder> &&`, judged in that folder, and with its output trimmed, as in `2>&1 | tail -5`) it asks whether your current work has a passing review, and for any other push command it says it cannot tell. The git pre-push hook below checks the exact commits a push sends. It never scans, never starts a review, and never approves a push for you.
+`init` adds one `PreToolUse` hook to Claude Code. It matches the `Bash` tool and runs only for `git push` commands. The hook looks for the record `review` wrote for your current work. It does not know what a push sends: for a plain `git push` (also after one leading `cd <folder> &&`, with the folder as a full path or one starting with `./` or `../`, judged in that folder, and with its output trimmed, as in `2>&1 | tail -5`) it asks whether your current work has a passing review, and for any other push command it says it cannot tell. The git pre-push hook below checks the exact commits a push sends. It never scans, never starts a review, and never approves a push for you.
 
 By default the gate only warns:
 
