@@ -43,6 +43,10 @@
 // 20. The line printed for lefthook puts git's hook arguments into a shell
 //     line: lefthook inserts {1} and {2} raw, so a remote URL holding
 //     '$(id)' closes the quotes and runs.
+// 21. A push whose net change touches only .openqodex/, which a review
+//     leaves out and so never records, is denied in a blocking repo by
+//     either hook (issue 279); or a push that also changes another file, or
+//     whose base git cannot read, goes through without a review.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -489,6 +493,74 @@ describe("the pre-push hook looks up the review of what the push sends", () => {
     expect(r.status).not.toBe(0);
     expect(r.out).toContain(UNREVIEWED);
   }, 60_000);
+});
+
+// 21. A review leaves .openqodex/ out of every change, so a push that
+// changes nothing else has nothing a review could record.
+describe("a push that changes only .openqodex/", () => {
+  const CONFIG = ".openqodex/config.yaml";
+  const blockingConfig = () => sandbox({ "a.txt": "x\n", [CONFIG]: BLOCK_YAML });
+  const editConfig = (s: Sandbox, line: string) => writeFileSync(join(s.repo, CONFIG), `${BLOCK_YAML}  ${line}\n`);
+
+  it("21. the pre-push hook lets it through with no review, and still denies one that also changes another file", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const state = push(s, "origin", "main");
+    expect(state.status, state.out).toBe(0);
+    expect(state.out).not.toContain(UNREVIEWED);
+    editConfig(s, "severity_threshold: minor");
+    writeFileSync(join(s.repo, "a.txt"), "y\n");
+    commitAll(s.repo);
+    const both = push(s, "origin", "main");
+    expect(both.status).not.toBe(0);
+    expect(both.out).toContain(UNREVIEWED);
+  }, 60_000);
+
+  it("21. the pre-push hook measures a new branch from the base it already uses, and denies one that also changes another file", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    git(s.repo, "remote", "set-head", "origin", "main");
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    git(s.repo, "checkout", "-q", "-b", "state");
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const state = push(s, "origin", "state");
+    expect(state.status, state.out).toBe(0);
+    expect(state.out).not.toContain(UNREVIEWED);
+    git(s.repo, "checkout", "-q", "-b", "code", "main");
+    editConfig(s, "severity_threshold: major");
+    writeFileSync(join(s.repo, "b.txt"), "code\n");
+    commitAll(s.repo);
+    const both = push(s, "origin", "code");
+    expect(both.status).not.toBe(0);
+    expect(both.out).toContain(UNREVIEWED);
+  }, 60_000);
+
+  it("21. the pre-push hook does not let it through when git cannot read the remote's commit", () => {
+    const s = blockingConfig();
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const head = git(s.repo, "rev-parse", "HEAD").trim();
+    const r = cli(s, ["hook", "pre-push", "origin"], { input: `refs/heads/main ${head} refs/heads/main ${"f".repeat(40)}\n` });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(COULD_NOT);
+  });
+
+  it("21. the agent hook lets it through with no review, and still denies one that also changes another file", () => {
+    const s = blockingConfig();
+    editConfig(s, "severity_threshold: major");
+    published(s);
+    expect(check(s, "git push").stdout).toBe("");
+    editConfig(s, "severity_threshold: minor");
+    writeFileSync(join(s.repo, "a.txt"), "y\n");
+    commitAll(s.repo);
+    const both = check(s, "git push").stdout;
+    expect(decision(both)).toBe("deny");
+    expect(both).toContain(UNREVIEWED);
+  });
 });
 
 // 19. The line printed for a hook manager drops git's arguments, so a push

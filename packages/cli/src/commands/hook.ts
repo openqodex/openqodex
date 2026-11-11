@@ -234,6 +234,8 @@ async function decide(input: HookInput): Promise<void> {
     }
     // The developer's current work, as the default review takes it.
     const change = await core.getChange({ repoRoot, scope: {}, exclude: config.exclude, defaultBase: config.defaultBase, idOnly: true });
+    // Nothing but .openqodex/ changed: no review can record it.
+    if (change.id === core.emptyChangeId(change.baseSha)) continue;
     // Only the record in the developer's own home counts, never one under
     // the repository's .openqodex/, which a branch can carry.
     const receipt = readHomeReceipt(home, repoRoot, change.id) ?? readHomeReceipt(home, repoRoot, "latest");
@@ -314,6 +316,8 @@ async function prePush(args: string[]): Promise<number> {
   for (const range of pushedRanges(await readAll())) {
     let changeId = "";
     const found = await rangeChangeId(core, repoRoot, config, remote, range.local, range.remoteSha);
+    // Nothing but .openqodex/ changed: no review can record it.
+    if ("id" in found && found.id === core.emptyChangeId(found.base)) continue;
     if ("id" in found) changeId = found.id;
     else messages.add(`OpenQodex could not tell what this push sends (${found.unknown}); run openqodex review, then push again.`);
     const exact = changeId === "" ? null : readHomeReceipt(home, repoRoot, changeId);
