@@ -42,7 +42,7 @@
 // 19. finalize --run hands the older runtime both --run and a findings path.
 // 20. A release whose own package.json declares another contract than the
 //     registry said is activated: the gate would rest on unsigned metadata.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -58,6 +58,14 @@ const NEWER = "0.99.0";
 const NOTICE = /openqodex updated to/;
 const DAY = 24 * 60 * 60 * 1000;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// How long an activation here waits for its home's lock. The lock is a port
+// hashed from the home folder (agents/lock.ts), so the home of another test,
+// in this file or one running beside it, can land on the same port and hold
+// it for a moment; with no wait the activation then reports busy (#326).
+// An init on a loaded machine holds it for seconds, so this waits as long as
+// init and a foreground update do. No case here expects busy. The daily
+// worker itself still waits 0.
+const LOCK_WAIT = 60_000;
 // The contract this build declares, as the registry would report it.
 const CONTRACT = (() => {
   const p = JSON.parse(readFileSync(join(BIN, "..", "..", "package.json"), "utf8")) as { openqodex: { agentContract: number; configFormat: number } };
@@ -183,7 +191,7 @@ describe("what the command prints and returns", () => {
     expect(first.stdout).not.toMatch(NOTICE);
     expect(first.stderr).toContain(`openqodex updated to ${NEWER} (was ${version}). Roll back: openqodex update --rollback`);
     expect(second.stderr).not.toMatch(NOTICE);
-  });
+  }, 120_000);
 });
 
 // A worker's last step for a second real runtime, in a child process that
@@ -198,7 +206,7 @@ async function activateCopy(s: Sandbox, to: string, from: string, o: Activation 
   cpSync(join(s.oqHome, "runtime", version), pkg, { recursive: true });
   const bin = join(pkg, "dist/bin.js");
   writeFileSync(bin, readFileSync(bin, "utf8").replaceAll(`"${version}"`, `"${to}"`));
-  const opts = { version: to, from, tmp, wait: 0, contract: o.said ?? CONTRACT, running: o.running ?? from, ...(o.keep === undefined ? {} : { keep: o.keep }) };
+  const opts = { version: to, from, tmp, wait: LOCK_WAIT, contract: o.said ?? CONTRACT, running: o.running ?? from, ...(o.keep === undefined ? {} : { keep: o.keep }) };
   const code = `const m = await import(${JSON.stringify(child)}); const r = await m.activateUnpacked({ ...${JSON.stringify(opts)}, home: process.env.H, env: process.env }); process.stdout.write(JSON.stringify(r));`;
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { env: { ...laptop(s), H: s.oqHome }, encoding: "utf8" });
   expect(r.stdout, r.stderr).toMatch(new RegExp(`"outcome":"${o.outcome ?? "activated"}"`));
@@ -209,6 +217,25 @@ let child = "";
 beforeAll(async () => {
   child = await bundleChildEntry();
 }, 60_000);
+
+describe("an activation beside another holder of its home's port", () => {
+  it("waits while another process holds the port for a moment, then activates (#326)", async () => {
+    const s = installed();
+    // A listener on this home's port for one second: what the lock of another
+    // test's home that lands on the same port looks like from here.
+    const code = `const m = await import(${JSON.stringify(child)}); const { createServer } = await import("node:net"); const server = createServer((c) => c.destroy()); server.listen({ host: "127.0.0.1", port: m.boundaryPort(process.env.H), exclusive: true }, () => { process.stdout.write("held\\n"); setTimeout(() => server.close(), 1000); });`;
+    const holder = spawn(process.execPath, ["--input-type=module", "-e", code], { env: { ...laptop(s), H: s.oqHome }, stdio: ["ignore", "pipe", "inherit"] });
+    const exited = new Promise<void>((r) => holder.once("exit", () => r()));
+    const held = await new Promise<boolean>((r) => {
+      holder.stdout.on("data", (d: Buffer) => d.toString().includes("held") && r(true));
+      void exited.then(() => r(false));
+    });
+    expect(held, "the helper took the port").toBe(true);
+    await activateCopy(s, NEWER, version);
+    expect(current(s)).toBe(NEWER);
+    await exited;
+  }, 120_000);
+});
 
 describe("runtimes kept by a background switch and by init", () => {
   let s: Sandbox;

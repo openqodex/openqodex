@@ -74,6 +74,14 @@ const version = (JSON.parse(readFileSync(join(BIN, "..", "..", "package.json"), 
 const OLDER = "0.98.0";
 const NEWER = "0.99.0";
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// How long an activation here waits for its home's lock. The lock is a port
+// hashed from the home folder (agents/lock.ts), so the home of another test,
+// in this file or one running beside it, can land on the same port and hold
+// it for a moment; with no wait the activation then reports busy (#326).
+// An init on a loaded machine holds it for seconds, so this waits as long as
+// init and a foreground update do. The case that expects busy passes 0, as
+// the daily worker does.
+const LOCK_WAIT = 60_000;
 // The contract this build declares, as the registry would report it.
 const CONTRACT = (() => {
   const p = JSON.parse(readFileSync(join(BIN, "..", "..", "package.json"), "utf8")) as { openqodex: { agentContract: number; configFormat: number } };
@@ -169,10 +177,10 @@ async function noCheckRuns(s: Sandbox, ms: number): Promise<boolean> {
   return checkedAt(s) === before;
 }
 // A worker's last step: activateUnpacked in a child, printing its result as JSON.
-function activation(s: Sandbox, v: string, from: string, extra: Record<string, string> = {}) {
+function activation(s: Sandbox, v: string, from: string, extra: Record<string, string> = {}, wait = LOCK_WAIT) {
   const tmp = unpacked(s, v);
   const p = nodeChild(
-    `const r = await m.activateUnpacked({ home: process.env.H, version: ${JSON.stringify(v)}, from: ${JSON.stringify(from)}, running: ${JSON.stringify(from)}, tmp: ${JSON.stringify(tmp)}, env: process.env, wait: 0, contract: ${JSON.stringify(CONTRACT)} }); process.stdout.write(JSON.stringify(r));`,
+    `const r = await m.activateUnpacked({ home: process.env.H, version: ${JSON.stringify(v)}, from: ${JSON.stringify(from)}, running: ${JSON.stringify(from)}, tmp: ${JSON.stringify(tmp)}, env: process.env, wait: ${wait}, contract: ${JSON.stringify(CONTRACT)} }); process.stdout.write(JSON.stringify(r));`,
     { ...laptop(s), H: s.oqHome, ...extra },
   );
   return { p, done: exited(p), tmp };
@@ -262,9 +270,9 @@ describe("5. three processes contending for the boundary", () => {
 });
 
 describe("5b. the lock is per home folder", () => {
-  // Its port comes from the home folder, so two test files, each with homes
-  // of their own, never share one; only a process in the same home can
-  // hold it (#57).
+  // Its port comes from the home folder, so two homes rarely share one; a
+  // process in the same home holds it (#57), and so, now and then, does the
+  // lock of another home that lands on the same port (#326).
   it("activations in two homes at once both activate; one in a home whose lock another process holds reports busy", async () => {
     const [a, b, c] = [installed(), installed(), installed()];
     const both = await Promise.all([activation(a, NEWER, version).done, activation(b, NEWER, version).done]);
@@ -272,7 +280,7 @@ describe("5b. the lock is per home folder", () => {
     const holder = nodeChild(`await m.withBoundary(process.env.H, { wait: 0 }, async () => { process.stdout.write("held\\n"); await new Promise((r) => setTimeout(r, 30000)); });`, { H: c.oqHome });
     try {
       await new Promise<void>((resolve) => holder.stdout?.on("data", (d: Buffer) => d.toString().includes("held") && resolve()));
-      expect((await activation(c, NEWER, version).done).out).toMatch(/"outcome":"busy"/);
+      expect((await activation(c, NEWER, version, {}, 0).done).out).toMatch(/"outcome":"busy"/);
     } finally {
       holder.kill("SIGKILL");
     }
@@ -388,7 +396,7 @@ describe("9. rollback when skip_version cannot be written", () => {
       chmodSync(locked, 0o755);
     }
     expect(active(s)).toEqual([NEWER, version]);
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("10. uninstall", () => {
