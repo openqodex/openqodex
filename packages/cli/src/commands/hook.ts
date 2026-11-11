@@ -5,7 +5,7 @@
 // The agent hook is a reminder about the developer's current work, not the
 // boundary: it does not know what a push sends. The git pre-push hook, which
 // git hands the exact ranges, is the authoritative check.
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -111,20 +111,12 @@ const commitOf = (repoRoot: string, rev: string) => git(repoRoot, ["rev-parse", 
 // review of base B to H does not cover a push of H over a remote commit R
 // that is not B, such as a force push over work the review never saw.
 async function rangeChangeId(core: Core, repoRoot: string, config: Config, remote: string, localSha: string, remoteSha: string | null): Promise<{ id: string; base: string } | { unknown: string }> {
-  const found = await rangeBase(repoRoot, config.defaultBase, remote, localSha, remoteSha);
-  if (!("base" in found)) return found;
-  const change = await core.getTreeChange({ repoRoot, baseRef: found.base, baseSha: found.base, headSha: localSha, exclude: config.exclude, idOnly: true });
-  return { id: change.id, base: found.base };
-}
-
-// The commit a pushed range starts from (see rangeChangeId).
-async function rangeBase(repoRoot: string, defaultBase: string | null, remote: string, localSha: string, remoteSha: string | null): Promise<{ base: string } | { unknown: string }> {
   let base: string | null = null;
   if (remoteSha !== null) {
     base = await commitOf(repoRoot, remoteSha);
     if (base === null) return { unknown: `the remote's commit ${remoteSha.slice(0, 12)} is not in this repository, so the push cannot be matched to a review; fetch, then push again` };
   } else {
-    const named = defaultBase !== null ? [defaultBase, `${remote}/${defaultBase}`] : [`refs/remotes/${remote}/HEAD`];
+    const named = config.defaultBase !== null ? [config.defaultBase, `${remote}/${config.defaultBase}`] : [`refs/remotes/${remote}/HEAD`];
     for (const ref of named) {
       const sha = await commitOf(repoRoot, ref);
       base = sha === null ? null : await git(repoRoot, ["merge-base", sha, localSha]);
@@ -132,7 +124,8 @@ async function rangeBase(repoRoot: string, defaultBase: string | null, remote: s
     }
     if (base === null) return { unknown: "this push starts a new branch and no base to measure it from was found (review.default_base, or the remote's default branch)" };
   }
-  return { base };
+  const change = await core.getTreeChange({ repoRoot, baseRef: base, baseSha: base, headSha: localSha, exclude: config.exclude, idOnly: true });
+  return { id: change.id, base };
 }
 
 // The block_on_severity the config sets in commit `base`, read from git as
@@ -143,23 +136,27 @@ async function rangeBase(repoRoot: string, defaultBase: string | null, remote: s
 async function blockingAt(core: Core, repoRoot: string, base: string): Promise<{ severity: string; file: string } | null> {
   const run = async (args: string[]): Promise<string> =>
     (await execFileAsync("git", args, { cwd: repoRoot, timeout: 10_000, maxBuffer: 2 * core.CONFIG_MAX_BYTES, env: { ...process.env, ...core.SERVER_GIT_ENV } })).stdout;
+  // One path per call, so other files under .openqodex/ never reach the
+  // output: a path names the entry itself, never what a folder holds.
+  const entry = async (path: string): Promise<{ mode: string; sha: string; size: number } | null> => {
+    const [meta = "", name] = (await run(["ls-tree", "-z", "-l", "--full-tree", base, "--", path])).split("\0")[0]!.split("\t");
+    const [mode = "", , sha = "", size] = meta.split(/\s+/);
+    return name === path ? { mode, sha, size: Number(size) } : null;
+  };
   try {
-    const listing = await run(["ls-tree", "-z", "-l", "--full-tree", base, "--", ".openqodex", core.CONFIG_FILE, core.LEGACY_CONFIG_FILE]);
-    const entries = new Map(
-      listing.split("\0").filter((l) => l !== "").map((l) => {
-        const [meta = "", path = ""] = l.split("\t");
-        const [mode, , sha, size] = meta.split(/\s+/);
-        return [path, { mode, sha, size: Number(size) }];
-      }),
-    );
-    if (entries.get(".openqodex")?.mode === "120000") return null;
-    const files = [core.CONFIG_FILE, core.LEGACY_CONFIG_FILE].filter((f) => entries.has(f));
+    const folder = await entry(".openqodex");
+    if (folder?.mode === "120000") return null;
+    const entries = new Map<string, { mode: string; sha: string; size: number } | null>([
+      [core.CONFIG_FILE, folder?.mode === "040000" ? await entry(core.CONFIG_FILE) : null],
+      [core.LEGACY_CONFIG_FILE, await entry(core.LEGACY_CONFIG_FILE)],
+    ]);
+    const files = [core.CONFIG_FILE, core.LEGACY_CONFIG_FILE].filter((f) => entries.get(f) !== null);
     // loadConfig reads both files before it picks one: either one a link,
     // not a file or too big stops it.
-    if (files.some((f) => !["100644", "100755"].includes(entries.get(f)!.mode ?? "") || !(entries.get(f)!.size <= core.CONFIG_MAX_BYTES))) return null;
+    if (files.some((f) => !["100644", "100755"].includes(entries.get(f)!.mode) || !(entries.get(f)!.size <= core.CONFIG_MAX_BYTES))) return null;
     const file = files[0];
     if (file === undefined) return null;
-    const text = await run(["cat-file", "blob", entries.get(file)!.sha!]);
+    const text = await run(["cat-file", "blob", entries.get(file)!.sha]);
     const severity = core.parseConfig(text, file, { runtimeVersion: __OPENQODEX_VERSION__ }).config.blockOnSeverity;
     return severity === null ? null : { severity, file };
   } catch {
@@ -167,23 +164,59 @@ async function blockingAt(core: Core, repoRoot: string, base: string): Promise<{
   }
 }
 
+// The commits a pushed range starts from, all of them commits the remote
+// has: for a branch the remote has, its old tip; for a new branch, the
+// nearest ancestors of the pushed commit that a remote-tracking ref of
+// `remote` contains, or the pushed commit itself when one does. Neither
+// review.default_base nor the remote's HEAD ref is needed. Empty when the
+// remote has none of the branch or git fails. Replace refs are off, and
+// git's output is read as it comes, so no output limit applies.
+async function remoteBases(core: Core, repoRoot: string, remote: string, range: Range): Promise<string[]> {
+  if (range.remoteSha !== null) {
+    const base = await commitOf(repoRoot, range.remoteSha);
+    return base === null ? [] : [base];
+  }
+  const head = await commitOf(repoRoot, range.local);
+  if (head === null) return [];
+  return new Promise((done) => {
+    const child = spawn("git", ["rev-list", "--boundary", head, "--not", `--remotes=${remote}`], {
+      cwd: repoRoot,
+      timeout: 10_000,
+      env: { ...process.env, ...core.SERVER_GIT_ENV },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const bases: string[] = [];
+    let sent = 0;
+    let rest = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      const lines = (rest + chunk).split("\n");
+      rest = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("-")) bases.push(line.slice(1));
+        else sent++;
+      }
+    });
+    child.once("error", () => done([]));
+    child.once("close", (code) => done(code !== 0 ? [] : sent === 0 ? [head] : bases));
+  });
+}
+
 // The work tree's config cannot be read (`error`). A lookup that fails for
 // its own reasons never stops a push, but a push can carry the broken config
-// itself. So the push stops when the config in the base of any pushed range,
-// a commit the remote has, chose blocking; otherwise the error stands.
+// itself. So the push stops when the config in any base of any pushed range
+// (remoteBases) chose blocking; otherwise the error stands.
 async function brokenConfig(core: Core, repoRoot: string, remote: string, error: unknown): Promise<number> {
   for (const range of pushedRanges(await readAll())) {
-    // A new branch is measured from the remote's default branch: the
-    // default_base the config names cannot be read.
-    const found = await rangeBase(repoRoot, null, remote, range.local, range.remoteSha);
-    if (!("base" in found)) continue;
-    const blocking = await blockingAt(core, repoRoot, found.base);
-    if (blocking === null) continue;
-    const reason = error instanceof Error ? error.message : String(error);
-    process.stderr.write(
-      `OpenQodex cannot read this repo's config: ${reason}\nThis repo blocks a push without a passing review (block_on_severity: ${blocking.severity} in ${blocking.file} at ${found.base.slice(0, 12)}). Fix the config, then push again.\n`,
-    );
-    return 1;
+    for (const base of await remoteBases(core, repoRoot, remote, range)) {
+      const blocking = await blockingAt(core, repoRoot, base);
+      if (blocking === null) continue;
+      const reason = error instanceof Error ? error.message : String(error);
+      process.stderr.write(
+        `OpenQodex cannot read this repo's config: ${reason}\nThis repo blocks a push without a passing review (block_on_severity: ${blocking.severity} in ${blocking.file} at ${base.slice(0, 12)}). Fix the config, then push again.\n`,
+      );
+      return 1;
+    }
   }
   throw error;
 }

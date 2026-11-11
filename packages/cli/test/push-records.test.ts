@@ -498,13 +498,57 @@ describe("15. a broken config in the work tree", () => {
     expect(cli(s, ["hook", "pre-push", "origin"], { input: `${strictLine}\n${laxLine}\n` }).status).toBe(1);
   });
 
-  it("a new branch with no base to measure from keeps today's exit 2", () => {
+  it("a new branch with no remote origin/HEAD, on top of a blocking origin/main: exit 1", () => {
     based({ ".openqodex/config.yaml": BLOCKS });
     put(".openqodex/config.yaml", MALFORMED);
     const r = cli(s, ["hook", "pre-push", "origin"], { input: `refs/heads/main ${g("rev-parse", "HEAD")} refs/heads/fresh ${"0".repeat(40)}\n` });
+    expect(r.status, r.stderr).toBe(1);
+  });
+
+  it("a new branch on top of a blocking origin/release, with origin/HEAD at a main that does not block: exit 1", () => {
+    based({ ".openqodex/config.yaml": LAX });
+    g("remote", "set-head", "origin", "main");
+    g("checkout", "-q", "-b", "release");
+    put(".openqodex/config.yaml", BLOCKS);
+    commitAll();
+    g("push", "-q", "origin", "release");
+    g("checkout", "-q", "-b", "feat");
+    writeFileSync(join(s.repo, "feat.txt"), "never reviewed\n");
+    commitAll();
+    put(".openqodex/config.yaml", MALFORMED);
+    const r = cli(s, ["hook", "pre-push", "origin"], { input: `refs/heads/feat ${g("rev-parse", "HEAD")} refs/heads/feat ${"0".repeat(40)}\n` });
+    expect(r.status, r.stderr).toBe(1);
+  });
+
+  it("a new branch none of whose commits the remote has gets no verdict from history: exit 2, as before", () => {
+    based({ ".openqodex/config.yaml": BLOCKS });
+    g("checkout", "-q", "--orphan", "lone");
+    commitAll();
+    put(".openqodex/config.yaml", MALFORMED);
+    const r = cli(s, ["hook", "pre-push", "origin"], { input: `refs/heads/lone ${g("rev-parse", "HEAD")} refs/heads/lone ${"0".repeat(40)}\n` });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("not valid YAML");
   });
+
+  it("a blocking base with tens of thousands of other files under .openqodex/ still blocks: exit 1", () => {
+    put(".openqodex/config.yaml", BLOCKS);
+    g("add", "-A");
+    const blob = g("hash-object", "-w", "README.md");
+    const lines = Array.from({ length: 40_000 }, (_, i) => `100644 ${blob}\t.openqodex/r${i}.json`).join("\n");
+    const r0 = spawnSync("git", ["update-index", "--index-info"], { cwd: s.repo, input: `${lines}\n`, encoding: "utf8" });
+    expect(r0.status, r0.stderr).toBe(0);
+    g("commit", "-q", "-m", "many");
+    const remote = tempDir("oq-remote-");
+    spawnSync("git", ["init", "-q", "--bare", remote]);
+    g("remote", "add", "origin", remote);
+    g("push", "-q", "-u", "origin", "main");
+    writeFileSync(join(s.repo, "code.txt"), "never reviewed\n");
+    g("add", "code.txt");
+    g("commit", "-q", "-m", "code");
+    put(".openqodex/config.yaml", MALFORMED);
+    const r = pushMain();
+    expect(r.status, r.stderr).toBe(1);
+  }, 60_000);
 
   it("a base with only the legacy .openqodex.yaml blocking, and a broken .openqodex/config.yaml in the work tree: exit 1", () => {
     based({ ".openqodex.yaml": BLOCKS });
