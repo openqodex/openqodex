@@ -43,6 +43,12 @@ it("does not lose any released instruction section when the stripping catalogue 
       expect(createHash("sha256").update(raw).digest("hex"), tag).toBe(hash);
       expect(stripInstructionSections(raw), tag).toBe("\n");
     }
+    // Stripping alone is not enough: init only replaces an old section in
+    // place (agents/plan.ts "md-section") when previousInstructionSections()
+    // names it, or it keeps the stale section forever on a teammate's
+    // machine with no init record of it (issue 219; instructions-0.2.0.md
+    // shipped from 0.2.0 to 0.4.0, but the catalogue only started at 0.5.0).
+    expect(previousInstructionSections(), file).toContain(raw.trimEnd());
   }
 });
 
