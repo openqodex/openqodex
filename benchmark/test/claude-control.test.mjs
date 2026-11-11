@@ -40,7 +40,9 @@ it("dispatches control directly to Claude Code's native review command without a
   expect(invocation.args).toContain("--max-budget-usd");
   // The checkout path may itself contain these words, so mask it before matching.
   const repoRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/\/$/, "");
-  const masked = JSON.stringify(invocation).replaceAll(repoRoot, "<repo>").replaceAll(process.execPath, "<node>");
+  // Masked per string, before JSON escaping can change how the path is spelled.
+  const mask = (_key, value) => (typeof value === "string" ? value.replaceAll(repoRoot, "<repo>").replaceAll(process.execPath, "<node>") : value);
+  const masked = JSON.stringify(invocation, mask);
   expect(masked).not.toMatch(/brief|report-dir|scanner|graph/i);
 });
 it("wires the trusted Bash gate without losing the settings or tool fences", () => {
