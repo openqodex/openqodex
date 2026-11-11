@@ -38,7 +38,10 @@ it("dispatches control directly to Claude Code's native review command without a
   expect(invocation.args).not.toContain("/built/dist/bin.js");
   expect(invocation.args).not.toContain("--disable-slash-commands");
   expect(invocation.args).toContain("--max-budget-usd");
-  expect(JSON.stringify(invocation)).not.toMatch(/brief|report-dir|scanner|graph/i);
+  // The checkout path may itself contain these words, so mask it before matching.
+  const repoRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/\/$/, "");
+  const masked = JSON.stringify(invocation).replaceAll(repoRoot, "<repo>").replaceAll(process.execPath, "<node>");
+  expect(masked).not.toMatch(/brief|report-dir|scanner|graph/i);
 });
 it("wires the trusted Bash gate without losing the settings or tool fences", () => {
   const settings = JSON.parse(invocation.args[invocation.args.indexOf("--settings") + 1]);
