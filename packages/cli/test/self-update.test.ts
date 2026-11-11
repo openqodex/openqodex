@@ -201,16 +201,21 @@ describe("what the command prints and returns", () => {
 // `said`: the contract the registry would have said the release declares.
 type Activation = { said?: unknown; outcome?: string; running?: string; keep?: unknown };
 async function activateCopy(s: Sandbox, to: string, from: string, o: Activation = {}): Promise<string> {
+  const code = activationCode(s, to, from, o);
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { env: { ...laptop(s), H: s.oqHome }, encoding: "utf8" });
+  expect(r.stdout, r.stderr).toMatch(new RegExp(`"outcome":"${o.outcome ?? "activated"}"`));
+  return r.stdout;
+}
+
+// Unpacks the copy and returns the child's code that activates it.
+function activationCode(s: Sandbox, to: string, from: string, o: Activation = {}): string {
   const tmp = join(s.oqHome, "runtime", `${to}.tmp-test`);
   const pkg = join(tmp, "unpacked", "package");
   cpSync(join(s.oqHome, "runtime", version), pkg, { recursive: true });
   const bin = join(pkg, "dist/bin.js");
   writeFileSync(bin, readFileSync(bin, "utf8").replaceAll(`"${version}"`, `"${to}"`));
   const opts = { version: to, from, tmp, wait: LOCK_WAIT, contract: o.said ?? CONTRACT, running: o.running ?? from, ...(o.keep === undefined ? {} : { keep: o.keep }) };
-  const code = `const m = await import(${JSON.stringify(child)}); const r = await m.activateUnpacked({ ...${JSON.stringify(opts)}, home: process.env.H, env: process.env }); process.stdout.write(JSON.stringify(r));`;
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { env: { ...laptop(s), H: s.oqHome }, encoding: "utf8" });
-  expect(r.stdout, r.stderr).toMatch(new RegExp(`"outcome":"${o.outcome ?? "activated"}"`));
-  return r.stdout;
+  return `const m = await import(${JSON.stringify(child)}); const r = await m.activateUnpacked({ ...${JSON.stringify(opts)}, home: process.env.H, env: process.env }); process.stdout.write(JSON.stringify(r));`;
 }
 
 let child = "";
@@ -219,22 +224,47 @@ beforeAll(async () => {
 }, 60_000);
 
 describe("an activation beside another holder of its home's port", () => {
-  it("waits while another process holds the port for a moment, then activates (#326)", async () => {
+  it("waits while another process holds the port, then activates once it is free (#326)", async () => {
     const s = installed();
-    // A listener on this home's port for one second: what the lock of another
-    // test's home that lands on the same port looks like from here.
-    const code = `const m = await import(${JSON.stringify(child)}); const { createServer } = await import("node:net"); const server = createServer((c) => c.destroy()); server.listen({ host: "127.0.0.1", port: m.boundaryPort(process.env.H), exclusive: true }, () => { process.stdout.write("held\\n"); setTimeout(() => server.close(), 1000); });`;
-    const holder = spawn(process.execPath, ["--input-type=module", "-e", code], { env: { ...laptop(s), H: s.oqHome }, stdio: ["ignore", "pipe", "inherit"] });
-    const exited = new Promise<void>((r) => holder.once("exit", () => r()));
-    const held = await new Promise<boolean>((r) => {
-      holder.stdout.on("data", (d: Buffer) => d.toString().includes("held") && r(true));
-      void exited.then(() => r(false));
+    const code = activationCode(s, NEWER, version);
+    // A listener on this home's port: what the lock of another test's home
+    // that lands on the same port looks like from here. It retries while yet
+    // another process holds the port, says "held", and lets go when told.
+    const hold = `const m = await import(${JSON.stringify(child)}); const { createServer } = await import("node:net"); const port = m.boundaryPort(process.env.H); const until = Date.now() + ${LOCK_WAIT}; const take = () => { const server = createServer((c) => c.destroy()); server.once("error", (e) => { if (e.code === "EADDRINUSE" && Date.now() < until) setTimeout(take, 100); else { process.stderr.write(String(e)); process.exit(1); } }); server.listen({ host: "127.0.0.1", port, exclusive: true }, () => { process.stdout.write("held\\n"); process.stdin.once("data", () => server.close(() => process.exit(0))); }); }; take();`;
+    const holder = spawn(process.execPath, ["--input-type=module", "-e", hold], { env: { ...laptop(s), H: s.oqHome }, stdio: ["pipe", "pipe", "inherit"] });
+    const holderExit = new Promise<void>((r) => holder.once("exit", () => r()));
+    // The activation pauses just before it takes the lock, so the moment
+    // below starts at the lock, not while node loads the module.
+    const activation = spawn(process.execPath, ["--input-type=module", "-e", code], {
+      env: { ...laptop(s), H: s.oqHome, OPENQODEX_E2E: "1", OPENQODEX_UPDATE_PAUSE: "before-boundary" },
+      stdio: ["ignore", "pipe", "inherit"],
     });
-    expect(held, "the helper took the port").toBe(true);
-    await activateCopy(s, NEWER, version);
-    expect(current(s)).toBe(NEWER);
-    await exited;
-  }, 120_000);
+    let out = "";
+    activation.stdout.on("data", (d: Buffer) => (out += d.toString()));
+    const done = new Promise<void>((r) => activation.once("exit", () => r()));
+    try {
+      const held = await new Promise<boolean>((r) => {
+        holder.stdout.on("data", (d: Buffer) => d.toString().includes("held") && r(true));
+        void holderExit.then(() => r(false));
+      });
+      expect(held, "the holder took the port").toBe(true);
+      const flag = join(s.oqHome, "update-paused");
+      for (let i = 0; i < 600 && !existsSync(flag); i++) await sleep(50);
+      expect(existsSync(flag), "the activation reached the lock").toBe(true);
+      rmSync(flag);
+      // With no wait the activation reports busy within this moment.
+      const ended = await Promise.race([done.then(() => true), sleep(2000).then(() => false)]);
+      expect(ended, `the activation ended while the port was held: ${out}`).toBe(false);
+      holder.stdin.write("release\n");
+      await done;
+      expect(out).toMatch(/"outcome":"activated"/);
+      expect(current(s)).toBe(NEWER);
+    } finally {
+      activation.kill("SIGKILL");
+      holder.kill("SIGKILL");
+      await Promise.all([done, holderExit]);
+    }
+  }, 180_000);
 });
 
 describe("runtimes kept by a background switch and by init", () => {

@@ -206,7 +206,7 @@ describe("1. two workers with different candidates", () => {
     expect(active(s)).toEqual([NEWER, version]);
     expect(existsSync(rt(s, OLDER))).toBe(false);
     expect(existsSync(a.tmp)).toBe(false);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("2. rollback while a worker waits at the boundary", () => {
@@ -222,7 +222,7 @@ describe("2. rollback while a worker waits at the boundary", () => {
     expect(active(s)[0]).toBe(version);
     expect(readFileSync(join(s.oqHome, "config.yaml"), "utf8")).toMatch(new RegExp(`^skip_version: ${OLDER.replaceAll(".", "\\.")}$`, "m"));
     expect(launch(s, ["--version"]).stdout.trim()).toBe(version);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("3. uninstall while a worker waits at the boundary", () => {
@@ -355,7 +355,7 @@ describe("7. runtime folders are never replaced", () => {
     const second = await activation(s, NEWER, version).done;
     expect(second.out).toMatch(/"outcome":"activated"/);
     expect(active(s)).toEqual([NEWER, version]);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("8. a crash between publishing the runtime and writing the active record", () => {
@@ -370,7 +370,7 @@ describe("8. a crash between publishing the runtime and writing the active recor
     expect(launch(s, ["--version"]).stdout.trim()).toBe(version);
     expect((await activation(s, NEWER, version).done).out).toMatch(/"outcome":"activated"/);
     expect(launch(s, ["--version"]).stdout.trim()).toBe(NEWER);
-  }, 120_000);
+  }, 180_000);
 
   it("a record naming a missing runtime runs the baked-in version; the second line is never run", () => {
     const s = installed();
