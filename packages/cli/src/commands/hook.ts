@@ -160,9 +160,9 @@ async function containingReceipt(core: Core, repoRoot: string, config: Config, s
   return null;
 }
 
-async function isAncestor(repoRoot: string, older: string, newer: string): Promise<boolean> {
+async function isAncestor(repoRoot: string, older: string, newer: string, env: Readonly<Record<string, string>> = {}): Promise<boolean> {
   try {
-    await execFileAsync("git", ["merge-base", "--is-ancestor", older, newer], { cwd: repoRoot, timeout: 10_000 });
+    await execFileAsync("git", ["merge-base", "--is-ancestor", older, newer], { cwd: repoRoot, timeout: 10_000, env: { ...process.env, ...env } });
     return true;
   } catch {
     return false;
@@ -181,13 +181,87 @@ const PLAIN_OPTIONS = new Set(["-u", "--set-upstream", "-f", "--force", "--force
 const REMOTE = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
 const BRANCH = /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/;
 
-// The refspec the line names, "" for none; null when the line is not recognised.
-export function plainPush(command: string): string | null {
+// The remote and the refspec the line names, in that order; null when the
+// line is not recognised.
+function plainWords(command: string): string[] | null {
   const words = command.trim().split(" ");
   if (words[0] !== "git" || words[1] !== "push") return null;
   const rest = words.slice(2).filter((w) => !PLAIN_OPTIONS.has(w));
   if (rest.length > 2 || (rest[0] !== undefined && !REMOTE.test(rest[0])) || (rest[1] !== undefined && !BRANCH.test(rest[1]))) return null;
-  return rest[1] ?? "";
+  return rest;
+}
+
+// The refspec the line names, "" for none; null when the line is not recognised.
+export function plainPush(command: string): string | null {
+  const rest = plainWords(command);
+  return rest === null ? null : (rest[1] ?? "");
+}
+
+// Whether the remote already has `sha`: a remote-tracking ref of `remote`
+// contains it. A commit only a local branch holds does not count. Replace
+// refs are off, as onlyStateChanged reads the change.
+async function remoteHolds(core: Core, repoRoot: string, remote: string, sha: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync("git", ["for-each-ref", "--count=1", "--format=%(refname)", `--contains=${sha}`, `refs/remotes/${remote}/`], { cwd: repoRoot, timeout: 10_000, env: { ...process.env, ...core.SERVER_GIT_ENV } });
+    return stdout.trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
+// The commits from `base`, which the remote has (`held`, else a
+// remote-tracking ref of `remote` contains it), to `head` change nothing but
+// .openqodex/, which a review leaves out: no review can record such a push.
+// A git error is false, so the push is looked up as before.
+async function onlyState(core: Core, repoRoot: string, remote: string, base: string, head: string, held: boolean): Promise<boolean> {
+  try {
+    return (held || (await remoteHolds(core, repoRoot, remote, base))) && (await core.onlyStateChanged(repoRoot, base, head));
+  } catch {
+    return false;
+  }
+}
+
+const FORCE_OPTIONS = new Set(["-f", "--force", "--force-with-lease"]);
+
+// The agent hook's skip, for a recognised line: HEAD changes nothing but
+// .openqodex/ from the review's `base` (onlyState), and the work tree and
+// index change nothing but .openqodex/ from HEAD, so the developer's current
+// work is what the push sends. The remote is the one the line names, else
+// the one git pushes the current branch to. Never for a push that could
+// remove commits from the remote branch (a force option, or a remote tip
+// that is not an ancestor of HEAD), or that sends more than the current
+// branch (push.default matching, a remote's push refspecs or mirror
+// setting, push.followTags).
+async function onlyStateWork(core: Core, repoRoot: string, command: string, base: string): Promise<boolean> {
+  const current = await git(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  const head = await commitOf(repoRoot, "HEAD");
+  const words = plainWords(command);
+  if (current === null || head === null || words === null) return false;
+  if (command.trim().split(" ").some((w) => FORCE_OPTIONS.has(w))) return false;
+  const remote =
+    words[0] ??
+    (await git(repoRoot, ["config", "--get", `branch.${current}.pushRemote`])) ??
+    (await git(repoRoot, ["config", "--get", "remote.pushDefault"])) ??
+    (await git(repoRoot, ["config", "--get", `branch.${current}.remote`])) ??
+    "origin";
+  const pushDefault = await git(repoRoot, ["config", "--get", "push.default"]);
+  if (pushDefault === "matching") return false;
+  if ((await git(repoRoot, ["config", "--get-all", `remote.${remote}.push`])) !== null) return false;
+  if ((await git(repoRoot, ["config", "--type=bool", "--get", `remote.${remote}.mirror`])) === "true") return false;
+  if ((await git(repoRoot, ["config", "--type=bool", "--get", "push.followTags"])) === "true") return false;
+  // The remote branch the push updates: the upstream's name under
+  // push.default upstream with no refspec, else the current branch's.
+  const merge = words[1] === undefined && pushDefault === "upstream" ? await git(repoRoot, ["config", "--get", `branch.${current}.merge`]) : null;
+  const target = merge?.replace(/^refs\/heads\//, "") ?? current;
+  const tip = await commitOf(repoRoot, `refs/remotes/${remote}/${target}`);
+  if (tip !== null && !(await isAncestor(repoRoot, tip, head, core.SERVER_GIT_ENV))) return false;
+  if (!(await onlyState(core, repoRoot, remote, base, head, false))) return false;
+  try {
+    const work = await core.getChange({ repoRoot, scope: { uncommitted: true }, exclude: [], idOnly: true });
+    return work.id === core.emptyChangeId(work.baseSha);
+  } catch {
+    return false;
+  }
 }
 
 const CANNOT_TELL = "OpenQodex could not tell what this push sends; run openqodex review and push with plain git push";
@@ -234,6 +308,7 @@ async function decide(input: HookInput): Promise<void> {
     }
     // The developer's current work, as the default review takes it.
     const change = await core.getChange({ repoRoot, scope: {}, exclude: config.exclude, defaultBase: config.defaultBase, idOnly: true });
+    if (await onlyStateWork(core, repoRoot, command, change.baseSha)) continue;
     // Only the record in the developer's own home counts, never one under
     // the repository's .openqodex/, which a branch can carry.
     const receipt = readHomeReceipt(home, repoRoot, change.id) ?? readHomeReceipt(home, repoRoot, "latest");
@@ -314,6 +389,9 @@ async function prePush(args: string[]): Promise<number> {
   for (const range of pushedRanges(await readAll())) {
     let changeId = "";
     const found = await rangeChangeId(core, repoRoot, config, remote, range.local, range.remoteSha);
+    // The remote's old tip is a commit the remote has; a new branch's base
+    // counts only when a remote-tracking ref contains it.
+    if ("id" in found && (await onlyState(core, repoRoot, remote, found.base, range.local, range.remoteSha !== null))) continue;
     if ("id" in found) changeId = found.id;
     else messages.add(`OpenQodex could not tell what this push sends (${found.unknown}); run openqodex review, then push again.`);
     const exact = changeId === "" ? null : readHomeReceipt(home, repoRoot, changeId);

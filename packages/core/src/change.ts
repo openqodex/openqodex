@@ -778,6 +778,27 @@ function newSideIds(buf: Buffer): Map<string, string> {
   return out;
 }
 
+// Change.id: the base and git's raw listing of the change, our own run
+// state left out.
+function changeId(baseSha: string, raw: Buffer): string {
+  return createHash("sha256").update(`${baseSha}\n`).update(raw).digest("hex");
+}
+
+// The id of a change from `baseSha` that changes nothing but our own run
+// state (.openqodex/): a review of it has nothing to review and records
+// nothing, so a push gate has nothing to look up.
+export function emptyChangeId(baseSha: string): string {
+  return changeId(baseSha, Buffer.alloc(0));
+}
+
+// Whether the commits `baseSha` to `headSha` change nothing but our own run
+// state, read as git stores them: replace refs off (SERVER_GIT_ENV), so a
+// replacement cannot show a commit with a tree it does not have.
+export async function onlyStateChanged(repoRoot: string, baseSha: string, headSha: string): Promise<boolean> {
+  const change = await diffChange({ repoRoot, baseRef: baseSha, baseSha, range: [baseSha, headSha], env: { ...process.env, ...SERVER_GIT_ENV }, exclude: [], idOnly: true });
+  return change.id === emptyChangeId(baseSha);
+}
+
 // Everything after the two sides are known: the file list, the id, the
 // changed lines and the brief's diff, from `git diff <range>`. `cwd`: where
 // git runs, `repoRoot` when left out.
@@ -815,7 +836,7 @@ async function diffChange(args: {
   ]);
 
   // The id stays the first listing's, excluded files included.
-  const id = createHash("sha256").update(`${args.baseSha}\n`).update(raw).digest("hex");
+  const id = changeId(args.baseSha, raw);
   if (args.idOnly) return {
     repoRoot, baseRef: args.baseRef, baseSha: args.baseSha, id, shortId: id.slice(0, 12),
     files: [], changedPaths: [], coverage: new Map(), deletionPoints: new Map(), diff: "", diffs: [], notReviewed: [], uncovered: [], stats: { files: 0, additions: 0, deletions: 0 },
