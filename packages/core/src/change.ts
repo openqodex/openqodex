@@ -791,6 +791,14 @@ export function emptyChangeId(baseSha: string): string {
   return changeId(baseSha, Buffer.alloc(0));
 }
 
+// Whether the commits `baseSha` to `headSha` change nothing but our own run
+// state, read as git stores them: replace refs off (SERVER_GIT_ENV), so a
+// replacement cannot show a commit with a tree it does not have.
+export async function onlyStateChanged(repoRoot: string, baseSha: string, headSha: string): Promise<boolean> {
+  const change = await diffChange({ repoRoot, baseRef: baseSha, baseSha, range: [baseSha, headSha], env: { ...process.env, ...SERVER_GIT_ENV }, exclude: [], idOnly: true });
+  return change.id === emptyChangeId(baseSha);
+}
+
 // Everything after the two sides are known: the file list, the id, the
 // changed lines and the brief's diff, from `git diff <range>`. `cwd`: where
 // git runs, `repoRoot` when left out.

@@ -47,6 +47,10 @@
 //     leaves out and so never records, is denied in a blocking repo by
 //     either hook (issue 279); or a push that also changes another file, or
 //     whose base git cannot read, goes through without a review.
+// 22. A change that looks like it touches only .openqodex/ passes while the
+//     push sends unreviewed code: measured from a base only a local branch
+//     holds, through a replace ref, or from a working tree that undoes a
+//     commit the push sends.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -560,6 +564,62 @@ describe("a push that changes only .openqodex/", () => {
     const both = check(s, "git push").stdout;
     expect(decision(both)).toBe("deny");
     expect(both).toContain(UNREVIEWED);
+  });
+
+  // A local trunk holding a code commit the remote does not have.
+  function localTrunk(s: Sandbox): void {
+    withRemote(s);
+    git(s.repo, "checkout", "-q", "-b", "trunk");
+    writeFileSync(join(s.repo, "b.txt"), "code\n");
+    commitAll(s.repo);
+  }
+
+  it("22. the pre-push hook denies a new branch measured from a default base only a local branch holds", () => {
+    const s = blockingConfig();
+    editConfig(s, "default_base: trunk");
+    commitAll(s.repo);
+    localTrunk(s);
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    git(s.repo, "checkout", "-q", "-b", "newbr");
+    const r = push(s, "origin", "newbr");
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(UNREVIEWED);
+  }, 60_000);
+
+  it("22. the pre-push hook denies a code commit a replace ref shows with the base's tree", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    const base = git(s.repo, "rev-parse", "HEAD").trim();
+    writeFileSync(join(s.repo, "a.txt"), "code\n");
+    commitAll(s.repo);
+    const code = git(s.repo, "rev-parse", "HEAD").trim();
+    const fake = git(s.repo, "commit-tree", `${base}^{tree}`, "-p", base, "-m", "fake").trim();
+    git(s.repo, "replace", code, fake);
+    const r = push(s, "origin", "main");
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(UNREVIEWED);
+  }, 60_000);
+
+  it("22. the agent hook denies a code commit the working tree undoes", () => {
+    const s = blockingConfig();
+    writeFileSync(join(s.repo, "a.txt"), "code\n");
+    published(s);
+    writeFileSync(join(s.repo, "a.txt"), "x\n");
+    const r = check(s, "git push").stdout;
+    expect(decision(r)).toBe("deny");
+    expect(r).toContain(UNREVIEWED);
+  });
+
+  it("22. the agent hook denies a branch whose upstream is a local branch holding code", () => {
+    const s = blockingConfig();
+    localTrunk(s);
+    git(s.repo, "checkout", "-q", "--track", "-b", "feat", "trunk");
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const r = check(s, "git push -u origin feat").stdout;
+    expect(decision(r)).toBe("deny");
+    expect(r).toContain(UNREVIEWED);
   });
 });
 
