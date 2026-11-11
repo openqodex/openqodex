@@ -24,7 +24,8 @@
 // 10. The pre-push hook prints raw scanner findings or starts a full review.
 // 11. The pre-push hook looks up the checked-out work instead of the pushed
 //     commit, so a push of another branch counts as reviewed.
-// 12. The agent hook blocks on an incomplete record.
+// 12. The agent hook blocks on an incomplete record of the moved change, or
+//     stays silent about it instead of printing the one incomplete line.
 // 13. The agent hook stays silent for an unreviewed change.
 // 14. A legacy receipt (the old two-step protocol) counts as a complete
 //     review, or blocks a push that it passed.

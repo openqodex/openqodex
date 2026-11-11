@@ -9,7 +9,8 @@
 // 5. Its message does not say what to run.
 // 6. A review judged with no threshold, or another one, passes a push after
 //    block_on_severity is set (the config is outside the change id).
-// 7. An incomplete record blocks a push, even with block_on_severity set.
+// 7. An incomplete record of this change blocks a push, or passes without
+//    saying the review did not finish, even with block_on_severity set.
 // 8. A legacy receipt (the old two-step protocol) counts as a complete
 //    record, or suddenly blocks a push the old version let through.
 // 9. A complete passing review of this change is not silent.
