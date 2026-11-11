@@ -1,6 +1,6 @@
 # Agents
 
-OpenQodex runs from Claude Code, Cursor, Codex CLI and Cline. `openqodex init` installs it into each one it finds. Whichever agent asks for the review, the review itself runs in a reviewer process OpenQodex starts: Claude Code or Codex, on your own login, with no other key. Cursor is not used as a reviewer (`security` says why); in Cursor and Cline the review works when Claude Code or Codex is installed too. Without either, `review` names the command with which the agent you are in reviews the change itself (see "Who reviews, by what is installed").
+OpenQodex runs from Claude Code, Cursor, Codex CLI, Cline and Goose. `openqodex init` installs it into each one it finds. Whichever agent asks for the review, the review itself runs in a reviewer process OpenQodex starts: Claude Code or Codex, on your own login, with no other key. Cursor is not used as a reviewer (`security` says why); in Cursor, Cline and Goose the review works when Claude Code or Codex is installed too. Without either, `review` names the command with which the agent you are in reviews the change itself (see "Who reviews, by what is installed").
 
 ## Run init
 
@@ -10,9 +10,9 @@ In your own terminal:
 npx openqodex init
 ```
 
-An agent installs OpenQodex for itself with the same command, naming itself and asking nothing: `npx -y openqodex@<version> init --yes --agent <host>`, where `<host>` is `claude-code`, `codex`, `cursor` or `cline`. The README and the quickstart give that line with the current version. Codex runs commands in a sandbox that by default cannot write outside the project or reach the network, so from Codex, run it in your own terminal.
+An agent installs OpenQodex for itself with the same command, naming itself and asking nothing: `npx -y openqodex@<version> init --yes --agent <host>`, where `<host>` is `claude-code`, `codex`, `cursor`, `cline` or `goose`. The README and the quickstart give that line with the current version. Codex runs commands in a sandbox that by default cannot write outside the project or reach the network, so from Codex, run it in your own terminal.
 
-`init` prints every file it will write and asks once: "Write these files?". The plan lists each file under the one it is for: "For you, on this machine" (the agent files in your home folder, the launcher, the git hook of this clone) and "For the team, in this repo" (the files to commit). `--agent <name>` picks agents by hand: `claude-code`, `cursor`, `codex`, `cline` or `all`. When `init` finds no agent, it asks which of the four to install into, before the plan. `--dry-run` prints the plan and writes nothing. `--yes` writes it without asking.
+`init` prints every file it will write and asks once: "Write these files?". The plan lists each file under the one it is for: "For you, on this machine" (the agent files in your home folder, the launcher, the git hook of this clone) and "For the team, in this repo" (the files to commit). `--agent <name>` picks agents by hand: `claude-code`, `cursor`, `codex`, `cline`, `goose` or `all`. When `init` finds no agent, it asks which of the five to install into, before the plan. `--dry-run` prints the plan and writes nothing. `--yes` writes it without asking.
 
 Inside a repository, the plan also holds the git pre-push hook, so every push from this repo is checked for a review, from an agent or by hand. `--hook none` leaves it out, and `--hook pre-push` puts it back. The choice is recorded for that repository, so a later `init` keeps it. The hook is described under "A git hook for every tool" below.
 
@@ -32,7 +32,7 @@ Before any push, review the change with the openqodex skill.
 
 The skill holds the procedure, and a repository's own team section (below) says how that repository reviews. An install made by an earlier version, with the longer section, gets this line in its place on the next `init`, while that section is still exactly as `init` wrote it.
 
-In project scope the repository's `CLAUDE.md` and `AGENTS.md` get a longer section: review with the openqodex skill when a feature or fix is done, and do not push on a blocked verdict unless the developer says so after seeing the findings. The Cursor and Cline rules carry that longer section too: Cursor has no instruction file in the home folder, so its rule in the repository holds it.
+In project scope the repository's `CLAUDE.md` and `AGENTS.md` get a longer section: review with the openqodex skill when a feature or fix is done, and do not push on a blocked verdict unless the developer says so after seeing the findings. The Cursor and Cline rules carry that longer section too: Cursor has no instruction file in the home folder, so its rule in the repository holds it. So does Goose's `.goosehints` in the repository.
 
 The tables below name the file for each agent. In an existing file, the section is appended and your own text stays as it is. `--uninstall` removes exactly that section, and nothing around it.
 
@@ -96,7 +96,7 @@ In either scope, `init` decides each write from where the path really lands, nev
 
 ## The launcher
 
-In user scope, the push gate hooks, the skill and the Cursor and Cline rules call a launcher, not npx. Every user-scope install gets it, with or without a hook. `init` copies the package to `~/.openqodex/runtime/<version>/` and checks the copy runs. It writes the version to the first line of `~/.openqodex/runtime/current`, then writes `~/.openqodex/bin/openqodex`, a small script that runs the copy that line names with the Node `init` ran under. For a Node that Homebrew installed, it names Homebrew's stable path, such as `/opt/homebrew/opt/node@22/bin/node`, not the versioned folder the next `brew upgrade` removes. When that Node is gone, the script runs the one your `PATH` names and says so in one line. When the line is missing, is not a version, or names a copy that is gone, the script runs the version `init` installed. The hooks and the skill's commands call that script by its full path, so they do not depend on npx or your `PATH`. A copy is never changed once written: when a folder of the same version with other contents is in the way, `init` stops and names it.
+In user scope, the push gate hooks, the skills and the Cursor and Cline rules call a launcher, not npx. Every user-scope install gets it, with or without a hook. `init` copies the package to `~/.openqodex/runtime/<version>/` and checks the copy runs. It writes the version to the first line of `~/.openqodex/runtime/current`, then writes `~/.openqodex/bin/openqodex`, a small script that runs the copy that line names with the Node `init` ran under. For a Node that Homebrew installed, it names Homebrew's stable path, such as `/opt/homebrew/opt/node@22/bin/node`, not the versioned folder the next `brew upgrade` removes. When that Node is gone, the script runs the one your `PATH` names and says so in one line. When the line is missing, is not a version, or names a copy that is gone, the script runs the version `init` installed. The hooks and the skill's commands call that script by its full path, so they do not depend on npx or your `PATH`. A copy is never changed once written: when a folder of the same version with other contents is in the way, `init` stops and names it.
 
 The user-scope skill is a short stub: when to run, and one command, `<launcher> guide skill`, which prints the full procedure of the version the launcher runs, who reviews included, with every command written for the launcher. In user scope the Cursor and Cline rules hold the instruction section and the same `<launcher> guide skill` line. No file `init` writes in user scope names a version, a review command or who reviews, so an update leaves none of them out of date. They change only with a release that changes how agents run a review (its agent contract), together with the permission rules, which name exact command lines. Such a release is never installed in the background: `openqodex update` installs it, and `<launcher> init` then refreshes each file you never edited. After any update, the next command, `doctor` and `update --status` say how many files OpenQodex wrote are from an older version, when any are.
 
@@ -112,11 +112,13 @@ In project scope, the hooks, the skill and the rules call `npx -y openqodex@<ver
 | Cursor | `mcpServers` in `~/.cursor/mcp.json` | `mcpServers` in `.cursor/mcp.json` |
 | Codex CLI | a `[mcp_servers.openqodex]` table between `# openqodex:start` and `# openqodex:end` at the end of `$CODEX_HOME/config.toml` (`~/.codex/config.toml` by default) | the same block in `.codex/config.toml` |
 | Cline | `mcpServers` in `~/.cline/data/settings/cline_mcp_settings.json`, when `~/.cline/data`, the Cline CLI's folder, is there | none |
+| Goose | none | none |
 
 - The Claude Code and Cursor entries hold `"type": "stdio"`, `command` and `args`; the Cline entry holds `command` and `args`.
 - Claude Code asks you to approve a project server from `.mcp.json` before it uses it.
 - Codex reads a project's `.codex/config.toml` only in a trusted project.
 - Cline documents a file for its CLI only, and no project file. With the VS Code extension alone, and in project scope, `init` writes no file for Cline and prints the entry to add in Cline's "Configure MCP Servers".
+- Goose keeps its servers, which it calls extensions, in `~/.config/goose/config.yaml`. `init` does not edit that file. It prints the entry to add under `extensions` there.
 - `init` adds the `openqodex` entry and keeps every other server and setting in the file. A file that does not parse, or whose `mcpServers` is not an object, is left untouched, and `init` exits 2. A server named `openqodex` that `init` did not write is left alone, and so is one you edited.
 - In Codex's `config.toml`, `init` first reads every key the file defines, the way TOML reads them: quoted and escaped keys decoded, text inside strings and comments left out. It appends its block only when no key is `mcp_servers.openqodex` or under it, and `mcp_servers` is not set to an inline table or another value. A second definition would make Codex refuse the whole file. A file `init` cannot read as TOML is left untouched, and the plan says so. The table the block opens runs on to the next header, so a key you write after `# openqodex:end` belongs to it; `--no-mcp` and `init --uninstall` then leave the block in place, since removing it would move that key under the table before it, and the plan says so.
 - Claude Code rewrites `~/.claude.json` while it runs. `init` reads the file again just before it writes and adds its entry to what is there then. It refuses only when the `openqodex` entry itself changed after the plan was printed.
@@ -180,6 +182,22 @@ OpenQodex writes no Cursor hook. The rule asks Cursor to review, but nothing sto
 | Code graph MCP server | merged into `~/.cline/data/settings/cline_mcp_settings.json` when `~/.cline/data` is there | none |
 
 OpenQodex writes no Cline hook. The rule carries the instruction section and asks Cline to review before any `git push`.
+
+## Goose
+
+| What | User scope | Project scope |
+|---|---|---|
+| Skill | `~/.config/goose/skills/openqodex/SKILL.md` | `.goose/skills/openqodex/SKILL.md` |
+| Instructions | a marked section in `~/.config/goose/.goosehints` | a marked section in `.goosehints` |
+| Code graph MCP server | none: `init` prints the entry to add | none: `init` prints the entry to add |
+
+This setup was built from Goose's documentation and has not been run against Goose.
+
+Goose reads `~/.config/goose/.goosehints` in every session, and the `.goosehints` files from the folder it starts in up to the repository root. `init` writes only files that Goose alone reads. Goose also reads `AGENTS.md` and `.agents/skills`, but the Codex and Cursor setups write there, and uninstalling one of those would remove a file Goose still needs.
+
+`init` finds Goose by the `goose` program on your `PATH`, or by the folder `~/.config/goose`.
+
+OpenQodex writes no Goose hook. The hints ask Goose to review before any `git push`, and the git pre-push hook still checks every push from a repository where `init` added it.
 
 ## What the push gate does
 
