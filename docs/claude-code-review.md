@@ -153,7 +153,7 @@ npx openqodex init
 
 Or ask Claude Code to run `npx -y openqodex@<version> init --yes --agent claude-code` (the README gives the current version): the same install, with no question.
 
-`init` finds Claude Code, Cursor, Codex CLI and Cline on your machine. It prints every file it will write and asks once. In the default user scope, it writes these for Claude Code:
+`init` finds Claude Code, Cursor, Codex CLI, Cline and Goose on your machine. It prints every file it will write and asks once. In the default user scope, it writes these for Claude Code:
 
 - the skill, in `~/.claude/skills/openqodex/SKILL.md`.
 - the push gate hook, merged into `~/.claude/settings.json`.

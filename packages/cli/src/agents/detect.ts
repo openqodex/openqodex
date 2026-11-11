@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { claudeHome, codexHome } from "./homes.js";
 
-export const AGENTS = ["claude-code", "cursor", "codex", "cline"] as const;
+export const AGENTS = ["claude-code", "cursor", "codex", "cline", "goose"] as const;
 export type AgentId = (typeof AGENTS)[number];
 
 export const AGENT_NAMES: Record<AgentId, string> = {
@@ -12,6 +12,7 @@ export const AGENT_NAMES: Record<AgentId, string> = {
   cursor: "Cursor",
   codex: "Codex CLI",
   cline: "Cline",
+  goose: "Goose",
 };
 
 function onPath(command: string): boolean {
@@ -44,5 +45,8 @@ export function detectAgents(home: string = homedir()): AgentId[] {
   if (existsSync(join(home, ".cursor")) || existsSync("/Applications/Cursor.app")) found.push("cursor");
   if (onPath("codex") || existsSync(codexHome(home))) found.push("codex");
   if (existsSync(join(home, ".cline")) || clineExtension(home)) found.push("cline");
+  // Goose keeps its config in ~/.config/goose on macOS and Linux
+  // (https://goose-docs.ai/docs/guides/using-goosehints).
+  if (onPath("goose") || existsSync(join(home, ".config", "goose"))) found.push("goose");
   return found;
 }

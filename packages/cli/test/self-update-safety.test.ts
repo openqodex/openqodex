@@ -438,12 +438,12 @@ describe("11. a launcher path with a wildcard character", () => {
 
 describe("12 and 13. the user-scope skill and the rules", () => {
   const skillPath = (s: Sandbox): string => join(s.home, ".claude/skills/openqodex/SKILL.md");
-  // One home with all four agents for the cases that only read what init
+  // One home with all five agents for the cases that only read what init
   // wrote; `guide skill` through the launcher writes nothing (no update
   // check starts after it).
   let all: Sandbox;
   beforeAll(() => {
-    all = installed(["claude-code", "codex", "cursor", "cline"]);
+    all = installed(["claude-code", "codex", "cursor", "cline", "goose"]);
   }, 120_000);
 
   it("a full-text skill an earlier init wrote, still as written, is replaced by the stub (failure 12)", () => {
@@ -461,7 +461,7 @@ describe("12 and 13. the user-scope skill and the rules", () => {
 
   it("the user-scope skill is a stub with no procedure and no reviewer, that sends the agent to guide skill (failure 13)", () => {
     const s = all;
-    for (const p of [".claude/skills", ".agents/skills", ".cursor/skills", ".cline/skills"]) {
+    for (const p of [".claude/skills", ".agents/skills", ".cursor/skills", ".cline/skills", ".config/goose/skills"]) {
       const text = readFileSync(join(s.home, p, "openqodex/SKILL.md"), "utf8");
       expect(text, p).toMatch(/^---\nname: openqodex\ndescription: /);
       expect(text, p).not.toContain("## Who reviews");

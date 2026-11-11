@@ -42,7 +42,7 @@ CI tests OpenQodex on Node 22, on macOS and on Ubuntu Linux. No test runs on Win
 
 ## Install
 
-1. Run this command from the repository. Put the agent you are in place of `<host>`: `claude-code`, `codex`, `cursor` or `cline`.
+1. Run this command from the repository. Put the agent you are in place of `<host>`: `claude-code`, `codex`, `cursor`, `cline` or `goose`.
 
    ```
    npx -y openqodex@0.17.0 init --yes --agent <host>
@@ -62,6 +62,7 @@ After the install:
 - Claude Code, Codex, Cursor and Cline read their MCP servers when they start. Ask the developer to restart the agent. Then the agent gets the code graph tools. An MCP server is a local tool server that the agent starts.
 - Cursor: the rule goes into each repository. Run `init` again in each repository that needs it.
 - Cline with the VS Code extension: `init` prints an MCP server entry. The developer adds it in Cline's "Configure MCP Servers".
+- Goose: `init` prints an MCP server entry. The developer adds it under `extensions` in `~/.config/goose/config.yaml`.
 
 ## What init wrote
 
@@ -73,6 +74,7 @@ By default, `init` writes the agent files into the developer's home folder (user
 | Codex CLI | `~/.agents/skills/openqodex/SKILL.md` | a section in `~/.codex/AGENTS.md` | a hook in `~/.codex/hooks.json` |
 | Cursor | `~/.cursor/skills/openqodex/SKILL.md` | the rule `.cursor/rules/openqodex.mdc` in the repository | none |
 | Cline | `~/.cline/skills/openqodex/SKILL.md` | the rule `~/Documents/Cline/Rules/openqodex.md` | none |
+| Goose | `~/.config/goose/skills/openqodex/SKILL.md` | a section in `~/.config/goose/.goosehints` | none |
 
 In the repository, `init` also writes these files:
 
