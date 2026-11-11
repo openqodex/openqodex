@@ -6,8 +6,13 @@
 // Ways it could fail, written before the code:
 //  1. `--agent goose` is refused, `--agent all` leaves Goose out, or the
 //     unknown-agent error and the no-agent list do not name it.
-//  2. Goose is not found by its program on PATH or by its config folder, or
-//     is found with neither.
+//  2. Goose is not found by its config folder, or is found by a program
+//     named goose on PATH, which is often another tool (the pressly/goose
+//     database migration tool).
+//  9. With XDG_CONFIG_HOME or GOOSE_PATH_ROOT set, init looks for Goose in
+//     one folder and writes its files in another, or in ~/.config/goose,
+//     which Goose then does not read; or a relative value is followed,
+//     which Goose ignores.
 //  3. A Goose install writes a file another agent's setup writes or claims
 //     (the shared `.agents/skills` skill, `AGENTS.md`), or any file beyond
 //     its own hints section and skill, in either scope.
@@ -22,7 +27,7 @@
 //  8. The plan says nothing about the push hook and the MCP server that init
 //     does not write for Goose.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { agentFreePath, cli, env, sandbox, snapshot, type Sandbox } from "./init-helpers.js";
@@ -85,14 +90,13 @@ describe("2. finding Goose", () => {
     expect(r.stderr).toContain("--agent goose    Goose");
   });
 
-  it("by a program named goose on PATH; detection only looks for the file, it never runs it", () => {
+  it("not by a program named goose on PATH alone, which may be another tool; detection never runs it", () => {
     const s = sandbox();
     const bin = tempDir("oq-goose-bin-");
     writeFileSync(join(bin, "goose"), "#!/bin/sh\nexit 1\n");
     chmodSync(join(bin, "goose"), 0o755);
     const r = cli(s, ["init", "--dry-run"], { cwd: s.home, env: { PATH: [bin, agentFreePath()].join(delimiter) } });
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain(gooseHints(s));
+    expect(r.stdout + r.stderr).not.toContain(gooseHints(s));
   });
 
   it("by its config folder, ~/.config/goose", () => {
@@ -119,7 +123,8 @@ describe("3, 4 and 8. what init writes for Goose", () => {
     expect(skill).toMatch(/^---\nname: openqodex\ndescription: /);
     expect(skill).toContain(`'${launcher(s)}' guide skill`);
     expect(r.stdout).toMatch(/note +Goose push hook: not written/);
-    expect(r.stdout).toMatch(/note +Goose MCP server for the code graph: not written.*~\/\.config\/goose\/config\.yaml/);
+    expect(r.stdout).toMatch(/note +Goose MCP server for the code graph: not written/);
+    expect(r.stdout).toContain(`Add it under "extensions" in ${join(s.home, ".config/goose/config.yaml")}: openqodex: {`);
     const again = user(s, ["--agent", "goose"]);
     expect(again.status, again.stderr).toBe(0);
     expect(again.stdout).toContain("Nothing to change");
@@ -227,5 +232,48 @@ describe("7. a Goose section an earlier version wrote", () => {
     expect(readFileSync(gooseHints(s), "utf8")).toBe(`My hint.\n\n${globalSection()}\n`);
     const after = spawnSync("sh", [launcher(s), "update", "--status"], { encoding: "utf8", env: env(s), cwd: s.home });
     expect(after.stdout).toMatch(/^agent files +up to date$/m);
+  });
+});
+
+describe("9. Goose's config folder moved by the environment", () => {
+  it("XDG_CONFIG_HOME: found in $XDG_CONFIG_HOME/goose, written there and nowhere in ~/.config, removed from there", () => {
+    const s = sandbox();
+    const xdg = realpathSync(tempDir("oq-xdg-"));
+    const folder = join(xdg, "goose");
+    const xenv = { XDG_CONFIG_HOME: xdg };
+    mkdirSync(join(s.home, ".config/goose"), { recursive: true });
+    // The folder under ~/.config does not count while XDG_CONFIG_HOME is set.
+    expect(cli(s, ["init", "--dry-run"], { cwd: s.home, env: xenv }).stdout).not.toContain(".goosehints");
+    mkdirSync(folder);
+    const plan = cli(s, ["init", "--dry-run"], { cwd: s.home, env: xenv });
+    expect(plan.stdout).toContain(join(folder, ".goosehints"));
+    const r = cli(s, ["init", "--yes", "--agent", "goose"], { cwd: s.home, env: xenv });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(folder, ".goosehints"), "utf8")).toBe(`${globalSection()}\n`);
+    expect(readFileSync(join(folder, "skills/openqodex/SKILL.md"), "utf8")).toContain(`'${launcher(s)}' guide skill`);
+    expect(r.stdout).toContain(`Add it under "extensions" in ${join(folder, "config.yaml")}`);
+    expect(existsSync(gooseHints(s))).toBe(false);
+    expect(existsSync(gooseSkill(s))).toBe(false);
+    const un = cli(s, ["init", "--yes", "--uninstall", "--agent", "goose"], { cwd: s.home, env: xenv });
+    expect(un.status, un.stderr).toBe(0);
+    expect(existsSync(join(folder, ".goosehints"))).toBe(false);
+    expect(existsSync(join(folder, "skills/openqodex/SKILL.md"))).toBe(false);
+  });
+
+  it("a relative XDG_CONFIG_HOME is ignored, as Goose ignores it", () => {
+    const s = sandbox();
+    const r = cli(s, ["init", "--yes", "--agent", "goose"], { cwd: s.home, env: { XDG_CONFIG_HOME: "relative/config" } });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(gooseHints(s), "utf8")).toBe(`${globalSection()}\n`);
+  });
+
+  it("GOOSE_PATH_ROOT: the folder is $GOOSE_PATH_ROOT/config, ahead of XDG_CONFIG_HOME", () => {
+    const s = sandbox();
+    const root = realpathSync(tempDir("oq-goose-root-"));
+    const r = cli(s, ["init", "--yes", "--agent", "goose"], { cwd: s.home, env: { GOOSE_PATH_ROOT: root, XDG_CONFIG_HOME: join(s.root, "xdg") } });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(root, "config/.goosehints"), "utf8")).toBe(`${globalSection()}\n`);
+    expect(existsSync(join(root, "config/skills/openqodex/SKILL.md"))).toBe(true);
+    expect(existsSync(join(s.root, "xdg"))).toBe(false);
   });
 });

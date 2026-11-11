@@ -118,7 +118,7 @@ In project scope, the hooks, the skill and the rules call `npx -y openqodex@<ver
 - Claude Code asks you to approve a project server from `.mcp.json` before it uses it.
 - Codex reads a project's `.codex/config.toml` only in a trusted project.
 - Cline documents a file for its CLI only, and no project file. With the VS Code extension alone, and in project scope, `init` writes no file for Cline and prints the entry to add in Cline's "Configure MCP Servers".
-- Goose keeps its servers, which it calls extensions, in `~/.config/goose/config.yaml`. `init` does not edit that file. It prints the entry to add under `extensions` there.
+- Goose keeps its servers, which it calls extensions, in `config.yaml` in its config folder (`~/.config/goose` by default). `init` does not edit that file. It prints the entry to add under `extensions` there.
 - `init` adds the `openqodex` entry and keeps every other server and setting in the file. A file that does not parse, or whose `mcpServers` is not an object, is left untouched, and `init` exits 2. A server named `openqodex` that `init` did not write is left alone, and so is one you edited.
 - In Codex's `config.toml`, `init` first reads every key the file defines, the way TOML reads them: quoted and escaped keys decoded, text inside strings and comments left out. It appends its block only when no key is `mcp_servers.openqodex` or under it, and `mcp_servers` is not set to an inline table or another value. A second definition would make Codex refuse the whole file. A file `init` cannot read as TOML is left untouched, and the plan says so. The table the block opens runs on to the next header, so a key you write after `# openqodex:end` belongs to it; `--no-mcp` and `init --uninstall` then leave the block in place, since removing it would move that key under the table before it, and the plan says so.
 - Claude Code rewrites `~/.claude.json` while it runs. `init` reads the file again just before it writes and adds its entry to what is there then. It refuses only when the `openqodex` entry itself changed after the plan was printed.
@@ -195,7 +195,7 @@ This setup was built from Goose's documentation and has not been run against Goo
 
 Goose reads `~/.config/goose/.goosehints` in every session, and the `.goosehints` files from the folder it starts in up to the repository root. `init` writes only files that Goose alone reads. Goose also reads `AGENTS.md` and `.agents/skills`, but the Codex and Cursor setups write there, and uninstalling one of those would remove a file Goose still needs.
 
-`init` finds Goose by the `goose` program on your `PATH`, or by the folder `~/.config/goose`.
+`init` finds Goose by its config folder only, because another program named `goose`, a database migration tool, is common. `--agent goose` sets Goose up on any machine. The config folder is `~/.config/goose`. `init` follows Goose's own rule: `$XDG_CONFIG_HOME/goose` when `XDG_CONFIG_HOME` is set, and `$GOOSE_PATH_ROOT/config` when `GOOSE_PATH_ROOT` is set, which comes first. Each counts only when it is an absolute path. The user-scope paths in the table move with that folder. Windows is not handled.
 
 OpenQodex writes no Goose hook. The hints ask Goose to review before any `git push`, and the git pre-push hook still checks every push from a repository where `init` added it.
 
