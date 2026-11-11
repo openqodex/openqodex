@@ -7,13 +7,16 @@ import {
   accessSync,
   appendFileSync,
   chmodSync,
+  closeSync,
   constants,
   existsSync,
   linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -48,7 +51,31 @@ const LOCK_WAIT_MS = 40 * 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function isInstalled(root: string, tool: string, recipe: Recipe): boolean {
-  return existsSync(markerPath(root, tool, recipe)) && existsSync(binaryPath(root, tool, recipe));
+  const bin = binaryPath(root, tool, recipe);
+  return existsSync(markerPath(root, tool, recipe)) && existsSync(bin) && (recipe.method !== "gem" || launcherRubyThere(bin));
+}
+
+// A gem's launcher is a script whose first line names, by absolute path, the
+// Ruby that installed it. When that Ruby is gone (Ruby was upgraded or
+// moved), the launcher can never start, so the tool counts as not installed
+// and is installed again with the Ruby found now (issue 327). A first line
+// cut short, a binary, or a launcher that cannot be read counts as installed,
+// as before; `#!/usr/bin/env ruby` names /usr/bin/env, which is there.
+function launcherRubyThere(bin: string): boolean {
+  let head: string;
+  try {
+    const fd = openSync(bin, "r");
+    try {
+      const buffer = Buffer.alloc(512);
+      head = buffer.toString("latin1", 0, readSync(fd, buffer, 0, buffer.length, 0));
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return true;
+  }
+  const interpreter = /^#![ \t]*(\/[^\s]+)[ \t\r\n]/.exec(head)?.[1];
+  return interpreter === undefined || existsSync(interpreter);
 }
 
 // ---------- the developer's runtimes (never installed by OpenQodex) ----------
@@ -493,6 +520,8 @@ export function publishVersion(
   if (!holdsLock(root, tool, token)) return discard("lost_lock");
   // A version folder without its marker is debris from an install that died
   // under the earlier in-place layout; no live worker writes there any more.
+  // So is a gem install whose launcher's Ruby is gone (isInstalled). For a
+  // link, only the link goes; the folder it names is left as it is.
   if (existsSync(final) || isSymlink(final)) rmSync(final, { recursive: true, force: true });
   try {
     if (how === "move") {
