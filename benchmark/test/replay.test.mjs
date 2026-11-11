@@ -285,3 +285,33 @@ it("a saved submission rejected by core is scored as a successful replay", () =>
   write(join(run, "samples", "division", "claude-graph-off", "1", "report", "submission.json"), submission([f({ line_number: 1 })]));
   expect(() => replayRun(run, { mode: "threshold" })).toThrow(/not a line this change/);
 });
+
+// Issue 276: one incomplete review out of several must not stop the whole replay.
+it("skips an incomplete review instead of stopping the whole replay", () => {
+  const { run } = savedRun([[f()], [f()]]);
+  const dir = join(run, "samples", "division", "claude-graph-off", "2", "report");
+  const report = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"));
+  write(join(dir, "report.json"), { ...report, completion: { status: "incomplete" } });
+  const replay = replayRun(run, { mode: "threshold" });
+  expect(replay.rows[0].samples).toBe(1);
+  expect(replay.skipped).toHaveLength(1);
+  expect(replay.skipped[0]).toMatchObject({ case: "division", config: "claude-graph-off", repeat: 2 });
+  expect(replay.skipped[0].reason).toContain("not complete");
+  const result = spawnSync(process.execPath, [cli, "threshold", run], { encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stderr).toContain("replay: skipping 1 incomplete review");
+  expect(result.stdout).toContain("Skipped: 1 incomplete review.");
+});
+
+it("--floors replaces the default 0.6-0.9 sweep with the given floors", () => {
+  const { run } = savedRun([[f()]]);
+  expect(replayRun(run, { mode: "floor" }).rows.map((r) => r.floor)).toEqual([0.6, 0.7, 0.8, 0.9]);
+  expect(replayRun(run, { mode: "floor", floors: [0.5] }).rows.map((r) => r.floor)).toEqual([0.5]);
+  const result = spawnSync(process.execPath, [cli, "floor", run, "--floors", "0.5"], { encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stdout).toContain("| 0.5 |");
+  for (const kept of ["0.6", "0.7", "0.8", "0.9"]) expect(result.stdout).not.toContain(`| ${kept} |`);
+  const bad = spawnSync(process.execPath, [cli, "floor", run, "--floors", "1.5"], { encoding: "utf8" });
+  expect(bad.status).toBe(2);
+  expect(bad.stderr).toContain("--floors takes comma-separated numbers from 0 to 1");
+});
