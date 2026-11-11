@@ -32,6 +32,10 @@
 // 16. The judgement rule substitutes the default for a configured confidence
 //     floor, including zero, while the other brief rules use that floor.
 // 17. A full diff budget tells the reviewer to open a deleted binary file.
+// 18. A whole-repo review (`review --all`) states the default 0.7 floor in
+//     its brief while checkSubmission applies the host's confidenceFloor
+//     (issue 277): the whole-repo branch of buildReviewerBrief dropped the
+//     floor it was given instead of passing it on to answerBlock.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { buildBrief, buildReviewerBrief, buildWholeRepoBrief } from "./brief.js";
@@ -371,5 +375,14 @@ describe.each(singlePassBuilders)("$name investigation", ({ build }) => {
     const text = build({ impactBlock: `## Impact\n\n${SECRET}`, neighbourhoodBlock: `## Code around the change\n\n${SECRET}` });
     expect(text).not.toContain(SECRET);
     expect(redactSecrets(text, [SECRET])).toBe(text);
+  });
+});
+
+describe("18. whole-repo brief states the host's confidence floor", () => {
+  it("states the host's confidence floor in a whole-repo brief, not the 0.7 default (issue 277)", () => {
+    const { text } = buildReviewerBrief({ change: makeChange(), scan: makeScan(), lenses: [], config: makeConfig(), secrets: [], confidenceFloor: 0.8, whole: { hot: [], graphNote: null, inventory: [] } });
+    expect(text).toContain("Findings at 0.8 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
+    expect(text).toContain("Raise every defect you can show from the code with confidence 0.5 or higher. Set confidence honestly. Findings under 0.8 are shown as possible issues and never counted.");
+    expect(text).not.toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict.");
   });
 });
