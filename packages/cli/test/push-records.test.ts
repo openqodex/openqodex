@@ -28,10 +28,13 @@
 // 10. The git hook passes a push where one range among several is unreviewed.
 // 14. The git hook blocks a push that sends nothing (empty stdin) on the
 //     state of the work tree.
+// 15. A config the push breaks in the work tree lets the git hook pass the
+//     push in a blocking repo; or a repo that never validly chose blocking
+//     is locked out by a broken file.
 //  7. The agent hook lets `git push origin unreviewed:main` pass on the
 //     review of the current work.
 import { stagedFake } from "../../review/test/staged-fake.js";
-import { mkdirSync, readFileSync, statSync, utimesSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -367,6 +370,8 @@ describe("9, 10. every form of push", () => {
     expect(agent.stderr.trim().split("\n")).toHaveLength(1);
     const zero = "0".repeat(40);
     // Exit 2: the installed hook script maps it to letting the push through.
+    // No commit holds a config here, so none chose blocking; 15 has the
+    // repo whose committed config blocks.
     expect(cli(s, ["hook", "pre-push", "origin"], { input: `refs/heads/x ${g("rev-parse", "HEAD")} refs/heads/x ${zero}\n` }).status).toBe(2);
   });
 
@@ -388,5 +393,128 @@ describe("9, 10. every form of push", () => {
     const r = cli(s, ["hook", "pre-push", "origin"], { input: "" });
     expect(r.status).toBe(0);
     expect(r.stderr).toBe("");
+  });
+});
+
+// 15. A broken config in the work tree makes the git hook's lookup fail
+// (exit 2), which the installed hook lets through: a blocking repo is
+// bypassed by a push that breaks its config (issue 339). The verdict then
+// comes from the config in the base of each pushed range, the commit the
+// remote has. A repo whose history never validly chose blocking keeps exit 2.
+describe("15. a broken config in the work tree", () => {
+  const g = (...a: string[]) => {
+    const r = spawnSync("git", a, { cwd: s.repo, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  const BLOCKS = "review:\n  block_on_severity: critical\n";
+  const LAX = "review:\n  severity_threshold: minor\n";
+  const MALFORMED = "review: [\n";
+  const put = (path: string, text: string) => {
+    mkdirSync(join(s.repo, path, ".."), { recursive: true });
+    writeFileSync(join(s.repo, path), text);
+  };
+  // Commits `files` on main, puts main on a bare remote, then commits an
+  // unreviewed code change on top.
+  function based(files: Record<string, string>): void {
+    for (const [path, text] of Object.entries(files)) put(path, text);
+    commitAll();
+    const remote = tempDir("oq-remote-");
+    spawnSync("git", ["init", "-q", "--bare", remote]);
+    g("remote", "add", "origin", remote);
+    g("push", "-q", "-u", "origin", "main");
+    writeFileSync(join(s.repo, "code.txt"), "never reviewed\n");
+    commitAll();
+  }
+  const pushMain = () => cli(s, ["hook", "pre-push", "origin"], { input: `refs/heads/main ${g("rev-parse", "HEAD")} refs/heads/main ${g("rev-parse", "origin/main")}\n` });
+
+  it("a blocking base and a work tree .openqodex that is a symbolic link: exit 1, naming the link", () => {
+    based({ ".openqodex/config.yaml": BLOCKS });
+    rmSync(join(s.repo, ".openqodex"), { recursive: true });
+    symlinkSync("elsewhere", join(s.repo, ".openqodex"));
+    commitAll();
+    const r = pushMain();
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain(".openqodex is a symbolic link");
+    expect(r.stderr).toContain("blocks a push without a passing review");
+    expect(r.stderr).toContain("push again");
+  });
+
+  for (const [what, text, says] of [
+    ["malformed YAML", MALFORMED, "not valid YAML"],
+    ["a bad block_on_severity value", "review:\n  block_on_severity: huge\n", "review.block_on_severity"],
+  ]) {
+    it(`a blocking base and ${what} in the work tree: exit 1, naming it`, () => {
+      based({ ".openqodex/config.yaml": BLOCKS });
+      put(".openqodex/config.yaml", text);
+      const r = pushMain();
+      expect(r.status, r.stderr).toBe(1);
+      expect(r.stderr).toContain(says);
+    });
+  }
+
+  it("a base that never chose blocking and malformed YAML in the work tree: exit 2, as before", () => {
+    based({ ".openqodex/config.yaml": LAX });
+    put(".openqodex/config.yaml", MALFORMED);
+    const r = pushMain();
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("openqodex hook pre-push: .openqodex/config.yaml: not valid YAML");
+  });
+
+  it("a base config that is itself malformed, even one naming block_on_severity, does not block: exit 2", () => {
+    based({ ".openqodex/config.yaml": `${BLOCKS}  exclude: [\n` });
+    const r = pushMain();
+    expect(r.status).toBe(2);
+  });
+
+  it("a base whose .openqodex is a symbolic link does not block, though its legacy file does: exit 2", () => {
+    symlinkSync("elsewhere", join(s.repo, ".openqodex"));
+    based({ ".openqodex.yaml": BLOCKS });
+    const r = pushMain();
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(".openqodex is a symbolic link");
+  });
+
+  it("two ranges, one whose base blocks and one whose base does not, exit 1 in either order", () => {
+    based({ ".openqodex/config.yaml": LAX });
+    const lax = g("rev-parse", "HEAD");
+    g("push", "-q", "origin", "HEAD:lax");
+    put(".openqodex/config.yaml", BLOCKS);
+    commitAll();
+    g("push", "-q", "origin", "HEAD:strict");
+    const strict = g("rev-parse", "HEAD");
+    writeFileSync(join(s.repo, "more.txt"), "never reviewed\n");
+    commitAll();
+    const strictWork = g("rev-parse", "HEAD");
+    g("checkout", "-q", "-b", "lax-work", lax);
+    writeFileSync(join(s.repo, "other.txt"), "never reviewed\n");
+    commitAll();
+    const laxWork = g("rev-parse", "HEAD");
+    put(".openqodex/config.yaml", MALFORMED);
+    const laxLine = `refs/heads/lax-work ${laxWork} refs/heads/lax ${lax}`;
+    const strictLine = `refs/heads/main ${strictWork} refs/heads/strict ${strict}`;
+    expect(cli(s, ["hook", "pre-push", "origin"], { input: `${laxLine}\n` }).status).toBe(2);
+    expect(cli(s, ["hook", "pre-push", "origin"], { input: `${laxLine}\n${strictLine}\n` }).status).toBe(1);
+    expect(cli(s, ["hook", "pre-push", "origin"], { input: `${strictLine}\n${laxLine}\n` }).status).toBe(1);
+  });
+
+  it("a new branch with no base to measure from keeps today's exit 2", () => {
+    based({ ".openqodex/config.yaml": BLOCKS });
+    put(".openqodex/config.yaml", MALFORMED);
+    const r = cli(s, ["hook", "pre-push", "origin"], { input: `refs/heads/main ${g("rev-parse", "HEAD")} refs/heads/fresh ${"0".repeat(40)}\n` });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("not valid YAML");
+  });
+
+  it("a base with only the legacy .openqodex.yaml blocking, and a broken .openqodex/config.yaml in the work tree: exit 1", () => {
+    based({ ".openqodex.yaml": BLOCKS });
+    put(".openqodex/config.yaml", MALFORMED);
+    expect(pushMain().status).toBe(1);
+  });
+
+  it("a base with a valid .openqodex/config.yaml that does not block beside a legacy file that does: the folder file wins, exit 2", () => {
+    based({ ".openqodex/config.yaml": LAX, ".openqodex.yaml": BLOCKS });
+    put(".openqodex/config.yaml", MALFORMED);
+    expect(pushMain().status).toBe(2);
   });
 });

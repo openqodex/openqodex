@@ -111,12 +111,20 @@ const commitOf = (repoRoot: string, rev: string) => git(repoRoot, ["rev-parse", 
 // review of base B to H does not cover a push of H over a remote commit R
 // that is not B, such as a force push over work the review never saw.
 async function rangeChangeId(core: Core, repoRoot: string, config: Config, remote: string, localSha: string, remoteSha: string | null): Promise<{ id: string; base: string } | { unknown: string }> {
+  const found = await rangeBase(repoRoot, config.defaultBase, remote, localSha, remoteSha);
+  if (!("base" in found)) return found;
+  const change = await core.getTreeChange({ repoRoot, baseRef: found.base, baseSha: found.base, headSha: localSha, exclude: config.exclude, idOnly: true });
+  return { id: change.id, base: found.base };
+}
+
+// The commit a pushed range starts from (see rangeChangeId).
+async function rangeBase(repoRoot: string, defaultBase: string | null, remote: string, localSha: string, remoteSha: string | null): Promise<{ base: string } | { unknown: string }> {
   let base: string | null = null;
   if (remoteSha !== null) {
     base = await commitOf(repoRoot, remoteSha);
     if (base === null) return { unknown: `the remote's commit ${remoteSha.slice(0, 12)} is not in this repository, so the push cannot be matched to a review; fetch, then push again` };
   } else {
-    const named = config.defaultBase !== null ? [config.defaultBase, `${remote}/${config.defaultBase}`] : [`refs/remotes/${remote}/HEAD`];
+    const named = defaultBase !== null ? [defaultBase, `${remote}/${defaultBase}`] : [`refs/remotes/${remote}/HEAD`];
     for (const ref of named) {
       const sha = await commitOf(repoRoot, ref);
       base = sha === null ? null : await git(repoRoot, ["merge-base", sha, localSha]);
@@ -124,8 +132,60 @@ async function rangeChangeId(core: Core, repoRoot: string, config: Config, remot
     }
     if (base === null) return { unknown: "this push starts a new branch and no base to measure it from was found (review.default_base, or the remote's default branch)" };
   }
-  const change = await core.getTreeChange({ repoRoot, baseRef: base, baseSha: base, headSha: localSha, exclude: config.exclude, idOnly: true });
-  return { id: change.id, base };
+  return { base };
+}
+
+// The block_on_severity the config sets in commit `base`, read from git as
+// loadConfig reads the work tree: .openqodex/config.yaml, else the legacy
+// .openqodex.yaml, and neither through a link or past the size cap. Null
+// when that config is missing, a link, too big or not valid, or git cannot
+// read it: only a config that validly chose blocking blocks.
+async function blockingAt(core: Core, repoRoot: string, base: string): Promise<{ severity: string; file: string } | null> {
+  const run = async (args: string[]): Promise<string> =>
+    (await execFileAsync("git", args, { cwd: repoRoot, timeout: 10_000, maxBuffer: 2 * core.CONFIG_MAX_BYTES, env: { ...process.env, ...core.SERVER_GIT_ENV } })).stdout;
+  try {
+    const listing = await run(["ls-tree", "-z", "-l", "--full-tree", base, "--", ".openqodex", core.CONFIG_FILE, core.LEGACY_CONFIG_FILE]);
+    const entries = new Map(
+      listing.split("\0").filter((l) => l !== "").map((l) => {
+        const [meta = "", path = ""] = l.split("\t");
+        const [mode, , sha, size] = meta.split(/\s+/);
+        return [path, { mode, sha, size: Number(size) }];
+      }),
+    );
+    if (entries.get(".openqodex")?.mode === "120000") return null;
+    const files = [core.CONFIG_FILE, core.LEGACY_CONFIG_FILE].filter((f) => entries.has(f));
+    // loadConfig reads both files before it picks one: either one a link,
+    // not a file or too big stops it.
+    if (files.some((f) => !["100644", "100755"].includes(entries.get(f)!.mode ?? "") || !(entries.get(f)!.size <= core.CONFIG_MAX_BYTES))) return null;
+    const file = files[0];
+    if (file === undefined) return null;
+    const text = await run(["cat-file", "blob", entries.get(file)!.sha!]);
+    const severity = core.parseConfig(text, file, { runtimeVersion: __OPENQODEX_VERSION__ }).config.blockOnSeverity;
+    return severity === null ? null : { severity, file };
+  } catch {
+    return null;
+  }
+}
+
+// The work tree's config cannot be read (`error`). A lookup that fails for
+// its own reasons never stops a push, but a push can carry the broken config
+// itself. So the push stops when the config in the base of any pushed range,
+// a commit the remote has, chose blocking; otherwise the error stands.
+async function brokenConfig(core: Core, repoRoot: string, remote: string, error: unknown): Promise<number> {
+  for (const range of pushedRanges(await readAll())) {
+    // A new branch is measured from the remote's default branch: the
+    // default_base the config names cannot be read.
+    const found = await rangeBase(repoRoot, null, remote, range.local, range.remoteSha);
+    if (!("base" in found)) continue;
+    const blocking = await blockingAt(core, repoRoot, found.base);
+    if (blocking === null) continue;
+    const reason = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `OpenQodex cannot read this repo's config: ${reason}\nThis repo blocks a push without a passing review (block_on_severity: ${blocking.severity} in ${blocking.file} at ${found.base.slice(0, 12)}). Fix the config, then push again.\n`,
+    );
+    return 1;
+  }
+  throw error;
 }
 
 // How many saved reviews a push looks through for one that contains it, so a
@@ -371,16 +431,23 @@ function pushedRanges(input: string): Range[] {
 // pushed range (rangeChangeId) must be a change a review recorded in the
 // developer's home covered. It prints no scanner output and never starts a
 // review. Exit 1 only when the lookup denies (block_on_severity is set and
-// the review is missing or blocked); an incomplete review never blocks.
+// the review is missing or blocked, or the work tree's config cannot be read
+// and a pushed range's base chose blocking: brokenConfig); an incomplete
+// review never blocks.
 async function prePush(args: string[]): Promise<number> {
   // Git sets these for hooks; they would point git at another index or tree.
   for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"]) delete process.env[name];
   const repoRoot = await repoRootOf(process.cwd());
   if (repoRoot === null) return fail("openqodex hook pre-push: run it inside a git repository");
   const core = await import("@openqodex/core");
-  const { config } = core.loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ });
-  const home = openqodexHomeDir();
   const remote = args[0] ?? "origin";
+  let config: Config;
+  try {
+    ({ config } = core.loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ }));
+  } catch (error) {
+    return brokenConfig(core, repoRoot, remote, error);
+  }
+  const home = openqodexHomeDir();
   // Only the records in the developer's own home count (see hook check).
   const newest = readHomeReceipt(home, repoRoot, "latest");
   const saved = readHomeReceipts(home, repoRoot, CONTAINING_LIMIT);
