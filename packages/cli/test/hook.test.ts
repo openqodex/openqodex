@@ -52,8 +52,11 @@
 //     push sends unreviewed code: measured from a base only a local branch
 //     holds, through a replace ref, or from a working tree that undoes a
 //     commit the push sends.
+// 23. A push that breaks the config in the work tree (a symbolic link for
+//     .openqodex) makes the lookup fail, and the push goes through with no
+//     review in a repo whose config sets block_on_severity (issue 339).
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   DEFAULT_CONFIG,
@@ -654,6 +657,23 @@ describe("a push that changes only .openqodex/", () => {
     expect(decision(r)).toBe("deny");
     expect(r).toContain(UNREVIEWED);
   });
+});
+
+describe("a push that breaks the config", () => {
+  it("23. the pre-push hook stops a push that makes .openqodex a symbolic link and changes code, in a blocking repo", () => {
+    const s = sandbox({ "a.txt": "x\n", ".openqodex/config.yaml": BLOCK_YAML });
+    withRemote(s);
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    const before = git(s.repo, "rev-parse", "origin/main").trim();
+    rmSync(join(s.repo, ".openqodex"), { recursive: true });
+    symlinkSync("elsewhere", join(s.repo, ".openqodex"));
+    writeFileSync(join(s.repo, "a.txt"), "code\n");
+    commitAll(s.repo);
+    const r = push(s, "origin", "main");
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(".openqodex is a symbolic link");
+    expect(git(join(s.root, "remote.git"), "rev-parse", "main").trim()).toBe(before);
+  }, 60_000);
 });
 
 // 19. The line printed for a hook manager drops git's arguments, so a push
