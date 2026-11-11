@@ -1,5 +1,11 @@
 # openqodex
 
+## 0.18.1
+
+### Patch Changes
+
+- [#347](https://github.com/openqodex/openqodex/pull/347) [`dcbac90`](https://github.com/openqodex/openqodex/commit/dcbac9081ce7ca1c90dbdde4d516d7a7f62a1d38) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The push check inside Claude Code and Codex now recognises the push lines agents usually type, such as `cd /path/to/worktree && git push -u origin my-branch 2>&1 | tail -5`, and judges them in the folder the `cd` names, instead of saying it could not tell what the push sends (issue 346).
+
 ## 0.18.0
 
 ### Minor Changes

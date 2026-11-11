@@ -62,7 +62,7 @@ In your own terminal, run `~/.openqodex/bin/openqodex review`. That path is the 
 For agents, the same install with no question:
 
 ```
-npx -y openqodex@0.18.0 init --yes --agent <host>
+npx -y openqodex@0.18.1 init --yes --agent <host>
 ```
 
 `<host>` is `claude-code`, `codex`, `cursor`, `cline` or `goose`. In its default sandbox mode, Codex gives commands no network. From Codex, run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent.
