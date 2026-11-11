@@ -24,7 +24,8 @@
 // 10. The pre-push hook prints raw scanner findings or starts a full review.
 // 11. The pre-push hook looks up the checked-out work instead of the pushed
 //     commit, so a push of another branch counts as reviewed.
-// 12. The agent hook blocks on an incomplete record.
+// 12. The agent hook blocks on an incomplete record of the moved change, or
+//     stays silent about it instead of printing the one incomplete line.
 // 13. The agent hook stays silent for an unreviewed change.
 // 14. A legacy receipt (the old two-step protocol) counts as a complete
 //     review, or blocks a push that it passed.
@@ -43,8 +44,19 @@
 // 20. The line printed for lefthook puts git's hook arguments into a shell
 //     line: lefthook inserts {1} and {2} raw, so a remote URL holding
 //     '$(id)' closes the quotes and runs.
+// 21. A push whose net change touches only .openqodex/, which a review
+//     leaves out and so never records, is denied in a blocking repo by
+//     either hook (issue 279); or a push that also changes another file, or
+//     whose base git cannot read, goes through without a review.
+// 22. A change that looks like it touches only .openqodex/ passes while the
+//     push sends unreviewed code: measured from a base only a local branch
+//     holds, through a replace ref, or from a working tree that undoes a
+//     commit the push sends.
+// 23. A push that breaks the config in the work tree (a symbolic link for
+//     .openqodex) makes the lookup fail, and the push goes through with no
+//     review in a repo whose config sets block_on_severity (issue 339).
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   DEFAULT_CONFIG,
@@ -488,6 +500,179 @@ describe("the pre-push hook looks up the review of what the push sends", () => {
     const r = push(s, "origin", "feature");
     expect(r.status).not.toBe(0);
     expect(r.out).toContain(UNREVIEWED);
+  }, 60_000);
+});
+
+// 21. A review leaves .openqodex/ out of every change, so a push that
+// changes nothing else has nothing a review could record.
+describe("a push that changes only .openqodex/", () => {
+  const CONFIG = ".openqodex/config.yaml";
+  const blockingConfig = () => sandbox({ "a.txt": "x\n", [CONFIG]: BLOCK_YAML });
+  const editConfig = (s: Sandbox, line: string) => writeFileSync(join(s.repo, CONFIG), `${BLOCK_YAML}  ${line}\n`);
+
+  it("21. the pre-push hook lets it through with no review, and still denies one that also changes another file", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const state = push(s, "origin", "main");
+    expect(state.status, state.out).toBe(0);
+    expect(state.out).not.toContain(UNREVIEWED);
+    editConfig(s, "severity_threshold: minor");
+    writeFileSync(join(s.repo, "a.txt"), "y\n");
+    commitAll(s.repo);
+    const both = push(s, "origin", "main");
+    expect(both.status).not.toBe(0);
+    expect(both.out).toContain(UNREVIEWED);
+  }, 60_000);
+
+  it("21. the pre-push hook measures a new branch from the base it already uses, and denies one that also changes another file", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    git(s.repo, "remote", "set-head", "origin", "main");
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    git(s.repo, "checkout", "-q", "-b", "state");
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const state = push(s, "origin", "state");
+    expect(state.status, state.out).toBe(0);
+    expect(state.out).not.toContain(UNREVIEWED);
+    git(s.repo, "checkout", "-q", "-b", "code", "main");
+    editConfig(s, "severity_threshold: major");
+    writeFileSync(join(s.repo, "b.txt"), "code\n");
+    commitAll(s.repo);
+    const both = push(s, "origin", "code");
+    expect(both.status).not.toBe(0);
+    expect(both.out).toContain(UNREVIEWED);
+  }, 60_000);
+
+  it("21. the pre-push hook does not let it through when git cannot read the remote's commit", () => {
+    const s = blockingConfig();
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const head = git(s.repo, "rev-parse", "HEAD").trim();
+    const r = cli(s, ["hook", "pre-push", "origin"], { input: `refs/heads/main ${head} refs/heads/main ${"f".repeat(40)}\n` });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(COULD_NOT);
+  });
+
+  it("21. the agent hook lets it through with no review, and still denies one that also changes another file", () => {
+    const s = blockingConfig();
+    editConfig(s, "severity_threshold: major");
+    published(s);
+    expect(check(s, "git push").stdout).toBe("");
+    editConfig(s, "severity_threshold: minor");
+    writeFileSync(join(s.repo, "a.txt"), "y\n");
+    commitAll(s.repo);
+    const both = check(s, "git push").stdout;
+    expect(decision(both)).toBe("deny");
+    expect(both).toContain(UNREVIEWED);
+  });
+
+  // A local trunk holding a code commit the remote does not have.
+  function localTrunk(s: Sandbox): void {
+    withRemote(s);
+    git(s.repo, "checkout", "-q", "-b", "trunk");
+    writeFileSync(join(s.repo, "b.txt"), "code\n");
+    commitAll(s.repo);
+  }
+
+  it("22. the pre-push hook denies a new branch measured from a default base only a local branch holds", () => {
+    const s = blockingConfig();
+    editConfig(s, "default_base: trunk");
+    commitAll(s.repo);
+    localTrunk(s);
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    git(s.repo, "checkout", "-q", "-b", "newbr");
+    const r = push(s, "origin", "newbr");
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(UNREVIEWED);
+  }, 60_000);
+
+  it("22. the pre-push hook denies a code commit a replace ref shows with the base's tree", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    const base = git(s.repo, "rev-parse", "HEAD").trim();
+    writeFileSync(join(s.repo, "a.txt"), "code\n");
+    commitAll(s.repo);
+    const code = git(s.repo, "rev-parse", "HEAD").trim();
+    const fake = git(s.repo, "commit-tree", `${base}^{tree}`, "-p", base, "-m", "fake").trim();
+    git(s.repo, "replace", code, fake);
+    const r = push(s, "origin", "main");
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(UNREVIEWED);
+  }, 60_000);
+
+  it("22. the agent hook denies a code commit the working tree undoes", () => {
+    const s = blockingConfig();
+    writeFileSync(join(s.repo, "a.txt"), "code\n");
+    published(s);
+    writeFileSync(join(s.repo, "a.txt"), "x\n");
+    const r = check(s, "git push").stdout;
+    expect(decision(r)).toBe("deny");
+    expect(r).toContain(UNREVIEWED);
+  });
+
+  it("22. the agent hook denies a branch whose upstream is a local branch holding code", () => {
+    const s = blockingConfig();
+    localTrunk(s);
+    git(s.repo, "checkout", "-q", "--track", "-b", "feat", "trunk");
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const r = check(s, "git push -u origin feat").stdout;
+    expect(decision(r)).toBe("deny");
+    expect(r).toContain(UNREVIEWED);
+  });
+
+  it("22. the agent hook denies a force push that drops code the remote branch holds", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    writeFileSync(join(s.repo, "b.txt"), "code\n");
+    commitAll(s.repo);
+    git(s.repo, "push", "-q", "origin", "main");
+    git(s.repo, "reset", "-q", "--hard", "HEAD~1");
+    git(s.repo, "branch", "-q", "-u", "origin/main");
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const r = check(s, "git push -f origin main").stdout;
+    expect(decision(r)).toBe("deny");
+    expect(r).toContain(UNREVIEWED);
+  });
+
+  it("22. the agent hook denies a push that sends another branch too (push.default matching)", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    git(s.repo, "branch", "-q", "-u", "origin/main");
+    git(s.repo, "checkout", "-q", "-b", "other");
+    git(s.repo, "push", "-q", "origin", "other");
+    writeFileSync(join(s.repo, "b.txt"), "code\n");
+    commitAll(s.repo);
+    git(s.repo, "checkout", "-q", "main");
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    git(s.repo, "config", "push.default", "matching");
+    const r = check(s, "git push").stdout;
+    expect(decision(r)).toBe("deny");
+    expect(r).toContain(UNREVIEWED);
+  });
+});
+
+describe("a push that breaks the config", () => {
+  it("23. the pre-push hook stops a push that makes .openqodex a symbolic link and changes code, in a blocking repo", () => {
+    const s = sandbox({ "a.txt": "x\n", ".openqodex/config.yaml": BLOCK_YAML });
+    withRemote(s);
+    expect(cli(s, ["hook", "install"]).status).toBe(0);
+    const before = git(s.repo, "rev-parse", "origin/main").trim();
+    rmSync(join(s.repo, ".openqodex"), { recursive: true });
+    symlinkSync("elsewhere", join(s.repo, ".openqodex"));
+    writeFileSync(join(s.repo, "a.txt"), "code\n");
+    commitAll(s.repo);
+    const r = push(s, "origin", "main");
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(".openqodex is a symbolic link");
+    expect(git(join(s.root, "remote.git"), "rev-parse", "main").trim()).toBe(before);
   }, 60_000);
 });
 

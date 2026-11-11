@@ -74,6 +74,14 @@ const version = (JSON.parse(readFileSync(join(BIN, "..", "..", "package.json"), 
 const OLDER = "0.98.0";
 const NEWER = "0.99.0";
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// How long an activation here waits for its home's lock. The lock is a port
+// hashed from the home folder (agents/lock.ts), so the home of another test,
+// in this file or one running beside it, can land on the same port and hold
+// it for a moment; with no wait the activation then reports busy (#326).
+// An init on a loaded machine holds it for seconds, so this waits as long as
+// init and a foreground update do. The case that expects busy passes 0, as
+// the daily worker does.
+const LOCK_WAIT = 60_000;
 // The contract this build declares, as the registry would report it.
 const CONTRACT = (() => {
   const p = JSON.parse(readFileSync(join(BIN, "..", "..", "package.json"), "utf8")) as { openqodex: { agentContract: number; configFormat: number } };
@@ -169,10 +177,10 @@ async function noCheckRuns(s: Sandbox, ms: number): Promise<boolean> {
   return checkedAt(s) === before;
 }
 // A worker's last step: activateUnpacked in a child, printing its result as JSON.
-function activation(s: Sandbox, v: string, from: string, extra: Record<string, string> = {}) {
+function activation(s: Sandbox, v: string, from: string, extra: Record<string, string> = {}, wait = LOCK_WAIT) {
   const tmp = unpacked(s, v);
   const p = nodeChild(
-    `const r = await m.activateUnpacked({ home: process.env.H, version: ${JSON.stringify(v)}, from: ${JSON.stringify(from)}, running: ${JSON.stringify(from)}, tmp: ${JSON.stringify(tmp)}, env: process.env, wait: 0, contract: ${JSON.stringify(CONTRACT)} }); process.stdout.write(JSON.stringify(r));`,
+    `const r = await m.activateUnpacked({ home: process.env.H, version: ${JSON.stringify(v)}, from: ${JSON.stringify(from)}, running: ${JSON.stringify(from)}, tmp: ${JSON.stringify(tmp)}, env: process.env, wait: ${wait}, contract: ${JSON.stringify(CONTRACT)} }); process.stdout.write(JSON.stringify(r));`,
     { ...laptop(s), H: s.oqHome, ...extra },
   );
   return { p, done: exited(p), tmp };
@@ -198,7 +206,7 @@ describe("1. two workers with different candidates", () => {
     expect(active(s)).toEqual([NEWER, version]);
     expect(existsSync(rt(s, OLDER))).toBe(false);
     expect(existsSync(a.tmp)).toBe(false);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("2. rollback while a worker waits at the boundary", () => {
@@ -214,7 +222,7 @@ describe("2. rollback while a worker waits at the boundary", () => {
     expect(active(s)[0]).toBe(version);
     expect(readFileSync(join(s.oqHome, "config.yaml"), "utf8")).toMatch(new RegExp(`^skip_version: ${OLDER.replaceAll(".", "\\.")}$`, "m"));
     expect(launch(s, ["--version"]).stdout.trim()).toBe(version);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("3. uninstall while a worker waits at the boundary", () => {
@@ -262,9 +270,9 @@ describe("5. three processes contending for the boundary", () => {
 });
 
 describe("5b. the lock is per home folder", () => {
-  // Its port comes from the home folder, so two test files, each with homes
-  // of their own, never share one; only a process in the same home can
-  // hold it (#57).
+  // Its port comes from the home folder, so two homes rarely share one; a
+  // process in the same home holds it (#57), and so, now and then, does the
+  // lock of another home that lands on the same port (#326).
   it("activations in two homes at once both activate; one in a home whose lock another process holds reports busy", async () => {
     const [a, b, c] = [installed(), installed(), installed()];
     const both = await Promise.all([activation(a, NEWER, version).done, activation(b, NEWER, version).done]);
@@ -272,7 +280,7 @@ describe("5b. the lock is per home folder", () => {
     const holder = nodeChild(`await m.withBoundary(process.env.H, { wait: 0 }, async () => { process.stdout.write("held\\n"); await new Promise((r) => setTimeout(r, 30000)); });`, { H: c.oqHome });
     try {
       await new Promise<void>((resolve) => holder.stdout?.on("data", (d: Buffer) => d.toString().includes("held") && resolve()));
-      expect((await activation(c, NEWER, version).done).out).toMatch(/"outcome":"busy"/);
+      expect((await activation(c, NEWER, version, {}, 0).done).out).toMatch(/"outcome":"busy"/);
     } finally {
       holder.kill("SIGKILL");
     }
@@ -347,7 +355,7 @@ describe("7. runtime folders are never replaced", () => {
     const second = await activation(s, NEWER, version).done;
     expect(second.out).toMatch(/"outcome":"activated"/);
     expect(active(s)).toEqual([NEWER, version]);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("8. a crash between publishing the runtime and writing the active record", () => {
@@ -362,7 +370,7 @@ describe("8. a crash between publishing the runtime and writing the active recor
     expect(launch(s, ["--version"]).stdout.trim()).toBe(version);
     expect((await activation(s, NEWER, version).done).out).toMatch(/"outcome":"activated"/);
     expect(launch(s, ["--version"]).stdout.trim()).toBe(NEWER);
-  }, 120_000);
+  }, 180_000);
 
   it("a record naming a missing runtime runs the baked-in version; the second line is never run", () => {
     const s = installed();
@@ -388,7 +396,7 @@ describe("9. rollback when skip_version cannot be written", () => {
       chmodSync(locked, 0o755);
     }
     expect(active(s)).toEqual([NEWER, version]);
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("10. uninstall", () => {
@@ -430,12 +438,12 @@ describe("11. a launcher path with a wildcard character", () => {
 
 describe("12 and 13. the user-scope skill and the rules", () => {
   const skillPath = (s: Sandbox): string => join(s.home, ".claude/skills/openqodex/SKILL.md");
-  // One home with all four agents for the cases that only read what init
+  // One home with all five agents for the cases that only read what init
   // wrote; `guide skill` through the launcher writes nothing (no update
   // check starts after it).
   let all: Sandbox;
   beforeAll(() => {
-    all = installed(["claude-code", "codex", "cursor", "cline"]);
+    all = installed(["claude-code", "codex", "cursor", "cline", "goose"]);
   }, 120_000);
 
   it("a full-text skill an earlier init wrote, still as written, is replaced by the stub (failure 12)", () => {
@@ -453,7 +461,7 @@ describe("12 and 13. the user-scope skill and the rules", () => {
 
   it("the user-scope skill is a stub with no procedure and no reviewer, that sends the agent to guide skill (failure 13)", () => {
     const s = all;
-    for (const p of [".claude/skills", ".agents/skills", ".cursor/skills", ".cline/skills"]) {
+    for (const p of [".claude/skills", ".agents/skills", ".cursor/skills", ".cline/skills", ".config/goose/skills"]) {
       const text = readFileSync(join(s.home, p, "openqodex/SKILL.md"), "utf8");
       expect(text, p).toMatch(/^---\nname: openqodex\ndescription: /);
       expect(text, p).not.toContain("## Who reviews");

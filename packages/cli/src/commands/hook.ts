@@ -5,7 +5,7 @@
 // The agent hook is a reminder about the developer's current work, not the
 // boundary: it does not know what a push sends. The git pre-push hook, which
 // git hands the exact ranges, is the authoritative check.
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -128,6 +128,99 @@ async function rangeChangeId(core: Core, repoRoot: string, config: Config, remot
   return { id: change.id, base };
 }
 
+// The block_on_severity the config sets in commit `base`, read from git as
+// loadConfig reads the work tree: .openqodex/config.yaml, else the legacy
+// .openqodex.yaml, and neither through a link or past the size cap. Null
+// when that config is missing, a link, too big or not valid, or git cannot
+// read it: only a config that validly chose blocking blocks.
+async function blockingAt(core: Core, repoRoot: string, base: string): Promise<{ severity: string; file: string } | null> {
+  const run = async (args: string[]): Promise<string> =>
+    (await execFileAsync("git", args, { cwd: repoRoot, timeout: 10_000, maxBuffer: 2 * core.CONFIG_MAX_BYTES, env: { ...process.env, ...core.SERVER_GIT_ENV } })).stdout;
+  // One path per call, so other files under .openqodex/ never reach the
+  // output: a path names the entry itself, never what a folder holds.
+  const entry = async (path: string): Promise<{ mode: string; sha: string; size: number } | null> => {
+    const [meta = "", name] = (await run(["ls-tree", "-z", "-l", "--full-tree", base, "--", path])).split("\0")[0]!.split("\t");
+    const [mode = "", , sha = "", size] = meta.split(/\s+/);
+    return name === path ? { mode, sha, size: Number(size) } : null;
+  };
+  try {
+    const folder = await entry(".openqodex");
+    if (folder?.mode === "120000") return null;
+    const entries = new Map<string, { mode: string; sha: string; size: number } | null>([
+      [core.CONFIG_FILE, folder?.mode === "040000" ? await entry(core.CONFIG_FILE) : null],
+      [core.LEGACY_CONFIG_FILE, await entry(core.LEGACY_CONFIG_FILE)],
+    ]);
+    const files = [core.CONFIG_FILE, core.LEGACY_CONFIG_FILE].filter((f) => entries.get(f) !== null);
+    // loadConfig reads both files before it picks one: either one a link,
+    // not a file or too big stops it.
+    if (files.some((f) => !["100644", "100755"].includes(entries.get(f)!.mode) || !(entries.get(f)!.size <= core.CONFIG_MAX_BYTES))) return null;
+    const file = files[0];
+    if (file === undefined) return null;
+    const text = await run(["cat-file", "blob", entries.get(file)!.sha]);
+    const severity = core.parseConfig(text, file, { runtimeVersion: __OPENQODEX_VERSION__ }).config.blockOnSeverity;
+    return severity === null ? null : { severity, file };
+  } catch {
+    return null;
+  }
+}
+
+// The commits a pushed range starts from, all of them commits the remote
+// has: for a branch the remote has, its old tip; for a new branch, the
+// nearest ancestors of the pushed commit that a remote-tracking ref of
+// `remote` contains, or the pushed commit itself when one does. Neither
+// review.default_base nor the remote's HEAD ref is needed. Empty when the
+// remote has none of the branch or git fails. Replace refs are off, and
+// git's output is read as it comes, so no output limit applies.
+async function remoteBases(core: Core, repoRoot: string, remote: string, range: Range): Promise<string[]> {
+  if (range.remoteSha !== null) {
+    const base = await commitOf(repoRoot, range.remoteSha);
+    return base === null ? [] : [base];
+  }
+  const head = await commitOf(repoRoot, range.local);
+  if (head === null) return [];
+  return new Promise((done) => {
+    const child = spawn("git", ["rev-list", "--boundary", head, "--not", `--remotes=${remote}`], {
+      cwd: repoRoot,
+      timeout: 10_000,
+      env: { ...process.env, ...core.SERVER_GIT_ENV },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const bases: string[] = [];
+    let sent = 0;
+    let rest = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      const lines = (rest + chunk).split("\n");
+      rest = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("-")) bases.push(line.slice(1));
+        else sent++;
+      }
+    });
+    child.once("error", () => done([]));
+    child.once("close", (code) => done(code !== 0 ? [] : sent === 0 ? [head] : bases));
+  });
+}
+
+// The work tree's config cannot be read (`error`). A lookup that fails for
+// its own reasons never stops a push, but a push can carry the broken config
+// itself. So the push stops when the config in any base of any pushed range
+// (remoteBases) chose blocking; otherwise the error stands.
+async function brokenConfig(core: Core, repoRoot: string, remote: string, error: unknown): Promise<number> {
+  for (const range of pushedRanges(await readAll())) {
+    for (const base of await remoteBases(core, repoRoot, remote, range)) {
+      const blocking = await blockingAt(core, repoRoot, base);
+      if (blocking === null) continue;
+      const reason = error instanceof Error ? error.message : String(error);
+      process.stderr.write(
+        `OpenQodex cannot read this repo's config: ${reason}\nThis repo blocks a push without a passing review (block_on_severity: ${blocking.severity} in ${blocking.file} at ${base.slice(0, 12)}). Fix the config, then push again.\n`,
+      );
+      return 1;
+    }
+  }
+  throw error;
+}
+
 // How many saved reviews a push looks through for one that contains it, so a
 // push stays fast however many reviews are saved.
 const CONTAINING_LIMIT = 20;
@@ -160,9 +253,9 @@ async function containingReceipt(core: Core, repoRoot: string, config: Config, s
   return null;
 }
 
-async function isAncestor(repoRoot: string, older: string, newer: string): Promise<boolean> {
+async function isAncestor(repoRoot: string, older: string, newer: string, env: Readonly<Record<string, string>> = {}): Promise<boolean> {
   try {
-    await execFileAsync("git", ["merge-base", "--is-ancestor", older, newer], { cwd: repoRoot, timeout: 10_000 });
+    await execFileAsync("git", ["merge-base", "--is-ancestor", older, newer], { cwd: repoRoot, timeout: 10_000, env: { ...process.env, ...env } });
     return true;
   } catch {
     return false;
@@ -181,13 +274,87 @@ const PLAIN_OPTIONS = new Set(["-u", "--set-upstream", "-f", "--force", "--force
 const REMOTE = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
 const BRANCH = /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/;
 
-// The refspec the line names, "" for none; null when the line is not recognised.
-export function plainPush(command: string): string | null {
+// The remote and the refspec the line names, in that order; null when the
+// line is not recognised.
+function plainWords(command: string): string[] | null {
   const words = command.trim().split(" ");
   if (words[0] !== "git" || words[1] !== "push") return null;
   const rest = words.slice(2).filter((w) => !PLAIN_OPTIONS.has(w));
   if (rest.length > 2 || (rest[0] !== undefined && !REMOTE.test(rest[0])) || (rest[1] !== undefined && !BRANCH.test(rest[1]))) return null;
-  return rest[1] ?? "";
+  return rest;
+}
+
+// The refspec the line names, "" for none; null when the line is not recognised.
+export function plainPush(command: string): string | null {
+  const rest = plainWords(command);
+  return rest === null ? null : (rest[1] ?? "");
+}
+
+// Whether the remote already has `sha`: a remote-tracking ref of `remote`
+// contains it. A commit only a local branch holds does not count. Replace
+// refs are off, as onlyStateChanged reads the change.
+async function remoteHolds(core: Core, repoRoot: string, remote: string, sha: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync("git", ["for-each-ref", "--count=1", "--format=%(refname)", `--contains=${sha}`, `refs/remotes/${remote}/`], { cwd: repoRoot, timeout: 10_000, env: { ...process.env, ...core.SERVER_GIT_ENV } });
+    return stdout.trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
+// The commits from `base`, which the remote has (`held`, else a
+// remote-tracking ref of `remote` contains it), to `head` change nothing but
+// .openqodex/, which a review leaves out: no review can record such a push.
+// A git error is false, so the push is looked up as before.
+async function onlyState(core: Core, repoRoot: string, remote: string, base: string, head: string, held: boolean): Promise<boolean> {
+  try {
+    return (held || (await remoteHolds(core, repoRoot, remote, base))) && (await core.onlyStateChanged(repoRoot, base, head));
+  } catch {
+    return false;
+  }
+}
+
+const FORCE_OPTIONS = new Set(["-f", "--force", "--force-with-lease"]);
+
+// The agent hook's skip, for a recognised line: HEAD changes nothing but
+// .openqodex/ from the review's `base` (onlyState), and the work tree and
+// index change nothing but .openqodex/ from HEAD, so the developer's current
+// work is what the push sends. The remote is the one the line names, else
+// the one git pushes the current branch to. Never for a push that could
+// remove commits from the remote branch (a force option, or a remote tip
+// that is not an ancestor of HEAD), or that sends more than the current
+// branch (push.default matching, a remote's push refspecs or mirror
+// setting, push.followTags).
+async function onlyStateWork(core: Core, repoRoot: string, command: string, base: string): Promise<boolean> {
+  const current = await git(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  const head = await commitOf(repoRoot, "HEAD");
+  const words = plainWords(command);
+  if (current === null || head === null || words === null) return false;
+  if (command.trim().split(" ").some((w) => FORCE_OPTIONS.has(w))) return false;
+  const remote =
+    words[0] ??
+    (await git(repoRoot, ["config", "--get", `branch.${current}.pushRemote`])) ??
+    (await git(repoRoot, ["config", "--get", "remote.pushDefault"])) ??
+    (await git(repoRoot, ["config", "--get", `branch.${current}.remote`])) ??
+    "origin";
+  const pushDefault = await git(repoRoot, ["config", "--get", "push.default"]);
+  if (pushDefault === "matching") return false;
+  if ((await git(repoRoot, ["config", "--get-all", `remote.${remote}.push`])) !== null) return false;
+  if ((await git(repoRoot, ["config", "--type=bool", "--get", `remote.${remote}.mirror`])) === "true") return false;
+  if ((await git(repoRoot, ["config", "--type=bool", "--get", "push.followTags"])) === "true") return false;
+  // The remote branch the push updates: the upstream's name under
+  // push.default upstream with no refspec, else the current branch's.
+  const merge = words[1] === undefined && pushDefault === "upstream" ? await git(repoRoot, ["config", "--get", `branch.${current}.merge`]) : null;
+  const target = merge?.replace(/^refs\/heads\//, "") ?? current;
+  const tip = await commitOf(repoRoot, `refs/remotes/${remote}/${target}`);
+  if (tip !== null && !(await isAncestor(repoRoot, tip, head, core.SERVER_GIT_ENV))) return false;
+  if (!(await onlyState(core, repoRoot, remote, base, head, false))) return false;
+  try {
+    const work = await core.getChange({ repoRoot, scope: { uncommitted: true }, exclude: [], idOnly: true });
+    return work.id === core.emptyChangeId(work.baseSha);
+  } catch {
+    return false;
+  }
 }
 
 const CANNOT_TELL = "OpenQodex could not tell what this push sends; run openqodex review and push with plain git push";
@@ -234,6 +401,7 @@ async function decide(input: HookInput): Promise<void> {
     }
     // The developer's current work, as the default review takes it.
     const change = await core.getChange({ repoRoot, scope: {}, exclude: config.exclude, defaultBase: config.defaultBase, idOnly: true });
+    if (await onlyStateWork(core, repoRoot, command, change.baseSha)) continue;
     // Only the record in the developer's own home counts, never one under
     // the repository's .openqodex/, which a branch can carry.
     const receipt = readHomeReceipt(home, repoRoot, change.id) ?? readHomeReceipt(home, repoRoot, "latest");
@@ -296,16 +464,23 @@ function pushedRanges(input: string): Range[] {
 // pushed range (rangeChangeId) must be a change a review recorded in the
 // developer's home covered. It prints no scanner output and never starts a
 // review. Exit 1 only when the lookup denies (block_on_severity is set and
-// the review is missing or blocked); an incomplete review never blocks.
+// the review is missing or blocked, or the work tree's config cannot be read
+// and a pushed range's base chose blocking: brokenConfig); an incomplete
+// review never blocks.
 async function prePush(args: string[]): Promise<number> {
   // Git sets these for hooks; they would point git at another index or tree.
   for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"]) delete process.env[name];
   const repoRoot = await repoRootOf(process.cwd());
   if (repoRoot === null) return fail("openqodex hook pre-push: run it inside a git repository");
   const core = await import("@openqodex/core");
-  const { config } = core.loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ });
-  const home = openqodexHomeDir();
   const remote = args[0] ?? "origin";
+  let config: Config;
+  try {
+    ({ config } = core.loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ }));
+  } catch (error) {
+    return brokenConfig(core, repoRoot, remote, error);
+  }
+  const home = openqodexHomeDir();
   // Only the records in the developer's own home count (see hook check).
   const newest = readHomeReceipt(home, repoRoot, "latest");
   const saved = readHomeReceipts(home, repoRoot, CONTAINING_LIMIT);
@@ -314,6 +489,9 @@ async function prePush(args: string[]): Promise<number> {
   for (const range of pushedRanges(await readAll())) {
     let changeId = "";
     const found = await rangeChangeId(core, repoRoot, config, remote, range.local, range.remoteSha);
+    // The remote's old tip is a commit the remote has; a new branch's base
+    // counts only when a remote-tracking ref contains it.
+    if ("id" in found && (await onlyState(core, repoRoot, remote, found.base, range.local, range.remoteSha !== null))) continue;
     if ("id" in found) changeId = found.id;
     else messages.add(`OpenQodex could not tell what this push sends (${found.unknown}); run openqodex review, then push again.`);
     const exact = changeId === "" ? null : readHomeReceipt(home, repoRoot, changeId);

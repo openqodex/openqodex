@@ -10,7 +10,7 @@
 [![CI](https://github.com/openqodex/openqodex/actions/workflows/ci.yml/badge.svg)](https://github.com/openqodex/openqodex/actions/workflows/ci.yml)
 [![Discussions](https://img.shields.io/github/discussions/openqodex/openqodex)](https://github.com/openqodex/openqodex/discussions)
 
-Open source AI code review for coding agents. A separate reviewer checks every change your agent writes before you push. A code graph gives your agent a map of your codebase. Works in Claude Code, Codex, Cursor and Cline.
+Open source AI code review for coding agents. A separate reviewer checks every change your agent writes before you push. A code graph gives your agent a map of your codebase. Works in Claude Code, Codex, Cursor, Cline and Goose.
 
 For people, in your terminal:
 
@@ -42,8 +42,9 @@ Then OpenQodex starts reviewers: separate Claude Code or Codex processes on your
 | Codex CLI | yes | yes | yes, after you trust the hook in Codex |
 | Cursor | yes | no | no, a rule asks Cursor to review |
 | Cline | yes | no | no, a rule asks Cline to review |
+| Goose | yes | no | no, the hints ask Goose to review |
 
-In Cursor and Cline, the review needs Claude Code or Codex installed as the reviewer. A push gate is a hook that looks for a review before your agent runs `git push`.
+In Cursor, Cline and Goose, the review needs Claude Code or Codex installed as the reviewer. A push gate is a hook that looks for a review before your agent runs `git push`.
 
 ## Requirements
 
@@ -54,7 +55,7 @@ In Cursor and Cline, the review needs Claude Code or Codex installed as the revi
 
 ## Install
 
-In a terminal, `init` finds Claude Code, Cursor, Codex CLI and Cline on your machine. It lists the files it will write. It asks you once. It starts the scanner downloads that your repository needs. Then it reviews your current change when a reviewer can start.
+In a terminal, `init` finds Claude Code, Cursor, Codex CLI, Cline and Goose on your machine. It lists the files it will write. It asks you once. It starts the scanner downloads that your repository needs. Then it reviews your current change when a reviewer can start.
 
 In your own terminal, run `~/.openqodex/bin/openqodex review`. That path is the launcher, a small script that `init` writes. An `npx` install puts no `openqodex` on your `PATH`.
 
@@ -64,7 +65,7 @@ For agents, the same install with no question:
 npx -y openqodex@0.17.0 init --yes --agent <host>
 ```
 
-`<host>` is `claude-code`, `codex`, `cursor` or `cline`. In its default sandbox mode, Codex gives commands no network. From Codex, run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent.
+`<host>` is `claude-code`, `codex`, `cursor`, `cline` or `goose`. In its default sandbox mode, Codex gives commands no network. From Codex, run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent.
 
 To install only the skill, run `npx skills add openqodex/openqodex -g`. That installs no push gate and downloads no scanner. A later `init` replaces that skill with the skill that `init` installs.
 
@@ -81,10 +82,10 @@ OpenQodex itself collects no usage data. The built-in scanners, as OpenQodex run
 - `review --all` reviews every file of the repository, less the paths that `review.paths.exclude` leaves out.
 - `review <branch>` reviews a branch. `review '#42'` reviews a pull request.
 - A review is complete only when every stage ran. Otherwise, `review` prints "Review incomplete" with what is missing. Then it exits 2.
-- The push gate inside your agent looks for a review of your current work. It does not know what a push sends. For a plain `git push`, it asks whether your current work has a passing review. For any other push command, it says it cannot tell. The git pre-push hook that `init` adds checks the exact commits a push sends, for each `git push` that runs git hooks. `git push --no-verify` skips that hook.
+- The push gate inside your agent looks for a review of your current work. It does not know what a push sends. For a plain `git push`, it asks whether your current work has a passing review. For any other push command, it says it cannot tell. The git pre-push hook that `init` adds checks the exact commits a push sends, for each `git push` that runs git hooks. `git push --no-verify` skips that hook. A review of the change being pushed that did not finish never blocks that push; the hook says so in one line.
 - Both warn by default. They block only when `.openqodex/config.yaml` sets `review.block_on_severity`. Severities run from `critical` through `major`, `minor` and `nitpick` to `info`. A finding at or above the set severity blocks the push.
 - The GitHub Action runs the full review on a pull request when the workflow gives it an Anthropic API key. Without a key, it runs the scanners only. The pre-commit hook also runs the scanners only.
-- `openqodex graph` answers questions about the code, such as who calls a function. An MCP server is a local tool server that your agent starts. `init` gives your agent the graph questions through an MCP server. For the Cline VS Code extension, `init` prints the entry for you to add.
+- `openqodex graph` answers questions about the code, such as who calls a function. An MCP server is a local tool server that your agent starts. `init` gives your agent the graph questions through an MCP server. For the Cline VS Code extension and for Goose, `init` prints the entry for you to add.
 - `--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny, the built-in scanners that use the network. It also stops scanner downloads. The reviewer still sends your change to its model service. An approved custom scanner still runs its own command.
 - `npx openqodex demo` builds a small repository with planted bugs. Then it scans that repository.
 
