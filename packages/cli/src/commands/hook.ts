@@ -7,7 +7,7 @@
 // git hands the exact ranges, is the authoritative check.
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { readText, sha256 } from "../agents/files.js";
 import { Guard } from "../agents/guarded-fs.js";
@@ -265,14 +265,37 @@ async function isAncestor(repoRoot: string, older: string, newer: string, env: R
 // The one command shape the agent hook recognises, after trimming: `git
 // push`, then plain words separated by single spaces: any of these options,
 // an optional remote name, and at most one refspec that is `HEAD` or the
-// current branch's name. Anything else (`src:dst`, `+`, `--no-verify`, a
-// second refspec, any other option, quotes, `$`, `;`, `&&`, a newline, `-C`,
-// a wrapper) is not recognised. The hook never works out what a push sends:
-// for a recognised line it asks whether the developer's current work has a
-// review.
+// current branch's name. Two additions around it: a leading `cd <folder> && `
+// (the push is then judged in that folder), and one output trim at the end:
+// `2>&1`, `2>/dev/null`, `| tail -n N`, `| tail -N`, the same with head, or
+// `2>&1` before one of those pipes. The folder is plain words, or one quoted
+// run without `$`, a backtick or a backslash; it never starts with `-` or
+// `~`. Anything else (`src:dst`, `+`, `--no-verify`, a second refspec, any
+// other option, other quotes, `$`, `;`, `||`, a second `&&`, a second `cd`,
+// any other pipe or redirect, a newline, `-C`, a wrapper) is not recognised.
+// The hook never works out what a push sends: for a recognised line it asks
+// whether the developer's current work has a review.
 const PLAIN_OPTIONS = new Set(["-u", "--set-upstream", "-f", "--force", "--force-with-lease"]);
 const REMOTE = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
 const BRANCH = /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/;
+const CD = /^cd ('[^'$`\\\n\r]*'|"[^"$`\\\n\r]*"|[A-Za-z0-9._/][A-Za-z0-9._/-]*) && /;
+const TRIM = / (?:2>&1(?: \| (?:tail|head) (?:-n \d+|-\d+))?|2>\/dev\/null|\| (?:tail|head) (?:-n \d+|-\d+))$/;
+
+// A recognised line: the folder its leading `cd` names (null for none) and
+// the push itself, without the `cd` and the output trim; null when the line
+// is not recognised.
+export function plainLine(command: string): { folder: string | null; push: string } | null {
+  let push = command.trim();
+  let folder: string | null = null;
+  const cd = CD.exec(push);
+  if (cd !== null) {
+    folder = cd[1]!.replace(/^(['"])(.*)\1$/s, "$2");
+    if (folder === "" || /^[-~]/.test(folder)) return null;
+    push = push.slice(cd[0].length);
+  }
+  push = push.replace(TRIM, "");
+  return plainWords(push) === null ? null : { folder, push };
+}
 
 // The remote and the refspec the line names, in that order; null when the
 // line is not recognised.
@@ -286,7 +309,8 @@ function plainWords(command: string): string[] | null {
 
 // The refspec the line names, "" for none; null when the line is not recognised.
 export function plainPush(command: string): string | null {
-  const rest = plainWords(command);
+  const line = plainLine(command);
+  const rest = line === null ? null : plainWords(line.push);
   return rest === null ? null : (rest[1] ?? "");
 }
 
@@ -374,20 +398,24 @@ async function decide(input: HookInput): Promise<void> {
 
   // Loaded only for a push, so every other shell command stays fast.
   const core = await import("@openqodex/core");
+  const line = plainLine(command);
   const spec = plainPush(command);
-  // A recognised line runs in `cwd`; any other is checked in the folders it
-  // pushes from, as one the hook cannot tell.
+  // A recognised line runs in `cwd`, or in the folder its `cd` names; any
+  // other is checked in the folders it pushes from, as one the hook cannot
+  // tell.
   const roots: string[] = [];
-  for (const folder of spec !== null ? [cwd] : folders) {
+  const denials = new Set<string>();
+  const notes = new Set<string>();
+  for (const folder of line !== null ? [resolve(cwd, line.folder ?? ".")] : folders) {
     try {
       const root = await core.findRepoRoot(folder);
       if (!roots.includes(root)) roots.push(root);
     } catch {
-      // not a repository: git itself will say so
+      // not a repository: git itself will say so. A `cd` folder that is not
+      // a checkout leaves the hook unable to tell where the push runs.
+      if (line !== null && line.folder !== null) notes.add(CANNOT_TELL);
     }
   }
-  const denials = new Set<string>();
-  const notes = new Set<string>();
   const home = openqodexHomeDir();
   for (const repoRoot of roots) {
     const { config } = core.loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ });
@@ -401,7 +429,7 @@ async function decide(input: HookInput): Promise<void> {
     }
     // The developer's current work, as the default review takes it.
     const change = await core.getChange({ repoRoot, scope: {}, exclude: config.exclude, defaultBase: config.defaultBase, idOnly: true });
-    if (await onlyStateWork(core, repoRoot, command, change.baseSha)) continue;
+    if (await onlyStateWork(core, repoRoot, line!.push, change.baseSha)) continue;
     // Only the record in the developer's own home counts, never one under
     // the repository's .openqodex/, which a branch can carry.
     const receipt = readHomeReceipt(home, repoRoot, change.id) ?? readHomeReceipt(home, repoRoot, "latest");

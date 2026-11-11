@@ -55,6 +55,11 @@
 // 23. A push that breaks the config in the work tree (a symbolic link for
 //     .openqodex) makes the lookup fail, and the push goes through with no
 //     review in a repo whose config sets block_on_severity (issue 339).
+// 24. An agent's usual push line, `cd <folder> && git push 2>&1 | tail -2`,
+//     is not recognised, so every push says it cannot tell (issue 346); or
+//     it is judged in the session's folder instead of the `cd` folder; or a
+//     line that hides something else (`$`, a second command, a pipe into a
+//     shell, `cd -`, `~`) is recognised.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -73,7 +78,7 @@ import { BIN, cli, env, git, sandbox, type Sandbox } from "./init-helpers.js";
 import { gateReceipt } from "@openqodex/core";
 import { readHomeReceipt, writeHomeReceipt } from "../src/receipts.js";
 import { pushFolders } from "../src/agents/push-command.js";
-import { aliasOf, plainPush } from "../src/commands/hook.js";
+import { aliasOf, plainLine, plainPush } from "../src/commands/hook.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -106,7 +111,6 @@ describe("hook check: which commands are pushes", () => {
     "git -Csub push",
     "FOO=1 git push",
     "npm test && git push origin main",
-    "cd sub && git push",
     "git --no-pager -c push.default=current push",
     "git -c alias.publish=push publish",
     "git ship",
@@ -142,12 +146,85 @@ describe("hook check: which commands are pushes", () => {
     expect(await pushFolders(command, s.repo, aliasOf)).toEqual([]);
   });
 
+  // 24. The lines agents type: a leading `cd` and an output trim around a
+  // plain push. [command, the folder of its `cd`, the refspec it names].
+  const plainLines: [string, string | null, string][] = [
+    ["git push 2>&1", null, ""],
+    ["git push 2>/dev/null", null, ""],
+    ["git push | tail -2", null, ""],
+    ["git push | tail -n 20", null, ""],
+    ["git push | head -1", null, ""],
+    ["git push origin HEAD | head -n 3", null, "HEAD"],
+    ["git push 2>&1 | tail -2", null, ""],
+    ["git push 2>&1 | head -n 5", null, ""],
+    ["cd sub && git push", "sub", ""],
+    ["cd /work/tree && git push 2>&1 | tail -2", "/work/tree", ""],
+    ["cd ../other-tree && git push -u origin my-branch 2>&1 | tail -5", "../other-tree", "my-branch"],
+    ['cd "/work/my tree" && git push', "/work/my tree", ""],
+    ["cd '/work/my tree' && git push --force-with-lease origin HEAD 2>&1", "/work/my tree", "HEAD"],
+  ];
+  it.each(plainLines)("recognises %j, run in the folder its cd names", (command, folder, refspec) => {
+    expect(plainLine(command)?.folder).toBe(folder);
+    expect(plainPush(command)).toBe(refspec);
+  });
+
+  // 24. Lines around a push that still hide what runs, or where.
+  const hidden = [
+    "cd $HOME && git push",
+    'cd "$DIR" && git push',
+    "cd `pwd` && git push",
+    "cd $(pwd) && git push",
+    "cd sub && git push $REMOTE",
+    "git push 2>&1 | tail -$N",
+    "cd 'sub'x && git push",
+    'cd "sub\\x" && git push',
+    'cd "" && git push',
+    "cd sub; git push",
+    "cd sub\ngit push",
+    "git push\necho done",
+    "cd sub || git push",
+    "git push || true",
+    "cd sub && git push && gh pr create",
+    "git push 2>&1 | tail -2 && gh pr create",
+    "cd sub && git push && git push",
+    "git push origin main:main",
+    "git push origin +main",
+    "git push --no-verify",
+    "git push --tags",
+    "cd sub && git -C sub push",
+    "npm test && cd sub && git push",
+    "cd sub && cd sub && git push",
+    "cd - && git push",
+    "cd -P sub && git push",
+    "cd ~ && git push",
+    "cd ~/sub && git push",
+    'cd "~/sub" && git push',
+    "cd sub&&git push",
+    "git push | tail",
+    "git push | tail -n x",
+    "git push | grep main",
+    "git push | tee push.log",
+    "git push | sh",
+    "git push | xargs echo",
+    "git push 2>&1 | tail -2 | sh",
+    "git push | tail -2 2>&1",
+    "git push 2>&1 2>&1",
+    "git push > push.log",
+    "git push 2>/dev/null | tail -2",
+    "git push &",
+  ];
+  it.each(hidden)("treats %j as a push it cannot tell", async (command) => {
+    expect(await pushFolders(command, s.repo, aliasOf)).not.toEqual([]);
+    expect(plainLine(command)).toBeNull();
+    expect(plainPush(command)).toBeNull();
+  });
+
   it("asks for a review of the current work on a plain git push", () => {
     expect(check(s, "git push").stdout).toContain(UNREVIEWED);
   });
 
   it("says it cannot tell what a push inside a compound line sends", () => {
-    expect(check(s, "cd sub && git push").stdout).toContain(COULD_NOT);
+    expect(check(s, "cd sub && git push && gh pr create").stdout).toContain(COULD_NOT);
   });
 
   it("prints nothing for a line that only names git push", () => {
@@ -272,10 +349,54 @@ describe("hook check: decisions", () => {
     await finalizedPassingReview(s.oqHome, a);
     const at = (cwd: string, command: string) => check(s, command, { cwd }).stdout;
     expect(at(a, "git push")).toBe("");
-    for (const command of ["git -C a push", "cd a && git push", "(cd a && git push)", "GIT_DIR=a/.git git push"]) {
+    expect(at(a, "git push 2>&1 | tail -2")).toBe("");
+    expect(at(s.root, "cd a && git push")).toBe("");
+    for (const command of [
+      "git -C a push",
+      "(cd a && git push)",
+      "GIT_DIR=a/.git git push",
+      "cd a && git push && gh pr create",
+      "cd a && git push 2>&1 | sh",
+    ]) {
       const out = at(s.root, command);
       expect(decision(out), command).toBe("deny");
       expect(out, command).toContain(COULD_NOT);
+    }
+  });
+
+  it("24. judges a push after cd in the cd folder: its branch, its config and its review, not the session folder's", async () => {
+    // A root without spaces, so the unquoted `cd` path is one word.
+    const s = sandbox({}, "oq-hook-cd-");
+    // The session's folder: a reviewed checkout on its own branch.
+    const session = blockingRepo(s.root, "session");
+    published(s, session);
+    await finalizedPassingReview(s.oqHome, session);
+    // The cd folder: another checkout, on branch feature, not reviewed yet.
+    const other = blockingRepo(s.root, "other");
+    git(other, "checkout", "-q", "-b", "feature");
+    published(s, other);
+    const line = "git push -u origin feature 2>&1 | tail -5";
+    // Judged in the session folder the branch would not match (cannot tell)
+    // and its review would pass; judged in `other` it is unreviewed.
+    for (const command of [`cd ${other} && ${line}`, `cd ../other && ${line}`, `cd "${other}" && ${line}`]) {
+      const out = check(s, command, { cwd: session }).stdout;
+      expect(decision(out), command).toBe("deny");
+      expect(out, command).toContain(UNREVIEWED);
+      expect(out, command).not.toContain(COULD_NOT);
+    }
+    await finalizedPassingReview(s.oqHome, other);
+    expect(check(s, `cd ${other} && ${line}`, { cwd: session }).stdout).toBe("");
+    // The session folder's own branch is not what this line pushes.
+    expect(check(s, `cd ${session} && ${line}`, { cwd: other }).stdout).toContain(COULD_NOT);
+  });
+
+  it("24. says it cannot tell when the cd folder is missing or not a checkout", () => {
+    const s = sandbox();
+    mkdirSync(join(s.root, "plain"));
+    for (const command of ["cd missing && git push 2>&1 | tail -2", "cd plain && git push"]) {
+      const out = check(s, command, { cwd: s.root }).stdout;
+      expect(out, command).toContain(COULD_NOT);
+      expect(decision(out), command).toBeUndefined();
     }
   });
 });
