@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { assetPath } from "../assets.js";
 import { AGENT_NAMES, type AgentId } from "./detect.js";
-import { claudeHome, claudeStateFile, codexHome } from "./homes.js";
+import { claudeHome, claudeStateFile, codexHome, gooseHome } from "./homes.js";
 import { MCP_SERVER, tomlBlock } from "./mcp.js";
 import shippedSkills from "./shipped-skills.json";
 
@@ -377,15 +377,16 @@ export function targetsFor(args: {
       // in every session, and .goosehints from the working folder up to the
       // repository root. https://goose-docs.ai/docs/guides/context-engineering/using-skills
       // lists .goose/skills/ and "platform-specific config directories"; Goose's
-      // crates/goose/src/skills/mod.rs names the config folder's skills/ (~/.config/goose/skills).
-      const goose = (...p: string[]): string => (user ? join(home, ".config", "goose", ...p) : at(".goose", ...p));
+      // crates/goose/src/skills/mod.rs names the config folder's skills/.
+      // The config folder as Goose finds it (homes.ts), joined without folding `..`.
+      const goose = (...p: string[]): string => (user ? [gooseHome(home), ...p].join(sep) : at(".goose", ...p));
       targets.push(skillTarget("Goose skill", goose("skills", "openqodex", "SKILL.md")));
       targets.push(user ? sectionTarget(agent, "Goose global hints", goose(".goosehints"), false) : sectionTarget(agent, "Goose project hints", at(".goosehints"), true));
       // https://goose-docs.ai/docs/getting-started/using-extensions, "Config
       // Entry": an extension under `extensions` in ~/.config/goose/config.yaml.
       // init edits no YAML file, so the developer adds it by hand.
       const entry = { name: MCP_SERVER, type: "stdio", cmd: server.command, args: server.args, enabled: true };
-      mcpNotes.push(`${mcpLabel}: not written: init does not edit Goose's YAML config file. Add it under "extensions" in ~/.config/goose/config.yaml: ${MCP_SERVER}: ${JSON.stringify(entry)}`);
+      mcpNotes.push(`${mcpLabel}: not written: init does not edit Goose's YAML config file. Add it under "extensions" in ${join(gooseHome(home), "config.yaml")}: ${MCP_SERVER}: ${JSON.stringify(entry)}`);
       break;
     }
   }

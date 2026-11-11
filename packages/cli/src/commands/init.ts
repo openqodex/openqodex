@@ -17,7 +17,7 @@ import type { BuiltinScanner } from "@openqodex/core";
 import { AGENT_NAMES, AGENTS, detectAgents, type AgentId } from "../agents/detect.js";
 import { readText } from "../agents/files.js";
 import { Guard } from "../agents/guarded-fs.js";
-import { claudeHome, codexHome } from "../agents/homes.js";
+import { claudeHome, codexHome, gooseHome } from "../agents/homes.js";
 import { excludeLine, gitDirs, gitPath, inWorkTree, planExclude, planUnexclude, repoRootOf } from "../agents/git.js";
 import { planInstall, planMcpOff, planUninstall, type Action, type Ctx } from "../agents/plan.js";
 import { withBoundary } from "../agents/lock.js";
@@ -741,7 +741,7 @@ export async function run(args: string[]): Promise<number> {
     runner: flags.project ? `npx -y openqodex@${__OPENQODEX_VERSION__}` : launcherRunner(launcherPath(openqodexHomeDir())),
     gitFolders,
     // Every folder this run may write, each opened once, here.
-    guard: new Guard({ repoRoot, gitFolders, roots: [home, claudeHome(home), codexHome(home), openqodexHomeDir()] }),
+    guard: new Guard({ repoRoot, gitFolders, roots: [home, claudeHome(home), codexHome(home), gooseHome(home), openqodexHomeDir()] }),
   };
   try {
     // A dry run writes nothing and takes no lock. Otherwise everything runs
