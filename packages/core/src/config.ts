@@ -87,7 +87,7 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
   {
     key: "review.stages",
     default: "true",
-    description: "The staged review when openqodex starts its own reviewer: two finder sessions per changed file, then a fresh verifier per batch of candidates. false runs one pass. --agent and --all always run one pass.",
+    description: "Staged review, the default, splits the change into units. A unit holds a few small files, one measured part or one [structural summary](claude-code-review.md#structural-summaries). Two fresh finder sessions read each unit. A fresh verifier then checks the candidates on each changed file. `false` selects the legacy single pass, without parts, structural summaries or coverage labels. The single pass brief carries at most 200 KB of diff text. Only the single pass has that cap. Its delivery pages hold at most 4,000 rows and 512 KB, as in the staged review. Both routes cut a line over 2,000 bytes into fragments. The single pass does not require a replaced line's old text; its pages still carry pure deletions in fragments. `--agent` and `--all` always run one pass.",
   },
   { key: "scanners.disable", default: "[]", description: "Built-in scanners to switch off, by name." },
   {

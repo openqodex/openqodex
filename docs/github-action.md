@@ -169,7 +169,7 @@ The repository also ships a pre-commit hook for the pre-push stage. Add this to 
 ```yaml
 repos:
   - repo: https://github.com/openqodex/openqodex
-    rev: v0.16.0
+    rev: v0.17.0
     hooks:
       - id: openqodex-scan
 ```

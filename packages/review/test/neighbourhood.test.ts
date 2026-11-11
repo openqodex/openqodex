@@ -20,6 +20,7 @@
 // 19. The name-frequency cap removes certain graph evidence.
 // 20. An ignored site directory also hides its changed-file candidates.
 // 21. Repeated rendering makes the byte budget quadratic in symbol count.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -58,7 +59,7 @@ function change(dir: string, lines: Record<string, number[]>, diffs: Change["dif
     repoRoot: dir,
     files: paths.map((path) => ({ path, status: "modified", oldPath: null, binary: false })),
     changedPaths: Object.keys(lines),
-    coverage: new Map(Object.entries(lines).map(([path, numbers]) => [path, new Set(numbers)])),
+    coverage: new Map(Object.entries(lines).map(([path, numbers]) => [path, makeLineSet(numbers)])),
     deletionPoints: new Map(),
     diffs,
     diff: diffs!.map((d) => d.text).join("\n"),

@@ -16,7 +16,7 @@
 //                  record says so in `missing`, the primary's findings stay);
 //                  any other failure leaves the review as the primary made it
 //                  and is named in the notes and the record
-import { findingKey, severityRank } from "@openqodex/core";
+import { findingKey, severityRank, shortenedMissing } from "@openqodex/core";
 import type { Disagreement, ModelCompletionRecord, Report, ReportFinding } from "@openqodex/core";
 import type { Conversation } from "./conversation.js";
 import { modelSession } from "./model-loop.js";
@@ -91,7 +91,7 @@ export function disagreementsOf(primary: { name: string; dispositions: Dispositi
 export function withSecondReviewer(record: ModelCompletionRecord, disagreements: Disagreement[], secrets: string[]): ModelCompletionRecord {
   const second = record.second;
   const refused = second?.attempts.some((a) => a.outcome === "refused") ?? false;
-  const notes = second && second.status !== "complete" && !refused ? [`the second reviewer (${second.reviewer.model}) did not complete: ${second.missing.join("; ")}`] : [];
+  const notes = second && second.status !== "complete" && !refused ? [`the second reviewer (${second.reviewer.model}) did not complete: ${shortenedMissing(second.missing).join("; ")}`] : [];
   const { trace_complete, ...rest } = record;
   return redactStored({ ...rest, disagreements, notes, trace_complete }, secrets);
 }

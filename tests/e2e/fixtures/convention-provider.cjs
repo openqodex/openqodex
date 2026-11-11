@@ -9,7 +9,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   // hunk examined with no candidate, every candidate refuted.
   const answer = () => {
     if (brief.startsWith("# OpenQodex review brief: find pass")) {
-      const hunks = [...brief.matchAll(/^### (h\d+) (.+) (\d+)-(\d+)$/gm)].map((m) => m[1]);
+      const hunks = [...brief.matchAll(/^### (h\d+) (.+) (\d+)-(\d+)(?: \([^\n]*\))*$/gm)].map((m) => m[1]);
       return { version: "find-1", change_id: id, unit: /^Unit: (u\d+)$/m.exec(brief)[1], examined: hunks, analysis: hunks.map((hunk) => ({ hunk, changed: "The page size changed.", could_break: "A caller that depends on the old page size.", checked: "The callers of page_size.", conclusion: "No defect." })), candidates: [] };
     }
     if (brief.startsWith("# OpenQodex review brief: verify pass")) {

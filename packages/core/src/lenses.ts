@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "yaml";
-import { unquoteDiffPath } from "./diff.js";
+import { diffHunks, diffIndex, unquoteDiffPath } from "./diff.js";
 import { matchesGlob, MAX_GLOB } from "./glob.js";
 import type { Change, SelectedLens } from "./types.js";
 
@@ -242,11 +242,27 @@ export function selectLensesForDiff(args: { diff: string; files: string[]; catal
   }));
 }
 
-export function selectLenses(change: Change, dir?: string, covered?: RuleCoverage): SelectedLens[] {
-  return selectLensesForDiff({
-    diff: change.diff,
-    files: change.files.map((f) => f.path),
-    catalog: cachedCatalog(dir),
-    covered,
-  });
+export function selectLenses(change: Change, dir?: string, covered?: RuleCoverage, log: (note: string) => void = console.warn): SelectedLens[] {
+  const catalog = cachedCatalog(dir);
+  const files = change.files.map((f) => f.path);
+  if (!change.diffs) return selectLensesForDiff({ diff: change.diff, files, catalog, covered });
+  const textHits = new Set<string>();
+  const patterns = catalog.filter((lens) => lens.triggers.hunkRegex).map((lens) => ({ name: lens.name, regex: new RegExp(lens.triggers.hunkRegex!, "i") }));
+  const replacements = new Set<string>();
+  for (const entry of change.diffs) {
+    if ((diffIndex(change, entry.path)?.replacements.length ?? 0) > 0) replacements.add(entry.path);
+    if (textHits.size === patterns.length) continue;
+    for (const hunk of diffHunks(change, entry.path, undefined, 512 * 1024, { onLimit: () => log(`Lens selection: skipped a diff page in ${entry.path} over the 512 KB byte budget.`) })) {
+      const text = extractChangedLineText(hunk);
+      // A ^ anchor matches at each hunk start. A matched lens needs no more probes.
+      for (const { name, regex } of patterns) if (!textHits.has(name) && regex.test(text)) textHits.add(name);
+      if (textHits.size === patterns.length) break;
+    }
+  }
+  return catalog.filter((lens) => fileTriggerMatches(files, lens.triggers.files)
+    && (!lens.triggers.hunkRegex || textHits.has(lens.name))
+    && (!lens.triggers.replacedLines || fileTriggerMatches([...replacements], lens.triggers.files) && replacements.size > 0)
+    && !coveredByScanner(lens, files, covered))
+    .sort((a, b) => specificity(b) - specificity(a) || a.confidenceFloor - b.confidenceFloor || a.name.localeCompare(b.name))
+    .slice(0, MAX_LENSES).map(({ name, description, confidenceFloor, body }) => ({ name, description, confidenceFloor, body }));
 }

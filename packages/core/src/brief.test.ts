@@ -36,6 +36,7 @@
 //     its brief while checkSubmission applies the host's confidenceFloor
 //     (issue 277): the whole-repo branch of buildReviewerBrief dropped the
 //     floor it was given instead of passing it on to answerBlock.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { buildBrief, buildReviewerBrief, buildWholeRepoBrief } from "./brief.js";
 import { selectLenses } from "./lenses.js";
@@ -244,7 +245,7 @@ describe("10. the reviewer brief's diff section", () => {
         { path: "logo.png", status: "deleted", oldPath: null, binary: true },
       ],
       changedPaths: ["app/big.py"],
-      coverage: new Map([["app/big.py", new Set(Array.from({ length: 205 }, (_, i) => i + 1))]]),
+      coverage: new Map([["app/big.py", makeLineSet(Array.from({ length: 205 }, (_, i) => i + 1))]]),
       deletionPoints: new Map([["logo.png", [{ after: 0, lines: 0, anchors: [1] }]]]),
       diff: big + deleted,
       diffs: [{ path: "app/big.py", text: big }, { path: "logo.png", text: deleted }],
@@ -257,19 +258,12 @@ describe("10. the reviewer brief's diff section", () => {
     expect(text).not.toContain("These files changed but their diff is not in this brief");
   });
 
-  it("states the host's confidence floor in a whole-repo brief, not the 0.7 default (issue 277)", () => {
-    const { text } = buildReviewerBrief({ change: makeChange(), scan: makeScan(), lenses: [], config: makeConfig(), secrets: [], confidenceFloor: 0.8, whole: { hot: [], graphNote: null, inventory: [] } });
-    expect(text).toContain("Findings at 0.8 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
-    expect(text).toContain("Raise every defect you can show from the code with confidence 0.5 or higher. Set confidence honestly. Findings under 0.8 are shown as possible issues and never counted.");
-    expect(text).not.toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict.");
-  });
-
   it("names the files to open with their changed lines and deletions, and says the rest is already shown", () => {
     const big = { path: "app/big.py", text: `diff --git a/app/big.py b/app/big.py\n${"+x\n".repeat(120_000)}` };
     const change = makeChange({
       files: [...makeChange().files, { path: "app/big.py", status: "modified", oldPath: null, binary: false }],
       changedPaths: [...makeChange().changedPaths, "app/big.py"],
-      coverage: new Map([...makeChange().coverage, ["app/big.py", new Set([3, 4])]]),
+      coverage: new Map([...makeChange().coverage, ["app/big.py", makeLineSet([3, 4])]]),
       deletionPoints: new Map([["app/big.py", [{ after: 9, lines: 2, anchors: [9, 10] }]]]),
       diffs: [{ path: "app/search.py", text: "diff --git a/app/search.py b/app/search.py\n+q\n" }, big],
     });
@@ -381,5 +375,14 @@ describe.each(singlePassBuilders)("$name investigation", ({ build }) => {
     const text = build({ impactBlock: `## Impact\n\n${SECRET}`, neighbourhoodBlock: `## Code around the change\n\n${SECRET}` });
     expect(text).not.toContain(SECRET);
     expect(redactSecrets(text, [SECRET])).toBe(text);
+  });
+});
+
+describe("18. whole-repo brief states the host's confidence floor", () => {
+  it("states the host's confidence floor in a whole-repo brief, not the 0.7 default (issue 277)", () => {
+    const { text } = buildReviewerBrief({ change: makeChange(), scan: makeScan(), lenses: [], config: makeConfig(), secrets: [], confidenceFloor: 0.8, whole: { hot: [], graphNote: null, inventory: [] } });
+    expect(text).toContain("Findings at 0.8 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
+    expect(text).toContain("Raise every defect you can show from the code with confidence 0.5 or higher. Set confidence honestly. Findings under 0.8 are shown as possible issues and never counted.");
+    expect(text).not.toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict.");
   });
 });

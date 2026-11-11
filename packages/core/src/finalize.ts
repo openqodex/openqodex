@@ -165,9 +165,7 @@ function touchesChange(f: AgentFinding, change: Change): string | null {
   if (!change.files.some((file) => file.path === f.file_path)) return "the file is not in this change";
   const lines = change.coverage.get(f.file_path);
   const end = f.line_end ?? f.line_number;
-  if (lines) {
-    for (const n of lines) if (f.line_number <= n && n <= end) return null;
-  }
+  if (lines?.overlaps(f.line_number, end)) return null;
   // A deletion has no line of its own: the lines just above and just below it
   // in the new file, those that exist, stand for it.
   for (const p of change.deletionPoints.get(f.file_path) ?? []) {

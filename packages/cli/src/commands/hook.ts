@@ -124,7 +124,7 @@ async function rangeChangeId(core: Core, repoRoot: string, config: Config, remot
     }
     if (base === null) return { unknown: "this push starts a new branch and no base to measure it from was found (review.default_base, or the remote's default branch)" };
   }
-  const change = await core.getTreeChange({ repoRoot, baseRef: base, baseSha: base, headSha: localSha, exclude: config.exclude });
+  const change = await core.getTreeChange({ repoRoot, baseRef: base, baseSha: base, headSha: localSha, exclude: config.exclude, idOnly: true });
   return { id: change.id, base };
 }
 
@@ -152,7 +152,7 @@ async function containingReceipt(core: Core, repoRoot: string, config: Config, s
     let id = fromBase.get(receipt.base.sha);
     if (id === undefined) {
       const base = await commitOf(repoRoot, receipt.base.sha);
-      id = base !== null && (await isAncestor(repoRoot, base, pushBase)) ? (await core.getTreeChange({ repoRoot, baseRef: base, baseSha: base, headSha: localSha, exclude: config.exclude })).id : null;
+      id = base !== null && (await isAncestor(repoRoot, base, pushBase)) ? (await core.getTreeChange({ repoRoot, baseRef: base, baseSha: base, headSha: localSha, exclude: config.exclude, idOnly: true })).id : null;
       fromBase.set(receipt.base.sha, id);
     }
     if (id === receipt.change_id) return { ...receipt, change_id: pushedId };
@@ -233,7 +233,7 @@ async function decide(input: HookInput): Promise<void> {
       continue;
     }
     // The developer's current work, as the default review takes it.
-    const change = await core.getChange({ repoRoot, scope: {}, exclude: config.exclude, defaultBase: config.defaultBase });
+    const change = await core.getChange({ repoRoot, scope: {}, exclude: config.exclude, defaultBase: config.defaultBase, idOnly: true });
     // Only the record in the developer's own home counts, never one under
     // the repository's .openqodex/, which a branch can carry.
     const receipt = readHomeReceipt(home, repoRoot, change.id) ?? readHomeReceipt(home, repoRoot, "latest");

@@ -30,6 +30,7 @@
 // 6. A symbolic link under the scratch root is followed: a cache folder
 //    reached through a link is used because it is already there, so a
 //    scanner writes outside the root.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -84,16 +85,16 @@ function setWritable(dir: string, writable: boolean): void {
 
 // One repository holding every check case's files, every line changed;
 // where two cases name the same path, the first keeps it.
-function plantAll(): { repo: string; paths: string[]; coverage: Map<string, Set<number>> } {
+function plantAll(): { repo: string; paths: string[]; coverage: Map<string, ReturnType<typeof makeLineSet>> } {
   const repo = tempDir("oq-server-repo-");
-  const coverage = new Map<string, Set<number>>();
+  const coverage = new Map<string, ReturnType<typeof makeLineSet>>();
   for (const c of Object.values(CHECK_CASES)) {
     if (c.network && offline()) continue;
     for (const [name, body] of Object.entries(c.files())) {
       if (coverage.has(name)) continue;
       mkdirSync(dirname(join(repo, name)), { recursive: true });
       writeFileSync(join(repo, name), body);
-      coverage.set(name, new Set(body.split("\n").map((_, i) => i + 1)));
+      coverage.set(name, makeLineSet(body.split("\n").map((_, i) => i + 1)));
     }
   }
   return { repo, paths: [...coverage.keys()], coverage };
@@ -205,7 +206,7 @@ describe("server runs of the scanners", () => {
       runScanners({
         repoDir: repo,
         changedPaths: [".github/workflows/ci.yml"],
-        coverage: new Map([[".github/workflows/ci.yml", new Set([1, 2, 3, 4, 5, 6])]]),
+        coverage: new Map([[".github/workflows/ci.yml", makeLineSet([1, 2, 3, 4, 5, 6])]]),
         config: parseConfig("").config,
         resolveTool: createToolResolver({ allowInstall: false, installRoot: root }),
         only: ["actionlint"],
@@ -243,7 +244,7 @@ describe("server runs of the scanners", () => {
     const result = await runScanners({
       repoDir: repo,
       changedPaths: Object.keys(files),
-      coverage: new Map(Object.entries(files).map(([name, body]) => [name, new Set(body.split("\n").map((_, i) => i + 1))])),
+      coverage: new Map(Object.entries(files).map(([name, body]) => [name, makeLineSet(body.split("\n").map((_, i) => i + 1))])),
       config: parseConfig("").config,
       resolveTool: createToolResolver({ allowInstall: false, installRoot }),
       only: ["kubeconform"],

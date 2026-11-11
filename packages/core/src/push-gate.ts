@@ -35,7 +35,7 @@ export type GateReceipt = {
   html?: string;
   // The counted findings by severity, or null for none.
   counts: string | null;
-  // The first thing an incomplete review was missing.
+  // The first missing condition, with its first range when it is coverage.
   missing: string | null;
   written_at: string;
 };
@@ -44,6 +44,8 @@ export type GateReceipt = {
 // repository. `html`: the absolute path of its report.html.
 export function gateReceipt(report: Report, kind: ReceiptKind, dir: string, html?: string): GateReceipt {
   const severities = countedSeverities(report);
+  const missing = report.completion?.missing ?? [];
+  const firstMissing = /^\d+ changed (?:range was|ranges were) not examined$/.test(missing[0] ?? "") ? missing.slice(0, 2).join("; ") : missing[0] ?? null;
   return {
     version: 1,
     change_id: report.change_id,
@@ -54,7 +56,7 @@ export function gateReceipt(report: Report, kind: ReceiptKind, dir: string, html
     report: `${dir}/report.md`,
     ...(html !== undefined ? { html } : {}),
     counts: kind === "incomplete" || severities.length === 0 ? null : severityBreakdown(severities),
-    missing: kind === "incomplete" ? (report.completion?.missing[0] ?? null) : null,
+    missing: kind === "incomplete" ? firstMissing : null,
     written_at: new Date().toISOString(),
   };
 }

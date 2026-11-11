@@ -19,7 +19,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DIFF_CAP_BYTES, getWholeRepo } from "../src/change.js";
+import { WHOLE_REPO_MAX_BYTES, getWholeRepo } from "../src/change.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -106,7 +106,7 @@ describe("getWholeRepo", () => {
 
   it("lists a file over the 5 MB cap as not reviewed instead of reading it into the scope", async () => {
     const dir = repo();
-    write(dir, "dump.sql", Buffer.alloc(DIFF_CAP_BYTES + 1, 0x61));
+    write(dir, "dump.sql", Buffer.alloc(WHOLE_REPO_MAX_BYTES + 1, 0x61));
     const whole = await getWholeRepo({ repoRoot: dir, exclude: [] });
     expect(whole.notReviewed).toEqual(["dump.sql"]);
     expect(whole.files.some((f) => f.path === "dump.sql")).toBe(false);

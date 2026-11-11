@@ -36,6 +36,8 @@
 //     number or text, or other code in a diff cell.
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,7 +46,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "../change.js";
 import { makeChange, makeScan } from "../test-fixtures.js";
 import type { Change, CompletionRecord, Report, ReportFinding } from "../types.js";
-import { DISPLAY_MAX_BYTES, DISPLAY_MAX_ROWS, buildDisplay, buildExcerptDisplay, checkDisplay, displayJson } from "./display.js";
+import { DISPLAY_MAX_BYTES, DISPLAY_MAX_ROWS, buildDisplay, buildExcerptDisplay, checkDisplay, displayHunks, displayJson } from "./display.js";
 import type { Display, DisplayRow } from "./display.js";
 import { renderHtml } from "./html.js";
 import { renderMarkdown } from "./markdown.js";
@@ -418,6 +420,23 @@ describe("the standard report", () => {
 //     added files with long names give a display.json finalize cannot read.
 // 19. Each excerpt walks the file from its start: 5,000 citations near line
 //     two million of a 2.5 million line file cost ten billion steps.
+// 20. A patch of a few very long lines is refused on its uncut bytes, though
+//     its rows fit once cut, and its note names the line limit, not bytes.
+// 21. Every uncut page of a file is held at once before any row is cut, so
+//     a file of long lines whose cut rows fit can take hundreds of MB.
+// 22. A cut row is a view that keeps its whole uncut page alive, so the
+//     bound of 21 does not hold; or the copy that frees it changes the text,
+//     such as a cut between the two halves of a surrogate pair.
+// 23. A row over the 512 KB page limit, the usual minified bundle, is
+//     skipped instead of shown cut.
+// 24. A row over the page limit is read only up to a byte cut, and a known
+//     secret that the cut splits is not found by redaction, so part of it
+//     shows: when it starts near character 5,000, or when redacting longer
+//     secrets before it pulls it into the first 5,000 characters.
+// 25. A row the reader cut is not known as cut, or keeps part of a secret at
+//     its end: invalid UTF-8 or a cut inside a character changes its length;
+//     a shorter secret inside the kept part grows when redacted; or a whole
+//     secret at the end overlaps the start of a cut one.
 describe("bounds", () => {
   const ms = (f: () => void): number => {
     const t = performance.now();
@@ -479,6 +498,132 @@ describe("bounds", () => {
     let html = "";
     expect(ms(() => (html = renderHtml({ report: report(change, { findings: [] }), display, version: "0.0.0-test" })))).toBeLessThan(1000);
     expect(html).toContain(`Diffs for ${(n - display.files.length).toLocaleString("en-US")} other changed files are not in this report.`);
+  });
+
+  const longLines = (count: number, chars: number): Change => {
+    const lines = Array.from({ length: count }, (_, i) => `+${String(i).padStart(6, "0")}${"x".repeat(chars - 6)}`);
+    const text = `diff --git a/min.js b/min.js\nnew file mode 100644\n--- /dev/null\n+++ b/min.js\n@@ -0,0 +1,${count} @@\n${lines.join("\n")}\n`;
+    return { ...fixtureChange(), files: [{ path: "min.js", status: "added", oldPath: null, binary: false }], diffs: [{ path: "min.js", text }] };
+  };
+
+  it("20. shows the cut rows of a patch of a few very long lines that is over the byte budget uncut", () => {
+    const display = buildDisplay({ change: longLines(20, 400_000), secrets: [] });
+    const rows = display.files[0]?.hunks.flatMap((h) => h.rows) ?? [];
+    expect(rows).toHaveLength(20);
+    expect(rows.every((r) => r.cut === true)).toBe(true);
+    expect(display.files[0]?.note).toBeNull();
+  });
+
+  it("20. names the byte limit, not the line limit, when cut rows still do not fit", () => {
+    const display = buildDisplay({ change: longLines(1_500, 6_000), secrets: [] });
+    expect(display.files[0]?.hunks).toEqual([]);
+    expect(display.files[0]?.note).not.toMatch(/lines of code/);
+    expect(display.files[0]?.note).toMatch(/MB/);
+  });
+
+  it("21. cuts each page's rows before it reads the next page", () => {
+    const log: string[] = [];
+    function* pages(): Generator<string> {
+      for (let k = 1; k <= 3; k++) {
+        log.push(`read ${k}`);
+        yield `@@ -0,0 +${k},1 @@\n+${"y".repeat(10_000)}\n`;
+      }
+    }
+    for (const hunk of displayHunks(pages(), [], [])) log.push(`cut ${hunk.rows.map((r) => r.text.length).join()}`);
+    expect(log).toEqual(["read 1", "cut 5000", "read 2", "cut 5000", "read 3", "cut 5000"]);
+  });
+
+  it("22. keeps under a quarter of the uncut pages alive once their rows are cut", () => {
+    // Collect garbage first, so the count is what the cut rows keep.
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    const used = () => { gc(); const m = process.memoryUsage(); return m.heapUsed + m.arrayBuffers; };
+    const uncut = 200 * 400_000;
+    function* pages(): Generator<string> {
+      for (let k = 0; k < 200; k++) yield `@@ -0,0 +${k + 1},1 @@\n+${String(k).padStart(6, "0")}${"x".repeat(400_000 - 6)}\n`;
+    }
+    const before = used();
+    const hunks = [...displayHunks(pages(), [], [])];
+    const grown = used() - before;
+    console.log(`22. 200 cut rows of 400 KB pages keep ${(grown / 1024 / 1024).toFixed(1)} MB`);
+    expect(hunks.flatMap((h) => h.rows).every((r) => r.cut === true && r.text.length === 5_000)).toBe(true);
+    expect(grown).toBeLessThan(uncut / 4);
+  }, 60_000);
+
+  it("22. keeps a cut that falls between the halves of a surrogate pair as the cut gave it", () => {
+    const text = `${"a".repeat(4_999)}\u{1F600}b`;
+    const short = `short \u{1F600} row`;
+    const rows = [...displayHunks([`@@ -0,0 +1,2 @@\n+${text}\n+${short}\n`], [], [])].flatMap((h) => h.rows);
+    expect(rows.map((r) => [r.text, r.cut])).toEqual([[text.slice(0, 5_000), true], [short, undefined]]);
+  });
+
+  it.each(["z", "\u20AC", "a\u{1F600}"])("23. shows a row over the 512 KB page limit cut, from memory and from a patch on disk (%s)", (unit) => {
+    const row = unit.repeat(Math.ceil((600 * 1024) / Buffer.byteLength(unit)));
+    const text = `diff --git a/min.js b/min.js\n--- a/min.js\n+++ b/min.js\n@@ -1,2 +1,2 @@\n-old\n+${row}\n same\n`;
+    const dir = mkdtempSync(join(tmpdir(), "oq-html-patch-"));
+    roots.push(dir);
+    writeFileSync(join(dir, "min.patch"), text);
+    for (const entry of [{ path: "min.js", text }, { path: "min.js", file: join(dir, "min.patch") }]) {
+      const change: Change = { ...fixtureChange(), files: [{ path: "min.js", status: "modified", oldPath: null, binary: false }], diffs: [entry] };
+      const file = buildDisplay({ change, secrets: [] }).files[0]!;
+      expect(file.hunks.flatMap((h) => h.rows).map((r) => [r.kind, r.old, r.new, r.text, r.cut])).toEqual([
+        ["del", 1, null, "old", undefined],
+        ["add", null, 1, row.slice(0, 5_000), true],
+        ["context", 2, 2, "same", undefined],
+      ]);
+      expect(file.note).toBeNull();
+    }
+  });
+
+  // The secret's characters are in neither the euro filler nor "[redacted]".
+  const SECRET = "QZXW".repeat(10);
+  const leaked = (row: string) => [...row].filter((c) => "QZXW".includes(c)).length;
+  // The reader's cut for a 40-character secret, in bytes after the row's
+  // marker: three bytes for each of 5,000 shown and 40 more characters, and
+  // four for a cut character.
+  const READ = 3 * (5_000 + 40) + 4;
+  it.each<[string, string]>([
+    ["the secret straddles the old cut, 4,990 three-byte characters in", `${"\u20AC".repeat(4_990)}${SECRET}`],
+    ["the secret ends exactly at the cut", `${"a".repeat(READ - 40 - 3 * 4_990)}${"\u20AC".repeat(4_990)}${SECRET}`],
+    ["the secret starts just past character 5,000", `${"\u20AC".repeat(5_000)}${SECRET}`],
+    ["redacting earlier secrets pulls a secret the cut splits into view", `${SECRET.repeat(20)}${"\u20AC".repeat((READ - 800 - 20) / 3)}${SECRET}`],
+  ])("24. shows no character of a known secret on a row over the page limit: %s", (_, head) => {
+    const text = `diff --git a/min.js b/min.js\n--- a/min.js\n+++ b/min.js\n@@ -1 +1 @@\n-old\n+${head}${"\u20AC".repeat(200_000)}\n`;
+    const change: Change = { ...fixtureChange(), files: [{ path: "min.js", status: "modified", oldPath: null, binary: false }], diffs: [{ path: "min.js", text }] };
+    const rows = buildDisplay({ change, secrets: [SECRET] }).files[0]!.hunks.flatMap((h) => h.rows);
+    const added = rows.find((r) => r.kind === "add")!;
+    expect(leaked(added.text)).toBe(0);
+    expect(added.cut).toBe(true);
+  });
+
+  // Each row starts with 260 copies of a 40-character secret, which redact to
+  // one marker and pull the row's end into the shown 5,000 characters. The
+  // reader keeps READ bytes of the row; the head is built so the cut lands
+  // where each case needs it. Secrets are capitals and one emoji; the filler,
+  // a replacement character and "[redacted]" hold neither.
+  const fromDisk = (head: Buffer, secrets: string[]): DisplayRow => {
+    const dir = mkdtempSync(join(tmpdir(), "oq-html-cut-"));
+    roots.push(dir);
+    const file = join(dir, "min.patch");
+    writeFileSync(file, Buffer.concat([Buffer.from("diff --git a/min.js b/min.js\n--- a/min.js\n+++ b/min.js\n@@ -1 +1 @@\n-old\n+"), head, Buffer.from(`${"\u20AC".repeat(200_000)}\n`)]));
+    const change: Change = { ...fixtureChange(), files: [{ path: "min.js", status: "modified", oldPath: null, binary: false }], diffs: [{ path: "min.js", file }] };
+    return buildDisplay({ change, secrets }).files[0]!.hunks.flatMap((h) => h.rows).find((r) => r.kind === "add")!;
+  };
+  const secretChars = (row: string) => (row.match(/[A-Z]|\u{1F600}/gu) ?? []).length;
+  const EMOJI = `${"QZXW".repeat(5)}${"\u{1F600}".repeat(10)}`;
+  const LONG = `${"QZXW".repeat(2)}KJVYKJ${"QZXW".repeat(6)}QZ`;
+  const A = `${"QZXW".repeat(8)}KJVYKJVY`;
+  const B = `KJVYKJVY${"QZXW".repeat(8)}`;
+  const bytes = (...parts: (string | Buffer)[]) => Buffer.concat(parts.map((p) => (typeof p === "string" ? Buffer.from(p) : p)));
+  it.each<[string, Buffer, string[]]>([
+    ["invalid UTF-8 bytes before a secret the cut splits", bytes(SECRET.repeat(260), Buffer.alloc(10, 0xff), "a".repeat(READ - 10_400 - 10 - 20), SECRET), [SECRET]],
+    ["the cut lands inside a four-byte character of a secret", bytes(SECRET.repeat(260), "a".repeat(READ - 10_400 - 34), EMOJI), [SECRET, EMOJI]],
+    ["the kept part of a cut secret holds a shorter secret", bytes(LONG.repeat(260), "a".repeat(READ - 10_400 - 39), LONG), [LONG, "KJVYKJ"]],
+    ["a whole secret at the cut ends with the start of another", bytes(A.repeat(260), "a".repeat(READ - 10_400 - 40), A, B), [A, B]],
+  ])("25. shows no character of a known secret on a row the reader cut: %s", (_, head, secrets) => {
+    const added = fromDisk(head, secrets);
+    expect(secretChars(added.text)).toBe(0);
+    expect(added.cut).toBe(true);
   });
 });
 
