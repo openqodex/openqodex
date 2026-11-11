@@ -15,7 +15,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { RULES, RULES_VERSION, shownFindings, classify, regressions, ruleCodeHash, ruleSources, rulesDifferences, rulesHash, runDifferences, scannerPlaces, scoreBrief, scoreJob, scoreSample, specDifferences, summarize, summarizeJobs, value } from "../lib/score.mjs";
+import { RULES, RULES_VERSION, shownFindings, classify, lineMatches, regressions, ruleCodeHash, ruleSources, rulesDifferences, rulesHash, runDifferences, scannerPlaces, scoreBrief, scoreJob, scoreSample, specDifferences, summarize, summarizeJobs, value } from "../lib/score.mjs";
 import { attemptDir, executeRun, planJobs, runManifest, sampleRecord } from "../lib/runner.mjs";
 import { loadRun, renderV3, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
@@ -329,6 +329,8 @@ describe("a rule constant changes without a version bump, and old and new scores
     12: "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
     // Issue 284: a health result on every review; an unhealthy one credits nothing and is failed.
     13: "157a833899f0edcb185874b856d1303c0532b22c05006ea1f6e939b7047e8e91",
+    // A finding with no line number (null or undefined) reads as the whole file, issue 153.
+    14: "4c7ea0ae3cfb28974338782ee53965005bebc0e41633d85506f399a86cd3d234",
   };
 
   it("pins the hash of the rules block, constants and matching code included, to its version", () => {
@@ -665,6 +667,27 @@ describe("a bug the spec expects from semgrep, found only by the reviewer, count
     expect(outcomes[0]).toMatchObject({ finder: null, locatedBy: null });
     const f = score.byConfig[CONFIG].finder;
     expect([f.match, f.byExpected, f.scannerExpectedReviewerFound, f.unjudged]).toEqual([{ hit: 0, of: 0 }, {}, 0, 1]);
+  });
+});
+
+describe("lineMatches reads a finding with no line number as the whole file (issue 153)", () => {
+  const truth = [{ id: "c1", file: "src/a.ts", lines: [5, 6], side: "right", valid: true }];
+
+  it("matches a finding whose line is undefined the same as one whose line is null", () => {
+    const undefinedLine = lineMatches([{ file: "src/a.ts", line: undefined, end: undefined }], truth);
+    const nullLine = lineMatches([{ file: "src/a.ts", line: null, end: null }], truth);
+    expect(nullLine.matches).toBe(1);
+    expect(nullLine).toEqual(undefinedLine);
+  });
+
+  it("still requires the file to match: a finding with no line in a different file is not near", () => {
+    const { matches } = lineMatches([{ file: "src/b.ts", line: null, end: null }], truth);
+    expect(matches).toBe(0);
+  });
+
+  it("still checks the line when one is given, further than k from the truth range", () => {
+    const { matches } = lineMatches([{ file: "src/a.ts", line: 50, end: 50 }], truth);
+    expect(matches).toBe(0);
   });
 });
 
