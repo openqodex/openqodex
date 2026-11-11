@@ -160,9 +160,9 @@ async function containingReceipt(core: Core, repoRoot: string, config: Config, s
   return null;
 }
 
-async function isAncestor(repoRoot: string, older: string, newer: string): Promise<boolean> {
+async function isAncestor(repoRoot: string, older: string, newer: string, env: Readonly<Record<string, string>> = {}): Promise<boolean> {
   try {
-    await execFileAsync("git", ["merge-base", "--is-ancestor", older, newer], { cwd: repoRoot, timeout: 10_000 });
+    await execFileAsync("git", ["merge-base", "--is-ancestor", older, newer], { cwd: repoRoot, timeout: 10_000, env: { ...process.env, ...env } });
     return true;
   } catch {
     return false;
@@ -221,21 +221,40 @@ async function onlyState(core: Core, repoRoot: string, remote: string, base: str
   }
 }
 
+const FORCE_OPTIONS = new Set(["-f", "--force", "--force-with-lease"]);
+
 // The agent hook's skip, for a recognised line: HEAD changes nothing but
 // .openqodex/ from the review's `base` (onlyState), and the work tree and
 // index change nothing but .openqodex/ from HEAD, so the developer's current
 // work is what the push sends. The remote is the one the line names, else
-// the one git pushes the current branch to.
+// the one git pushes the current branch to. Never for a push that could
+// remove commits from the remote branch (a force option, or a remote tip
+// that is not an ancestor of HEAD), or that sends more than the current
+// branch (push.default matching, a remote's push refspecs or mirror
+// setting, push.followTags).
 async function onlyStateWork(core: Core, repoRoot: string, command: string, base: string): Promise<boolean> {
   const current = await git(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
   const head = await commitOf(repoRoot, "HEAD");
-  if (current === null || head === null) return false;
+  const words = plainWords(command);
+  if (current === null || head === null || words === null) return false;
+  if (command.trim().split(" ").some((w) => FORCE_OPTIONS.has(w))) return false;
   const remote =
-    plainWords(command)?.[0] ??
+    words[0] ??
     (await git(repoRoot, ["config", "--get", `branch.${current}.pushRemote`])) ??
     (await git(repoRoot, ["config", "--get", "remote.pushDefault"])) ??
     (await git(repoRoot, ["config", "--get", `branch.${current}.remote`])) ??
     "origin";
+  const pushDefault = await git(repoRoot, ["config", "--get", "push.default"]);
+  if (pushDefault === "matching") return false;
+  if ((await git(repoRoot, ["config", "--get-all", `remote.${remote}.push`])) !== null) return false;
+  if ((await git(repoRoot, ["config", "--type=bool", "--get", `remote.${remote}.mirror`])) === "true") return false;
+  if ((await git(repoRoot, ["config", "--type=bool", "--get", "push.followTags"])) === "true") return false;
+  // The remote branch the push updates: the upstream's name under
+  // push.default upstream with no refspec, else the current branch's.
+  const merge = words[1] === undefined && pushDefault === "upstream" ? await git(repoRoot, ["config", "--get", `branch.${current}.merge`]) : null;
+  const target = merge?.replace(/^refs\/heads\//, "") ?? current;
+  const tip = await commitOf(repoRoot, `refs/remotes/${remote}/${target}`);
+  if (tip !== null && !(await isAncestor(repoRoot, tip, head, core.SERVER_GIT_ENV))) return false;
   if (!(await onlyState(core, repoRoot, remote, base, head, false))) return false;
   try {
     const work = await core.getChange({ repoRoot, scope: { uncommitted: true }, exclude: [], idOnly: true });

@@ -621,6 +621,38 @@ describe("a push that changes only .openqodex/", () => {
     expect(decision(r)).toBe("deny");
     expect(r).toContain(UNREVIEWED);
   });
+
+  it("22. the agent hook denies a force push that drops code the remote branch holds", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    writeFileSync(join(s.repo, "b.txt"), "code\n");
+    commitAll(s.repo);
+    git(s.repo, "push", "-q", "origin", "main");
+    git(s.repo, "reset", "-q", "--hard", "HEAD~1");
+    git(s.repo, "branch", "-q", "-u", "origin/main");
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    const r = check(s, "git push -f origin main").stdout;
+    expect(decision(r)).toBe("deny");
+    expect(r).toContain(UNREVIEWED);
+  });
+
+  it("22. the agent hook denies a push that sends another branch too (push.default matching)", () => {
+    const s = blockingConfig();
+    withRemote(s);
+    git(s.repo, "branch", "-q", "-u", "origin/main");
+    git(s.repo, "checkout", "-q", "-b", "other");
+    git(s.repo, "push", "-q", "origin", "other");
+    writeFileSync(join(s.repo, "b.txt"), "code\n");
+    commitAll(s.repo);
+    git(s.repo, "checkout", "-q", "main");
+    editConfig(s, "severity_threshold: major");
+    commitAll(s.repo);
+    git(s.repo, "config", "push.default", "matching");
+    const r = check(s, "git push").stdout;
+    expect(decision(r)).toBe("deny");
+    expect(r).toContain(UNREVIEWED);
+  });
 });
 
 // 19. The line printed for a hook manager drops git's arguments, so a push
