@@ -67,7 +67,7 @@ function launcherRubyThere(bin: string): boolean {
     const fd = openSync(bin, "r");
     try {
       const buffer = Buffer.alloc(512);
-      head = buffer.toString("latin1", 0, readSync(fd, buffer, 0, buffer.length, 0));
+      head = buffer.toString("utf8", 0, readSync(fd, buffer, 0, buffer.length, 0));
     } finally {
       closeSync(fd);
     }
