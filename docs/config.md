@@ -130,7 +130,7 @@ A finding below this severity is left out of the report's findings and counted i
 One of `critical`, `major`, `minor`, `nitpick`, `info`. The default is unset.
 
 - Unset: OpenQodex warns and never blocks. No command exits 1. The push gate never denies a push.
-- Set: the verdict is `blocked` when a finding on a changed line is at or above this severity. `scan` and `review` exit 1. The push gate denies a push unless a finished review of the current change passed.
+- Set: the verdict is `blocked` when a finding on a changed line is at or above this severity. `scan` and `review` exit 1. The push gate denies a push unless a finished review of the current change passed. One exception: a review of the current change that did not finish never blocks the push. The hook prints one line saying the review is incomplete.
 
 Findings outside the changed lines never count toward the verdict.
 
