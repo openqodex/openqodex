@@ -22,7 +22,8 @@
 //     trusted.
 //  9. The agent hook counts as reviewed a push line it does not recognise
 //     exactly (anything but `git push` with a few options, a remote and the
-//     current branch), or lets git's push settings change its answer.
+//     current branch, after one optional `cd` and before one optional output
+//     trim), or lets git's push settings change its answer.
 // 11. An unreadable config blocks instead of taking the tool-error path
 //     (allow, one line).
 // 10. The git hook passes a push where one range among several is unreviewed.
@@ -307,7 +308,7 @@ describe("9, 10. every form of push", () => {
 
   it("9. recognised lines with a review of the current work are silent, whatever git's push settings say", async () => {
     await setUp(true);
-    const lines = ["git push", "git push origin", "git push origin main", "git push origin HEAD", "git push -u origin main", "git push --set-upstream origin main", "git push -f origin main", "git push --force-with-lease origin main"];
+    const lines = ["git push", "git push origin", "git push origin main", "git push origin HEAD", "git push -u origin main", "git push --set-upstream origin main", "git push -f origin main", "git push --force-with-lease origin main", "cd . && git push", "git push 2>&1 | tail -2"];
     for (const command of lines) expect(check(command), command).toBe("");
     // The agent hook reads no git push setting: the same answers with one set.
     g("config", "push.default", "matching");
@@ -343,7 +344,8 @@ describe("9, 10. every form of push", () => {
       "git push; git push",
       "git push\ngit push",
       "git push origin main > /dev/null",
-      "cd . && git push",
+      "cd . && git push && gh pr create",
+      "cd . && git push 2>&1 | sh",
       "FOO=1 git push",
       "git push https://example.invalid/x.git main",
     ]) {
