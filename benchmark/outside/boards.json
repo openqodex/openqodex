@@ -99,7 +99,18 @@
       ],
       "judge": {
         "deployment": "judge",
-        "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/README.md"
+        "source": "https://github.com/withmartian/code-review-benchmark/blob/e616e849755441da38f18bf3adba2c9583b03803/offline/README.md",
+        "prompt": {
+          "path": "offline/code_review_benchmark/step3_judge_comments.py",
+          "url": "https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/code_review_benchmark/step3_judge_comments.py",
+          "sha256": "7370dfb21bed01655aada1d4d75f32e07c92e4c4c86dfc6cf6d47058a65ce16d",
+          "hashCovers": "The complete source file containing the semantic matching prompt."
+        },
+        "calibrationPrompts": {
+          "sha256": "c04a15540cb245ee8659012294324322a7f43f552fd8e7bfb3a3cc37cc961bdb",
+          "source": "suites/martian/calibration-sources.json",
+          "hashCovers": "Pinned source files containing extraction, deduplication and matching prompts."
+        }
       },
       "note": "Reserved URLs are copied verbatim from the golden files, which mix upstream and injected fork URLs."
     },
@@ -132,7 +143,13 @@
       "reservedPrUrls": [],
       "judge": {
         "deployment": "judge",
-        "source": "https://github.com/alibaba/aacr-bench/blob/68a569759289a83654a59d06db2a72910edf0a4a/evaluation/README.md"
+        "source": "https://github.com/alibaba/aacr-bench/blob/68a569759289a83654a59d06db2a72910edf0a4a/evaluation/README.md",
+        "prompt": {
+          "path": "evaluation/judge.py",
+          "url": "https://raw.githubusercontent.com/alibaba/aacr-bench/68a569759289a83654a59d06db2a72910edf0a4a/evaluation/judge.py",
+          "sha256": "c5305284ae895d7d184a181bc3eb1ba6c3aee1d163cf37435138cd3dd7af663a",
+          "hashCovers": "The complete source file containing the semantic matching prompt."
+        }
       },
       "note": "AACR is split by P1. The positive file contains 196 rows at this commit; the plan says 200."
     },
@@ -386,6 +403,19 @@
         "source": "https://raw.githubusercontent.com/review-bench/ReviewBench/e7d0683507b227ff20a9230120240d8ab2a97bbe/docs/METHODOLOGY.md",
         "sha256": "54422d7c71a1723f5c4162985b569c3ee09ee120f89eacd72407578b839ffb51",
         "note": "ReviewBench supplies its official judge. This is information, not a deployment we probe."
+      }
+    },
+    "greptile": {
+      "repo": "ai-code-review-evaluations/golden_comments",
+      "commit": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+      "source": "https://www.greptile.com/benchmarks",
+      "sourcesSha256": "2c79856ddf930cc83c90ddb098a5f93a47831adde9a03b7525de7df480858ee1",
+      "judge": {
+        "deployment": "judge",
+        "prompt": {
+          "sha256": "6f8d2bcad75c8ce488c2c518b1752ae566a540c865e80ceddddae213ba09e388",
+          "hashCovers": "The Greptile semantic identification prompt in greptile-judge.mjs."
+        }
       }
     }
   },

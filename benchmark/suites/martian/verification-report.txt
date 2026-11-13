@@ -1,0 +1,54 @@
+Published Martian verification (W8-2)
+Source: https://raw.githubusercontent.com/withmartian/code-review-benchmark/e616e849755441da38f18bf3adba2c9583b03803/offline/results/benchmark_data.json; revision e616e849755441da38f18bf3adba2c9583b03803; read 2026-10-14; sha256 60fe361f1430ce3d55bf85d2ceba30205c6a207eb2c49447a2b527e23718d5ed.
+Cases: 50/50 mapped. Golden comments: 173/173 mapped. Tree proofs: 50/50 mapped. Differences: 0.
+The published results name URLs, titles, original URLs, golden source files and comments, but no base or head commits. Frozen commits are checked against the committed tree proofs, not inferred from the published results.
+ai-code-review-evaluation__discourse-graphite-1: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/1; 4 comments g1-g4; mapped
+ai-code-review-evaluation__discourse-graphite-10: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/10; 7 comments g1-g7; mapped
+ai-code-review-evaluation__discourse-graphite-2: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/2; 2 comments g1-g2; mapped
+ai-code-review-evaluation__discourse-graphite-3: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/3; 3 comments g1-g3; mapped
+ai-code-review-evaluation__discourse-graphite-4: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/4; 8 comments g1-g8; mapped
+ai-code-review-evaluation__discourse-graphite-5: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/5; 3 comments g1-g3; mapped
+ai-code-review-evaluation__discourse-graphite-6: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/6; 1 comments g1-g1; mapped
+ai-code-review-evaluation__discourse-graphite-7: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/7; 5 comments g1-g5; mapped
+ai-code-review-evaluation__discourse-graphite-8: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/8; 6 comments g1-g6; mapped
+ai-code-review-evaluation__discourse-graphite-9: https://github.com/ai-code-review-evaluation/discourse-graphite/pull/9; 2 comments g1-g2; mapped
+ai-code-review-evaluation__keycloak-greptile-1: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1; 2 comments g1-g2; mapped
+ai-code-review-evaluation__sentry-greptile-1: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1; 4 comments g1-g4; mapped
+ai-code-review-evaluation__sentry-greptile-2: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2; 4 comments g1-g4; mapped
+ai-code-review-evaluation__sentry-greptile-3: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3; 3 comments g1-g3; mapped
+ai-code-review-evaluation__sentry-greptile-5: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5; 6 comments g1-g6; mapped
+calcom__cal.com-10600: https://github.com/calcom/cal.com/pull/10600; 5 comments g1-g5; mapped
+calcom__cal.com-10967: https://github.com/calcom/cal.com/pull/10967; 6 comments g1-g6; mapped
+calcom__cal.com-11059: https://github.com/calcom/cal.com/pull/11059; 9 comments g1-g9; mapped
+calcom__cal.com-14740: https://github.com/calcom/cal.com/pull/14740; 6 comments g1-g6; mapped
+calcom__cal.com-14943: https://github.com/calcom/cal.com/pull/14943; 2 comments g1-g2; mapped
+calcom__cal.com-22345: https://github.com/calcom/cal.com/pull/22345; 2 comments g1-g2; mapped
+calcom__cal.com-22532: https://github.com/calcom/cal.com/pull/22532; 4 comments g1-g4; mapped
+calcom__cal.com-7232: https://github.com/calcom/cal.com/pull/7232; 3 comments g1-g3; mapped
+calcom__cal.com-8087: https://github.com/calcom/cal.com/pull/8087; 2 comments g1-g2; mapped
+calcom__cal.com-8330: https://github.com/calcom/cal.com/pull/8330; 2 comments g1-g2; mapped
+getsentry__sentry-67876: https://github.com/getsentry/sentry/pull/67876; 3 comments g1-g3; mapped
+getsentry__sentry-77754: https://github.com/getsentry/sentry/pull/77754; 4 comments g1-g4; mapped
+getsentry__sentry-80168: https://github.com/getsentry/sentry/pull/80168; 3 comments g1-g3; mapped
+getsentry__sentry-80528: https://github.com/getsentry/sentry/pull/80528; 2 comments g1-g2; mapped
+getsentry__sentry-93824: https://github.com/getsentry/sentry/pull/93824; 5 comments g1-g5; mapped
+getsentry__sentry-95633: https://github.com/getsentry/sentry/pull/95633; 2 comments g1-g2; mapped
+grafana__grafana-103633: https://github.com/grafana/grafana/pull/103633; 3 comments g1-g3; mapped
+grafana__grafana-106778: https://github.com/grafana/grafana/pull/106778; 2 comments g1-g2; mapped
+grafana__grafana-107534: https://github.com/grafana/grafana/pull/107534; 1 comments g1-g1; mapped
+grafana__grafana-76186: https://github.com/grafana/grafana/pull/76186; 3 comments g1-g3; mapped
+grafana__grafana-79265: https://github.com/grafana/grafana/pull/79265; 5 comments g1-g5; mapped
+grafana__grafana-80329: https://github.com/grafana/grafana/pull/80329; 2 comments g1-g2; mapped
+grafana__grafana-90045: https://github.com/grafana/grafana/pull/90045; 3 comments g1-g3; mapped
+grafana__grafana-90939: https://github.com/grafana/grafana/pull/90939; 2 comments g1-g2; mapped
+grafana__grafana-94942: https://github.com/grafana/grafana/pull/94942; 2 comments g1-g2; mapped
+grafana__grafana-97529: https://github.com/grafana/grafana/pull/97529; 2 comments g1-g2; mapped
+keycloak__keycloak-32918: https://github.com/keycloak/keycloak/pull/32918; 2 comments g1-g2; mapped
+keycloak__keycloak-33832: https://github.com/keycloak/keycloak/pull/33832; 4 comments g1-g4; mapped
+keycloak__keycloak-36880: https://github.com/keycloak/keycloak/pull/36880; 5 comments g1-g5; mapped
+keycloak__keycloak-36882: https://github.com/keycloak/keycloak/pull/36882; 2 comments g1-g2; mapped
+keycloak__keycloak-37038: https://github.com/keycloak/keycloak/pull/37038; 2 comments g1-g2; mapped
+keycloak__keycloak-37429: https://github.com/keycloak/keycloak/pull/37429; 5 comments g1-g5; mapped
+keycloak__keycloak-37634: https://github.com/keycloak/keycloak/pull/37634; 4 comments g1-g4; mapped
+keycloak__keycloak-38446: https://github.com/keycloak/keycloak/pull/38446; 2 comments g1-g2; mapped
+keycloak__keycloak-40940: https://github.com/keycloak/keycloak/pull/40940; 2 comments g1-g2; mapped

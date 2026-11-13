@@ -11,7 +11,7 @@ import type { ProjectModel } from "../discovery/projects.js";
 import { normalisePy } from "../discovery/projects.js";
 import type { World } from "../resolve.js";
 import type { FileFacts, GraphEdge, GraphNode } from "../types.js";
-import { FRAMEWORK_EDGE_KINDS, RESERVED_FACT_KINDS, validateFrameworkEvidence } from "./plugin.js";
+import { FRAMEWORK_EDGE_KINDS, MAX_ENTITIES_PER_APP, MAX_EDGES_PER_APP, RESERVED_FACT_KINDS, validateFrameworkEvidence } from "./plugin.js";
 import type { Detection, Entity, FrameworkEdge, FrameworkFactBase, FrameworkPlugin, FrameworkUnknown, PluginIndex, RoleAssignment } from "./plugin.js";
 import { PLUGINS, pluginsKey } from "./registry.js";
 import { deriveTestCalls } from "./shared/tests.js";
@@ -20,11 +20,7 @@ import { deriveTestCalls } from "./shared/tests.js";
 // name every relation they can hide.
 export const FRAMEWORK_DATA_VERSION = 2;
 
-// The most entities and edges one plugin keeps per application (null: the
-// registrations no application reaches). Past either cap the rest are left
-// out and one unknown with cause "fan-out-capped" says how many.
-export const MAX_ENTITIES_PER_APP = 20_000;
-export const MAX_EDGES_PER_APP = 100_000;
+export { MAX_ENTITIES_PER_APP, MAX_EDGES_PER_APP } from "./plugin.js";
 
 // Applies the caps to one plugin's output, in the order the plugin emitted it.
 function capPerApp(plugin: string, entities: Entity[], edges: FrameworkEdge[], unknowns: FrameworkUnknown[]): { entities: Entity[]; edges: FrameworkEdge[] } {

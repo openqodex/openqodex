@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { buildGraph, frameworkLayer } from "../../index.js";
 import type { FrameworkLayer, Graph, Registration } from "../../index.js";
 import { parserFor } from "../../parser.js";
-import { cpuMs, expectLinear, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
+import { cpuMs, expectLinear, growthTests, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
 import type { GoHttpFact } from "./facts.js";
 import { MAX_SOURCE_BYTES, readFacts, wants } from "./facts.js";
 import { matches, MAX_APPS, MAX_EDGES, MAX_MATCH_WORK, MAX_MIDDLEWARE_CHAIN, MAX_MOUNTS, MAX_REGISTRATIONS, MAX_ROLES, MAX_TEST_REQUESTS, MAX_UNKNOWNS } from "./resolve.js";
@@ -213,15 +213,20 @@ describe("the net/http plugin on a crafted repository", () => {
     edges: graph.frameworks?.edges.filter((e) => e.plugin === "go-http") ?? [],
   });
 
-  it("a crafted repository cannot hang or exhaust the build: reading the facts of more than 1 MiB of route files takes time that grows with them and no faster", async () => {
-    expectLinear("the net/http fact reader on the crafted files", await readerCpuMs("go", sources(crafted(1)), readFacts), await readerCpuMs("go", sources(files), readFacts));
-  }, 300_000);
+  growthTests("in time that grows with it", () => {
+    it("a crafted repository cannot hang or exhaust the build: reading the facts of more than 1 MiB of route files takes time that grows with them and no faster", async () => {
+      expectLinear("the net/http fact reader on the crafted files", await readerCpuMs("go", sources(crafted(1)), readFacts), await readerCpuMs("go", sources(files), readFacts));
+    }, 300_000);
 
-  it("a crafted repository cannot hang or exhaust the build: the plugin resolves it in time that grows with it and no faster", async () => {
+    it("a crafted repository cannot hang or exhaust the build: the plugin resolves it in time that grows with it and no faster", async () => {
+      expectLinear("the net/http plugin on the crafted repository", await pluginCpuMs(build(quarter), "go-http"), await pluginCpuMs(build(root), "go-http"));
+    }, 300_000);
+  });
+
+  it("a crafted repository cannot hang or exhaust the build: the plugin resolves it", () => {
     const run = graph.frameworks?.plugins.find((p) => p.id === "go-http");
     expect(run?.status).toBe("ok");
-    expectLinear("the net/http plugin on the crafted repository", await pluginCpuMs(build(quarter), "go-http"), await pluginCpuMs(build(root), "go-http"));
-  }, 300_000);
+  });
 
   it("stops at the build's registration and mount caps, with one unknown each", () => {
     const { unknowns, registrations, edges } = mine();
@@ -255,15 +260,20 @@ describe("the net/http plugin on a crafted repository", () => {
     expect(mine().registrations.some((r) => r.site.file === "huge.go")).toBe(false);
   });
 
-  it("matches a request against a pattern of hundreds of wildcards in linear time, with no regular expression", async () => {
+  it("matches a request against a pattern of hundreds of wildcards, with no regular expression", () => {
     expect(matches(WILD, LONG_PATH)).toBe(false);
     expect(matches(WILD, `/${"x/".repeat(299)}x`)).toBe(false);
     expect(matches("/{rest...}", LONG_PATH)).toBe(false);
-    // The same three matches with every length a quarter, and in full.
-    const wild = (n: number) => `/${Array.from({ length: n }, (_, i) => `{a${i}}`).join("/")}`;
-    const long = (n: number) => `/${"a/".repeat(n)}b`;
-    const all = (q: number) => () => matches(wild(300 * q), long(2000 * q)) || matches(wild(300 * q), `/${"x/".repeat(300 * q - 1)}x`) || matches("/{rest...}", long(2000 * q));
-    expectLinear("matching with every length a quarter and in full", await cpuMs(all(0.25)), await cpuMs(all(1)));
+  });
+
+  growthTests("in linear time", () => {
+    it("matches a request against a pattern of hundreds of wildcards in linear time", async () => {
+      // The same three matches with every length a quarter, and in full.
+      const wild = (n: number) => `/${Array.from({ length: n }, (_, i) => `{a${i}}`).join("/")}`;
+      const long = (n: number) => `/${"a/".repeat(n)}b`;
+      const all = (q: number) => () => matches(wild(300 * q), long(2000 * q)) || matches(wild(300 * q), `/${"x/".repeat(300 * q - 1)}x`) || matches("/{rest...}", long(2000 * q));
+      expectLinear("matching with every length a quarter and in full", await cpuMs(all(0.25)), await cpuMs(all(1)));
+    });
   });
 });
 
@@ -315,10 +325,9 @@ describe("the net/http plugin on work split over hundreds of small muxes", () =>
     for (const dir of [root, quarter]) if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
-  it("a crafted repository cannot hang or exhaust the build: work split over hundreds of muxes still stops at each build cap, with one unknown each, in time that grows with the work and no faster", async () => {
+  it("a crafted repository cannot hang or exhaust the build: work split over hundreds of muxes still stops at each build cap, with one unknown each", () => {
     const run = graph.frameworks?.plugins.find((p) => p.id === "go-http");
     expect(run?.status).toBe("ok");
-    expectLinear("the net/http plugin on 100 and on 400 small muxes", await pluginCpuMs(build(quarter), "go-http"), await pluginCpuMs(build(root), "go-http"));
     const regs =graph.frameworks?.entities.filter((e) => e.kind === "registration" && e.plugin === "go-http") ?? [];
     expect(regs.length).toBe(MAX_REGISTRATIONS);
     const mounts = graph.frameworks?.edges.filter((e) => e.plugin === "go-http" && e.kind === "mounts") ?? [];
@@ -330,6 +339,12 @@ describe("the net/http plugin on work split over hundreds of small muxes", () =>
     expect(capped.filter((u) => u.note.includes(`mounted muxes after ${MAX_MOUNTS} `)).length).toBe(1);
     expect(capped.filter((u) => u.note.includes(`test requests after ${MAX_TEST_REQUESTS} `)).length).toBe(1);
   }, 300_000);
+
+  growthTests("in time that grows with the work", () => {
+    it("a crafted repository cannot hang or exhaust the build: work split over hundreds of muxes takes time that grows with the work and no faster", async () => {
+      expectLinear("the net/http plugin on 100 and on 400 small muxes", await pluginCpuMs(build(quarter), "go-http"), await pluginCpuMs(build(root), "go-http"));
+    }, 300_000);
+  });
 });
 
 // ---------- small repositories, one rule each ----------
@@ -524,13 +539,18 @@ describe("the net/http plugin on a package of many symbols", () => {
     for (const dir of [root, quarter]) if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
-  it("a crafted repository cannot hang or exhaust the build: no lookup scans a file's or a package's symbols once per handler type or test function", async () => {
+  it("a crafted repository cannot hang or exhaust the build: every handler type and test function of a package of many symbols is found", () => {
     const run = graph.frameworks?.plugins.find((p) => p.id === "go-http");
     expect(run?.status).toBe("ok");
     expect(goRegs(graph).filter((r) => r.handler.status === "bound").length).toBe(3000);
     expect((graph.frameworks?.roles ?? []).filter((r) => r.plugin === "go-http" && r.role === "test").length).toBe(3600);
-    expectLinear("the net/http plugin on a quarter of the symbols and on all of them", await pluginCpuMs(build(quarter), "go-http"), await pluginCpuMs(build(root), "go-http"));
   }, 300_000);
+
+  growthTests("in time that grows with the symbols", () => {
+    it("a crafted repository cannot hang or exhaust the build: no lookup scans a file's or a package's symbols once per handler type or test function", async () => {
+      expectLinear("the net/http plugin on a quarter of the symbols and on all of them", await pluginCpuMs(build(quarter), "go-http"), await pluginCpuMs(build(root), "go-http"));
+    }, 300_000);
+  });
 });
 
 // Every list the plugin returns grown past its cap by files a stranger

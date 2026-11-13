@@ -25,3 +25,5 @@ Changes the Next.js, React, Express, FastAPI and Go net/http plugins need from `
 11. `Registration.partial` (added on the 4a branch after the interface commit 4b builds on). The 4b plugins leave it absent; a route under a computed mount or include prefix has a null pattern and an unknown that names the computed part.
 
 12. Index a file's methods once in the shared test mapper. `deriveTestCalls` in `shared/tests.ts` finds a test class's methods by scanning every symbol of its file once per test class, so a file of thousands of test classes costs classes times symbols. A map of each file's methods by owner, built once, as the 4b plugins now find components, actions and handlers, keeps it linear.
+
+13. Maven and Gradle dependencies through `PluginInputs` and `PluginIndex.declares`. JUnit detection uses proven annotation identities. A manifest alone detects nothing. The plugin cannot read a declared JUnit version through this contract.

@@ -1,0 +1,7 @@
+[
+  {
+    "text": "/home/email-dev/",
+    "label": "a home folder path",
+    "reason": "An example path the control reviewer wrote inside a finding, not a machine path of this run; it appears in the row, the board input, the sample and its receipt."
+  }
+]

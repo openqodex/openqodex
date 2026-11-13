@@ -1,0 +1,20 @@
+{
+  "guards": "binds a name a Java star import brings to the class of the package the import names, never to a same-named class of another package",
+  "callers": [
+    {
+      "to": "src/main/java/a/b/Tool.java#Tool.make",
+      "site": "src/main/java/x/App.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/c/d/Tool.java#Tool.make",
+      "site": "src/main/java/x/App.java:7"
+    }
+  ],
+  "floor": {
+    "src/main/java/a/b/Tool.java#Tool.make": false
+  }
+}

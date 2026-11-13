@@ -61,7 +61,10 @@ afterAll(() => {
   else process.env.OPENQODEX_HOME = savedHome;
 });
 
-describe("custom scanner trust flow", () => {
+// The real resolver on a real release reads the GitHub API and downloads
+// actionlint, so it runs with the real programs on the full tier: the
+// variable OPENQODEX_GROWTH_TESTS marks the full tier.
+describe.skipIf(process.env.OPENQODEX_GROWTH_TESTS !== "1")("custom scanner trust flow", () => {
   it("an unapproved, edited or revoked custom scanner never runs, and an altered download is never installed", { timeout: 180_000 }, async () => {
     const config = parseConfig(yaml(RUN)).config;
     const changed = [".github/workflows/ci.yml"];

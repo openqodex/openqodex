@@ -62,12 +62,12 @@
 // 9. A row that cannot be a case (no pull request link, a link listed
 //    twice, no golden comment) is used or dropped silently: it is left out
 //    and named in the report with its reason.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { benchRoot } from "../lib/cases.mjs";
 import { cacheRoot, commitAnswer, licenceExclusion, licenceNote, licenceRecord, pullAnswer, repoAnswer } from "../lib/licence.mjs";
-import { HASHED, MARTIAN_SEVERITY, SUITES, entryHash, freezeMergeBase, martianTruth, realCaseId, splitRewriteProblems, truthHashOf } from "../lib/suites.mjs";
+import { HASHED, MARTIAN_SEVERITY, SUITES, canonicalJson, entryHash, freezeMergeBase, martianTruth, realCaseId, splitRewriteProblems, truthHashOf } from "../lib/suites.mjs";
 import { HEAD_GONE, UnionFind, fetchPinned } from "./aacr.mjs";
 
 export const SPLIT_NAME = "martian-v1";
@@ -89,6 +89,81 @@ const countBy = (list, f) => {
   for (const x of list) m.set(f(x), (m.get(f(x)) ?? 0) + 1);
   return [...m.entries()].sort((a, b) => b[1] - a[1] || byBytes(String(a[0]), String(b[0])));
 };
+
+// W8-2 failure list: benchmark/test/greptile-failures.md. Equal totals do
+// not prove a mapping: compare each identity and each complete comment.
+export function verifyMartianMapping({ suite, published, rows, proofs }) {
+  const differences = [];
+  const byUrl = new Map(rows.map((r) => [r.row.url, r]));
+  const expectedUrls = new Set(suite.cases.map((e) => e.prUrl));
+  let mappedCases = 0;
+  let mappedComments = 0;
+  let mappedProofs = 0;
+  const mappings = [];
+  for (const entry of suite.cases) {
+    const before = differences.length;
+    const golden = byUrl.get(entry.prUrl);
+    const pub = published[entry.prUrl];
+    if (!pub) differences.push(`${entry.name}: missing published case ${entry.prUrl}`);
+    if (!golden) differences.push(`${entry.name}: missing pinned golden row ${entry.prUrl}`);
+    if (!pub || !golden) continue;
+    for (const [field, expected] of [["pr_title", golden.row.pr_title], ["original_url", golden.row.original_url ?? null], ["az_comment", golden.row.az_comment ?? null], ["golden_source_file", golden.file.split("/").pop()]]) {
+      if ((pub[field] ?? null) !== expected) differences.push(`${entry.name}: published ${field} differs from the pinned golden file`);
+    }
+    if (golden.file !== entry.goldenFile || (golden.row.original_url ?? null) !== entry.originalUrl) differences.push(`${entry.name}: suite identity differs from the pinned golden row`);
+    const match = PR_URL.exec(entry.prUrl);
+    if (!match || entry.repo !== `${match[1]}/${match[2]}` || entry.prRef !== `refs/pull/${match[3]}/head`) differences.push(`${entry.name}: suite repository or pull request ref differs from its published identity`);
+    const comments = Array.isArray(pub.golden_comments) ? pub.golden_comments : [];
+    const want = golden.row.comments;
+    for (let i = 0; i < Math.max(comments.length, want.length); i++) {
+      if (!comments[i]) differences.push(`${entry.name} comment g${i + 1}: missing published comment`);
+      else if (!want[i]) differences.push(`${entry.name} comment g${i + 1}: extra published comment`);
+      else if (canonicalJson(comments[i]) !== canonicalJson(want[i])) differences.push(`${entry.name} comment g${i + 1}: published comment differs from the pinned golden file`);
+      else mappedComments++;
+    }
+    if (entry.truth.items !== want.length || entry.truthHash !== truthHashOf(martianTruth(golden.row).items)) differences.push(`${entry.name}: suite comment count or truth hash differs from the pinned golden file`);
+    const proof = proofs.find((p) => p.name === entry.name && p.caseId === entry.id);
+    if (!proof) differences.push(`${entry.name}: no proof for the suite's case id`);
+    else if (proof.baseSha !== entry.baseSha || proof.headSha !== entry.headSha || (entry.mergeBaseSha && proof.mergeBaseSha !== entry.mergeBaseSha) || proof.ok !== true || proof.ancestorOfHead !== true || !["mergeBase", "builtBase", "head", "builtHead"].every((key) => typeof proof.trees?.[key] === "string" && /^[0-9a-f]{40}$/.test(proof.trees[key])) || proof.trees.mergeBase !== proof.trees.builtBase || proof.trees.head !== proof.trees.builtHead) differences.push(`${entry.name}: committed tree proof differs from the suite's frozen commits or is not proved`);
+    else mappedProofs++;
+    if (before === differences.length) mappedCases++;
+    mappings.push(`${entry.name}: ${entry.prUrl}; ${want.length} comments g1-g${want.length}; ${before === differences.length ? "mapped" : "differs"}`);
+  }
+  for (const url of Object.keys(published).sort()) if (!expectedUrls.has(url)) differences.push(`${url}: extra published case outside the suite`);
+  for (const { row } of rows) if (!expectedUrls.has(row.url)) differences.push(`${row.url}: pinned golden row outside the suite`);
+  if (suite.cases.length !== 50 || Object.keys(published).length !== 50 || rows.length !== 50) differences.push(`case totals: suite ${suite.cases.length}, published ${Object.keys(published).length}, golden ${rows.length}; expected 50 each`);
+  const comments = rows.reduce((n, r) => n + r.row.comments.length, 0);
+  const publishedComments = Object.values(published).reduce((n, r) => n + (r.golden_comments?.length ?? 0), 0);
+  if (comments !== 173 || publishedComments !== 173) differences.push(`comment totals: golden ${comments}, published ${publishedComments}; expected 173 each`);
+  return { counts: { cases: suite.cases.length, comments, mappedCases, mappedComments, mappedProofs }, differences, mappings };
+}
+
+export async function verifyPublishedMartian({ cache = cacheRoot(), offline = false, root = benchRoot } = {}) {
+  const source = JSON.parse(readFileSync(join(root, "suites/martian/verification-source.json"), "utf8"));
+  const suite = JSON.parse(readFileSync(join(root, SUITES.martian.cases), "utf8"));
+  const board = JSON.parse(readFileSync(join(root, "outside/boards.json"), "utf8")).boards.martian;
+  if (source.revision !== board.commit || suite.dataset.revision !== source.revision || source.url !== pinnedUrl(board, source.path)) throw new Error("Martian verification source is not the suite's pinned published revision");
+  const published = JSON.parse(await fetchPinned(cache, "martian", source, { offline }));
+  const rows = [];
+  for (const pin of board.data) {
+    if (pin.url !== pinnedUrl(board, pin.path)) throw new Error(`${pin.path}: not a raw golden file at the pinned Martian revision`);
+    const suitePin = suite.dataset.files.find((p) => p.path === pin.path);
+    if (suitePin?.sha256 !== pin.sha256) throw new Error(`${pin.path}: suite and board pins differ`);
+    for (const row of JSON.parse(await fetchPinned(cache, "martian", pin, { offline }))) rows.push({ file: pin.path, row });
+  }
+  const proofs = [];
+  const proofDir = join(root, "index/proof");
+  for (const file of readdirSync(proofDir).filter((f) => /^martian.*\.json$/.test(f)).sort()) proofs.push(...JSON.parse(readFileSync(join(proofDir, file), "utf8")).cases);
+  const verified = verifyMartianMapping({ suite, published, rows, proofs });
+  const report = [
+    "Published Martian verification (W8-2)",
+    `Source: ${source.url}; revision ${source.revision}; read ${source.readDate}; sha256 ${source.sha256}.`,
+    `Cases: ${verified.counts.mappedCases}/${verified.counts.cases} mapped. Golden comments: ${verified.counts.mappedComments}/${verified.counts.comments} mapped. Tree proofs: ${verified.counts.mappedProofs}/${verified.counts.cases} mapped. Differences: ${verified.differences.length}.`,
+    "The published results name URLs, titles, original URLs, golden source files and comments, but no base or head commits. Frozen commits are checked against the committed tree proofs, not inferred from the published results.",
+    ...verified.mappings, ...verified.differences.map((d) => `Difference: ${d}`),
+  ].join("\n") + "\n";
+  return { ...verified, report, source, published, rows, proofs };
+}
 
 // The raw file of `path` at the board's commit: the only URL a golden file
 // is fetched from.
@@ -311,7 +386,11 @@ export async function ingestMartian({ boards, cache = cacheRoot(), offline = fal
 // a new file.
 export function writeMartianIngest(result, { root = benchRoot } = {}) {
   const splitPath = join(root, SUITES.martian.split);
-  const problems = existsSync(splitPath) ? splitRewriteProblems(JSON.parse(readFileSync(splitPath, "utf8")), JSON.parse(result.files[SUITES.martian.split])) : [];
+  const old = existsSync(splitPath) ? JSON.parse(readFileSync(splitPath, "utf8")) : null;
+  const problems = old ? splitRewriteProblems(old, JSON.parse(result.files[SUITES.martian.split])) : [];
+  // The exposure on record comes from saved reading notes, not the golden
+  // files, so a re-ingest keeps it as the file holds it.
+  if (old?.exposure) result.files[SUITES.martian.split] = `${JSON.stringify({ ...JSON.parse(result.files[SUITES.martian.split]), exposure: old.exposure }, null, 2)}\n`;
   if (problems.length > 0) {
     throw new Error(`${splitPath} exists, and a new split is a new file: write it as ${SPLIT_NAME.replace(/\d+$/, (n) => String(Number(n) + 1))}, or move the old file to the Trash if no run has used it. The new split would change it:\n  ${problems.join("\n  ")}`);
   }
@@ -326,7 +405,15 @@ export function writeMartianIngest(result, { root = benchRoot } = {}) {
 }
 
 async function main(args) {
-  const usage = "usage: node benchmark/ingest/martian.mjs [--offline]\n       node benchmark/ingest/martian.mjs --freeze-merge-base <name>";
+  const usage = "usage: node benchmark/ingest/martian.mjs [--offline]\n       node benchmark/ingest/martian.mjs --freeze-merge-base <name>\n       node benchmark/ingest/martian.mjs --verify-published [--offline]";
+  if (args.includes("--verify-published")) {
+    if (args.some((a) => !["--verify-published", "--offline"].includes(a))) throw new Error(usage);
+    const verified = await verifyPublishedMartian({ offline: args.includes("--offline") });
+    const path = join(benchRoot, "suites/martian/verification-report.txt");
+    writeFileSync(path, verified.report);
+    process.stdout.write(verified.report);
+    return verified.differences.length ? 1 : 0;
+  }
   if (args[0] === "--freeze-merge-base") {
     if (args.length !== 2) {
       console.error(usage);

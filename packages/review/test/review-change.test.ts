@@ -51,6 +51,7 @@
 // 22. A round's check errors are lost, so a rejected finding reads as never
 //     raised: the result's rounds lack a correction round's errors, the
 //     answer they judged, or the changed ranges the round carried.
+// 24. Large staged parts share sessions or receive credit before transport.
 // 23. The result's timings are read before the scratch folder is removed, so
 //     a review that filled large scanner caches reports a total_ms that
 //     misses the cleanup reviewChange still waits for; or the JSON report's
@@ -186,7 +187,7 @@ describe("a model reviewer through reviewChange", () => {
     expect(refused.model.requests).toHaveLength(1);
     expect(refused.result.status).toBe("incomplete");
     expect(refused.result.coverage?.unread).toEqual([{ path: "b/second.txt", start: 1, end: 1000, deletion: false }]);
-    expect(refused.result.completion?.missing).toEqual(["budget refused before correction call 2", "1 changed range was not sent to the reviewer: b/second.txt:1-1000"]);
+    expect(refused.result.completion?.missing).toEqual(["budget refused before correction call 2", "1 changed range was not examined", "b/second.txt:1-1000"]);
   });
 
   it("2. records one usage entry per attempt, each with its purpose, and totals that add them up", async () => {
@@ -227,7 +228,7 @@ describe("a model reviewer through reviewChange", () => {
     // is not covered: coverage names the whole range, as it does for an agent.
     expect(reads[1]!.range).toEqual([reads[0]!.range![1] + 1, 1000]);
     expect(r.result.coverage?.unread).toEqual([{ path: "b/second.txt", start: 1, end: 1000, deletion: false }]);
-    expect(r.result.completion?.missing).toContain("1 changed range was not sent to the reviewer: b/second.txt:1-1000");
+    expect(r.result.completion?.missing).toEqual(["budget refused before brief call 3", "1 changed range was not examined", "b/second.txt:1-1000"]);
     expect(r.result.status).toBe("incomplete");
     expect(r.result.reason).toContain("budget refused before brief call 3");
   });
@@ -243,16 +244,16 @@ describe("a model reviewer through reviewChange", () => {
     expect(b!.reason).toBeNull();
   });
 
-  it("5. a tool call outside the snapshot is refused, logged with its reason, and ends the review incomplete", async () => {
+  it("5. a tool call outside the snapshot is refused, logged with its reason, and incorrectly ends the review incomplete", async () => {
     const r = await run({ fixture: { probes: [{ name: "read_file", args: { path: "../../etc/passwd" } }, { name: "list_files", args: { glob: "src/*" } }] } });
     const [outside, listed] = r.result.trace;
     expect(outside).toMatchObject({ tool: "read_file", path: "../../etc/passwd", inside: false, ok: false, served: true });
     expect(outside!.reason).toMatch(/outside/);
     expect(listed).toMatchObject({ tool: "list_files", inside: true, ok: true });
-    expect(r.result.status).toBe("incomplete");
-    expect(r.result.reason).toMatch(/outside the snapshot: \.\.\/\.\.\/etc\/passwd/);
-    // The conversation ended at once: no further call carried the refusal.
-    expect(r.model.requests).toHaveLength(1);
+    expect(r.result.status).toBe("complete");
+    expect(r.result.completion?.refused).toEqual(["../../etc/passwd"]);
+    expect(r.model.requests).toHaveLength(2);
+    expect(r.model.requests[1]!.messages).toContainEqual(expect.objectContaining({ role: "tool", text: expect.stringContaining("refused:") }));
   });
 
   it("6. a budget refusal on the second authorize ends the review with one transport call and its usage kept", async () => {
@@ -323,8 +324,8 @@ describe("a model reviewer through reviewChange", () => {
   it("9. a server floor above 0.7 reaches the brief and the check", async () => {
     const r = await run({ floor: 0.8, fixture: { findings: [SUBTRACTION] } });
     const brief = r.model.requests[0]!.messages[1]!.text;
-    expect(brief).toContain("with confidence 0.8 or higher");
-    expect(brief).toContain("Findings under 0.8, or under a cited lens's floor, are not counted.");
+    expect(brief).toContain("Findings at 0.8 or higher, and at a cited lens's floor, count toward the verdict.");
+    expect(brief).toContain("Findings under 0.8 are shown as possible issues and never counted.");
     expect(r.result.status).toBe("complete");
     expect(r.result.findings).toEqual([]);
   });
@@ -405,14 +406,15 @@ describe("scoped and incremental reviews through reviewChange", () => {
     expect(existsSync(worktrees) ? readdirSync(worktrees) : []).toEqual([]);
   });
 
-  it("14. a tool call for a path outside the scopes is refused, logged out of scope, and leaves the review incomplete", async () => {
+  it("14. a tool call for a path outside the scopes is refused, logged out of scope, and incorrectly leaves the review incomplete", async () => {
     const repo = changeRepo();
     const model = fixtureModel({ probes: [{ name: "read_file", args: { path: "db/x.sql" } }] });
     const result = await reviewChange({ clonePath: repo.dir, mergeBaseSha: repo.base, headSha: repo.head, scopes: ["src"] }, model, opts());
     expect(result.trace[0]).toMatchObject({ tool: "read_file", path: "db/x.sql", ok: false, inside: true, inScope: false, reason: "outside the review's scopes" });
     expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: "tool", text: "refused: outside the review's scopes" });
-    expect(result.status).toBe("incomplete");
-    expect(result.reason).toContain("the reviewer asked for a path outside the review's scopes: db/x.sql");
+    expect(result.status).toBe("complete");
+    expect(result.completion?.refused).toEqual(["db/x.sql"]);
+    expect(model.requests).toHaveLength(2);
   });
 
   it("14. a previously reviewed ancestor makes the delta the obligation, and a finding on the whole change still counts", async () => {
@@ -739,4 +741,45 @@ it.each([false, true])("records staged model sessions and missing work before th
   expect(secondAt).toBeGreaterThan(1);
   expect(asked.slice(secondAt).every((call) => call.reviewer === "second")).toBe(true);
   expect(result.usage.calls.filter((call) => call.reviewer !== "second").map((call) => call.callId)).toEqual(result.completion!.attempts.map((call) => call.callId));
+});
+
+async function stagedBig(refuse = false) {
+  const repo = changeRepo();
+  const text = Array.from({ length: 9000 }, (_, i) => `export const n${i + 1} = ${i + 1};`).join("\n") + "\n";
+  writeFileSync(join(repo.dir, "big.ts"), text);
+  git(repo.dir, "add", "big.ts");
+  git(repo.dir, "commit", "-qm", "Add big source file");
+  const head = git(repo.dir, "rev-parse", "HEAD");
+  const requests: import("../src/reviewer.js").ModelRequest[] = [];
+  const model: ModelReviewer = { kind: "model", model: "parts-fixture", maxOutputTokens: 4096, async complete(request) {
+    requests.push(request);
+    const brief = request.messages.find((m) => m.role === "user")!.text;
+    const fixed = JSON.parse(recorded(brief));
+    for (const m of brief.matchAll(/^### (c\d+) \(scanner\)\n([\s\S]*?)(?=^### |^## )/gm)) {
+      const at = /^- Location: (.+):(\d+)$/m.exec(m[2]!)!;
+      fixed.dropped.push({ candidate: m[1], reason: "The function is internal and never exposed.", file_path: at[1], line_number: Number(at[2]) });
+    }
+    return { message: { text: stagedAnswer(brief, JSON.stringify(fixed), () => ""), toolCalls: [] }, usage: { model: "parts-fixture", inputTokens: 10, outputTokens: 10 } };
+  } };
+  const result = await runReviewChange({ clonePath: repo.dir, mergeBaseSha: repo.base, headSha: head, config: { ...DEFAULT_CONFIG, stages: true, graph: { ...DEFAULT_CONFIG.graph, enabled: false } } }, model, {
+    profile: "server", workDir: tempDir("oq-parts-work-"), installRoot: tempDir("oq-parts-tools-"), tools: { web: false, shell: false }, scanners: "preinstalled", budget: { deadlineMs: 120000, authorize: async () => !refuse },
+  });
+  return { result, requests };
+}
+it("7r. reviews a 9000-line file with fresh model finder pairs and exact brief credit", async () => {
+  const { result, requests } = await stagedBig();
+  expect(result.status, result.reason).toBe("complete");
+  const briefs = requests.filter((q) => q.purpose === "find").map((q) => q.messages[1]!.text).filter((text) => /^### h\d+ big.ts /m.test(text));
+  expect(briefs.length).toBeGreaterThanOrEqual(6);
+  expect(result.coverage!.given!.filter((g) => g.path === "big.ts").length).toBeGreaterThanOrEqual(3);
+  expect(result.coverage!.given!.filter((g) => g.path === "big.ts").every((g) => g.by === "brief")).toBe(true);
+  expect(result.rounds.flatMap((r) => r.delivered).filter((h) => h.path === "big.ts")).toEqual([]);
+});
+it("7l. leaves unsent staged parts unread after the first budget refusal", async () => {
+  const { result, requests } = await stagedBig(true);
+  expect(requests).toEqual([]);
+  expect(result.status).toBe("incomplete");
+  expect(result.coverage!.given).toEqual([]);
+  expect(result.coverage!.unread.filter((h) => h.path === "big.ts").length).toBeGreaterThanOrEqual(3);
+  expect(result.reason).toContain("big.ts:");
 });

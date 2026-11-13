@@ -47,9 +47,17 @@
 //     reuses the tree installed from the old lock.
 // 26. A gem lock line in any other shape (a path in the name, no sha256)
 //     is installed.
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+// 27. A gem tool whose launcher names a Ruby that is gone (Ruby upgraded or
+//     moved) still counts as installed, so every review fails to start it
+//     and nothing installs it again (issue 327).
+// 28. A launcher that names no fixed Ruby (`#!/usr/bin/env ruby`), a binary,
+//     or a launcher that cannot be read counts as stale and is installed
+//     again on every run.
+// 29. With installs off, a gem tool whose Ruby is gone fails to start
+//     instead of giving the plain not-installed reason.
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,8 +66,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { run } from "../src/toolchain/fetch.js";
-import { publishVersion, readGemLock, readLock, takeOverStaleLock } from "../src/toolchain/install.js";
-import { lockedFolder } from "../src/toolchain/table.js";
+import { isInstalled, publishVersion, readGemLock, readLock, takeOverStaleLock } from "../src/toolchain/install.js";
+import { lockedFolder, versionDir, type Recipe } from "../src/toolchain/table.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -342,6 +350,60 @@ describe("toolchain", () => {
   });
 });
 
+// A Ruby the gem tools can be installed with: brakeman's pinned gem needs 3.0.
+const haveRuby = spawnSync("ruby", ["-e", "exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.0') ? 0 : 1)"], { timeout: 15_000 }).status === 0;
+
+describe("a gem tool whose launcher names a Ruby that is gone (issue 327)", () => {
+  const brakeman = table.tools.brakeman;
+
+  it("counts as not installed when its launcher's Ruby is gone (27)", () => {
+    const root = join(tempDir("oq-launcher-"), "tools");
+    gemInstall(root, "brakeman", brakeman, "#!/nonexistent/ruby\n");
+    expect(isInstalled(root, "brakeman", brakeman)).toBe(false);
+  });
+
+  it("counts as installed when the launcher's Ruby is there, is found through env, is a binary or cannot be read (28)", () => {
+    const cases: [string, string | Buffer][] = [
+      ["a Ruby that is there", `#!${process.execPath}\n`],
+      ["a Ruby with an argument", `#!${process.execPath} -w\n`],
+      ["env", "#!/usr/bin/env ruby\n"],
+      ["a binary", Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01])],
+    ];
+    for (const [name, launcher] of cases) {
+      const root = join(tempDir("oq-launcher-"), "tools");
+      gemInstall(root, "brakeman", brakeman, launcher);
+      expect(isInstalled(root, "brakeman", brakeman), name).toBe(true);
+    }
+    const root = join(tempDir("oq-launcher-"), "tools");
+    const bin = gemInstall(root, "brakeman", brakeman, "#!/nonexistent/ruby\n");
+    chmodSync(bin, 0o000);
+    expect(isInstalled(root, "brakeman", brakeman), "unreadable").toBe(true);
+    chmodSync(bin, 0o755);
+  });
+
+  it.skipIf(!haveRuby)("with installs off, gives the plain not-installed reason (29)", async () => {
+    const home = freshHome();
+    gemInstall(join(home, "tools"), "brakeman", brakeman, "#!/nonexistent/ruby\n");
+    const r = await tc.createToolResolver({ allowInstall: false })("brakeman");
+    expect(r).toEqual({ ok: false, status: "not_installed", reason: "not installed (installs are off)" });
+  }, 60_000);
+
+  it.skipIf(!haveRuby)("with installs on, installs it again with the Ruby found now, and it runs (27)", async () => {
+    const home = freshHome();
+    const old = gemInstall(join(home, "tools"), "brakeman", brakeman, "#!/nonexistent/ruby\n");
+    const r = await tc.createToolResolver({ allowInstall: true, installBudgetMs: null })("brakeman");
+    expect(r).toMatchObject({ ok: true });
+    if (!r.ok) return;
+    // The new install replaced the link; the folder it named is not deleted.
+    expect(realpathSync(r.tool.path)).not.toBe(realpathSync(old));
+    expect(existsSync(old)).toBe(true);
+    const interpreter = /^#!(\S+)/.exec(readFileSync(r.tool.path, "utf8"))?.[1] ?? "";
+    expect(existsSync(interpreter), interpreter).toBe(true);
+    const env = { PATH: "/usr/bin:/bin", HOME: process.env.HOME ?? "", TMPDIR: tmpdir(), LANG: "en_US.UTF-8", ...r.tool.env };
+    expect(execFileSync(r.tool.path, ["--version"], { encoding: "utf8", env })).toContain(brakeman.version);
+  }, 300_000);
+});
+
 describe("downloadVerified and extractArchive", () => {
   it("refuses an archive member that escapes the destination", async () => {
     const dir = tempDir("oq-tar-");
@@ -367,14 +429,28 @@ describe("downloadVerified and extractArchive", () => {
     }
   });
 
+  // Served from this machine, as the cases below are: a real release asset
+  // from GitHub failed this test on a connect timeout (issue 215).
   it("returns the sha256 of what it downloaded and refuses a wrong one", async () => {
+    const bytes = randomBytes(64 * 1024);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const server = createServer((_req, res) => {
+      res.writeHead(200);
+      res.end(bytes);
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/asset.tar.gz`;
     const dir = tempDir("oq-dl-");
-    const asset = table.tools.actionlint.assets["linux-arm64"];
-    const got = await tc.downloadVerified(asset.url, null, join(dir, "a"));
-    expect(got.sha256).toBe(asset.sha256);
-    expect(createHash("sha256").update(readFileSync(join(dir, "a"))).digest("hex")).toBe(asset.sha256);
-    await expect(tc.downloadVerified(asset.url, "f".repeat(64), join(dir, "b"))).rejects.toThrow("checksum mismatch");
-    expect(existsSync(join(dir, "b"))).toBe(false);
+    try {
+      const got = await tc.downloadVerified(url, null, join(dir, "a"));
+      expect(got.sha256).toBe(sha256);
+      expect(readFileSync(join(dir, "a")).equals(bytes)).toBe(true);
+      await expect(tc.downloadVerified(url, "f".repeat(64), join(dir, "b"))).rejects.toThrow("checksum mismatch");
+      expect(existsSync(join(dir, "b"))).toBe(false);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
   }, 60_000);
 
   it("stops a download that trickles past its deadline or grows past its cap", async () => {
@@ -416,6 +492,19 @@ function builtVersion(dir: string, content: string): string {
   writeFileSync(join(dir, "bin", "actionlint"), content);
   writeFileSync(join(dir, ".installed"), "{}\n");
   return dir;
+}
+
+// A finished gem install in the layout a gem install leaves: the version
+// folder is a link to the worker's own folder, which holds the marker and
+// the launcher. Returns the launcher's path.
+function gemInstall(root: string, tool: string, recipe: Recipe, launcher: string | Buffer): string {
+  const final = versionDir(root, tool, recipe);
+  const built = join(dirname(final), ".build-old");
+  mkdirSync(join(built, "bin"), { recursive: true });
+  writeFileSync(join(built, "bin", recipe.binary), launcher, { mode: 0o755 });
+  writeFileSync(join(built, ".installed"), "{}\n");
+  symlinkSync(".build-old", final);
+  return join(built, "bin", recipe.binary);
 }
 
 // A minimal ustar archive, written by hand so a member can carry ../ in its

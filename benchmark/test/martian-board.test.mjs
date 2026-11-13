@@ -27,7 +27,7 @@
 //    benchmark_data.json, and Martian's own pipeline at the pinned commit
 //    judges it with errors_count 0 (when its checkout is in the cache).
 // Also, as for AACR-Bench (PR 155): a held-out access goes unlogged; a case
-// whose licence nobody verified is converted for a board; a failed or
+// whose licence nobody verified reaches a board submission; a failed or
 // never-started review vanishes from Martian's denominators; two
 // configurations go by one tool name; result files leave the run through a
 // symbolic link; a modified evaluator runs as the pinned one; the bench
@@ -41,9 +41,13 @@
 // 9. A file marked assume-unchanged, or an ignored file, hides an edit of
 //    the evaluator.
 // 10. A link under the bench cache puts their checkout in the repository.
+// 11. A failed native body reaches the judge or loses its denominator or
+//     failure record, or an empty native body becomes a comment.
+// 12. Extracted native candidates lack the review's stable source id,
+//     so Martian withholds the control's evaluation.
 import { spawn, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { benchRoot, git, repoRoot } from "../lib/cases.mjs";
@@ -54,6 +58,7 @@ import { endpointSecrets } from "../lib/model-env.mjs";
 import { findingId, martianFindings, martianGolden, readMartianEvaluation } from "../lib/score.mjs";
 import { readCase, truthOf } from "../lib/suites.mjs";
 import { convertRun } from "../outside/convert/martian.mjs";
+import { newWave, openWave } from "../lib/wave.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 import { CLAUDE, COMMIT, convertOpts, fakeProvider, finding, FIXTURES, fixturePlan, fixtureReport, GOLDEN, MODEL, PACKAGE, readJson, RELEASE, REPORTS, report, savedRun, suite, write } from "./martian-board-fixture.mjs";
 
@@ -62,6 +67,18 @@ afterAll(removeTempDirs);
 const WRAPPER = join(benchRoot, "outside", "boards", "martian.sh");
 const JUDGE = join(benchRoot, "outside", "boards", "martian-judge.mjs");
 const RECORD = process.env.MARTIAN_BOARD_RECORD === "1";
+const FIXTURE_AT = "2026-10-24T00:00:00.000Z";
+
+// Manifest fields can change independently of the converter's output shape.
+function checkConversionBaseline(folder, name) {
+  const file = join(folder, "outside/martian/convert.json");
+  const { manifestSha256, ...converted } = readJson(file);
+  expect(manifestSha256).toBe(createHash("sha256").update(readFileSync(join(folder, "manifest.json"))).digest("hex"));
+  if (RECORD) write(join(FIXTURES, name), readFileSync(file, "utf8"));
+  const expected = readJson(join(FIXTURES, name));
+  delete expected.manifestSha256;
+  expect(converted).toEqual(expected);
+}
 
 const filesUnder = (dir) => (existsSync(dir) ? readdirSync(dir, { recursive: true }).map((p) => join(dir, String(p))).filter((p) => statSync(p).isFile()) : []);
 const refusal = async (fn) => {
@@ -72,6 +89,55 @@ const refusal = async (fn) => {
   }
   return null;
 };
+
+const nativeRun = (ctx, sample) => savedRun(ctx, { configs: ["control-graph-off"], plan: { "control-graph-off/1": Object.fromEntries([...ctx.ids.keys()].map((name) => [name, { reviewer: "control", started_at: "2026-10-14T00:00:00Z", ...sample }])) } });
+
+it("converts failed native Martian reviews to empty reviews and records their failures", async () => {
+  const ctx = await suite();
+  const failure = "Review failed while reading src/checkout.ts:40.";
+  const out = await nativeRun(ctx, { status: "failed", nativeBody: failure, failure });
+  const { record, data } = await convertRun(out, convertOpts(ctx));
+  expect(record.tools[0]).toMatchObject({ reviews: 3, findings: 0, statuses: { failed: 3 }, held: false });
+  for (const entry of Object.values(data)) {
+    expect(entry.reviews).toHaveLength(1);
+    expect(entry.reviews[0]).toMatchObject({ review_comments: [], openqodex: { status: "failed", findingIds: [] } });
+  }
+  expect(record.failures).toEqual([...ctx.ids.keys()].sort().map((name) => ({ caseId: ctx.ids.get(name), config: "control-graph-off", repeat: 1, failure })));
+});
+
+it("keeps empty native Martian reviews in the denominator without comments", async () => {
+  const ctx = await suite();
+  const out = await nativeRun(ctx, { status: "complete", nativeBody: "", failure: null });
+  const { record, data } = await convertRun(out, convertOpts(ctx));
+  expect(record.tools[0]).toMatchObject({ reviews: 3, findings: 0, statuses: { complete: 3 }, held: false });
+  for (const entry of Object.values(data)) expect(entry.reviews[0]).toMatchObject({ review_comments: [], openqodex: { status: "complete", findingIds: [] } });
+});
+
+it("attributes every extracted native candidate to one stable review source id", async () => {
+  const ctx = await suite();
+  const body = "The coupon checkout reads the total before locking. The refund handler records the complete card number.";
+  const out = await nativeRun(ctx, { status: "complete", nativeBody: body, failure: null });
+  const { data } = await convertRun(out, convertOpts(ctx));
+  const again = await convertRun(await nativeRun(ctx, { status: "complete", nativeBody: body, failure: null }), convertOpts(ctx));
+  const tool = "claude-code-control-r1";
+  const candidates = {}, dedup = {}, evaluations = {};
+  for (const [url, entry] of Object.entries(data)) {
+    const review = entry.reviews[0];
+    expect(review.review_comments).toEqual([{ path: null, line: null, body, created_at: "2026-10-14T00:00:00Z" }]);
+    expect(review.openqodex.findingIds).toEqual([expect.stringMatching(/^[a-f0-9]{64}$/)]);
+    expect(again.data[url].reviews[0].openqodex.findingIds).toEqual(review.openqodex.findingIds);
+    candidates[url] = { [tool]: body.split(". ").map((text) => ({ text })) };
+    dedup[url] = { [tool]: [[0], [1]] };
+    evaluations[url] = { [tool]: { total_candidates: 2, total_golden: entry.golden_comments.length, errors_count: 0, true_positives: [], false_positives: candidates[url][tool].map((c) => ({ candidate: c.text })) } };
+  }
+  const totals = { beta: 1, profiles: Object.fromEntries(["all", "core", "strict"].map((profile) => [profile, { [tool]: { tp: 0, fp: 6, fn: 5, prs: 3 } }])) };
+  const result = martianEvaluations({ data, candidates, dedup, evaluations, totals, judge: { model: "fixture", served: "fixture" }, model: "fixture" });
+  expect(result.problems).toEqual([]);
+  expect(result.tools[0].problems).toEqual([]);
+  expect(result.tools[0].evaluation.candidates).toHaveLength(6);
+  for (const candidate of result.tools[0].evaluation.candidates) expect(candidate.sourceFindingIds).toEqual(data[candidate.prUrl].reviews[0].openqodex.findingIds);
+  expect(new Set(Object.values(data).map((entry) => entry.reviews[0].openqodex.findingIds[0])).size).toBe(3);
+});
 
 // ---------- the tests ----------
 
@@ -131,8 +197,16 @@ describe("a run that is not a release run reads Martian's cases", () => {
 describe("a conversion made outside the gate, or of another manifest, is judged", () => {
   const judgeDry = (out, accessLog) => {
     const home = tempDir("oq-martian-board-gate-");
+    const root = join(home, "runner/benchmark");
+    // Keep the checkout outside the runner's repository, even under a local TMPDIR.
+    for (const file of ["lib", "score.mjs", "legacy", "outside/boards.json", "outside/boards/martian-judge.mjs", "outside/boards/aacr-judge.mjs", "outside/convert/martian.mjs"]) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      cpSync(join(benchRoot, file), join(root, file), { recursive: true });
+    }
+    mkdirSync(join(root, "../packages"), { recursive: true });
+    symlinkSync(join(benchRoot, "../packages/scanners"), join(root, "../packages/scanners"));
     writeFileSync(join(home, "azure.env"), "AZURE_OPENAI_BASE_URL=https://judge.example.test/v1\nAZURE_OPENAI_KEY=fake-key\n");
-    return spawnSync(process.execPath, [JUDGE, out, "--dry-run", "--checkout", join(home, "offline"), "--python", join(home, "venv", "bin", "python")], { encoding: "utf8", env: { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), OPENQODEX_BENCH_ACCESS_LOG: accessLog }, timeout: 60_000 });
+    return spawnSync(process.execPath, [join(root, "outside/boards/martian-judge.mjs"), out, "--dry-run", "--checkout", join(home, "offline"), "--python", join(home, "venv", "bin", "python")], { encoding: "utf8", env: { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), OPENQODEX_BENCH_ACCESS_LOG: accessLog }, timeout: 60_000 });
   };
 
   it("refuses to judge when the run's manifest changed after the conversion, or the access line is not in the log", async () => {
@@ -176,15 +250,45 @@ describe("a finding without a title, problem, consequence or fix is dropped", ()
   });
 });
 
-describe("a case whose licence nobody verified, or a sample outside Martian, is converted for the board", () => {
-  it("refuses a run holding a case whose licence class is unverified, naming it, and writes and logs nothing", async () => {
+describe("an unverified licence reaches a board submission, or a sample outside Martian is converted", () => {
+  it("an unverified-licence case converts for the local judge and is still refused at submission", async () => {
     const ctx = await suite(GOLDEN, { "oq-fixture/ledger": "NOASSERTION" });
     const out = await savedRun(ctx, { plan: fixturePlan() });
     const opts = convertOpts(ctx);
+    const { record, data } = await convertRun(out, opts);
+    const name = "oq-fixture__ledger-7";
+    const url = "https://github.com/oq-fixture/ledger/pull/7";
+    expect(record.cases).toHaveLength(3);
+    expect(record.cases.find((c) => c.case === name)).toMatchObject({ licence: "unverified" });
+    expect(readJson(join(out, "outside/martian/convert.json")).cases).toEqual(record.cases);
+    expect(data[url].golden_comments).toEqual(GOLDEN.find((r) => r.url === url).comments);
+    expect(data[url].reviews).toHaveLength(1);
+    expect(data[url].reviews[0].review_comments.length).toBeGreaterThan(0);
+    expect(existsSync(opts.accessLog)).toBe(true);
+
+    const submission = join(out, "submission");
+    const result = spawnSync(process.execPath, [join(benchRoot, "outside/submit/martian.mjs"), out, "--out", submission], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toMatch(/unverified licence/);
+    expect(result.stderr).toContain(name);
+    expect(result.stderr).not.toContain("oq-fixture__shop-11");
+    expect(existsSync(submission)).toBe(false);
+  });
+
+  it.each(["unknown", "none"])("the Martian converter still refuses an excluded licence class", async (cls) => {
+    const ctx = await suite();
+    const name = "oq-fixture__ledger-7";
+    const path = join(ctx.root, "suites/martian/cases.json");
+    const cases = readJson(path);
+    cases.cases.find((c) => c.name === name).licence.class = cls;
+    write(path, JSON.stringify(cases));
+    const out = await savedRun(ctx, { plan: fixturePlan() });
+    const opts = convertOpts(ctx);
     const why = await refusal(() => convertRun(out, opts));
-    expect(why).toMatch(/oq-fixture__ledger-7/);
-    expect(why).not.toMatch(/oq-fixture__shop-11/);
-    expect(why).toMatch(/never converted for a board/);
+    expect(why).toContain(name);
+    expect(why).not.toContain("oq-fixture__shop-11");
+    expect(why).not.toContain("oq-fixture__shop-12");
+    expect(why).toContain(`licence ${cls}`);
     expect(existsSync(join(out, "outside"))).toBe(false);
     expect(existsSync(opts.accessLog)).toBe(false);
   });
@@ -197,6 +301,23 @@ describe("a case whose licence nobody verified, or a sample outside Martian, is 
     write(join(out, "samples", "flask-path-traversal", MODEL, "1", "sample.json"), JSON.stringify({ case: "flask-path-traversal", config: MODEL, repeat: 1, attempt: 1 }));
     expect(await refusal(() => convertRun(out, convertOpts(ctx)))).toMatch(/flask-path-traversal/);
     expect(existsSync(join(out, "outside"))).toBe(false);
+  });
+
+  it("collects every planned case and hash problem under Martian's conversion heading", async () => {
+    const ctx = await suite();
+    const plan = fixturePlan();
+    plan[`${MODEL}/1`][[...ctx.ids.keys()][0]] = "unstarted";
+    const out = await savedRun(ctx, { plan });
+    const manifest = readJson(join(out, "manifest.json"));
+    manifest.jobs[0].caseId = "martian/not-in-suite@12345678";
+    const changed = manifest.jobs[1];
+    manifest.caseHashes[readCase(changed.caseId, { root: ctx.root }).name] = "0".repeat(64);
+    write(join(out, "manifest.json"), JSON.stringify(manifest));
+    const opts = convertOpts(ctx);
+    const why = await refusal(() => convertRun(out, opts));
+    expect(why).toBe(`${out} is not converted for Martian's board:\nmartian/not-in-suite@12345678: not in the frozen martian suite\n${changed.caseId}: the run's case hash differs from the frozen suite`);
+    expect(existsSync(join(out, "outside"))).toBe(false);
+    expect(existsSync(opts.accessLog)).toBe(false);
   });
 });
 
@@ -263,13 +384,14 @@ describe("the saved fixture converts to entries Martian's evaluator accepts", ()
     expect(body).not.toMatch(/\n|```/);
   });
 
-  it("converts the three saved reviews to the saved benchmark_data.json, byte for byte", async () => {
+  it("the Martian converter's fixture data stays byte-identical and convert.json freezes its shape from this commit on", async () => {
     const ctx = await suite();
     const out = await savedRun(ctx, { plan: fixturePlan() });
-    await convertRun(out, convertOpts(ctx));
+    await convertRun(out, convertOpts(ctx, { now: () => FIXTURE_AT }));
     const written = readFileSync(join(out, "outside", "martian", "benchmark_data.json"), "utf8");
-    if (RECORD) write(join(FIXTURES, "benchmark_data.json"), written);
+    // This committed output predates the shared run reader. Never re-record it here.
     expect(written).toBe(readFileSync(join(FIXTURES, "benchmark_data.json"), "utf8"));
+    checkConversionBaseline(out, "convert.json");
     const data = JSON.parse(written);
     expect(data["https://github.com/oq-fixture/shop/pull/11"].reviews[0].review_comments[0]).toEqual({
       path: "src/checkout.ts",
@@ -280,6 +402,17 @@ describe("the saved fixture converts to entries Martian's evaluator accepts", ()
     });
     // A finding outside the change is sent too.
     expect(data["https://github.com/oq-fixture/ledger/pull/7"].reviews[0].review_comments).toHaveLength(1);
+  });
+
+  it("convert.json freezes notRun, statuses with not-run, suite-count reviews and access caseCount from this commit on", async () => {
+    const ctx = await suite();
+    const partial = { ...ctx, ids: new Map([...ctx.ids].slice(0, 2)) };
+    const out = await savedRun(partial, { plan: fixturePlan() });
+    const { record } = await convertRun(out, convertOpts(ctx, { now: () => FIXTURE_AT }));
+    checkConversionBaseline(out, "convert-not-run.json");
+    expect(record.notRun).toEqual([{ tool: "openqodex-library-r1", caseId: [...ctx.ids.values()][2] }]);
+    expect(record.tools[0]).toMatchObject({ reviews: ctx.ids.size, statuses: { "not-run": 1 } });
+    expect(record.access.caseCount).toBe(ctx.ids.size);
   });
 });
 
@@ -452,9 +585,12 @@ describe("Martian's own pipeline judges the converted fixture", () => {
     const home = tempDir("oq-martian-board-judged-");
     writeFileSync(join(home, "azure.env"), `AZURE_OPENAI_BASE_URL=${provider.base}\nAZURE_OPENAI_KEY=${key}\n`);
     chmodSync(join(home, "azure.env"), 0o600);
-    const env = { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), OPENQODEX_BENCH_ACCESS_LOG: opts.accessLog, TMPDIR: home, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+    // The judging pays a model, so it names a wave: one of this test's own.
+    const waveRoot = tempDir("oq-martian-board-wave-");
+    newWave("fixture-wave", { root: waveRoot });
+    const env = { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), OPENQODEX_BENCH_ACCESS_LOG: opts.accessLog, OPENQODEX_BENCH_WAVES: join(waveRoot, "index/waves"), TMPDIR: home, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
     const r = await new Promise((done) => {
-      const child = spawn(process.execPath, [JUDGE, out, "--checkout", OFFLINE, "--python", PYTHON], { env });
+      const child = spawn(process.execPath, [JUDGE, out, "--checkout", OFFLINE, "--python", PYTHON, "--wave", "fixture-wave"], { env });
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (c) => (stdout += c));
@@ -463,6 +599,10 @@ describe("Martian's own pipeline judges the converted fixture", () => {
     });
     await provider.close();
     expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+    // Their pipeline reports no cost: the reservation is settled at the forecast, marked estimated.
+    const journal = readFileSync(openWave("fixture-wave", { root: waveRoot }).file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(journal.slice(1).map((l) => [l.kind, l.path ?? null, l.estimated ?? false])).toEqual([["reserve", "judge-martian", false], ["settle", null, true]]);
+    expect(journal[2].actualUsd).toBe(journal[1].forecastUsd);
     const board = join(out, "outside", "martian");
     const record = readJson(join(board, "eval.json"));
     expect(record).toMatchObject({ commit: COMMIT, checkout: { commit: COMMIT, tree: expect.stringMatching(/^[0-9a-f]{40}$/) }, judge: { deployment: "gpt-5.2" }, problems: [] });

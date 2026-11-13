@@ -45,7 +45,26 @@ const require = createRequire(import.meta.url);
 // Every value the library exports: the functions by name and the four
 // namespaces that group them.
 const VALUES = [
+  "assemble",
   "buildGraph",
+  "deserializeModel",
+  "floorReasons",
+  "graphOf",
+  "hotSymbols",
+  "INDEX_FORMAT",
+  "isTestPath",
+  "LineSet",
+  "OPERATIONS",
+  "parseTarget",
+  "prepareIndexes",
+  "query",
+  "querySliced",
+  "readIndex",
+  "readIndexFrom",
+  "resolveTarget",
+  "serializeModel",
+  "SLICE_CHECKS",
+  "writeIndex",
   "createToolResolver",
   "defaultLensDir",
   "detectImpact",
@@ -94,6 +113,23 @@ const TYPES = [
   "DiffCoverage",
   "FileFacts",
   "Graph",
+  "Session",
+  "Request",
+  "Answer",
+  "Operation",
+  "Target",
+  "Item",
+  "Extra",
+  "ErrorCode",
+  "Tier",
+  "Evidence",
+  "Unknown",
+  "Cause",
+  "GenerationManifest",
+  "OpenGeneration",
+  "GraphStore",
+  "ProjectModel",
+  "ReadIndexFile",
   "ImpactSummary",
   "Lang",
   "Lens",
@@ -152,7 +188,32 @@ const TYPES = [
 // What each namespace holds: the same functions as the named exports.
 const NAMESPACES: Record<string, string[]> = {
   scanners: ["createToolResolver", "isFixturePath", "loadToolchain", "preinstallScanners", "ruleClassFor", "runScanners", "toolchainHash"],
-  graph: ["buildGraph", "detectImpact", "extractFacts", "PacketCollision", "PacketLeak", "writePacket"],
+  graph: [
+    "assemble",
+    "buildGraph",
+    "deserializeModel",
+    "detectImpact",
+    "extractFacts",
+    "floorReasons",
+    "graphOf",
+    "hotSymbols",
+    "INDEX_FORMAT",
+    "isTestPath",
+    "OPERATIONS",
+    "PacketCollision",
+    "PacketLeak",
+    "parseTarget",
+    "prepareIndexes",
+    "query",
+    "querySliced",
+    "readIndex",
+    "readIndexFrom",
+    "resolveTarget",
+    "serializeModel",
+    "SLICE_CHECKS",
+    "writeIndex",
+    "writePacket",
+  ],
   lenses: ["defaultLensDir", "loadLensCatalog", "selectLenses", "selectLensesForDiff"],
   render: ["renderJson", "renderMarkdown", "renderReview", "renderSarif"],
 };
@@ -187,7 +248,7 @@ const REPORT: Report = {
   ],
   below_threshold: 0,
   outside_change: [],
-  low_confidence: [],
+  possible: [], low_confidence: [],
   not_reviewed: [],
   dropped: [],
   scanners: [{ scanner: "semgrep", status: "ran", version: "1.94.0", rawCount: 1, keptCount: 1, durationMs: 1200, reason: null }],
@@ -293,6 +354,8 @@ describe("the installed package as a library", () => {
     const lines = [
       `import { ${values}, ${types} } from "openqodex"; import * as lib from "openqodex";`,
       `export const all = [${values}] as const; export type All = [${TYPES.join(", ")}]; type AnyNames<T> = { [K in keyof T]: 0 extends 1 & T[K] ? K : never }[keyof T]; export const noAny: [AnyNames<typeof lib>] extends [never] ? true : AnyNames<typeof lib> = true;`,
+      // Failure case: the installed declarations omit the possible result list.
+      "export const possibleItems = (result: ReviewResult): ResultFinding[] => result.possible;",
     ];
     const consumer = join(project, "consumer");
     mkdirSync(consumer);
@@ -351,8 +414,8 @@ describe("a bundled program with openqodex external", () => {
     out = JSON.parse(r.stdout) as WorkerOut;
   }, 120_000);
 
-  it("loads the 48 lenses from the installed package", () => {
-    expect(out.lenses, "lenses").toEqual({ ok: true, value: 48 });
+  it("loads the 49 lenses from the installed package", () => {
+    expect(out.lenses, "lenses").toEqual({ ok: true, value: 49 });
   });
 
   it("tells the security lenses apart: each lens file marked security: true, and no other", () => {

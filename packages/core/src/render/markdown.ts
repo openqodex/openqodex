@@ -1,5 +1,5 @@
 import type { Report, ReportFinding } from "../types.js";
-import { SEVERITIES_DESC, candidateLocation, coverageLine, escapeMarkdown, location, lowConfidenceReason, sourceLabel, verdictLine } from "./common.js";
+import { SEVERITIES_DESC, candidateLocation, coverageLine, escapeMarkdown, location, lowConfidenceReason, orderPossible, sourceLabel, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
 import { renderObservations } from "./review.js";
 
@@ -74,6 +74,12 @@ export function renderMarkdown(report: Report): string {
   const observations = renderObservations(report);
   if (observations) out.push("", observations.trimEnd());
 
+  const possible = orderPossible(report);
+  if (possible.length > 0) {
+    // wording: session
+    out.push("", "## Possible issues (not counted)", "", ...findingTable(possible));
+  }
+
   if (report.outside_change.length > 0) {
     out.push("", "## Outside the changed lines", "", "Shown for information; these never count toward the verdict.", "");
     out.push(...findingTable(report.outside_change));
@@ -104,8 +110,8 @@ export function renderMarkdown(report: Report): string {
       out.push(`| ${code(l.file_path)} | ${cell(l.title + lowConfidenceReason(l))} | ${l.confidence} | ${l.floor} |`);
     }
   }
-  if (report.not_reviewed_paths.length > 0) {
-    out.push("", "## Not reviewed, change too large", "");
+  if (report.base.ref === "all" && report.not_reviewed_paths.length > 0) {
+    out.push("", `## Not reviewed: ${report.not_reviewed_paths.length} ${report.not_reviewed_paths.length === 1 ? "file" : "files"}, over 5 MB, links or unreadable`, "");
     for (const p of report.not_reviewed_paths) out.push(`- ${code(p)}`);
   }
 

@@ -88,7 +88,6 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
-  rmSync,
   statSync,
   symlinkSync,
   utimesSync,
@@ -96,8 +95,11 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BIN, cli, env, git, inTerminal, promptsAsked, sandbox, snapshot, status, type Sandbox } from "./init-helpers.js";
-import { adoptTempDir, removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
+import { BIN, cli, env, git, inTerminal, promptsAsked, sandbox, snapshot, status, tree, type Sandbox } from "./init-helpers.js";
+import { gitDirs } from "../src/agents/git.js";
+import { Guard } from "../src/agents/guarded-fs.js";
+import { isShippedSkill } from "../src/agents/targets.js";
+import { adoptTempDir, removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
 
@@ -148,15 +150,23 @@ function ourCommands(path: string): string[] {
 // the two team files, meant to be committed.
 const REPO_FOLDER_STATUS = "?? .openqodex/.gitignore\n?? .openqodex/config.yaml\n?? .openqodex/custom-instructions.md\n";
 
+// A command as the developer would paste it into a shell in the repo.
+function paste(s: Sandbox, command: string): ReturnType<typeof spawnSync> & { stdout: string; stderr: string } {
+  return spawnSync("sh", ["-c", command], { cwd: s.repo, env: env(s), encoding: "utf8" });
+}
+
 describe("init, user scope, all agents", () => {
+  // One install that the cases below only read, until the last one removes it.
   let s: Sandbox;
   let statusBefore: string;
+  let first: ReturnType<typeof cli>;
 
   beforeAll(() => {
     expect(existsSync(BIN), "build the CLI first (pnpm build)").toBe(true);
     s = sandbox();
     statusBefore = status(s);
-    cli(s, ["init", "--yes", "--agent", "all"]);
+    first = cli(s, ["init", "--yes", "--agent", "all"]);
+    expect(first.status, first.stderr).toBe(0);
   });
 
   it("writes hook commands that run through sh from a home path with a space", () => {
@@ -170,8 +180,64 @@ describe("init, user scope, all agents", () => {
     }
   });
 
-  it("uninstall restores the starting state", () => {
-    const r = cli(s, ["init", "--uninstall", "--yes"]);
+  it("20. writes one line into each agent's global instruction file", () => {
+    for (const file of [join(s.home, ".claude/CLAUDE.md"), join(s.home, ".codex/AGENTS.md")]) {
+      expect(sectionOf(file)).toEqual(["Before any push, review the change with the openqodex skill."]);
+    }
+  });
+
+  it("20. ends by naming what it wrote for you, with the undo, and for the team, and init --project", () => {
+    const end = first.stdout.slice(first.stdout.lastIndexOf("is installed for"));
+    const mine = end.indexOf("Written for you");
+    const team = end.indexOf("Written for the team");
+    expect(mine).toBeGreaterThan(-1);
+    expect(team).toBeGreaterThan(mine);
+    expect(end.slice(mine, team)).toContain("~/.claude/skills/openqodex/SKILL.md");
+    // The home path holds a space, so the launcher is written in single quotes.
+    expect(end.slice(mine, team)).toContain(`'${join(s.oqHome, "bin/openqodex")}' init --uninstall`);
+    expect(end.slice(team)).toContain(".openqodex/config.yaml");
+    expect(end.slice(team)).toContain("CLAUDE.md");
+    expect(end).toContain("init --project");
+    // 25. --project moves the agent files only: the scanners and init's own
+    // record stay on this machine, and the line must not say otherwise.
+    expect(end).not.toMatch(/keep everything inside/i);
+    expect(end).toMatch(/init --project[^\n]*~\/\.openqodex/);
+  });
+
+  it("13. --yes adds the pre-push hook; a second run without --yes asks nothing and changes nothing", () => {
+    expect(readFileSync(join(s.repo, ".git/hooks/pre-push"), "utf8")).toContain(join(s.oqHome, "bin/openqodex"));
+    expect(first.stdout).toContain("Every push from this repo is now checked for a review");
+    const before = snapshot(s);
+    // No terminal and no --yes: a run that had to ask or write would exit 2.
+    const second = cli(s, ["init", "--agent", "all"]);
+    expect(second.status, second.stderr).toBe(0);
+    expect(second.stdout).toContain("Nothing to change");
+    expect(second.stdout).not.toContain("pre-push hook: not asked");
+    expect(snapshot(s)).toEqual(before);
+  });
+
+  it("21. the next review init prints runs from a shell with no openqodex on PATH", () => {
+    const next = /^Next: .* or run (.+)$/m.exec(first.stdout)?.[1];
+    expect(next, first.stdout).toBeDefined();
+    // In a repository of its own: the review writes its folder there, which
+    // the uninstall below would leave in this one.
+    const other = { ...s, repo: join(s.root, "other repo") };
+    mkdirSync(other.repo);
+    git(other.repo, "init", "-q", "-b", "main");
+    expect(paste(other, "command -v openqodex").status).not.toBe(0);
+    // What fails is the program name. The flags keep the test from
+    // downloading scanners.
+    const review = paste(other, `${next!} --no-install --offline`);
+    expect(review.status, review.stderr).not.toBe(127);
+    expect(review.stderr).not.toMatch(/not found/);
+  });
+
+  // Last: it removes the install the cases above read.
+  it("21. the undo init prints runs as pasted, and restores the starting state", () => {
+    const undo = /To undo: (.+)$/m.exec(first.stdout)?.[1];
+    expect(undo, first.stdout).toBeDefined();
+    // --yes stands in for the answer in a terminal.
+    const r = paste(s, `${undo!} --yes`);
     expect(r.status, r.stderr).toBe(0);
     expect(status(s)).toBe(statusBefore);
     expect(readFileSync(join(s.repo, ".git/info/exclude"), "utf8")).not.toContain("openqodex");
@@ -282,66 +348,40 @@ describe("init, files the developer owns or edited", () => {
     expect(u.stdout).toContain("edited");
   });
 
-  it("17. replaces a copy of the shipped skill (npx skills add, this or an earlier version) with the stub and records it", () => {
-    const shipped = readFileSync(join(BIN, "..", "..", "skills/openqodex/SKILL.md"), "utf8");
-    const older = shipped.replace(/openqodex@\d+\.\d+\.\d+/g, "openqodex@0.7.1");
-    expect(older).not.toBe(shipped);
-    for (const copy of [shipped, older]) {
-      const s = sandbox();
-      const skill = join(s.home, ".claude/skills/openqodex/SKILL.md");
-      mkdirSync(join(skill, ".."), { recursive: true });
-      writeFileSync(skill, copy);
-      const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
-      expect(r.status, r.stderr).toBe(0);
-      const now = readFileSync(skill, "utf8");
-      expect(now).toContain("guide skill");
-      expect(now).not.toContain("openqodex@");
-      const record = readJson<{ files: { path: string; sha256: string }[] }>(join(s.oqHome, "install.json"));
-      const sha = createHash("sha256").update(now).digest("hex");
-      expect(record.files).toContainEqual(expect.objectContaining({ path: skill, sha256: sha }));
-    }
-  });
-
-  it("17. keeps a copy of the shipped skill the developer edited", () => {
+  it("17. replaces a copy of the shipped skill (npx skills add) with the stub and records it", () => {
     const shipped = readFileSync(join(BIN, "..", "..", "skills/openqodex/SKILL.md"), "utf8");
     const s = sandbox();
     const skill = join(s.home, ".claude/skills/openqodex/SKILL.md");
     mkdirSync(join(skill, ".."), { recursive: true });
-    const edited = `${shipped}\nCompany rule: also check the changelog.\n`;
-    writeFileSync(skill, edited);
+    writeFileSync(skill, shipped);
     const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
     expect(r.status, r.stderr).toBe(0);
-    expect(readFileSync(skill, "utf8")).toBe(edited);
-    expect(r.stdout).toContain("left alone");
+    const now = readFileSync(skill, "utf8");
+    expect(now).toContain("guide skill");
+    expect(now).not.toContain("openqodex@");
+    const record = readJson<{ files: { path: string; sha256: string }[] }>(join(s.oqHome, "install.json"));
+    const sha = createHash("sha256").update(now).digest("hex");
+    expect(record.files).toContainEqual(expect.objectContaining({ path: skill, sha256: sha }));
   });
 
-  it("17. keeps a shipped copy whose launcher paragraph the developer edited", () => {
+  // Which skill texts init takes for a shipped copy it may replace, and which
+  // for the developer's, kept. The run above proves init asks this question.
+  describe("17 and 28. a shipped copy or the developer's edit", () => {
     const shipped = readFileSync(join(BIN, "..", "..", "skills/openqodex/SKILL.md"), "utf8");
+    const runner = "'/home/dev/.openqodex/bin/openqodex'";
+    const pins = /npx -y openqodex@\d+\.\d+\.\d+/g;
     const paragraph = /^When the file `~\/\.openqodex\/bin\/openqodex` exists[^\n]*/m;
-    expect(shipped).toMatch(paragraph);
-    const edited = shipped.replace(paragraph, (p) => `${p} Company rule: use the launcher in CI too.`);
-    const s = sandbox();
-    const skill = join(s.home, ".claude/skills/openqodex/SKILL.md");
-    mkdirSync(join(skill, ".."), { recursive: true });
-    writeFileSync(skill, edited);
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
-    expect(r.status, r.stderr).toBe(0);
-    expect(readFileSync(skill, "utf8")).toBe(edited);
-    expect(r.stdout).toContain("left alone");
-  });
-
-  it("17. replaces the full skill an earlier init wrote in user scope, with the launcher in place of npx", () => {
-    const shipped = readFileSync(join(BIN, "..", "..", "skills/openqodex/SKILL.md"), "utf8");
-    const s = sandbox();
-    const launcher = `'${join(s.oqHome, "bin/openqodex")}'`;
-    const rendered = shipped.replace(/^When the file `~\/\.openqodex\/bin\/openqodex` exists[^\n]*\n\n/m, "").replace(/npx -y openqodex@\d+\.\d+\.\d+/g, launcher);
-    const skill = join(s.home, ".claude/skills/openqodex/SKILL.md");
-    mkdirSync(join(skill, ".."), { recursive: true });
-    writeFileSync(skill, rendered);
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
-    expect(r.status, r.stderr).toBe(0);
-    expect(readFileSync(skill, "utf8")).toContain("guide skill");
-    expect(readFileSync(skill, "utf8")).not.toBe(rendered);
+    it.each([
+      ["the file as this version shipped it", shipped, true],
+      ["the file as an earlier version shipped it", shipped.replace(/openqodex@\d+\.\d+\.\d+/g, "openqodex@0.7.1"), true],
+      ["the full skill an earlier user-scope init wrote, the launcher in place of npx", shipped.replace(/^When the file `~\/\.openqodex\/bin\/openqodex` exists[^\n]*\n\n/m, "").replace(pins, runner), true],
+      ["a shipped copy the developer added a line to", `${shipped}\nCompany rule: also check the changelog.\n`, false],
+      ["a shipped copy whose launcher paragraph the developer edited", shipped.replace(paragraph, (p) => `${p} Company rule: use the launcher in CI too.`), false],
+      ["a skill that holds a placeholder for the runner literally", shipped.replace(pins, "<runner>"), false],
+      ["a skill that spells out the key's own runner placeholder", shipped.replace(pins, "\u0000runner\u0000"), false],
+    ])("%s: shipped is %s", (_name, text, isShipped) => {
+      expect(isShippedSkill(text, runner)).toBe(isShipped);
+    });
   });
 
   it("does not overwrite or remove a foreign rule file with the same name", () => {
@@ -350,7 +390,9 @@ describe("init, files the developer owns or edited", () => {
     mkdirSync(join(rule, ".."), { recursive: true });
     writeFileSync(rule, "my own rule\n");
     expect(cli(s, ["init", "--yes", "--agent", "cline"]).status).toBe(0);
-    cli(s, ["init", "--uninstall", "--yes"]);
+    expect(readFileSync(rule, "utf8")).toBe("my own rule\n");
+    const un = cli(s, ["init", "--uninstall", "--yes"]);
+    expect(un.status, un.stderr).toBe(0);
     expect(readFileSync(rule, "utf8")).toBe("my own rule\n");
   });
 
@@ -404,19 +446,6 @@ describe("init, files the developer owns or edited", () => {
   });
 });
 
-describe("init, repository symlinks", () => {
-  it("refuses a .cursor/rules folder that links outside the repo", () => {
-    const s = sandbox();
-    const outside = tempDir("oq outside ");
-    mkdirSync(join(s.repo, ".cursor"));
-    symlinkSync(outside, join(s.repo, ".cursor/rules"));
-    const r = cli(s, ["init", "--yes", "--agent", "cursor"]);
-    expect(r.status).toBe(2);
-    expect(readdirSync(outside)).toEqual([]);
-    rmSync(outside, { recursive: true });
-  });
-});
-
 describe("init, project scope", () => {
   it("uses the pinned npx command, and a teammate without a record can uninstall what is unchanged", () => {
     const s = sandbox({ "AGENTS.md": "# Agents\n\nBe nice.\n" });
@@ -441,20 +470,16 @@ describe("init, project scope", () => {
     const agents = join(s.repo, "AGENTS.md");
     const edited = readFileSync(agents, "utf8").replace("## Review with OpenQodex", "## Review with OpenQodex, our way");
     writeFileSync(agents, edited);
-    cli(s, ["init", "--yes", "--project", "--agent", "codex"]);
-    cli(s, ["init", "--uninstall", "--yes", "--project"]);
+    const again = cli(s, ["init", "--yes", "--project", "--agent", "codex"]);
+    expect(again.status, again.stderr).toBe(0);
+    expect(readFileSync(agents, "utf8")).toBe(edited);
+    const un = cli(s, ["init", "--uninstall", "--yes", "--project"]);
+    expect(un.status, un.stderr).toBe(0);
     expect(readFileSync(agents, "utf8")).toBe(edited);
   });
 });
 
 describe("init, writes nothing when it should not", () => {
-  it("--dry-run writes nothing", () => {
-    const s = sandbox();
-    const before = snapshot(s);
-    expect(cli(s, ["init", "--dry-run", "--agent", "all"]).status).toBe(0);
-    expect(snapshot(s)).toEqual(before);
-  });
-
   it("18. without a terminal, an agent or --yes, exits 2, writes nothing, and prints the plan and the flags", () => {
     const s = sandbox();
     const before = snapshot(s);
@@ -486,14 +511,6 @@ const OLD_SECTION = [
 ].join("\n");
 
 describe("20. the global section and what init says it wrote", () => {
-  it("writes one line into each agent's global instruction file", () => {
-    const s = sandbox();
-    expect(cli(s, ["init", "--yes", "--agent", "claude-code", "--agent", "codex"]).status).toBe(0);
-    for (const file of [join(s.home, ".claude/CLAUDE.md"), join(s.home, ".codex/AGENTS.md")]) {
-      expect(sectionOf(file)).toEqual(["Before any push, review the change with the openqodex skill."]);
-    }
-  });
-
   it("replaces the long section an earlier version wrote and recorded", () => {
     const s = sandbox();
     const claudeMd = join(s.home, ".claude/CLAUDE.md");
@@ -505,60 +522,17 @@ describe("20. the global section and what init says it wrote", () => {
     expect(sectionOf(claudeMd)).toHaveLength(1);
     expect(readFileSync(claudeMd, "utf8").startsWith("# Mine\n")).toBe(true);
   });
-
-  it("ends by naming what it wrote for you, with the undo, and for the team, and init --project", () => {
-    const s = sandbox();
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
-    expect(r.status, r.stderr).toBe(0);
-    const end = r.stdout.slice(r.stdout.lastIndexOf("is installed for"));
-    const mine = end.indexOf("Written for you");
-    const team = end.indexOf("Written for the team");
-    expect(mine).toBeGreaterThan(-1);
-    expect(team).toBeGreaterThan(mine);
-    expect(end.slice(mine, team)).toContain("~/.claude/skills/openqodex/SKILL.md");
-    // The home path holds a space, so the launcher is written in single quotes.
-    expect(end.slice(mine, team)).toContain(`'${join(s.oqHome, "bin/openqodex")}' init --uninstall`);
-    expect(end.slice(team)).toContain(".openqodex/config.yaml");
-    expect(end.slice(team)).toContain("CLAUDE.md");
-    expect(end).toContain("init --project");
-    // 25. --project moves the agent files only: the scanners and init's own
-    // record stay on this machine, and the line must not say otherwise.
-    expect(end).not.toMatch(/keep everything inside/i);
-    expect(end).toMatch(/init --project[^\n]*~\/\.openqodex/);
-  });
-});
-
-describe("21. the commands init prints run as pasted", () => {
-  it("the next review and the undo run from a shell with no openqodex on PATH", () => {
-    const s = sandbox();
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
-    expect(r.status, r.stderr).toBe(0);
-    const next = /^Next: .* or run (.+)$/m.exec(r.stdout)?.[1];
-    const undo = /To undo: (.+)$/m.exec(r.stdout)?.[1];
-    expect(next, r.stdout).toBeDefined();
-    expect(undo, r.stdout).toBeDefined();
-    const paste = (command: string) => spawnSync("sh", ["-c", command], { cwd: s.repo, env: env(s), encoding: "utf8" });
-    expect(paste("command -v openqodex").status).not.toBe(0);
-    // What fails is the program name. The flags keep the test from
-    // downloading scanners, and --yes stands in for the answer in a terminal.
-    const review = paste(`${next!} --no-install --offline`);
-    expect(review.status, review.stderr).not.toBe(127);
-    expect(review.stderr).not.toMatch(/not found/);
-    const removed = paste(`${undo!} --yes`);
-    expect(removed.status, removed.stderr).toBe(0);
-    expect(existsSync(join(s.home, ".claude/skills/openqodex/SKILL.md"))).toBe(false);
-  });
 });
 
 describe("19. init with no agent found", () => {
   // Agent detection also sees a real system Cursor installation.
-  it.skipIf(existsSync("/Applications/Cursor.app"))("in a terminal, offers the four agents and installs into the one chosen", () => {
+  it.skipIf(existsSync("/Applications/Cursor.app"))("in a terminal, offers the five agents and installs into the one chosen", () => {
     const s = sandbox();
     // Space ticks the first agent, Claude Code; clack redraws that line only.
     const r = inTerminal(s, ["init"], [["Space: select", " "], ["◼ Claude Code", "\r"], ["Write these files?", "\r"]]);
     expect(r.stdout).toContain("No coding agent found on this machine");
     expect(r.status, r.stdout).toBe(0);
-    for (const name of ["Claude Code", "Cursor", "Codex CLI", "Cline"]) expect(r.stdout).toContain(name);
+    for (const name of ["Claude Code", "Cursor", "Codex CLI", "Cline", "Goose"]) expect(r.stdout).toContain(name);
     // No other question than the chooser and the one confirmation.
     expect(promptsAsked(r.stdout).filter((p) => p !== "Write these files?" && !p.startsWith("No coding agent found"))).toEqual([]);
     expect(existsSync(join(s.home, ".claude/skills/openqodex/SKILL.md"))).toBe(true);
@@ -570,7 +544,7 @@ describe("19. init with no agent found", () => {
     const before = snapshot(s);
     const r = cli(s, ["init", "--yes"]);
     expect(r.status).toBe(2);
-    for (const agent of ["claude-code", "cursor", "codex", "cline", "all"]) expect(r.stderr).toContain(`--agent ${agent}`);
+    for (const agent of ["claude-code", "cursor", "codex", "cline", "goose", "all"]) expect(r.stderr).toContain(`--agent ${agent}`);
     expect(snapshot(s)).toEqual(before);
   });
 });
@@ -585,10 +559,12 @@ describe("18. init asks once", () => {
     expect(readFileSync(join(s.repo, "CLAUDE.md"), "utf8")).toContain(SECTION_START);
   });
 
-  it("the plan puts every file under 'For you' or 'For the team' and names the two opt-outs", () => {
+  it("11 and 18. --dry-run for every agent writes nothing, puts every file under 'For you' or 'For the team' and names the two opt-outs", () => {
     const s = sandbox();
-    const r = cli(s, ["init", "--dry-run", "--agent", "claude-code"]);
+    const before = snapshot(s);
+    const r = cli(s, ["init", "--dry-run", "--agent", "all"]);
     expect(r.status, r.stderr).toBe(0);
+    expect(snapshot(s)).toEqual(before);
     const mine = r.stdout.indexOf("For you");
     const team = r.stdout.indexOf("For the team");
     expect(mine).toBeGreaterThan(-1);
@@ -628,15 +604,6 @@ function lockTools(s: Sandbox): void {
 }
 
 describe("init, after writing", () => {
-  it("starts the scanner installs this repo wants, one reason line each", () => {
-    const s = sandbox({ "deploy.sh": "#!/bin/sh\necho hi\n" });
-    lockTools(s);
-    const r = cli(s, ["init", "--yes", "--agent", "cursor"]);
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toContain("Downloading the scanners this repo needs in the background:\n");
-    expect(r.stdout).toContain("\n  shellcheck: shell scripts, such as deploy.sh\n");
-  });
-
   it("downloads what the repo's files and config call for, says why, and --dry-run downloads nothing (29)", () => {
     const s = sandbox({
       "package.json": JSON.stringify({ dependencies: { expo: "~52.0.0", react: "18.3.1", "react-native": "0.76.0" } }),
@@ -660,12 +627,14 @@ describe("init, after writing", () => {
     expect(existsSync(join(s.oqHome, "tools"))).toBe(false);
   });
 
-  it("22. picks the downloads from tracked and untracked files alike, and leaves out a scanner the config switches off", () => {
+  it("22. picks the downloads from tracked and untracked files alike, names why for each, and leaves out a scanner the config switches off", () => {
     const s = sandbox({ "deploy.sh": "#!/bin/sh\necho hi\n", ".openqodex/config.yaml": "scanners:\n  disable: [gitleaks]\n" });
     writeFileSync(join(s.repo, "app.py"), "print('hi')\n");
     lockTools(s);
     const r = cli(s, ["init", "--yes", "--agent", "cursor"]);
     expect(r.status, r.stderr).toBe(0);
+    // One reason line per scanner.
+    expect(r.stdout).toContain("\n  shellcheck: shell scripts, such as deploy.sh\n");
     const lines = r.stdout.split("\n");
     const at = lines.indexOf("Downloading the scanners this repo needs in the background:");
     expect(at, r.stdout).toBeGreaterThan(-1);
@@ -681,29 +650,6 @@ describe("init, after writing", () => {
 const SECTION_START = "<!-- openqodex:start -->";
 
 describe("init, the hook question and the instruction section", () => {
-  it("--yes adds the pre-push hook; a second run without --yes asks nothing and changes nothing", () => {
-    const s = sandbox();
-    const first = cli(s, ["init", "--yes", "--agent", "all"]);
-    expect(first.status, first.stderr).toBe(0);
-    expect(readFileSync(join(s.repo, ".git/hooks/pre-push"), "utf8")).toContain(join(s.oqHome, "bin/openqodex"));
-    expect(first.stdout).toContain("Every push from this repo is now checked for a review");
-    const before = snapshot(s);
-    // No terminal and no --yes: a run that had to ask or write would exit 2.
-    const second = cli(s, ["init", "--agent", "all"]);
-    expect(second.status, second.stderr).toBe(0);
-    expect(second.stdout).toContain("Nothing to change");
-    expect(second.stdout).not.toContain("pre-push hook: not asked");
-    expect(snapshot(s)).toEqual(before);
-  });
-
-  it("--hook none writes no hook, and a later --yes run keeps that answer", () => {
-    const s = sandbox();
-    expect(cli(s, ["init", "--yes", "--hook", "none", "--agent", "claude-code"]).status).toBe(0);
-    expect(existsSync(join(s.repo, ".git/hooks/pre-push"))).toBe(false);
-    expect(cli(s, ["init", "--yes", "--agent", "claude-code"]).status).toBe(0);
-    expect(existsSync(join(s.repo, ".git/hooks/pre-push"))).toBe(false);
-  });
-
   it("24. with a pre-push hook it did not write, or husky, does not say every push is checked, and says what to add", () => {
     const foreign = sandbox();
     writeFileSync(join(foreign.repo, ".git/hooks/pre-push"), "#!/bin/sh\necho mine\n");
@@ -819,18 +765,6 @@ describe("16. init, custom agent homes", () => {
     expect(readFileSync(join(outside, "settings.json"), "utf8")).toBe("{}\n");
   });
 
-  it("26. a folder link the repository holds is refused on the way to an agent folder named from outside it", () => {
-    const s = sandbox();
-    const outside = join(s.root, "outside");
-    mkdirSync(outside);
-    // The developer's own link, outside the repo, into a folder the repo holds as a link.
-    symlinkSync(outside, join(s.repo, "cfg"));
-    symlinkSync(join(s.repo, "cfg"), join(s.root, "via"));
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code"], { env: { CLAUDE_CONFIG_DIR: join(s.root, "via") } });
-    expect(r.status).toBe(2);
-    expect(readdirSync(outside)).toEqual([]);
-  });
-
   it("26. a link the repository swaps in after the plan is shown is refused at the write", () => {
     const s = sandbox();
     const outside = join(s.root, "outside");
@@ -850,52 +784,12 @@ describe("27. a write decides from where the path really lands, not from its spe
     return cli(s, ["init", "--yes", "--agent", "claude-code"], { env: { CLAUDE_CONFIG_DIR: config } });
   }
 
-  it("a parent folder link in the repository that points outside is refused", () => {
-    const s = sandbox();
-    const outside = join(s.root, "outside");
-    mkdirSync(outside);
-    symlinkSync(outside, join(s.repo, ".claude"));
-    expect(initWith(s, join(s.repo, ".claude")).status).toBe(2);
-    expect(readdirSync(outside)).toEqual([]);
-  });
-
-  it("a work-tree name that starts with two dots is inside the repository: its link is refused", () => {
-    const s = sandbox();
-    const outside = join(s.root, "outside");
-    mkdirSync(outside);
-    symlinkSync(outside, join(s.repo, "..cfg"));
-    expect(initWith(s, `${s.repo}/..cfg`).status).toBe(2);
-    expect(readdirSync(outside)).toEqual([]);
-  });
-
-  it("a .. after a link the repository holds is taken after the link, as the system takes it", () => {
-    const s = sandbox();
-    const outside = join(s.root, "outside");
-    mkdirSync(join(outside, "deep"), { recursive: true });
-    symlinkSync(join(outside, "deep"), join(s.repo, "lnk"));
-    // Spelled, this is the repo's own "evil"; the system lands in outside/evil.
-    expect(initWith(s, `${s.repo}/lnk/../evil`).status).toBe(2);
-    expect(readdirSync(outside)).toEqual(["deep"]);
-  });
-
   it("a path whose . and .. segments resolve inside the home folder is written there", () => {
     const s = sandbox();
     mkdirSync(join(s.home, "x"));
     const r = initWith(s, `${s.home}/./x/../.claude`);
     expect(r.status, r.stderr).toBe(0);
     expect(existsSync(join(s.home, ".claude/skills/openqodex/SKILL.md"))).toBe(true);
-  });
-
-  it("a path whose .. segments resolve outside every folder init may write is refused", () => {
-    const s = sandbox();
-    const outside = join(s.root, "outside");
-    mkdirSync(outside);
-    writeFileSync(join(outside, "settings.json"), "{}\n");
-    mkdirSync(join(s.home, ".claude"));
-    // From ~/.claude, ../../outside is the sandbox's outside folder.
-    symlinkSync("../../outside/settings.json", join(s.home, ".claude/settings.json"));
-    expect(initWith(s, join(s.home, ".claude")).status).toBe(2);
-    expect(readFileSync(join(outside, "settings.json"), "utf8")).toBe("{}\n");
   });
 
   it("a folder spelled with a doubled separator, a ./ and a trailing slash is the same folder, and a second run changes nothing", () => {
@@ -917,17 +811,6 @@ describe("27. a write decides from where the path really lands, not from its spe
     expect(existsSync(join(s.root, "agent config/skills/openqodex/SKILL.md"))).toBe(true);
   });
 
-  it("a sibling of the home folder that shares its name prefix is outside it: a settings link there is refused", () => {
-    const s = sandbox();
-    const sibling = `${s.home}2`;
-    mkdirSync(sibling);
-    writeFileSync(join(sibling, "settings.json"), "{}\n");
-    mkdirSync(join(s.home, ".claude"));
-    symlinkSync(join(sibling, "settings.json"), join(s.home, ".claude/settings.json"));
-    expect(initWith(s, join(s.home, ".claude")).status).toBe(2);
-    expect(readFileSync(join(sibling, "settings.json"), "utf8")).toBe("{}\n");
-  });
-
   it("the repository spelled in another case keeps the repository's rule on a volume that folds case, and is another folder on one that keeps it", () => {
     const s = sandbox();
     const outside = join(s.root, "outside");
@@ -936,6 +819,123 @@ describe("27. a write decides from where the path really lands, not from its spe
     const flipped = join(s.root, "THE REPO");
     const folds = sameFolder(s.repo, flipped);
     expectSpelling(initWith(s, join(flipped, ".claude")), folds, join(flipped, ".claude"), join(s.repo, ".claude"), outside);
+  });
+});
+
+// The write guard every file init writes goes through (src/agents/plan.ts),
+// built with the folders init builds it with (src/commands/init.ts): the
+// repository, its git folders, the home folder, the agents' folders and
+// OpenQodex's home. The case "26. an agent folder inside the repository"
+// above proves init's writes go through it and checks the reason it gives.
+// Each row: a sandbox with a link, the file init would write, and the folder
+// outside, which must hold afterwards what it held before.
+describe("9, 26, 27 and 28. the write guard refuses a write through a repository link or outside every folder init writes", () => {
+  type Row = { repo?: string; config?: string; target: string; outside: string };
+  const outsideOf = (s: Sandbox): string => {
+    const outside = join(s.root, "outside");
+    mkdirSync(outside, { recursive: true });
+    return outside;
+  };
+  // Spelled as given, not joined: a join would fold the .. before the link.
+  const skillIn = (config: string): string => `${config}/skills/openqodex/SKILL.md`;
+  const rows: [string, (s: Sandbox) => Row][] = [
+    [
+      "9. a .cursor/rules folder that links outside the repo",
+      (s) => {
+        const outside = outsideOf(s);
+        mkdirSync(join(s.repo, ".cursor"));
+        symlinkSync(outside, join(s.repo, ".cursor/rules"));
+        return { target: join(s.repo, ".cursor/rules/openqodex.mdc"), outside };
+      },
+    ],
+    [
+      "26. a folder link the repository holds, on the way to an agent folder named from outside it",
+      (s) => {
+        const outside = outsideOf(s);
+        // The developer's own link, outside the repo, into a folder the repo holds as a link.
+        symlinkSync(outside, join(s.repo, "cfg"));
+        symlinkSync(join(s.repo, "cfg"), join(s.root, "via"));
+        return { config: join(s.root, "via"), target: skillIn(join(s.root, "via")), outside };
+      },
+    ],
+    [
+      "27. a parent folder link in the repository that points outside",
+      (s) => {
+        const outside = outsideOf(s);
+        symlinkSync(outside, join(s.repo, ".claude"));
+        return { config: join(s.repo, ".claude"), target: skillIn(join(s.repo, ".claude")), outside };
+      },
+    ],
+    [
+      "27. a work-tree name that starts with two dots is inside the repository",
+      (s) => {
+        const outside = outsideOf(s);
+        symlinkSync(outside, join(s.repo, "..cfg"));
+        return { config: `${s.repo}/..cfg`, target: skillIn(`${s.repo}/..cfg`), outside };
+      },
+    ],
+    [
+      "27. a .. after a link the repository holds is taken after the link, as the system takes it",
+      (s) => {
+        const outside = outsideOf(s);
+        mkdirSync(join(outside, "deep"));
+        symlinkSync(join(outside, "deep"), join(s.repo, "lnk"));
+        // Spelled, this is the repo's own "evil"; the system lands in outside/evil.
+        return { config: `${s.repo}/lnk/../evil`, target: skillIn(`${s.repo}/lnk/../evil`), outside };
+      },
+    ],
+    [
+      "27. a settings link whose .. segments resolve outside every folder init may write",
+      (s) => {
+        const outside = outsideOf(s);
+        writeFileSync(join(outside, "settings.json"), "{}\n");
+        mkdirSync(join(s.home, ".claude"));
+        // From ~/.claude, ../../outside is the sandbox's outside folder.
+        symlinkSync("../../outside/settings.json", join(s.home, ".claude/settings.json"));
+        return { config: join(s.home, ".claude"), target: join(s.home, ".claude/settings.json"), outside };
+      },
+    ],
+    [
+      "27. a settings link into a sibling of the home folder that shares its name prefix",
+      (s) => {
+        const sibling = `${s.home}2`;
+        mkdirSync(sibling);
+        writeFileSync(join(sibling, "settings.json"), "{}\n");
+        mkdirSync(join(s.home, ".claude"));
+        symlinkSync(join(sibling, "settings.json"), join(s.home, ".claude/settings.json"));
+        return { config: join(s.home, ".claude"), target: join(s.home, ".claude/settings.json"), outside: sibling };
+      },
+    ],
+    [
+      "28. a work tree inside its bare repository: the common git folder does not exempt the work tree's links",
+      (s) => {
+        const bare = join(s.root, "repo.git");
+        git(s.root, "clone", "-q", "--bare", s.repo, bare);
+        git(bare, "worktree", "add", "-q", join(bare, "main"), "main");
+        const work = join(bare, "main");
+        const outside = outsideOf(s);
+        symlinkSync(outside, join(work, ".claude"));
+        return { repo: work, config: join(work, ".claude"), target: skillIn(join(work, ".claude")), outside };
+      },
+    ],
+  ];
+  it.each(rows)("%s is refused, and nothing lands outside", async (_name, build) => {
+    const s = sandbox();
+    const row = build(s);
+    const repo = row.repo ?? s.repo;
+    const before = tree(row.outside);
+    const guard = new Guard({ repoRoot: repo, gitFolders: await gitDirs(repo), roots: [s.home, row.config ?? join(s.home, ".claude"), join(s.home, ".codex"), s.oqHome] });
+    expect(() => guard.write(row.target, "written\n")).toThrow();
+    expect(tree(row.outside)).toEqual(before);
+  });
+
+  // The control: built this way, the guard writes where init may, so a row
+  // above passes only for its link.
+  it("a write into the agent folder in the home folder is made", async () => {
+    const s = sandbox();
+    const guard = new Guard({ repoRoot: s.repo, gitFolders: await gitDirs(s.repo), roots: [s.home, join(s.home, ".claude"), join(s.home, ".codex"), s.oqHome] });
+    guard.write(skillIn(join(s.home, ".claude")), "written\n");
+    expect(readFileSync(skillIn(join(s.home, ".claude")), "utf8")).toBe("written\n");
   });
 });
 
@@ -982,20 +982,6 @@ describe("28. writes decide by filesystem identity, through checked handles", ()
     expectSpelling(r, folds, spelled, join(repo, ".claude"), outside);
   });
 
-  it("a work tree inside its bare repository: the common git folder does not exempt the work tree's links", () => {
-    const s = sandbox();
-    const bare = join(s.root, "repo.git");
-    git(s.root, "clone", "-q", "--bare", s.repo, bare);
-    git(bare, "worktree", "add", "-q", join(bare, "main"), "main");
-    const tree = join(bare, "main");
-    const outside = join(s.root, "outside");
-    mkdirSync(outside);
-    symlinkSync(outside, join(tree, ".claude"));
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code"], { cwd: tree, env: { CLAUDE_CONFIG_DIR: join(tree, ".claude") } });
-    expect(r.status).toBe(2);
-    expect(readdirSync(outside)).toEqual([]);
-  });
-
   it("install.json as a link to a file outside: the file outside is not replaced", () => {
     const s = sandbox();
     const outside = join(s.root, "outside");
@@ -1018,7 +1004,9 @@ describe("28. writes decide by filesystem identity, through checked handles", ()
     utimesSync(stale, longAgo, longAgo);
     mkdirSync(s.oqHome, { recursive: true });
     symlinkSync(cache, join(s.oqHome, "runtime"));
-    cli(s, ["init", "--yes", "--agent", "claude-code"]);
+    // The runtime copy cannot be written through the link, so init fails.
+    const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
+    expect(r.status, r.stdout + r.stderr).toBe(2);
     expect(existsSync(join(stale, "package.json"))).toBe(true);
     expect(readdirSync(cache)).toEqual(["0.0.1"]);
   });
@@ -1031,17 +1019,5 @@ describe("28. writes decide by filesystem identity, through checked handles", ()
     expect(r.status, r.stdout).toBe(0);
     expect(promptsAsked(r.stdout)).toContain("Write these files?");
     expect(readFileSync(join(s.oqHome, "install.json"), "utf8")).toBe(record);
-  });
-
-  it("a skill that holds the placeholder text literally is a user edit, kept", () => {
-    const shipped = readFileSync(join(BIN, "..", "..", "skills/openqodex/SKILL.md"), "utf8");
-    const s = sandbox();
-    const skill = join(s.home, ".claude/skills/openqodex/SKILL.md");
-    mkdirSync(join(skill, ".."), { recursive: true });
-    const edited = shipped.replace(/npx -y openqodex@\d+\.\d+\.\d+/g, "<runner>");
-    expect(edited).not.toBe(shipped);
-    writeFileSync(skill, edited);
-    expect(cli(s, ["init", "--yes", "--agent", "claude-code"]).status).toBe(0);
-    expect(readFileSync(skill, "utf8")).toBe(edited);
   });
 });

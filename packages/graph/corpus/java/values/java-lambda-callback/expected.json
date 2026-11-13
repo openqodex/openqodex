@@ -1,0 +1,26 @@
+{
+  "guards": "binds a call inside a Java lambda to the method that encloses the lambda, certain",
+  "callers": [
+    {
+      "to": "src/main/java/lam/Each.java#Each.each",
+      "site": "src/main/java/lam/App.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/lam/Printer.java#Printer.show",
+      "site": "src/main/java/lam/App.java:6",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/main/java/lam/App.java",
+      "line": 6
+    }
+  ],
+  "floor": {
+    "src/main/java/lam/Printer.java#Printer.show": false
+  }
+}

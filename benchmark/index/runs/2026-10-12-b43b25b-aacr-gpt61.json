@@ -7364,6 +7364,7 @@
   "privateListHash": "1ac12abee253eba199197a2ba97a88666a83c18b36f0338b255279710f2cf176",
   "outside": {
     "aacr": {
+      "evidenceHash": "2f99ebbae794278fcdf86ab0efb6b4bf2a29a4a5a30ecc2906004888c3777d89",
       "label": "AACR-Bench's own evaluator on this run's findings: a board output and a diagnostic, never an acceptance metric. Line numbers come from its path, side and line stages; semantic numbers only from a judged evaluation the wrapper ran.",
       "board": {
         "repo": "alibaba/aacr-bench",
@@ -7385,6 +7386,7 @@
       "folders": [
         {
           "config": "model-gpt-6.1-sol-graph-on",
+          "boardConfig": "model-gpt-6.1-sol-graph-on",
           "repeat": 1,
           "tool": "openqodex-model-gpt-6.1-sol-graph-on-r1",
           "metrics": [
@@ -7447,6 +7449,7 @@
         },
         {
           "config": "model-gpt-6.1-sol-graph-on",
+          "boardConfig": "model-gpt-6.1-sol-graph-on",
           "repeat": 2,
           "tool": "openqodex-model-gpt-6.1-sol-graph-on-r2",
           "metrics": [
@@ -7509,6 +7512,7 @@
         },
         {
           "config": "model-gpt-6.1-sol-graph-on",
+          "boardConfig": "model-gpt-6.1-sol-graph-on",
           "repeat": 3,
           "tool": "openqodex-model-gpt-6.1-sol-graph-on-r3",
           "metrics": [
@@ -7575,6 +7579,7 @@
           "repeats": [
             {
               "config": "model-gpt-6.1-sol-graph-on",
+              "boardConfig": "model-gpt-6.1-sol-graph-on",
               "repeat": 1,
               "tool": "openqodex-model-gpt-6.1-sol-graph-on-r1",
               "metrics": [
@@ -7637,6 +7642,7 @@
             },
             {
               "config": "model-gpt-6.1-sol-graph-on",
+              "boardConfig": "model-gpt-6.1-sol-graph-on",
               "repeat": 2,
               "tool": "openqodex-model-gpt-6.1-sol-graph-on-r2",
               "metrics": [
@@ -7699,6 +7705,7 @@
             },
             {
               "config": "model-gpt-6.1-sol-graph-on",
+              "boardConfig": "model-gpt-6.1-sol-graph-on",
               "repeat": 3,
               "tool": "openqodex-model-gpt-6.1-sol-graph-on-r3",
               "metrics": [

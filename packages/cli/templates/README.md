@@ -10,7 +10,7 @@ Each file here is copied or merged by `openqodex init`. Three placeholders are f
 
 `instructions-section.md` is the marked section (between `<!-- openqodex:start -->` and `<!-- openqodex:end -->`) that tells an agent to review with the openqodex skill when a feature or fix is done; OpenQodex starts its own reviewer process. `init` prints it before writing, records it, and `--uninstall` removes exactly that section. It goes into the repo's `CLAUDE.md` and `AGENTS.md` in project scope, and inside the Cursor and Cline rules.
 
-`global-section.md` is the one-line marked section for each agent's global instruction file in user scope (`CLAUDE.md` in Claude Code's folder, `AGENTS.md` in Codex's): "Before any push, review the change with the openqodex skill." The global file is read in every repository, so it holds the trigger only. It replaces the longer section an earlier `init` wrote there while that one is still as recorded.
+`global-section.md` is the one-line marked section for each agent's global instruction file in user scope (`CLAUDE.md` in Claude Code's folder, `AGENTS.md` in Codex's, `.goosehints` in Goose's): "Before any push, review the change with the openqodex skill." The global file is read in every repository, so it holds the trigger only. It replaces the longer section an earlier `init` wrote there while that one is still as recorded.
 
 ## The team section
 
@@ -102,6 +102,24 @@ No template: `src/agents/targets.ts` builds each entry, and `src/agents/mcp.ts` 
 - Skill path conflict: the `skills` CLI table puts Cline skills in `.agents/skills/` and `~/.agents/skills/`; Cline's docs (https://docs.cline.bot/features/skills) list `.cline/skills/`, `.clinerules/skills/`, `.claude/skills/` and `~/.cline/skills/`, and not `.agents/skills/`. Write the path Cline's docs name. That Cline reads `.agents/skills/`: assumption, untested.
 
 - MCP server: https://docs.cline.bot/mcp/configuring-mcp-servers names `~/.cline/data/settings/cline_mcp_settings.json` for the Cline CLI, and no project file. The VS Code extension's file is not documented there, so when Cline is found but `~/.cline/data` is not there, and in project scope, `init` writes nothing for Cline and its plan names the entry to add in Cline's "Configure MCP Servers". The test is `~/.cline/data`, not `~/.cline`: `init` itself makes `~/.cline` for the skill, which would make a second run register the server where the first did not.
+
+## Goose
+
+| What | Template | User scope | Project scope |
+|---|---|---|---|
+| Skill | `skill-stub.md` in user scope, `skills/openqodex/SKILL.md` in project scope | `~/.config/goose/skills/openqodex/SKILL.md` | `.goose/skills/openqodex/SKILL.md` |
+| Instructions | `global-section.md` in user scope, `instructions-section.md` in project scope, between their markers | `~/.config/goose/.goosehints` | `.goosehints` |
+| MCP server | none: a note in the plan with the entry for `extensions` in `~/.config/goose/config.yaml` | none | none |
+
+Read on 2026-11-11. Goose was not installed: none of this was run against Goose.
+
+- Hints: https://goose-docs.ai/docs/guides/using-goosehints. Global hints are `~/.config/goose/.goosehints`; Goose loads `AGENTS.md` and `.goosehints` from the working folder up to the repository root and combines them.
+- Skills: https://goose-docs.ai/docs/guides/context-engineering/using-skills lists `.agents/skills/` and `~/.agents/skills/`, and, for backward compatibility, `.goose/skills/`, `.claude/skills/`, `~/.claude/skills/` and "platform-specific config directories". Goose's source (`crates/goose/src/skills/mod.rs`, `all_skill_dirs_with_config`, main branch) names that folder as `Paths::config_dir().join("skills")`, the `skills` folder inside Goose's config folder (see below).
+- Only paths Goose alone reads: `.agents/skills/` and `AGENTS.md` are written by the Codex and Cursor setups, and the install record keeps no owner per path, so uninstalling one agent would remove a file the other still reads.
+- MCP server: https://goose-docs.ai/docs/getting-started/using-extensions, "Config Entry": an extension under `extensions` in `~/.config/goose/config.yaml` with `name`, `cmd`, `args`, `enabled` and `type: stdio`. `init` edits no YAML file.
+- Hooks: Goose runs hooks from plugins in `~/.agents/plugins/` and `.agents/plugins/` (https://goose-docs.ai/docs/guides/context-engineering/hooks). No Goose hook is written; the plan says so.
+- Config folder: `src/agents/homes.ts` (`gooseHome`) gives it for detection and for every user-scope path. It follows Goose's `Paths::config_dir` (`crates/goose/src/config/paths.rs`, main branch): `$GOOSE_PATH_ROOT/config` when `GOOSE_PATH_ROOT` is an absolute path; else the etcetera crate's XDG strategy, which Goose uses on macOS and Linux (https://docs.rs/etcetera/latest/etcetera/app_strategy/fn.choose_app_strategy.html): `$XDG_CONFIG_HOME/goose` when that is an absolute path, else `~/.config/goose`. That Goose reads its global `.goosehints` from that same folder: from the hints page ("goose looks for each configured filename in both global (`~/.config/goose/`) and local project locations"), assumption, untested, when the folder is moved. Windows is not handled.
+- Detection: the config folder only. A `goose` on `PATH` is often another program (the pressly/goose database migration tool).
 
 ## Placeholders
 

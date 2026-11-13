@@ -55,7 +55,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { AACR_LINE_K, LOCATION_LABEL, NEAR_LINES, lineMatches, names, normPath, normText, originOf, population, ratio, rulesHash, stats, topLevel, value } from "./score.mjs";
 
-export const SCAN_RULES_VERSION = 1;
+// Scan rules version 2 (W8-2): Greptile suite scoring through its board judge, denominator fixed at 50.
+// Merged PR 229: scanner outside advisories are information; legacy untagged findings still count.
+export const SCAN_RULES_VERSION = 2;
 // The one configuration of a scanner-only run.
 export const SCAN_CONFIG = "scan";
 // Finders a spec names that are the reviewer, never a candidate.

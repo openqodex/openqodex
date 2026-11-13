@@ -1,0 +1,34 @@
+{
+  "guards": "binds a call on the declared result of a method called on a typed Java value, and dispatches it to the overrides below that result type",
+  "callers": [
+    {
+      "to": "src/main/java/res/Repo.java#Repo.find",
+      "site": "src/main/java/res/Svc.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/res/Item.java#Item.normalize",
+      "site": "src/main/java/res/Svc.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/res/Special.java#Special.normalize",
+      "site": "src/main/java/res/Svc.java:7",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/main/java/res/Svc.java:7",
+      "candidates": [
+        "src/main/java/res/Special.java#Special.normalize"
+      ]
+    }
+  ],
+  "floor": {
+    "src/main/java/res/Item.java#Item.normalize": false
+  }
+}

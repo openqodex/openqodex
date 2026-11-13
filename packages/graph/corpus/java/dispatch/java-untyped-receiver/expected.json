@@ -1,0 +1,19 @@
+{
+  "guards": "never binds a Java call on a value of unknown type to a repository method of the same name, and floors that method's callers",
+  "notReached": [
+    {
+      "to": "src/main/java/app/Mailer.java#Mailer.send",
+      "site": "src/main/java/app/App.java:9"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/main/java/app/App.java",
+      "line": 9,
+      "cause": "no-receiver-type"
+    }
+  ],
+  "floor": {
+    "src/main/java/app/Mailer.java#Mailer.send": true
+  }
+}

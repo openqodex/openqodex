@@ -52,12 +52,18 @@
 // 12. An accepted entry's board numbers (outside) are edited and the
 //    results page shows them: the pointer records their hash (boardHash),
 //    and acceptedProblems refuses an entry whose board numbers differ.
+// 13. A number tuned on its cases is read as a score: an entry carries the
+//    purpose its run named (tune, score, diagnostic), the group key ends
+//    with it, and `tunedOn: true` marks an older entry whose reviewer was
+//    tuned on the cases it scored, so every generator labels the number.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { benchRoot } from "./cases.mjs";
 import { ISSUE_METRICS } from "./interval.mjs";
 import { canonical, caseSetHash } from "./score.mjs";
+import { outsideProblems } from "./outside-boards.mjs";
+import { PURPOSES } from "./suites.mjs";
 
 export const INDEX_VERSION = 1;
 export const indexRoot = join(benchRoot, "index");
@@ -107,7 +113,8 @@ export function hashFolder(folder, paths = fileList(folder)) {
   return { files: entries.length, listHash: listHash(entries), entries };
 }
 
-// Board output is reproducible from the reviewed run and is not part of its asset.
+// The reviewed-run identity excludes board numbers. Published evidence has
+// its own evidenceHash and is included in the asset's file list.
 export function reviewedBytes(folder, path) {
   const bytes = readFileSync(join(folder, path));
   if (path !== "score.json") return bytes;
@@ -236,6 +243,8 @@ export function buildEntry({ runId, manifest, resumes, score, asset, privateList
     splitHash: manifest.splitHash ?? null,
     // Only when the run named one, so an entry without a subset is the one it was (failure 11).
     ...(manifest.subset && manifest.subset !== "all" ? { subset: manifest.subset } : {}),
+    // Only when the run named one: tune, score or diagnostic (failure 13).
+    ...(manifest.purpose ? { purpose: manifest.purpose } : {}),
     mode: manifest.mode ?? "review",
     path: manifest.path ?? "laptop",
     build: { commit: b.commit ?? null, short: b.short ?? null, cliVersion: b.cliVersion ?? null, dirty: b.dirty ?? null, bundleHash: b.bundleHash ?? b.bundleSha256 ?? null },
@@ -334,6 +343,8 @@ export function entryProblems(e) {
   need(e.split === "dev" || e.split === "test", "split must be dev or test");
   need(e.splitHash === null || HEX64.test(e.splitHash ?? ""), "splitHash must be a sha256 or null");
   need(e.subset === undefined || (typeof e.subset === "string" && e.subset !== "" && e.subset !== "all"), "subset must name the split file's subset the run used, or be absent");
+  need(e.purpose === undefined || PURPOSES.includes(e.purpose), `purpose must be ${PURPOSES.join(", ")}, or absent`);
+  need(e.tunedOn === undefined || e.tunedOn === true, "tunedOn must be true, or absent: the reviewer was tuned on these cases");
   need(e.mode === "review" || e.mode === "scan", "mode must be review or scan");
   need(e.path === "laptop" || e.path === "server", "path must be laptop or server");
   need(e.build && HEX40.test(e.build.commit ?? "") && typeof e.build.short === "string" && e.build.commit.startsWith(e.build.short) && typeof e.build.dirty === "boolean", "build must name the full commit, its short form and whether the tree was dirty");
@@ -351,6 +362,7 @@ export function entryProblems(e) {
     } else headlineProblems(s, `scores.${config}`, e.rulesVersion).forEach((what) => need(false, what));
   }
   need(e.release === null || (typeof e.release === "string" && e.release !== ""), "release must be a version or null");
+  if (e.outside !== undefined) outsideProblems(e.outside).forEach((what) => need(false, what));
   if (e.split === "test") {
     need(typeof e.release === "string" && e.release !== "", "a held-out (test split) entry must name the release it was run for; no held-out case runs outside a release");
     need(e.perCase === null, "a held-out (test split) entry holds aggregates only: perCase must be null, and the per-case detail stays in the asset");
@@ -431,7 +443,7 @@ export function groupKeys(e) {
     const reviewer = scan ? "none" : reviewerOf(config);
     const model = scan ? "none" : (e.reviewers?.[reviewer]?.model ?? "unknown");
     // A subset ends the key only when the run named one (failure 11).
-    const key = [e.suite, e.split, e.splitHash ?? "none", e.mode, e.path, reviewer, model, config, e.rulesVersion ?? "legacy", ...(e.subset ? [e.subset] : [])].join("|");
+    const key = [e.suite, e.split, e.splitHash ?? "none", e.mode, e.path, reviewer, model, config, e.rulesVersion ?? "legacy", ...(e.subset ? [e.subset] : []), ...(e.purpose ? [e.purpose] : [])].join("|");
     return { key, config, reviewer, model };
   });
 }

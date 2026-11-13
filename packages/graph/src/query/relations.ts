@@ -9,6 +9,7 @@
 // produce is a capability boundary, never an empty success. Each is a job
 // (answer.ts) that checks the question's budget at every element it
 // touches and goes on where the budget stopped it.
+import { LineSet } from "@openqodex/core";
 import { detectImpact, toImpactUnknown } from "../impact.js";
 import type { Tier } from "../model/records.js";
 import { weakest } from "../model/records.js";
@@ -410,7 +411,7 @@ export function impact(s: Session, req: Request, extra: Extra): Job | Answer {
       const n = point.outcome(s, "impact");
       if (isAnswer(n)) return n;
       target = candidate(g, n, 1);
-      change = { files: [{ path: n.file, status: "modified", oldPath: null, binary: false }], coverage: new Map([[n.file, new Set([n.startLine])]]) };
+      change = { files: [{ path: n.file, status: "modified", oldPath: null, binary: false }], coverage: new Map([[n.file, new LineSet().add(n.startLine)]]) };
     }
     if (spent(budget)) return stoppedAt(base, [], [], null);
     const sum = detectImpact(g, change as NonNullable<typeof change>);

@@ -1,7 +1,8 @@
 // Ways the call resolution could fail, per language, each checked below on a
 // small real repo whose callers are known by hand:
 // 1. A call through an import alias (`import { target as t }`, `require`,
-//    `from x import target as t`, a Go package alias) is missed.
+//    `from x import target as t`, a Go package alias) is missed. Java has no
+//    import alias: its case is a static import and an explicit type import.
 // 2. A method call on a receiver whose type a constructor or an annotation
 //    gives is missed.
 // 3. A same-named function in another file is taken for the target (a name
@@ -155,6 +156,59 @@ describe("go", () => {
     expect(callSites(g, symbol(g, "store/store.go", "Target", "Svc"))).toEqual([at(files, "cmd/main.go", "LITERAL"), at(files, "cmd/main.go", "PARAM")].sort());
     expect(callSites(g, symbol(g, "store/helper.go", "Helper"))).toEqual([at(files, "store/store.go", "SAMEPKG")]);
     expect(callSites(g, symbol(g, "other/other.go", "Target"))).toEqual([at(files, "other/other.go", "OWN")]);
+  });
+});
+
+describe("java", () => {
+  const files = {
+    "pom.xml": "<project><groupId>a</groupId><artifactId>m</artifactId></project>\n",
+    "src/main/java/a/store/Store.java": [
+      "package a.store;",
+      "",
+      "public class Store {",
+      "  public static int target() { return Helper.help(); } // SAMEPKG",
+      "  public int find(String id) { return 1; }",
+      "}",
+    ].join("\n"),
+    "src/main/java/a/store/Helper.java": ["package a.store;", "", "public class Helper {", "  public static int help() { return 2; }", "}"].join("\n"),
+    "src/main/java/a/app/Main.java": [
+      "package a.app;",
+      "",
+      "import static a.store.Store.target;",
+      "import a.store.Store;",
+      "",
+      "public class Main {",
+      "  void run(Store p) {",
+      "    target(); // STATIC",
+      "    Store.target(); // TYPE",
+      "    var v = new Store();",
+      "    v.find(\"x\"); // CTOR",
+      "    p.find(\"y\"); p.find(\"z\"); // PARAM",
+      "    apply(x -> x.find(\"w\")); // UNTYPED",
+      "  }",
+      "",
+      "  void apply(Object f) {}",
+      "}",
+    ].join("\n"),
+    "src/main/java/a/other/Other.java": [
+      "package a.other;",
+      "",
+      "public class Other {",
+      "  public static int target() { return 3; }",
+      "  public int find(String id) { return 4; }",
+      "  int own() { return target(); } // OWN",
+      "}",
+    ].join("\n"),
+  };
+
+  it("binds a static import, an explicit type import, a same-package type, a constructed and a parameter receiver, two sites on one line; never a same-named method elsewhere or an untyped receiver", async () => {
+    const g = await graphOf(files);
+    const main = "src/main/java/a/app/Main.java";
+    expect(callSites(g, symbol(g, "src/main/java/a/store/Store.java", "target", "Store"))).toEqual([at(files, main, "STATIC"), at(files, main, "TYPE")].sort());
+    expect(callSites(g, symbol(g, "src/main/java/a/store/Store.java", "find", "Store"))).toEqual([at(files, main, "CTOR"), at(files, main, "PARAM"), at(files, main, "PARAM")].sort());
+    expect(callSites(g, symbol(g, "src/main/java/a/store/Helper.java", "help", "Helper"))).toEqual([at(files, "src/main/java/a/store/Store.java", "SAMEPKG")]);
+    expect(callSites(g, symbol(g, "src/main/java/a/other/Other.java", "target", "Other"))).toEqual([at(files, "src/main/java/a/other/Other.java", "OWN")]);
+    expect(callSites(g, symbol(g, "src/main/java/a/other/Other.java", "find", "Other"))).toEqual([]);
   });
 });
 

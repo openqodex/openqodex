@@ -1,0 +1,20 @@
+{
+  "guards": "binds super.m() in a Java override to the superclass member, never to the override itself",
+  "callers": [
+    {
+      "to": "src/main/java/s/Base.java#Base.run",
+      "site": "src/main/java/s/Child.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/s/Child.java#Child.run",
+      "site": "src/main/java/s/Child.java:5"
+    }
+  ],
+  "floor": {
+    "src/main/java/s/Base.java#Base.run": false
+  }
+}

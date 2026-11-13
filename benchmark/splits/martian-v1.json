@@ -88,5 +88,516 @@
   "counts": {
     "dev": 0,
     "test": 50
+  },
+  "exposure": {
+    "rule": "Recorded for reporting: every Martian case is held out, so exposure moves no case. A Martian run reports its score on every case and on the unexposed ones (reason none) side by side, and Martian is not a clean fallback for Greptile. Reasons: golden-read, the case's golden comments were read on 2026-10-26 (w8-analysis/martian-gap.txt); shares-pr-with-greptile-dossier, the same pull request's Greptile truth was read in a dossier the same day. twin is the Greptile case that is the same pull request.",
+    "cases": {
+      "ai-code-review-evaluation__discourse-graphite-1": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-10": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-2": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-3": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-4": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-5": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-6": {
+        "reasons": [
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-7": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-8": {
+        "reasons": [
+          "golden-read",
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__discourse-graphite-9": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1",
+        "by": [
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__keycloak-greptile-1": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96",
+        "by": [
+          "pr",
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__sentry-greptile-1": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd",
+        "by": [
+          "pr",
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__sentry-greptile-2": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c",
+        "by": [
+          "pr",
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__sentry-greptile-3": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c",
+        "by": [
+          "pr",
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "ai-code-review-evaluation__sentry-greptile-5": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0",
+        "by": [
+          "pr",
+          "head",
+          "base",
+          "title"
+        ]
+      },
+      "calcom__cal.com-10600": {
+        "reasons": [
+          "golden-read",
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f",
+        "by": [
+          "base",
+          "title"
+        ]
+      },
+      "calcom__cal.com-10967": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e",
+        "by": [
+          "title"
+        ]
+      },
+      "calcom__cal.com-11059": {
+        "reasons": [
+          "golden-read",
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7",
+        "by": [
+          "base",
+          "title"
+        ]
+      },
+      "calcom__cal.com-14740": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b",
+        "by": [
+          "base",
+          "title"
+        ]
+      },
+      "calcom__cal.com-14943": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f",
+        "by": [
+          "base",
+          "title"
+        ]
+      },
+      "calcom__cal.com-22345": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf",
+        "by": [
+          "title"
+        ]
+      },
+      "calcom__cal.com-22532": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938",
+        "by": [
+          "title"
+        ]
+      },
+      "calcom__cal.com-7232": {
+        "reasons": [
+          "golden-read",
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac",
+        "by": [
+          "title"
+        ]
+      },
+      "calcom__cal.com-8087": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226",
+        "by": [
+          "title"
+        ]
+      },
+      "calcom__cal.com-8330": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde",
+        "by": [
+          "title"
+        ]
+      },
+      "getsentry__sentry-67876": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d",
+        "by": [
+          "title"
+        ]
+      },
+      "getsentry__sentry-77754": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c",
+        "by": [
+          "title"
+        ]
+      },
+      "getsentry__sentry-80168": {
+        "reasons": [
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273",
+        "by": [
+          "title"
+        ]
+      },
+      "getsentry__sentry-80528": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca",
+        "by": [
+          "title"
+        ]
+      },
+      "getsentry__sentry-93824": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664",
+        "by": [
+          "title"
+        ]
+      },
+      "getsentry__sentry-95633": {
+        "reasons": [
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-103633": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-106778": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-107534": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-76186": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-79265": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-80329": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-90045": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-90939": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a",
+        "by": [
+          "title"
+        ]
+      },
+      "grafana__grafana-94942": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12",
+        "by": [
+          "base",
+          "title"
+        ]
+      },
+      "grafana__grafana-97529": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b",
+        "by": [
+          "base",
+          "title"
+        ]
+      },
+      "keycloak__keycloak-32918": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d",
+        "by": [
+          "title"
+        ]
+      },
+      "keycloak__keycloak-33832": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f",
+        "by": [
+          "base",
+          "title"
+        ]
+      },
+      "keycloak__keycloak-36880": {
+        "reasons": [
+          "golden-read",
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf",
+        "by": [
+          "title"
+        ]
+      },
+      "keycloak__keycloak-36882": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a",
+        "by": [
+          "title"
+        ]
+      },
+      "keycloak__keycloak-37038": {
+        "reasons": [
+          "none"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81",
+        "by": [
+          "title"
+        ]
+      },
+      "keycloak__keycloak-37429": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b",
+        "by": [
+          "title"
+        ]
+      },
+      "keycloak__keycloak-37634": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5",
+        "by": [
+          "title"
+        ]
+      },
+      "keycloak__keycloak-38446": {
+        "reasons": [
+          "golden-read"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b",
+        "by": [
+          "title"
+        ]
+      },
+      "keycloak__keycloak-40940": {
+        "reasons": [
+          "shares-pr-with-greptile-dossier"
+        ],
+        "twin": "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9",
+        "by": [
+          "title"
+        ]
+      }
+    },
+    "counts": {
+      "exposed": 26,
+      "unexposed": 24,
+      "byReason": {
+        "golden-read": 22,
+        "none": 24,
+        "shares-pr-with-greptile-dossier": 9
+      }
+    }
   }
 }

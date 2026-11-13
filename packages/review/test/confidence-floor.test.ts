@@ -8,6 +8,7 @@
 //  2. A server floor reaches the brief but not the check, or the other way.
 //  3. A server floor below a lens's floor lowers that lens's floor.
 //  4. A floor below 0.7 is clamped back to 0.7.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, buildReviewerBrief, checkSubmission } from "@openqodex/core";
 import type { Change, RunManifest, ScanResult } from "@openqodex/core";
@@ -20,7 +21,7 @@ const change: Change = {
   shortId: "bbbbbbbbbbbb",
   files: [{ path: "src/a.ts", oldPath: null, status: "modified", binary: false }],
   changedPaths: ["src/a.ts"],
-  coverage: new Map([["src/a.ts", new Set([2])]]),
+  coverage: new Map([["src/a.ts", makeLineSet([2])]]),
   deletionPoints: new Map(),
   diff: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -2 +2 @@\n-x\n+y\n",
   notReviewed: [],
@@ -71,33 +72,33 @@ describe("the confidence floor", () => {
   it("1. without a floor, the brief is the one the laptop gets today, with 0.7 in both places", () => {
     const text = brief();
     expect(text).toBe(brief(0.7));
-    expect(text).toContain("6. Raise findings with evidence you can point at, with confidence 0.7 or higher. Anchor each on an added or modified line or a deletion anchor.");
-    expect(text).toContain("- `confidence`: 0 to 1, set honestly. Findings under 0.7, or under a cited lens's floor, are not counted.");
+    expect(text).toContain("Findings under 0.7 are shown as possible issues and never counted.");
+    expect(text).toContain("- `confidence`: 0 to 1, set honestly. Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict.");
   });
 
   it("2. a floor reaches both lines of the brief", () => {
     for (const floor of [0.5, 0.85]) {
       const text = brief(floor);
-      expect(text).toContain(`with confidence ${floor} or higher.`);
-      expect(text).toContain(`Findings under ${floor}, or under a cited lens's floor, are not counted.`);
+      expect(text).toContain(`Findings at ${floor} or higher, and at a cited lens's floor, count toward the verdict.`);
+      expect(text).toContain(floor > 0.5 ? `Findings under ${floor} are shown as possible issues and never counted.` : `Findings under ${floor} are dropped.`);
       expect(text).not.toContain("0.7");
     }
   });
 
   it("2. the check applies the same floor: without one at 0.7, above and below it as given", () => {
     expect(check(0.65).findings).toEqual([]);
-    expect(check(0.65).low_confidence).toEqual([expect.objectContaining({ confidence: 0.65, floor: 0.7 })]);
+    expect(check(0.65).possible).toEqual([expect.objectContaining({ confidence: 0.65 })]);
     expect(check(0.75).findings).toHaveLength(1);
     // 4. a floor below 0.7 is kept as given.
     expect(check(0.65, { floor: 0.5 }).findings).toHaveLength(1);
     expect(check(0.75, { floor: 0.8 }).findings).toEqual([]);
-    expect(check(0.75, { floor: 0.8 }).low_confidence).toEqual([expect.objectContaining({ floor: 0.8 })]);
+    expect(check(0.75, { floor: 0.8 }).possible).toEqual([expect.objectContaining({ confidence: 0.75 })]);
   });
 
   it("3. a lens's higher floor still wins over the server floor", () => {
     const low = check(0.85, { floor: 0.8, lensFloor: 0.9, source: "lens:auth" });
     expect(low.findings).toEqual([]);
-    expect(low.low_confidence).toEqual([expect.objectContaining({ confidence: 0.85, floor: 0.9 })]);
+    expect(low.possible).toEqual([expect.objectContaining({ confidence: 0.85 })]);
     expect(check(0.95, { floor: 0.8, lensFloor: 0.9, source: "lens:auth" }).findings).toHaveLength(1);
     // A lens floor under the server floor does not lower it.
     expect(check(0.75, { floor: 0.8, lensFloor: 0.6, source: "lens:auth" }).findings).toEqual([]);

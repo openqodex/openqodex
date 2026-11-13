@@ -30,12 +30,10 @@
 //    (their evaluator leaves out an instance with no result file): every
 //    planned review's first attempt gets a file, with no comment when it
 //    failed or never started; a retry never replaces it, as in our score.
-// 4. A case whose licence nobody verified is converted for a board: runs
-//    publish these cases in full (Sid, 2026-10-12), but board conversion
-//    still refuses them. Every case's
-//    licence record goes through lib/licence.mjs, licenceExclusion (a class
-//    no run uses) and publishRefusal (a class board submissions refuse), and
-//    one refused case refuses the whole run.
+// 4. A case with an excluded licence class is converted: every case's
+//    licence record goes through lib/licence.mjs, licenceExclusion, and
+//    one excluded case refuses the whole run. Unverified cases convert
+//    for local judging; board submissions still apply publishRefusal.
 // 5. Our line count differs from AACR's on the same reports: each comment
 //    carries the path and the range our scorer reads (paths normalised, the
 //    range [line_number, max(line_end, line_number)]), and the dataset step
@@ -57,10 +55,11 @@ import { fileURLToPath } from "node:url";
 import { AACR_BOARD, AACR_K, AACR_READER, boardFolder, instanceIdOf, isTestGap, readAacrOutside, toolName } from "../../lib/aacr-board.mjs";
 import { parseCaseId } from "../../lib/cases.mjs";
 import { benchCache } from "../../lib/board-files.mjs";
-import { cacheRoot, licenceExclusion, publishRefusal } from "../../lib/licence.mjs";
-import { normPath, population, shownFindings } from "../../lib/score.mjs";
+import { cacheRoot, licenceExclusion } from "../../lib/licence.mjs";
+import { normPath, reviewPopulation, shownFindings } from "../../lib/score.mjs";
 import { checkPinned, rawPath, readSuite } from "../../lib/suites.mjs";
 import { loadRun } from "../../score.mjs";
+import { nativeReviewBody } from "../../lib/claude-control.mjs";
 
 export { benchCache, instanceIdOf, isTestGap, readAacrOutside };
 
@@ -81,8 +80,8 @@ export function commentOf(f) {
   return { path: normPath(f.file_path), start_line: start, end_line: end, content: parts.length > 0 ? parts.join("\n") : "A finding with no text.", tier: f.tier ?? "finding" };
 }
 
-// What happened to a planned review's first attempt, as our scorer reads it.
-const statusOf = (first) => (first === null ? "unstarted" : first.report === null ? "failed" : first.report.completion?.status === "complete" ? "complete" : "incomplete");
+// What happened to a planned review's first attempt, as our scorer reads it; an unhealthy one failed.
+const statusOf = (job) => (job.first === null ? "unstarted" : !job.health.ok ? "failed" : nativeReviewBody(job.first.row) !== null ? job.first.row.status : job.first.report === null ? "failed" : job.first.report.completion?.status === "complete" ? "complete" : "incomplete");
 
 /**
  * Converts the run in `folder`: writes <folder>/outside/aacr/ and returns
@@ -95,6 +94,7 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
   const manifest = existsSync(join(folder, "manifest.json")) ? readJson(join(folder, "manifest.json")) : null;
   if (!manifest) throw new Error(`${folder} has no manifest.json; it is not a benchmark run`);
   const suite = manifest.suite ?? "planted";
+  if (suite === "greptile") throw new Error("Greptile uses benchmark/outside/boards/greptile-run.mjs, with caught or missed per case against the chosen truth set");
   if (suite !== "aacr") throw new Error(`${folder}: the run is of suite ${suite}, not aacr; only an AACR-Bench run is converted for its board`);
   if (manifest.mode === "scan") throw new Error(`${folder}: a scanner-only run shows the developer no finding, so it has nothing to convert for the board`);
   const out = boardFolder(folder);
@@ -109,15 +109,15 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
       continue;
     }
     const record = spec.source?.licence ?? null;
-    const why = record === null ? "its truth copy holds no licence record" : (licenceExclusion(record) ?? publishRefusal([{ name, licence: record.class }]));
-    if (why !== null) problems.push(`${name}: ${why}; a case whose licence is not verified is never converted for a board`);
+    const why = record === null ? "its truth copy holds no licence record" : licenceExclusion(record);
+    if (why !== null) problems.push(`${name}: ${why}`);
     if (spec.split === "test" || heldOut.has(name)) problems.push(`${name}: held out (the test split); a held-out case is never converted or exported before a release`);
   }
   for (const a of run.attempts) if (parseCaseId(run.specs[a.case]?.id)?.suite !== "aacr") problems.push(`samples/${a.case}/${a.config}: a sample of ${a.case}, which is not an AACR-Bench case`);
   if (problems.length > 0) throw new Error(`${folder} is not converted for AACR-Bench:\n${[...new Set(problems)].join("\n")}`);
 
   // The population our scorer counts: each planned review by its first attempt.
-  const pop = population(manifest, run.attempts);
+  const pop = reviewPopulation(manifest, run.attempts);
   if (pop.problems.length > 0) throw new Error(`${folder}: the run's samples do not match its plan:\n${pop.problems.join("\n")}`);
   const { jobs } = pop;
   const instances = new Map();
@@ -130,13 +130,21 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
     instances.set(name, { instanceId, caseId: spec.id, case: name, references: bugs.length, left: bugs.filter((b) => b.side === "left").length });
   }
   const files = new Map();
+  const commentCounts = new Map();
   const withoutLine = [];
+  const failures = [];
   // Board-only rule: use the scorer's test-request predicate without changing our score.
   const forBoard = (report) => shownFindings(report).filter((f) => !excludeTestGaps || !isTestGap(f));
   for (const job of jobs) {
     const first = job.first;
-    const shown = forBoard(first?.report ?? null);
-    const comments = shown.map(commentOf);
+    // An unhealthy review sends the judge nothing.
+    const usable = first === null || job.health.ok;
+    const shown = usable ? forBoard(first?.report ?? null) : [];
+    const saved = nativeReviewBody(first?.row);
+    const native = saved !== null && !usable ? "" : saved;
+    const comments = native !== null ? native.trim() ? [{ path: null, start_line: null, end_line: null, content: native }] : [] : shown.map(commentOf);
+    commentCounts.set(job, comments.length);
+    if (native !== null && statusOf(job) === "failed") failures.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, failure: first.row.failure ?? job.health.reason ?? null });
     comments.forEach((c, index) => {
       if (c.start_line === null) withoutLine.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, index });
     });
@@ -146,7 +154,7 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
     files.set(file, {
       review: { comments, summary: { input_tokens: usage?.input_tokens ?? null, output_tokens: usage?.output_tokens ?? null } },
       duration_seconds: typeof first?.row?.wallMs === "number" ? first.row.wallMs / 1000 : null,
-      openqodex: { tool: toolName(job.config, job.repeat), caseId: job.caseId, case: job.case, config: job.config, repeat: job.repeat, attempt: 1, status: statusOf(first), findings: comments.length, observations: comments.filter((c) => c.tier === "observation").length },
+      openqodex: { tool: toolName(job.config, job.repeat), caseId: job.caseId, case: job.case, config: job.config, repeat: job.repeat, attempt: 1, status: statusOf(job), findings: comments.length, observations: comments.filter((c) => c.tier === "observation").length },
     });
   }
   const folders = [...new Set(jobs.map((j) => `${j.config}\0${j.repeat}`))]
@@ -154,8 +162,8 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
       const [config, repeat] = [k.split("\0")[0], Number(k.split("\0")[1])];
       const mine = jobs.filter((j) => j.config === config && j.repeat === repeat);
       const statuses = {};
-      for (const j of mine) statuses[statusOf(j.first)] = (statuses[statusOf(j.first)] ?? 0) + 1;
-      return { config, repeat, tool: toolName(config, repeat), dir: `${config}/r${repeat}`, files: mine.length, comments: mine.reduce((n, j) => n + forBoard(j.first?.report ?? null).length, 0), leftOutTestGaps: mine.reduce((n, j) => n + shownFindings(j.first?.report ?? null).length - forBoard(j.first?.report ?? null).length, 0), statuses };
+      for (const j of mine) statuses[statusOf(j)] = (statuses[statusOf(j)] ?? 0) + 1;
+      return { config, repeat, tool: toolName(config, repeat), dir: `${config}/r${repeat}`, files: mine.length, comments: mine.reduce((n, j) => n + commentCounts.get(j), 0), leftOutTestGaps: mine.reduce((n, j) => n + (j.first === null || j.health.ok ? shownFindings(j.first?.report ?? null).length - forBoard(j.first?.report ?? null).length : 0), 0), statuses };
     })
     .sort((a, b) => (a.config < b.config ? -1 : a.config > b.config ? 1 : a.repeat - b.repeat));
   const all = [...instances.values()];
@@ -177,6 +185,7 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
     folders,
     references: { total, left, share: total === 0 ? 0 : left / total },
     excludeTestGaps,
+    failures,
     leftOutTestGaps: folders.reduce((n, f) => n + f.leftOutTestGaps, 0),
     withoutLine,
   };

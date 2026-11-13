@@ -52,10 +52,42 @@ function scannerLabel(source: string): string {
   return source.startsWith("custom:") ? "custom scanner" : source;
 }
 
+const NOT_LISTED = "failed for a reason not listed";
+
 // A scanner failure as a fixed class: the reason can hold the tool's stderr,
-// so none of its text is kept beyond the class and an exit code.
-export function failureClass(reason: string | null): string {
+// so none of its text is kept beyond the class and an exit code. golangci
+// runs once per Go module and joins the parts of its reason with "; ", after
+// it turns any "; " in tool text into ", ", so each part gets its own class.
+// Any other scanner's reason is one part: its "; " can be tool text.
+export function failureClass(reason: string | null, source = ""): string {
   const r = reason ?? "";
+  const parts = (source === "golangci" ? r.split("; ") : [r]).map(partClass);
+  // The runner keeps 300 characters of a reason. A golangci reason at that
+  // cap ends in a cut part, which names nothing: it is not a reason not listed.
+  if (source === "golangci" && r.length >= 300 && parts.length > 1 && parts[parts.length - 1] === NOT_LISTED) parts.pop();
+  const listed = [...new Set(parts.filter((c) => c !== NOT_LISTED))];
+  if (listed.length === 0) return NOT_LISTED;
+  return parts.includes(NOT_LISTED) ? [...listed, "a reason not listed"].join(", ") : listed.join(", ");
+}
+
+// The fixed text the golangci adapter writes before any tool output, so it
+// is matched first: a type-check message can quote anything.
+const GOLANGCI_CLASSES: [RegExp, string][] = [
+  // A changed Go package did not compile, so no linter read it.
+  [/^[^:]*: could not type-check/, "could not type-check a changed package"],
+  // The time for all Go modules ran out before this one started.
+  [/^timed out before module/, "ran out of time before a Go module"],
+  [/^skipped \d+ module\(s\) past the cap/, "skipped Go modules past the cap"],
+  // Skips: reported only when another part of the run failed.
+  [/^not run on .*\. No go\.mod is at or above/, "a changed Go file was outside any Go module"],
+  [/^not run on .*\. Its dependencies are not in the Go module cache/, "Go dependencies were not downloaded"],
+  // A part left out to keep the reason short.
+  [/^and \d+ more$/, "more reasons left out"],
+];
+
+function partClass(r: string): string {
+  const owned = GOLANGCI_CLASSES.find(([re]) => re.test(r));
+  if (owned) return owned[1];
   const timeout = /timed out after (\d+)\s*s/.exec(r);
   if (timeout) return `timed out after ${timeout[1]} s`;
   const exit = /\bexit (\d+)\b/.exec(r);
@@ -65,12 +97,13 @@ export function failureClass(reason: string | null): string {
     [/more output than the limit/, "printed more output than the limit"],
     [/was killed/, "was killed"],
     [/wrote no report|no report/, "printed no report"],
-    [/^parse:|read report|report too large/, "its report could not be read"],
+    // golangci puts the Go module before its parse error: "backend: parse: ...".
+    [/(^|: )parse:|read report|report too large/, "its report could not be read"],
     [/not a regular file/, "not a regular file"],
     [/outside the repo/, "a file was outside the repo"],
     [/larger than/, "a file was too large to read"],
   ];
-  return classes.find(([re]) => re.test(r))?.[1] ?? "failed for a reason not listed";
+  return classes.find(([re]) => re.test(r))?.[1] ?? NOT_LISTED;
 }
 
 // Called by the scan pipeline once the scanners have run. A scanner that
@@ -83,7 +116,7 @@ export function noteScan(repoRoot: string, scan: ScanResult): void {
   run.pending = {
     code: "scanner-failed",
     component: [...new Set(failed.map((s) => `scanner:${scannerLabel(s.scanner)}`))].join(", "),
-    diagnostic: failed.map((s) => `${scannerLabel(s.scanner)}: ${failureClass(s.reason)}`).join("; "),
+    diagnostic: failed.map((s) => `${scannerLabel(s.scanner)}: ${failureClass(s.reason, s.scanner)}`).join("; "),
   };
 }
 

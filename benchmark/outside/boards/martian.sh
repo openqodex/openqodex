@@ -8,7 +8,7 @@
 #       builds its venv beside it (code-review-benchmark@<commit>.venv) with
 #       uv, Python 3.11 and their uv.lock, so the checkout holds nothing but
 #       the pinned tree; nothing is installed globally.
-#   benchmark/outside/boards/martian.sh <run folder> [--dry-run]
+#   benchmark/outside/boards/martian.sh <run folder> (--wave <id> | --dry-run)
 #       1. converts the run (outside/convert/martian.mjs) into
 #          <run>/outside/martian/, unless it holds a conversion already;
 #          only a release run converts, and the access is logged;
@@ -17,7 +17,9 @@
 #          values hidden, and stops;
 #       3. prepares their checkout and runs their steps 2, 2.5 and 3 and
 #          score_profiles in <run>/outside/martian/work (martian-judge.mjs),
-#          which checks the conversion and the release gate again first;
+#          which checks the conversion and the release gate again first,
+#          and reserves the judging's forecast in the wave named by --wave
+#          (benchmark/lib/wave.mjs);
 #       4. leaves <tool>/evaluation.json per tool name and eval.json.
 #
 # The judge's base URL and key never pass through this script:
@@ -44,10 +46,16 @@ die() {
 dry=0
 prepare_only=0
 run=""
+wave=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --prepare) prepare_only=1 ;;
     --dry-run) dry=1 ;;
+    --wave)
+      [ $# -ge 2 ] || die "--wave needs a wave id"
+      wave=$2
+      shift
+      ;;
     -*) die "unknown option $1" ;;
     *)
       [ -z "$run" ] || die "name one run folder"
@@ -93,7 +101,8 @@ if [ "$prepare_only" = 1 ]; then
   exit 0
 fi
 
-[ -n "$run" ] || die "usage: martian.sh --prepare | martian.sh <run folder> [--dry-run]"
+[ -n "$run" ] || die "usage: martian.sh --prepare | martian.sh <run folder> (--wave <id> | --dry-run)"
+[ "$dry" = 1 ] || [ -n "$wave" ] || die "--wave <id> is required: the judging pays a model (node benchmark/lib/wave.mjs --wave-new <id> starts one)"
 [ -f "$run/manifest.json" ] || die "$run holds no manifest.json; it is not a benchmark run"
 run=$(cd "$run" && pwd)
 out="$run/outside/martian"
@@ -109,4 +118,4 @@ if [ "$dry" = 1 ]; then
 fi
 
 prepare
-exec node "$judge" "$run" --checkout "$offline" --python "$python"
+exec node "$judge" "$run" --checkout "$offline" --python "$python" --wave "$wave"

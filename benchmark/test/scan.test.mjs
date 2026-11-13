@@ -110,7 +110,12 @@ describe("the scan rules are versioned", () => {
   // One hash per scan rules version; a change to any scan rule, or to a
   // review rule the scan score calls, moves the hash and fails this test
   // until SCAN_RULES_VERSION is bumped and the new hash added here.
-  const KNOWN_SCAN_RULES = { 1: "32eb61eedf50150d6adbbbc8af02897f62b56f015c01a32512adc6217215507b" };
+  const KNOWN_SCAN_RULES = {
+    1: "32eb61eedf50150d6adbbbc8af02897f62b56f015c01a32512adc6217215507b",
+    // W8-2: Greptile suite scoring through its board judge, denominator fixed at 50.
+    // PR 229: scanner outside advisories are information; legacy untagged findings still count.
+    2: "3260fdcec7129a5bcdc427285e210475fbb7c83ee16de25e2c9e7888bfad5d86",
+  };
 
   it("pins the hash of the scan rules block, its matching code included, to its version", () => {
     expect(SCAN_RULES.version).toBe(SCAN_RULES_VERSION);

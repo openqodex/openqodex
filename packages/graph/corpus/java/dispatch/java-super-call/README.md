@@ -1,0 +1,1 @@
+Base defines run; Child extends Base, overrides run and calls `super.run()` inside it. The change edits Base.run. A graph that treats super like this binds the call to Child.run, a recursion that does not happen, and reports no caller of Base.run. The call must bind certain to Base.run and never to Child.run.

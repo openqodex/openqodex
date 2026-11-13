@@ -51,7 +51,7 @@ const SUBTRACTION: Finding = {
   candidate: null,
 };
 
-async function run(second: FixtureOptions, refuseAt?: number, big = false, first: FixtureOptions = { findings: [SUBTRACTION] }) {
+async function run(second: FixtureOptions | null, refuseAt?: number, big = false, first: FixtureOptions = { findings: [SUBTRACTION] }) {
   const repo = changeRepo({ big });
   const primary = fixtureModel(first);
   const other = fixtureModel({ model: "second-model", ...second });
@@ -62,7 +62,7 @@ async function run(second: FixtureOptions, refuseAt?: number, big = false, first
     installRoot: tempDir("oq-second-install-"),
     tools: { web: false, shell: false },
     scanners: "preinstalled",
-    secondReviewer: other,
+    ...(second ? { secondReviewer: other } : {}),
     budget: {
       deadlineMs: 120_000,
       authorize: async (call) => {
@@ -175,4 +175,33 @@ describe("a second reviewer through reviewChange", () => {
     expect(json.not_reviewed).toEqual([]);
     expect(result.render.markdown()).not.toContain("Unchecked scanner candidates");
   });
+});
+
+// Failure case: second-reviewer possible items join the primary result.
+it("returns primary possible items with full text and does not merge second-reviewer possible items", async () => {
+  const { result } = await run({ findings: [{ ...SUBTRACTION, confidence: 0.55, title: "Second possible" }] }, undefined, false, { findings: [{ ...SUBTRACTION, confidence: 0.55 }] });
+  expect(result.findings).toEqual([]);
+  expect(result.possible).toEqual([expect.objectContaining({ title: "Subtraction in add", confidence: 0.55, problem: SUBTRACTION.problem, foundBy: ["fixture-model"] })]);
+  expect(JSON.parse(result.render.json()).possible.map((f: { title: string }) => f.title)).toEqual(["Subtraction in add"]);
+});
+
+// A counted second-reviewer finding must own the primary possible item's key.
+it("drops a primary possible item when the second reviewer counts the same defect", async () => {
+  const { result } = await run({ findings: [{ ...SUBTRACTION, confidence: 0.8 }] }, undefined, false, { findings: [{ ...SUBTRACTION, confidence: 0.6 }] });
+  expect(result.findings).toEqual([expect.objectContaining({ title: SUBTRACTION.title, confidence: 0.8 })]);
+  expect(result.possible).toEqual([]);
+  const report = JSON.parse(result.render.json());
+  expect(report.findings).toHaveLength(1);
+  expect(report.possible).toEqual([]);
+});
+
+// Saved possible items and library results must name the same primary reviewer.
+it.each([false, true])("keeps possible attribution equal in the report and result, second reviewer: %s", async (second) => {
+  const { result } = await run(second ? { findings: [] } : null, undefined, false, { findings: [{ ...SUBTRACTION, confidence: 0.6 }] });
+  expect(result.status).not.toBe("incomplete");
+  const report = JSON.parse(result.render.json());
+  expect(report.possible).toHaveLength(1);
+  expect(report.possible[0].found_by).toEqual(["fixture-model"]);
+  expect(result.possible).toHaveLength(1);
+  expect(result.possible[0]!.foundBy).toEqual(report.possible[0].found_by);
 });

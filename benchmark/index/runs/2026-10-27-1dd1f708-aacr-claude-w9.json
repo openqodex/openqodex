@@ -1,0 +1,5415 @@
+{
+  "version": 1,
+  "runId": "2026-10-27-1dd1f708-aacr-claude-w9",
+  "date": "2026-10-27",
+  "startedAt": "2026-10-27T12:36:13.347Z",
+  "draft": false,
+  "suite": "aacr",
+  "split": "dev",
+  "splitHash": "edf0f4863eb81a3004d9319cb4fa8cea7085466c5774b6ad51567aff642585f4",
+  "subset": "dev-laptop",
+  "mode": "review",
+  "path": "laptop",
+  "build": {
+    "commit": "1dd1f708d48b421af95727ecd1338e8edb418487",
+    "short": "1dd1f70",
+    "cliVersion": "0.15.0",
+    "dirty": false,
+    "bundleHash": "070f080791d3ea09df37be4011c6a1d97862d01e7e70775f55c5f7ea3b0859ae"
+  },
+  "reviewers": {
+    "claude": {
+      "version": "2.1.311",
+      "model": "claude-opus-5-5"
+    }
+  },
+  "configs": [
+    "claude-graph-on"
+  ],
+  "repeat": 1,
+  "web": "off",
+  "caseSetHash": "7ed9a2a71387a8618a4a389c7247ae0da7dbf08623486a87b35caf40d8f53807",
+  "caseIds": [
+    "aacr/FreeCAD__FreeCAD-20156@42c3bcfb",
+    "aacr/FreeCAD__FreeCAD-20612@c0895ab8",
+    "aacr/FreeCAD__FreeCAD-21257@dba12060",
+    "aacr/browser-use__browser-use-1482@cb2104e7",
+    "aacr/browser-use__browser-use-3172@1d8c4220",
+    "aacr/cline__cline-1808@db7e35a1",
+    "aacr/dbeaver__dbeaver-37564@11784336",
+    "aacr/dbeaver__dbeaver-38239@d703b239",
+    "aacr/dbeaver__dbeaver-38915@e9bf4f83",
+    "aacr/dotnet__aspnetcore-59322@1e3495e1",
+    "aacr/facebook__react-32499@7ab7fe2e",
+    "aacr/facebook__react-33059@455957e7",
+    "aacr/gofr-dev__gofr-1325@ba1b0f99",
+    "aacr/google-gemini__gemini-cli-8154@9457d5bb",
+    "aacr/immich-app__immich-16893@29971316",
+    "aacr/immich-app__immich-17879@12ac26cb",
+    "aacr/immich-app__immich-18043@ae73eeb5",
+    "aacr/juspay__hyperswitch-7353@7a11b347",
+    "aacr/kestra-io__kestra-7191@0ef12ce1",
+    "aacr/laravel__framework-54226@3464631a",
+    "aacr/laravel__framework-56591@7aafc5bf",
+    "aacr/linera-io__linera-protocol-3151@897f852f",
+    "aacr/lvgl__lvgl-7602@bf19799e",
+    "aacr/lvgl__lvgl-8689@ca963dea",
+    "aacr/microsoft__typescript-go-1000@1838712f",
+    "aacr/microsoft__typescript-go-691@6376093c",
+    "aacr/mrdoob__three.js-30076@5b9e47ca",
+    "aacr/ollama__ollama-8938@5ef27881",
+    "aacr/ollama__ollama-9654@56ed0571",
+    "aacr/ollama__ollama-9746@0a08b69a",
+    "aacr/ppy__osu-33423@8f5dbba9",
+    "aacr/symfony__symfony-60342@c3c98365",
+    "aacr/valkey-io__valkey-1485@4d411ad4",
+    "aacr/valkey-io__valkey-2141@9d7f4179",
+    "aacr/vllm-project__vllm-19756@c811bca8"
+  ],
+  "rulesVersion": 12,
+  "rulesHash": "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
+  "decisionsHash": null,
+  "scannersComplete": true,
+  "external": null,
+  "ended": {
+    "how": "finished",
+    "why": null
+  },
+  "release": null,
+  "scores": {
+    "claude-graph-on": {
+      "population": {
+        "planned": 35,
+        "complete": 32,
+        "incomplete": 2,
+        "failed": 1,
+        "unstarted": 0,
+        "retries": 1,
+        "retryCostUsd": 0.7639798000000001
+      },
+      "issueRecall": {
+        "all": {
+          "hit": 0,
+          "of": 256,
+          "ci": [
+            0,
+            0
+          ]
+        },
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        }
+      },
+      "precision": {
+        "lower": {
+          "hit": 0,
+          "of": 135,
+          "ci": [
+            0,
+            0
+          ]
+        },
+        "upper": {
+          "hit": 135,
+          "of": 135,
+          "ci": [
+            1,
+            1
+          ]
+        }
+      },
+      "uniqueIssuePrecision": {
+        "lower": {
+          "hit": 0,
+          "of": 135,
+          "ci": null
+        },
+        "upper": {
+          "hit": 135,
+          "of": 135,
+          "ci": null
+        }
+      },
+      "redundancy": {
+        "hit": 0,
+        "of": 135
+      },
+      "f1": 0,
+      "controls": {
+        "hit": 0,
+        "of": 0
+      },
+      "cleanFindingsPerCase": {
+        "findings": 0,
+        "cases": 0
+      },
+      "location": {
+        "precision": {
+          "hit": 71,
+          "of": 135
+        },
+        "recall": {
+          "hit": 71,
+          "of": 256
+        },
+        "knownNoise": 0
+      },
+      "plantedLegacy": null,
+      "severity": {
+        "exact": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "withinOne": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "oneOff": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "off": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "over": 0,
+        "under": 0,
+        "unknown": 0
+      },
+      "finder": {
+        "match": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "byExpected": {},
+        "byFinder": {
+          "scanner": 0,
+          "reviewer": 0
+        },
+        "scannerExpectedReviewerFound": 0,
+        "unjudged": 0,
+        "droppedCandidates": 0
+      },
+      "wallMsMean": 168659.42857142858,
+      "costUsdMean": 1.5418093352941176,
+      "costUsdTotal": 52.4215174
+    }
+  },
+  "perCase": {
+    "claude-graph-on": {
+      "aacr/FreeCAD__FreeCAD-20156@42c3bcfb": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 16
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/FreeCAD__FreeCAD-20612@c0895ab8": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/FreeCAD__FreeCAD-21257@dba12060": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 19
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/browser-use__browser-use-1482@cb2104e7": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/browser-use__browser-use-3172@1d8c4220": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/cline__cline-1808@db7e35a1": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/dbeaver__dbeaver-37564@11784336": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 5
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/dbeaver__dbeaver-38239@d703b239": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 4
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/dbeaver__dbeaver-38915@e9bf4f83": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 5
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/dotnet__aspnetcore-59322@1e3495e1": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 5
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/facebook__react-32499@7ab7fe2e": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 16
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/facebook__react-33059@455957e7": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/gofr-dev__gofr-1325@ba1b0f99": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/google-gemini__gemini-cli-8154@9457d5bb": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 13
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/immich-app__immich-16893@29971316": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 19
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 12
+          },
+          "upper": {
+            "hit": 12,
+            "of": 12
+          }
+        },
+        "findings": 12,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/immich-app__immich-17879@12ac26cb": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 9
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/immich-app__immich-18043@ae73eeb5": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 6
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/juspay__hyperswitch-7353@7a11b347": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 8
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/kestra-io__kestra-7191@0ef12ce1": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 8
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 9
+          },
+          "upper": {
+            "hit": 9,
+            "of": 9
+          }
+        },
+        "findings": 9,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/laravel__framework-54226@3464631a": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/laravel__framework-56591@7aafc5bf": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/linera-io__linera-protocol-3151@897f852f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/lvgl__lvgl-7602@bf19799e": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/lvgl__lvgl-8689@ca963dea": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 33
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 16
+          },
+          "upper": {
+            "hit": 16,
+            "of": 16
+          }
+        },
+        "findings": 16,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/microsoft__typescript-go-1000@1838712f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/microsoft__typescript-go-691@6376093c": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/mrdoob__three.js-30076@5b9e47ca": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 17
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/ollama__ollama-8938@5ef27881": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 2
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/ollama__ollama-9654@56ed0571": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/ollama__ollama-9746@0a08b69a": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 20
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 10
+          },
+          "upper": {
+            "hit": 10,
+            "of": 10
+          }
+        },
+        "findings": 10,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/ppy__osu-33423@8f5dbba9": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 8
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/symfony__symfony-60342@c3c98365": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 4
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/valkey-io__valkey-1485@4d411ad4": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 8
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/valkey-io__valkey-2141@9d7f4179": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 1
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "aacr/vllm-project__vllm-19756@c811bca8": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 4
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      }
+    }
+  },
+  "perBug": {
+    "claude-graph-on": {
+      "aacr/FreeCAD__FreeCAD-20156@42c3bcfb": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c10": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c11": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c12": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c13": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c14": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c15": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c16": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/FreeCAD__FreeCAD-20612@c0895ab8": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/FreeCAD__FreeCAD-21257@dba12060": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c10": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c11": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c12": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c13": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c14": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c15": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c16": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c17": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c18": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c19": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/browser-use__browser-use-1482@cb2104e7": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/browser-use__browser-use-3172@1d8c4220": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/cline__cline-1808@db7e35a1": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/dbeaver__dbeaver-37564@11784336": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/dbeaver__dbeaver-38239@d703b239": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/dbeaver__dbeaver-38915@e9bf4f83": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/dotnet__aspnetcore-59322@1e3495e1": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/facebook__react-32499@7ab7fe2e": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c10": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c11": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c12": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c13": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c14": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c15": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c16": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/facebook__react-33059@455957e7": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/gofr-dev__gofr-1325@ba1b0f99": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/google-gemini__gemini-cli-8154@9457d5bb": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c10": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c11": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c12": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c13": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/immich-app__immich-16893@29971316": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c10": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c11": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c12": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c13": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c14": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c15": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c16": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c17": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c18": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c19": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/immich-app__immich-17879@12ac26cb": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/immich-app__immich-18043@ae73eeb5": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/juspay__hyperswitch-7353@7a11b347": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/kestra-io__kestra-7191@0ef12ce1": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/laravel__framework-54226@3464631a": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/laravel__framework-56591@7aafc5bf": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/linera-io__linera-protocol-3151@897f852f": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/lvgl__lvgl-7602@bf19799e": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/lvgl__lvgl-8689@ca963dea": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "not-in-brief"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c10": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c11": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c12": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c13": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c14": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c15": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c16": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c17": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c18": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c19": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c20": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c21": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c22": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c23": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c24": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c25": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c26": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c27": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c28": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c29": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c30": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c31": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c32": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c33": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/microsoft__typescript-go-1000@1838712f": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/microsoft__typescript-go-691@6376093c": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/mrdoob__three.js-30076@5b9e47ca": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c10": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c11": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c12": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c13": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c14": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c15": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c16": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c17": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/ollama__ollama-8938@5ef27881": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/ollama__ollama-9654@56ed0571": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "incomplete"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/ollama__ollama-9746@0a08b69a": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c9": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c10": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c11": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c12": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c13": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c14": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c15": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c16": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c17": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c18": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c19": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c20": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/ppy__osu-33423@8f5dbba9": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/symfony__symfony-60342@c3c98365": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/valkey-io__valkey-1485@4d411ad4": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "not-in-brief"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c5": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c6": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c7": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c8": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/valkey-io__valkey-2141@9d7f4179": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "aacr/vllm-project__vllm-19756@c811bca8": {
+        "c1": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        },
+        "c2": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c3": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "judged-wrong"
+          ],
+          "ruling": null
+        },
+        "c4": {
+          "found": [
+            false
+          ],
+          "severity": null,
+          "given": [
+            null
+          ],
+          "finder": [
+            null
+          ],
+          "cause": [
+            "unresolved"
+          ],
+          "ruling": null
+        }
+      }
+    }
+  },
+  "intervals": {
+    "method": "Percentile bootstrap over clusters drawn with replacement; each metric is a ratio of sums recomputed on every resample, and a cluster keeps all its truth items, findings and repeats together. A cluster with nothing to count for a metric is left out of it. The interval describes this run and decides nothing: the trend's alarm and the acceptance rule compare two runs with a paired sign-flip test. With fewer than minClusters clusters it is null, listed under tooFewClusters.",
+    "cluster": "repoGroup",
+    "groups": {
+      "aacr/FreeCAD__FreeCAD-20156@42c3bcfb": "freecad/freecad",
+      "aacr/FreeCAD__FreeCAD-20612@c0895ab8": "freecad/freecad",
+      "aacr/FreeCAD__FreeCAD-21257@dba12060": "freecad/freecad",
+      "aacr/browser-use__browser-use-1482@cb2104e7": "browser-use/browser-use",
+      "aacr/browser-use__browser-use-3172@1d8c4220": "browser-use/browser-use",
+      "aacr/cline__cline-1808@db7e35a1": "cline/cline",
+      "aacr/dbeaver__dbeaver-37564@11784336": "dbeaver/dbeaver",
+      "aacr/dbeaver__dbeaver-38239@d703b239": "dbeaver/dbeaver",
+      "aacr/dbeaver__dbeaver-38915@e9bf4f83": "dbeaver/dbeaver",
+      "aacr/dotnet__aspnetcore-59322@1e3495e1": "dotnet/aspnetcore",
+      "aacr/facebook__react-32499@7ab7fe2e": "facebook/react",
+      "aacr/facebook__react-33059@455957e7": "facebook/react",
+      "aacr/gofr-dev__gofr-1325@ba1b0f99": "gofr-dev/gofr",
+      "aacr/google-gemini__gemini-cli-8154@9457d5bb": "google-gemini/gemini-cli",
+      "aacr/immich-app__immich-16893@29971316": "immich-app/immich",
+      "aacr/immich-app__immich-17879@12ac26cb": "immich-app/immich",
+      "aacr/immich-app__immich-18043@ae73eeb5": "immich-app/immich",
+      "aacr/juspay__hyperswitch-7353@7a11b347": "juspay/hyperswitch",
+      "aacr/kestra-io__kestra-7191@0ef12ce1": "kestra-io/kestra",
+      "aacr/laravel__framework-54226@3464631a": "laravel/framework",
+      "aacr/laravel__framework-56591@7aafc5bf": "laravel/framework",
+      "aacr/linera-io__linera-protocol-3151@897f852f": "linera-io/linera-protocol",
+      "aacr/lvgl__lvgl-7602@bf19799e": "lvgl/lvgl",
+      "aacr/lvgl__lvgl-8689@ca963dea": "lvgl/lvgl",
+      "aacr/microsoft__typescript-go-1000@1838712f": "microsoft/typescript-go",
+      "aacr/microsoft__typescript-go-691@6376093c": "microsoft/typescript-go",
+      "aacr/mrdoob__three.js-30076@5b9e47ca": "mrdoob/three.js",
+      "aacr/ollama__ollama-8938@5ef27881": "ollama/ollama",
+      "aacr/ollama__ollama-9654@56ed0571": "ollama/ollama",
+      "aacr/ollama__ollama-9746@0a08b69a": "ollama/ollama",
+      "aacr/ppy__osu-33423@8f5dbba9": "ppy/osu",
+      "aacr/symfony__symfony-60342@c3c98365": "symfony/symfony",
+      "aacr/valkey-io__valkey-1485@4d411ad4": "valkey-io/valkey",
+      "aacr/valkey-io__valkey-2141@9d7f4179": "valkey-io/valkey",
+      "aacr/vllm-project__vllm-19756@c811bca8": "vllm-project/vllm"
+    },
+    "resamples": 10000,
+    "level": 0.95,
+    "minClusters": 8,
+    "seed": "mulberry32 seeded with the first 32 bits of sha256 over the run id, the configuration and the metric name, joined by NUL",
+    "runId": "2026-10-27-1dd1f708-aacr-claude-w9",
+    "tooFewClusters": {
+      "claude-graph-on": {
+        "issueRecall.criticalMajor": 0
+      }
+    }
+  },
+  "asset": {
+    "url": "https://github.com/openqodex/openqodex/releases/download/benchmark-data/2026-10-27-1dd1f708-aacr-claude-w9.tar.gz",
+    "sha256": "5af71b0af5e034bd24fc74a949dfe0ec2a8dff9321fb7a13b2dc9be8c327b3cf",
+    "bytes": 2226458,
+    "files": 435,
+    "listHash": "28d75356a20e864ae079de7b9c908efecbf734064b92a5c5138c940aa239b1af"
+  },
+  "accepted": true,
+  "acceptedAt": "2026-10-27T17:15:32.737Z",
+  "acceptedBy": "Sid",
+  "legacy": false,
+  "privateListHash": "4d7303233bdab96788805bdc3490160ac7b6cd1847f64f38846b721752257490",
+  "publishExceptions": [
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 348,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 350,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 360,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 368,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 370,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 380,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 381,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 388,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 390,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 400,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 410,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 420,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 421,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 430,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 440,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    },
+    {
+      "file": "samples/microsoft__typescript-go-1000/claude-graph-on/1/report/brief.md",
+      "line": 441,
+      "label": "a home folder path",
+      "reason": "A fixture path inside the pull request's own Go tests (microsoft__typescript-go-1000, src/project/...), quoted in the brief's diff; not a machine path of this run."
+    }
+  ]
+}

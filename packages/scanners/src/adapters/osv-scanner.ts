@@ -27,6 +27,7 @@
 // into the result; the runner never throws on a scanner failure: static
 // analysis is additive context, not a gate.
 
+import type { LineSet } from "@openqodex/core";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -381,7 +382,7 @@ function entryRangeForPackage(
   lines: string[] | null,
   pkgName: string,
   pkgVersion: string,
-  changed?: Set<number>,
+  changed?: LineSet,
 ): { start: number; end: number } {
   if (!lines || !pkgName) return { start: 1, end: 1 };
   const name = pkgName.toLowerCase();
@@ -403,10 +404,7 @@ function entryRangeForPackage(
   }
   if (candidates.length > 0) {
     const touched = changed
-      ? candidates.find((c) => {
-          for (let n = c.start; n <= c.end; n++) if (changed.has(n)) return true;
-          return false;
-        })
+      ? candidates.find((c) => changed.overlaps(c.start, c.end))
       : undefined;
     return touched ?? candidates[0];
   }

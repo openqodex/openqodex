@@ -1,3 +1,4 @@
+import type { LineSet } from "./line-set.js";
 // Shared contracts for every OpenQodex package. Code against these types;
 // a change here is agreed first, never made inside a feature branch.
 
@@ -212,7 +213,7 @@ export type ResolveTool = (scanner: BuiltinScanner, call?: { probeHome?: string 
 // ---------- change ----------
 
 // Path to the set of new-side line numbers the developer added or changed.
-export type DiffCoverage = Map<string, Set<number>>;
+export type DiffCoverage = Map<string, LineSet>;
 
 // A place where the change only removed lines: `lines` lines were deleted
 // after new-side line `after` (0: at the top of the file). Its `anchors`, the
@@ -237,21 +238,24 @@ export type ChangedFile = {
   binary: boolean;
 };
 
+// Exactly one representation of a file's retained patch. Read through diffText.
+export type DiffEntry = { path: string } & ({ text: string; file?: never } | { text?: never; file: string });
+
 export type Change = {
   repoRoot: string;
   baseRef: string; // what the base was resolved from, for display
   baseSha: string;
-  id: string; // sha256 hex of baseSha + "\n" + `git diff --cached --raw -z --no-abbrev <base>`; covers binary files and anything past the diff cap
+  id: string; // sha256 hex of baseSha + "\n" + `git diff --cached --raw -z --no-abbrev <base>`; covers binary files and every patch size
   shortId: string;
   files: ChangedFile[]; // everything in the change, exclusions already applied
   changedPaths: string[]; // files that still exist (not deleted), what scanners receive
   coverage: DiffCoverage; // from the zero-context diff
   deletionPoints: Map<string, DeletionPoint[]>; // from the same diff, per file that still exists
-  diff: string; // the three-lines-of-context diff, capped
+  diff: string; // the in-memory portion of the three-lines-of-context diff
   // The same diff split per file, in the same order; absent where a caller built a Change by hand.
-  diffs?: { path: string; text: string }[];
-  notReviewed: string[]; // paths left out because the change was too large
-  // Changed text files past the coverage cap, whose changed lines are not
+  diffs?: DiffEntry[];
+  notReviewed: string[]; // empty for changes; whole-repo scope keeps its listing rule
+  // Hand-built changes may name text files whose changed lines are not
   // known: a review counts one as read only when the reviewer read all of it.
   // Absent where a caller built a Change by hand.
   uncovered?: string[];
@@ -614,7 +618,8 @@ export type ReviewerRecord = {
 // One reviewer session of a staged review, as the tool measured it. `role`
 // is the ReviewerRole the session's call ids carry (`finder:<unit>:<pass>`
 // or `verifier:<n>`); `unit` names the find unit for a finder; `examined`
-// the hunk ids the finder's accepted answer listed; `failure` one plain
+// the distinct hunk or part ids the finder's answer listed, without path
+// or range labels; `failure` one plain
 // line when the session did not complete, else null.
 export type ReviewerSessionRecord = {
   role: string;
@@ -629,12 +634,30 @@ export type ReviewerSessionRecord = {
 
 // A changed hunk with the id the tool gave it (`h1`, `h2`, ...). `start` and
 // `end` are lines of the new file; a deletion's are its anchors.
-export type HunkRef = { id: string; path: string; start: number; end: number; deletion: boolean; point?: number };
+export type DeletionRef = { id: string; oldStart: number; oldEnd: number };
+export type HunkRef = {
+  id: string; path: string; start: number; end: number;
+  deletion: boolean | DeletionRef;
+  point?: number;
+  part?: { n: number; of: number; whole: string };
+  old?: [number, number] | null;
+  // Byte fragments always name one line. lineBytes excludes its final LF.
+  fragment?: { of?: string; from: number; to: number };
+  lineBytes?: number;
+  fromByte?: number;
+  removedIn?: number | number[];
+  rows?: number;
+  bytes?: number;
+  note?: string;
+};
 
 // A find unit: one changed file, or a group of small files whose diffs stay
 // under the unit size bound, or one slice of a large file. Every hunk of the
 // change belongs to exactly one unit.
-export type ReviewUnit = { id: string; files: string[]; hunks: HunkRef[]; diffBytes: number };
+export type ReviewUnit = {
+  id: string; files: string[]; hunks: HunkRef[]; diffBytes: number;
+  digest?: { id: string; kind: "json" | "store"; text: string; processed: string[]; omitted: { path: string; lines: [number, number]; why: string }[] };
+};
 
 // The two finder passes run on every unit, each in a fresh session.
 export type FindPass = "local" | "contracts";
@@ -715,6 +738,8 @@ export type CompletionRecord = {
   contract: "openqodex-review-2";
   status: "complete" | "incomplete";
   missing: string[];
+  // Outside paths and tools not given whose calls were refused.
+  refused: string[];
   reviewer: ReviewerRecord | null;
   // The change id, the git tree the change and the snapshot were made from
   // (null for a target, whose head commit is in the change), and a hash of
@@ -724,7 +749,15 @@ export type CompletionRecord = {
   coverage: {
     hunks: number;
     covered: number;
-    unread: { path: string; start: number; end: number; deletion: boolean }[];
+    unread: (Pick<HunkRef, "path" | "start" | "end" | "deletion"> & Partial<Omit<HunkRef, "path" | "start" | "end" | "deletion">>)[];
+    // A deletion's credited old lines are in `old`. `fragment` names bytes of
+    // one line only, and `lineBytes` is that line's length.
+    given?: { path: string; start: number; end: number; deletion?: string; by: "brief" | "page" | "digest" | "read"; old?: [number, number]; lineBytes?: number; fragment?: { of?: string; from: number; to: number }; part?: HunkRef["part"] }[];
+    // One entry per original obligation, before delivery splits it into pieces.
+    // by names the first source that contributed to its complete coverage.
+    inventory?: { path: string; start: number; end: number; deletion?: string; by?: "brief" | "page" | "digest" | "read" }[];
+    // Includes files with no line obligations, such as binaries and pure renames.
+    files?: ChangedFile[];
     files_read: string[];
     files_not_read: string[];
   };
@@ -790,6 +823,8 @@ export type ModelCompletionRecord = {
   contract: "openqodex-model-review-1";
   status: "complete" | "incomplete";
   missing: string[];
+  // Outside paths and tools not given whose calls were refused.
+  refused: string[];
   reviewer: { kind: "model"; model: string; servedModels: string[]; calls: number };
   snapshot: { change_id: string; tree: string | null; before: string; after: string | null };
   candidates: { total: number; disposed: number };
@@ -820,6 +855,8 @@ export type ReportFinding = {
   severity: Severity;
   category: Category;
   confidence: number | null; // null for a scanner finding
+  // Effective confidence floor for an under-floor outside-change entry.
+  floor?: number;
   file_path: string;
   line_number: number;
   line_end: number;
@@ -853,6 +890,9 @@ export type Report = {
   // Findings on lines the developer changed. Only these and `not_reviewed`
   // count toward the verdict.
   findings: ReportFinding[];
+  // Confirmed issues below the effective floor, at confidence 0.5 or higher.
+  // Shown separately and never counted toward the verdict.
+  possible: ReportFinding[];
   // How many findings on changed lines were left out of `findings` because
   // they sit below review.severity_threshold (and below block_on_severity).
   below_threshold: number;
@@ -874,7 +914,7 @@ export type Report = {
   // The code graph's view of the change. Always present: status "off",
   // "skipped" or "failed" says why there is nothing in it.
   impact: ImpactSummary | null;
-  not_reviewed_paths: string[]; // Change.notReviewed
+  not_reviewed_paths: string[]; // Change.notReviewed, empty for a change review
   stats: { files: number; additions: number; deletions: number };
   // A review run by `review` itself: its completion record (a model
   // reviewer's has its own contract). Absent in a scan and in a review from

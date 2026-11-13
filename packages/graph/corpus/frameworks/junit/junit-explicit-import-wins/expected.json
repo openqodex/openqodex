@@ -1,0 +1,53 @@
+{
+  "guards": "lets an explicit JUnit import shadow a same-package annotation",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 1,
+    "roles": [
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "role": "test"
+      }
+    ],
+    "edges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "to": "src/main/java/shop/Service.java#Service.read",
+        "tier": "certain",
+        "category": "direct-call"
+      }
+    ],
+    "notUnknowns": [
+      {
+        "file": "src/test/java/shop/ServiceTest.java",
+        "line": 4,
+        "cause": "ambiguous"
+      }
+    ],
+    "notEdges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/StarTest.java#StarTest.reads"
+      }
+    ],
+    "notRoles": [
+      {
+        "target": "src/test/java/shop/StarTest.java#StarTest.reads",
+        "role": "test"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:4",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/StarTest.java:4",
+      "tier": "certain"
+    }
+  ]
+}

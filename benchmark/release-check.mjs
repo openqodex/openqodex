@@ -9,7 +9,7 @@
 //        [--suites planted,aacr] [--subset dev-laptop] [--cases a,b]
 //        [--allow-missing-scanners] [--install-scanners]
 //        [--reviewers <names> --max-usd <n> --max-minutes <n>
-//         [--review-max-usd <n>] [--repeat <n>]]
+//         [--review-max-usd <n>] [--repeat <n>] [--wave <id>]]
 //        [--out <folder>] [--summary <file>]
 //
 // --base is the published package by default: the version the registry's
@@ -31,7 +31,9 @@
 // --reviewers adds review runs, which the caller names and pays for: each
 // build reviews each suite those reviewers review (Claude Code and Codex the
 // planted cases, model reviewers any suite), with --max-usd, --max-minutes,
-// --review-max-usd and --repeat passed to each run as they are. The two
+// --review-max-usd, --repeat and --wave passed to each run as they are
+// (--wave is required unless every reviewer is model:scripted: each run
+// reserves its forecast in the wave journal, lib/wave.mjs). The two
 // runs are compared by loop/compare.mjs (the paired sign-flip test over
 // clusters, at its family alpha), and a gate metric is a loss when its
 // change is shown past the acceptable loss benchmark/loop/levers.json
@@ -96,7 +98,7 @@ import { GATE_METRICS, METRICS, changeVerdict, comparePairs, loadSides, lossIn, 
 import { guardVerdict } from "./loop/decide.mjs";
 import { compareScan } from "./trend.mjs";
 
-const USAGE = "usage: node benchmark/release-check.mjs [--base npm:<version>|file:<path.tgz>|local] [--candidate local|file:<path.tgz>|npm:<version>] [--suites planted,aacr] [--subset dev-laptop] [--cases a,b] [--allow-missing-scanners] [--install-scanners] [--reviewers <names> --max-usd <n> --max-minutes <n> [--review-max-usd <n>] [--repeat <n>]] [--out <folder>] [--summary <file>]";
+const USAGE = "usage: node benchmark/release-check.mjs [--base npm:<version>|file:<path.tgz>|local] [--candidate local|file:<path.tgz>|npm:<version>] [--suites planted,aacr] [--subset dev-laptop] [--cases a,b] [--allow-missing-scanners] [--install-scanners] [--reviewers <names> --max-usd <n> --max-minutes <n> [--review-max-usd <n>] [--repeat <n>] [--wave <id>]] [--out <folder>] [--summary <file>]";
 // The AACR-Bench subset a release check scans unless --subset names another.
 const DEFAULT_SUBSET = "dev-laptop";
 // The family error of a review comparison, split as compare.mjs splits it.
@@ -116,7 +118,7 @@ const readJson = (path) => {
 };
 
 function parseArgs(argv) {
-  const o = { base: null, candidate: "local", suites: ["planted", "aacr"], subset: null, cases: null, allowMissing: false, install: false, reviewers: null, maxUsd: null, maxMinutes: null, reviewMaxUsd: null, repeat: null, out: null, summary: null };
+  const o = { base: null, candidate: "local", suites: ["planted", "aacr"], subset: null, cases: null, allowMissing: false, install: false, reviewers: null, maxUsd: null, maxMinutes: null, reviewMaxUsd: null, repeat: null, wave: null, out: null, summary: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -136,6 +138,7 @@ function parseArgs(argv) {
     else if (a === "--max-minutes") o.maxMinutes = next();
     else if (a === "--review-max-usd") o.reviewMaxUsd = next();
     else if (a === "--repeat") o.repeat = next();
+    else if (a === "--wave") o.wave = next();
     else if (a === "--out") o.out = resolve(next());
     else if (a === "--summary") o.summary = resolve(next());
     else throw new Error(`unknown flag ${a}`);
@@ -148,7 +151,7 @@ function parseArgs(argv) {
   if (o.cases !== null && o.suites.length !== 1) throw new Error("--cases names cases of one suite; name that suite alone in --suites");
   for (const spec of [o.base, o.candidate]) if (spec !== null) parsePackageSpec(spec);
   if (o.base !== null && o.base === o.candidate) throw new Error(`--base and --candidate both name ${o.base}; a build compared with itself shows nothing`);
-  const paid = [["--max-usd", o.maxUsd], ["--max-minutes", o.maxMinutes], ["--review-max-usd", o.reviewMaxUsd], ["--repeat", o.repeat]].filter(([, v]) => v !== null).map(([f]) => f);
+  const paid = [["--max-usd", o.maxUsd], ["--max-minutes", o.maxMinutes], ["--review-max-usd", o.reviewMaxUsd], ["--repeat", o.repeat], ["--wave", o.wave]].filter(([, v]) => v !== null).map(([f]) => f);
   if (o.reviewers === null) {
     if (paid.length > 0) throw new Error(`${paid.join(", ")}: only review runs read ${paid.length === 1 ? "it" : "them"}; name the reviewers with --reviewers`);
   } else {
@@ -158,6 +161,7 @@ function parseArgs(argv) {
     for (const r of o.reviewers) if (!isModelReviewer(r) && !LAPTOP.includes(r)) throw new Error(`--reviewers takes claude, codex or model:<deployment>, not ${r}`);
     if (o.maxUsd === null || o.maxMinutes === null) throw new Error("--reviewers needs --max-usd and --max-minutes: each review run names what it may spend and how long it may take");
     if (models.length > 0 && o.reviewMaxUsd === null) throw new Error("model reviewers need --review-max-usd: every call is held to it before it is sent");
+    if (o.wave === null && o.reviewers.some((r) => r !== "model:scripted")) throw new Error("--reviewers that pay a model need --wave <id>: each review run reserves its forecast in the wave's journal (node benchmark/lib/wave.mjs --wave-new <id> starts one)");
   }
   return o;
 }
@@ -250,6 +254,7 @@ async function runOne({ o, ctx, suite, side, mode, build }) {
     args.push("--reviewers", o.reviewers.join(","), "--max-usd", o.maxUsd, "--max-minutes", o.maxMinutes);
     if (o.reviewMaxUsd !== null) args.push("--review-max-usd", o.reviewMaxUsd);
     if (o.repeat !== null) args.push("--repeat", o.repeat);
+    if (o.wave !== null) args.push("--wave", o.wave);
   }
   process.stderr.write(`\n== ${name}: ${build.label} ==\n`);
   ctx.runs.push({ suite, mode, side, folder: relative(ctx.out, folder) });

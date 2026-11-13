@@ -3,8 +3,10 @@
 // indent) or for markdown (headings, bullets and bold labels). The words and
 // their order are the same in both; only the markup differs.
 import pc from "picocolors";
-import type { ModelCompletionRecord, Report, ReportFinding, ReviewerRecord } from "../types.js";
-import { candidateLocation, coverageLine, display, escapeMarkdown, findingTitle, firstLine, location, lowConfidenceReason, notOpenedLabel, observationsOmittedLine, orderFindings, orderObservations, severityBreakdown, verdictLine } from "./common.js";
+import { deletionLabel, unreadRangeCount, deletionLabels, shortenedMissing } from "../completion.js";
+import { hunkFragmentLabel } from "../delivery.js";
+import type { CompletionRecord, ModelCompletionRecord, Report, ReportFinding, ReviewerRecord } from "../types.js";
+import { candidateLocation, coverageLine, display, escapeMarkdown, findingTitle, firstLine, location, lowConfidenceReason, notOpenedLabel, observationsOmittedLine, orderFindings, orderObservations, orderPossible, severityBreakdown, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
 
 type Line =
@@ -85,6 +87,23 @@ function observationLines(report: Report): Line[] {
   return out;
 }
 
+function possibleHeading(report: Report): string {
+  // wording: session
+  return `Possible issues (${report.possible?.length ?? 0}), not counted`;
+}
+
+function possibleLines(report: Report): Line[] {
+  const ordered = orderPossible(report);
+  if (ordered.length === 0) return [];
+  const out: Line[] = [{ kind: "heading", text: possibleHeading(report) }];
+  const offset = report.findings.length + orderObservations(report).length;
+  ordered.forEach((f, i) => {
+    out.push(...findingLines(f, offset + i + 1));
+    if (f.suggested_change) out.push({ kind: "label", text: "Suggested change" }, { kind: "code", text: f.suggested_change });
+  });
+  return out;
+}
+
 // A dropped candidate, as one item and its source.
 function droppedLines(d: Report["dropped"][number]): Line[] {
   const cited = d.cited ? ` (see ${d.cited.file_path}:${d.cited.line_number})` : "";
@@ -133,10 +152,10 @@ function lines(report: Report): Line[] {
     if (ordered.length === 0) out.push({ kind: "text", text: "No findings on the changed lines." });
   }
   ordered.forEach((f, i) => out.push(...findingLines(f, i + 1)));
-  out.push(...observationLines(report));
+  out.push(...observationLines(report), ...possibleLines(report));
   if (report.outside_change.length > 0) {
-    // Numbered after the findings and the observations, so no two shown items share a number.
-    const shown = ordered.length + orderObservations(report).length;
+    // Numbered after findings, observations and possible issues.
+    const shown = ordered.length + orderObservations(report).length + orderPossible(report).length;
     out.push({ kind: "heading", text: `Outside the changed lines (${report.outside_change.length}), never counted` });
     report.outside_change.forEach((f, i) => out.push(...findingLines(f, shown + i + 1)));
   }
@@ -170,6 +189,7 @@ function lines(report: Report): Line[] {
   }
   if (c) {
     out.push({ kind: "heading", text: "Coverage" });
+    if (c.refused?.length) out.push({ kind: "text", text: `These requests were refused and were not served: ${c.refused.join(", ")}` });
     if (c.trace_complete === false) {
       // Reads were not measured: say so, never "Files not read".
       const by = `not recorded by ${c.reviewer ? product(c.reviewer.driver) : "the reviewer"}`;
@@ -180,12 +200,69 @@ function lines(report: Report): Line[] {
       out.push({ kind: "field", label: notOpenedLabel(c.coverage), text: c.coverage.files_not_read.length > 0 ? c.coverage.files_not_read.join(", ") : "none" });
     }
     out.push({ kind: "field", label: "Changed ranges given to the reviewer", text: `${c.coverage.covered} of ${c.coverage.hunks}` });
+    const fileLines = fileCoverageLines(c.coverage);
+    if (fileLines.length > 0) out.push({ kind: "text", text: "" });
+    for (const text of fileLines) out.push({ kind: "text", text });
   }
-  if (report.not_reviewed_paths.length > 0) out.push({ kind: "field", label: "Left out, change too large", text: report.not_reviewed_paths.join(", ") });
+  if (report.base.ref === "all" && report.not_reviewed_paths.length > 0) out.push({ kind: "field", label: `Not reviewed: ${report.not_reviewed_paths.length} ${report.not_reviewed_paths.length === 1 ? "file" : "files"}, over 5 MB, links or unreadable`, text: report.not_reviewed_paths.join(", ") });
   out.push({ kind: "text", text: `Scanners: ${coverageLine(report.scanners)}` });
   out.push({ kind: "text", text: c?.contract === "openqodex-model-review-1" ? modelReviewerLine(c) : reviewerLine(c?.reviewer ?? null) });
   out.push({ kind: "text", text: CLOSING });
   return out;
+}
+
+// Coverage labels come from the record even when no diff or tool read was
+// saved for a file, as with a structural summary. Keep every file and range.
+// The same shape the Missing list uses: one number for a single line or an
+// empty range, so the two never disagree.
+function span(start: number, end: number): string {
+  return `${start}${end > start ? `-${end}` : ""}`;
+}
+
+export function fileCoverageLines(coverage: CompletionRecord["coverage"]): string[] {
+  if (coverage.given === undefined) return [];
+  // `named`: the label is a fragment label, which carries its own path.
+  const files = new Map<string, { start: number; end: number; oldStart: number; label: string; named?: boolean }[]>();
+  const ids = deletionLabels(coverage);
+  // A removed fragment of a renamed file names the old path.
+  const oldPath = (path: string) => coverage.files?.find((f) => f.path === path)?.oldPath ?? path;
+  for (const g of coverage.given) {
+    const deletion = g.deletion ? ` (deletion ${g.deletion}${g.old && !g.lineBytes ? `, old lines ${g.old[0]}-${g.old[1]}` : ""})` : "";
+    const part = g.part ? ` (part ${g.part.n} of ${g.part.of})` : "";
+    const named = Boolean(g.lineBytes && g.fragment);
+    const bytes = named ? hunkFragmentLabel({ ...g, fragment: g.fragment! }, oldPath(g.path)) : span(g.start, g.end);
+    const label = `${bytes}${deletion}${part} ${g.by === "digest" ? "structural summary" : g.by}`;
+    const ranges = files.get(g.path) ?? [];
+    ranges.push({ start: g.start, end: g.end, oldStart: g.old?.[0] ?? 0, label, named });
+    files.set(g.path, ranges);
+  }
+  for (const h of coverage.unread) {
+    const deletion = deletionLabel(h, ids);
+    const part = h.part ? ` (part ${h.part.n} of ${h.part.of})` : "";
+    const ranges = files.get(h.path) ?? [];
+    ranges.push({ start: h.start, end: h.end, oldStart: typeof h.deletion === "object" ? h.deletion.oldStart : 0, label: `${h.fragment ? hunkFragmentLabel({ ...h, fragment: h.fragment }, oldPath(h.path)) : span(h.start, h.end)}${deletion}${part} not examined`, named: Boolean(h.fragment) });
+    files.set(h.path, ranges);
+  }
+  for (const file of coverage.files ?? []) {
+    if (files.has(file.path)) continue;
+    const label = file.binary ? "binary, not reviewed by line" : file.status === "renamed" ? "renamed, no changed lines" : file.status === "modified" ? "mode change only" : `${file.status}, no changed lines`;
+    files.set(file.path, [{ start: 0, end: 0, oldStart: 0, label }]);
+  }
+  // A line that opens with a fragment label takes its path from that label.
+  return [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([path, ranges]) => {
+    const sorted = ranges.sort((a, b) => a.start - b.start || a.end - b.end || a.oldStart - b.oldStart);
+    return `${sorted[0]!.named ? "" : `${path}: `}${sorted.map((r) => r.label).join(", ")}`;
+  });
+}
+
+function receiptCoverage(record: Report["completion"]): string {
+  if (!record) return "Changed ranges: not recorded in this report";
+  const coverage = record.coverage;
+  if (coverage.given === undefined) return `Changed ranges: ${coverage.covered} examined, ${unreadRangeCount(coverage)} not examined; coverage labels not recorded`;
+  const counts = { brief: 0, digest: 0, page: 0, read: 0 };
+  if (coverage.inventory === undefined) return `Changed ranges: ${coverage.covered} examined, ${unreadRangeCount(coverage)} not examined; range source counts not recorded`;
+  for (const range of coverage.inventory) if (range.by) counts[range.by]++;
+  return `Changed ranges: ${counts.brief} in a finder's brief, ${counts.digest} structural summary, ${counts.page} by page, ${counts.read} read by the reviewer, ${unreadRangeCount(coverage)} not examined`;
 }
 
 const hasSummary = (report: Report): boolean => report.summary !== null && report.summary.trim() !== "";
@@ -217,7 +294,7 @@ export function renderReceipt(report: Report, opts: { html: string; md: string; 
   out.push(display(`Change ${report.change_id.slice(0, 12)} against ${report.base.ref}, ${plural(files, "file", "files")}, +${additions} -${deletions}`));
   if (hasSummary(report)) out.push(display(`Summary: ${report.summary}`));
   if (!complete) {
-    out.push(display(`Missing: ${(record?.missing ?? ["no completion record"]).join("; ")}`));
+    out.push(display(`Missing: ${shortenedMissing(record?.missing ?? ["no completion record"]).join("; ")}`));
     out.push(`Findings so far (the change was not fully reviewed): ${ordered.length === 0 ? "none" : ordered.length}`);
   } else if (ordered.length === 0) {
     out.push("No findings on the changed lines.");
@@ -230,6 +307,11 @@ export function renderReceipt(report: Report, opts: { html: string; md: string; 
     observations.forEach((f, i) => out.push(display(`${findingLabel(f, ordered.length + i + 1)} (${location(f)})`)));
     if (omitted) out.push(omitted);
   }
+  const possible = orderPossible(report);
+  if (possible.length > 0) {
+    out.push(possibleHeading(report));
+    possible.forEach((f, i) => out.push(display(`${findingLabel(f, ordered.length + observations.length + i + 1)} (${location(f)})`)));
+  }
   if (!complete && report.not_reviewed.length > 0) {
     // One line each: the developer sees what the scanners found, unchecked.
     out.push(`${UNCHECKED} (${report.not_reviewed.length}):`);
@@ -237,6 +319,8 @@ export function renderReceipt(report: Report, opts: { html: string; md: string; 
   } else if (report.not_reviewed.length > 0) {
     out.push(`${plural(report.not_reviewed.length, "scanner candidate was", "scanner candidates were")} not checked by the reviewer and count toward the verdict; the report lists them.`);
   }
+  out.push(receiptCoverage(record));
+  if (record?.refused?.length) out.push(display(`These requests were refused and were not served: ${record.refused.join(", ")}`));
   for (const note of report.notes ?? []) if (/^Convention(?:s supplied| omitted| transformed):/.test(note)) out.push(display(note));
   out.push(`Report: ${opts.html}`, `Markdown: ${opts.md}`);
   return `${out.join("\n")}\n`;
@@ -247,19 +331,25 @@ export function renderReceipt(report: Report, opts: { html: string; md: string; 
 // the fix, any suggested change and the source. `numbers` are the receipt's
 // and must exist; they are printed in the order given.
 export function renderFindingDetails(report: Report, numbers: number[]): string {
-  const ordered = [...orderFindings(report.findings), ...orderObservations(report)];
+  const ordered = [...orderFindings(report.findings), ...orderObservations(report), ...orderPossible(report)];
   const out: string[] = [];
   let observations = false;
+  let possible = false;
   for (const n of numbers) {
     const f = ordered[n - 1];
     if (f === undefined) continue;
-    const observation = n > report.findings.length;
+    const possibleItem = n > report.findings.length + (report.observations?.length ?? 0);
+    const observation = n > report.findings.length && !possibleItem;
+    if (possibleItem && !possible) {
+      out.push(possibleHeading(report));
+      possible = true;
+    }
     if (observation && !observations) {
       out.push("Observations (do not count toward the verdict):");
       observations = true;
     }
     out.push(display(findingLabel(f, n)));
-    const fields = f.problem !== undefined || observation ? findingLines(f, n).slice(1) : [{ kind: "field" as const, label: "Where", text: location(f) }, { kind: "field" as const, label: "Description", text: f.description }, { kind: "field" as const, label: "Source", text: f.source ?? "the reviewer" }];
+    const fields = f.problem !== undefined || observation || possibleItem ? findingLines(f, n).slice(1) : [{ kind: "field" as const, label: "Where", text: location(f) }, { kind: "field" as const, label: "Description", text: f.description }, { kind: "field" as const, label: "Source", text: f.source ?? "the reviewer" }];
     for (const l of fields) if (l.kind === "field") out.push(`   ${l.label}: ${display(l.text)}`);
     if (f.suggested_change !== null && f.suggested_change.trim() !== "") {
       out.push("   Suggested change:");

@@ -91,8 +91,8 @@
 //    evidence hash is not the current one, naming the candidate.
 // The licence class each candidate carries (lib/licence.mjs) travels into
 // the suite entry and every run's case copy, so a case whose licence is
-// unverified is used and published in full like any other. Outside converters
-// and board submissions still apply publishRefusal.
+// unverified is used and published in full like any other. Local board
+// conversion accepts it; board submissions still apply publishRefusal.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

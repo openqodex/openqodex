@@ -1,9 +1,9 @@
 // Strict preinstall of every scanner into a clean install root, as a server
 // image build does it. It downloads every pinned scanner from its release
 // (about 1 GB) and runs each one on its check case through the real binary,
-// so it runs only with OPENQODEX_PREINSTALL_FULL=1: the release workflow's
-// check after each publish sets it (tests/e2e/preinstall-full.test.ts), and
-// the pull request gate skips it. The strict check's failures and the
+// so it runs only with OPENQODEX_PREINSTALL_FULL=1: the release workflow
+// sets it before each publish and again after it
+// (tests/e2e/preinstall-full.test.ts), and the pull request gate skips it. The strict check's failures and the
 // server's resolver on a preinstalled root are checked on every gate, in
 // server-roots.subprocess.test.ts.
 //

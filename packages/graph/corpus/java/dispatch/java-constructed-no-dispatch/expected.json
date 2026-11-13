@@ -1,0 +1,53 @@
+{
+  "guards": "dispatches a call on a Java local declared by an interface type, and never a call on a var whose value a constructor made",
+  "callers": [
+    {
+      "to": "src/main/java/repo/Repo.java#Repo.find",
+      "site": "src/main/java/app/Run.java:10",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/repo/SqlRepo.java#SqlRepo.find",
+      "site": "src/main/java/app/Run.java:10",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/repo/MemRepo.java#MemRepo.find",
+      "site": "src/main/java/app/Run.java:10",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/repo/MemRepo.java#MemRepo.find",
+      "site": "src/main/java/app/Run.java:12",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/main/java/app/Run.java:10",
+      "candidates": [
+        "src/main/java/repo/SqlRepo.java#SqlRepo.find",
+        "src/main/java/repo/MemRepo.java#MemRepo.find"
+      ]
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/repo/SqlRepo.java#SqlRepo.find",
+      "site": "src/main/java/app/Run.java:12"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/main/java/app/Run.java",
+      "line": 12
+    }
+  ],
+  "floor": {
+    "src/main/java/repo/MemRepo.java#MemRepo.find": true
+  }
+}

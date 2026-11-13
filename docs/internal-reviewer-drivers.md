@@ -62,13 +62,13 @@ Each `result` event carries `num_turns` and `usage` for that turn (input, output
 The boundary is Claude Code's own permission rules: `--tools Read,Grep,Glob` and `--permission-mode dontAsk` with no settings source, which refused every read outside the working folder in the runs above. The alarm is the tool's own check of the event stream (`packages/review/src/agents/trace.ts`), which does not trust the boundary and fails closed:
 
 - the run fails when the `init` event lists any tool beyond Read, Grep and Glob, any MCP server or a memory path; the `Agent` tool is never listed, so no subagent or nested turn can make a call the stream does not show, and every `tool_use` in the stream is checked whichever turn it came from;
-- every tool call counts from the moment the agent asks for it, with or without a result; a tool name other than the three makes the review incomplete;
+- every tool call is recorded from the moment the agent asks for it, with or without a result; a successful call to a tool the reviewer was not given makes the review incomplete. A refused call is listed on the receipt and does not fail the review;
 - every path-bearing input (`file_path`, `path`, `notebook_path`, `cwd`, `directory`, and a `pattern` or `glob` that starts at `/`, `~`, a drive or `..`) is resolved against the snapshot, then through the real path of its deepest existing folder, and compared case-insensitively on macOS and Windows; a path with `$`, `%` or a NUL is refused, `~` is the home folder;
 - an input that is not an object, or a path field that is not text, makes the review incomplete;
-- any attempt outside the snapshot makes the review incomplete, even one the agent refused;
+- a read outside the snapshot makes the review incomplete. An attempt the agent marked as an error is a refusal: it is listed on the receipt and does not fail the review. The error flag also marks a tool that ran and failed, so the init check on the tool list is the guard that keeps a tool the reviewer was not given from running at all. A review whose init event shows such a tool is failed before any call. A call with no result recorded still counts as a read;
 - one place outside the snapshot is the agent's own. Claude Code saves a tool result too large to hand the model at `<configuration folder>/projects/<its name for the working folder>/<session id>/tool-results/<tool call id>.txt` and tells the model to read it back. A call on the `tool-results` folder of this session (the session id from the `init` event; the configuration folder from `CLAUDE_CONFIG_DIR`, else `~/.claude`, as `init` reads it) is kept in `trace.json` with `own: true` and does not make the review incomplete: it holds only what this session's own calls returned, and each of those calls was checked. Any other path in the configuration folder (the login, another session's output, a transcript) stays outside. With Claude Code 2.1.296, `dontAsk` refused that read (2026-10-09).
 
-The snapshot holds no links (they are written as plain files) and secrets the scanners found are redacted in every file of it before the reviewer starts; a file too large to check is removed from it.
+The snapshot holds no links (they are written as plain files) and secrets the scanners found are redacted in every file of it before the reviewer starts. Every file remains readable regardless of size. Redaction streams bytes and range reads use a cached line index; time and budget bound the review.
 
 ### What the agent stores
 
@@ -147,7 +147,10 @@ Observed with codex-cli 0.160.0 (2026-10-04):
 
 What `traced: false` changes in the run (`packages/review/src/review-change.ts`, `packages/review/src/conversation.ts`, `packages/core/src/completion.ts`):
 
-- No read in the stream counts as coverage. A changed range counts only when its diff is in the brief or the run sent it in a correction round. A range still not sent after two rounds makes the review incomplete ("not given to the reviewer"). A changed line over 2,000 characters is given in numbered parts; a line too large for the byte budget keeps the review incomplete.
+- No read in the stream counts as coverage.
+  A changed range counts only when a brief, a delivery page or a structural summary carried it to the reviewer.
+  A long line counts only when every fragment of it arrived; see [Long lines](claude-code-review.md#long-lines).
+  Each unexamined range keeps the review incomplete and has its own entry in the record.
 - The commands and searches the stream shows are kept in `trace.json` with `inside: null` and their input under `detail`. They never pass or fail a review: there is no "read outside the snapshot" alarm and no "tool it was not given" check. The sandbox is the boundary.
 - The completion record holds `trace_complete: false`, and empty `files_read` and `files_not_read`. The report prints "Files the reviewer opened: not recorded by Codex" and "Reads outside the snapshot: not recorded by Codex".
 

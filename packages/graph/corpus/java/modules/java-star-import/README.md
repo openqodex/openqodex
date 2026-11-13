@@ -1,0 +1,1 @@
+App imports `a.b.*` and calls `Tool.make()`. Packages a.b and c.d both declare a class Tool with a static make. The change edits a.b's Tool.make. A graph that skips star imports finds no caller, and one that matches the class by its name alone binds the call to c.d's Tool as well. The call must bind certain to a.b's Tool.make through the import and never reach c.d's.

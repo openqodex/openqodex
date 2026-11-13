@@ -5,7 +5,7 @@
 // in as a host object; nothing here prints or keeps state of its own.
 import { closeSync, constants, openSync, readSync } from "node:fs";
 import { join } from "node:path";
-import { DIFF_CAP_BYTES, loadLensCatalog, safeGit, selectLensesForDiff } from "@openqodex/core";
+import { loadLensCatalog, safeGit, selectLensesForDiff } from "@openqodex/core";
 import type { Change, Config, HotSpot, ImpactSummary, ResolveTool, RuleCoverage, ScanResult, ScannerSource, SelectedLens, WholeRepo } from "@openqodex/core";
 import { buildGraph, detectImpact, emptyImpact, hotSymbols, isManifest, langOf } from "@openqodex/graph";
 import type { Graph, GraphStore, Lease, ListedFile } from "@openqodex/graph";
@@ -119,7 +119,7 @@ export async function graphFor(p: PipelineResult, host: GraphHost, noGraph: bool
   if (!p.config.graph.enabled) return emptyImpact("off", "graph.enabled is false in the config");
   const relevant = (path: string | null) => path !== null && (langOf(path) !== null || isManifest(path));
   if (!p.change.files.some((f) => relevant(f.path) || relevant(f.oldPath))) {
-    return emptyImpact("skipped", `no ${withBase ? "changed " : ""}file is TypeScript, JavaScript, Python, Go or Ruby code or a manifest`);
+    return emptyImpact("skipped", `no ${withBase ? "changed " : ""}file is TypeScript, JavaScript, Python, Go, Ruby or Java code or a manifest`);
   }
   try {
     const { store, refused } = host.store ? await host.store() : { store: null, refused: undefined };
@@ -202,14 +202,15 @@ export async function buildHotSpots(p: PipelineResult, host: GraphHost, noGraph:
 }
 
 // The lens triggers over the whole repo: every line counts as changed. Each
-// text file contributes its first bytes, an equal share of the 5 MB the
-// brief's diff may carry, so a late file is sampled as fully as an early
+// text file contributes its first bytes, an equal share of a 5 MB
+// sampling budget, so a late file is sampled as fully as an early
 // one; the matches are then ranked and capped as for a change.
+const LENS_SAMPLE_BYTES = 5 * 1024 * 1024;
 const LENS_SAMPLE_MIN_BYTES = 1024;
 
 export function wholeRepoLenses(change: WholeRepo, covered?: RuleCoverage): SelectedLens[] {
   const text = [...change.lines.keys()];
-  const share = Math.max(LENS_SAMPLE_MIN_BYTES, Math.floor(DIFF_CAP_BYTES / Math.max(1, text.length)));
+  const share = Math.max(LENS_SAMPLE_MIN_BYTES, Math.floor(LENS_SAMPLE_BYTES / Math.max(1, text.length)));
   const buf = Buffer.alloc(share);
   let diff = "";
   for (const path of text) {

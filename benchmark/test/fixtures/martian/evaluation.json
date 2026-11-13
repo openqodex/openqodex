@@ -15,6 +15,7 @@
       "prUrl": "https://github.com/alpha/app/pull/1",
       "sourceFindingIds": ["c49ed7a6de79297315ab9968dc0e1c74d516fef1f6e5cda613f05b47aa94edff"],
       "extractedText": "The cache entry is read after the lock is released, so two writers can both miss and both insert",
+      "officialFp": false,
       "extraction": { "model": "gpt-5.2", "step": "step2_extract_comments", "file": "results/gpt-5.2/candidates.json" },
       "dedupGroup": 0
     },
@@ -23,6 +24,7 @@
       "prUrl": "https://github.com/alpha/app/pull/1",
       "sourceFindingIds": ["c49ed7a6de79297315ab9968dc0e1c74d516fef1f6e5cda613f05b47aa94edff"],
       "extractedText": "Read and insert should happen under the same lock",
+      "officialFp": false,
       "extraction": { "model": "gpt-5.2", "step": "step2_extract_comments", "file": "results/gpt-5.2/candidates.json" },
       "dedupGroup": 1
     },
@@ -31,6 +33,7 @@
       "prUrl": "https://github.com/alpha/app/pull/1",
       "sourceFindingIds": ["bbfacf3ea0b833feb953e61f55d08246cff87d9da940ca43a6cd14ad359d3ab7"],
       "extractedText": "The widget id from the request is joined into the SQL text",
+      "officialFp": false,
       "extraction": { "model": "gpt-5.2", "step": "step2_extract_comments", "file": "results/gpt-5.2/candidates.json" },
       "dedupGroup": 2
     },
@@ -39,6 +42,7 @@
       "prUrl": "https://github.com/alpha/app/pull/1",
       "sourceFindingIds": ["112ab4afbe57945e1a960097a03228a228a4b33499b3f6e5bce7b98ebd5d10cd"],
       "extractedText": "Eviction stops one entry early and never evicts the newest entry",
+      "officialFp": true,
       "extraction": { "model": "gpt-5.2", "step": "step2_extract_comments", "file": "results/gpt-5.2/candidates.json" },
       "dedupGroup": 3
     },
@@ -47,6 +51,7 @@
       "prUrl": "https://github.com/alpha/app/pull/1",
       "sourceFindingIds": ["9cfda66b64c744e970ebd80538b69ba79d26db9edbd108ca96873035441a0b0e"],
       "extractedText": "The constant VALUE should be named CACHE_TTL_SECONDS",
+      "officialFp": true,
       "extraction": { "model": "gpt-5.2", "step": "step2_extract_comments", "file": "results/gpt-5.2/candidates.json" },
       "dedupGroup": 4
     },
@@ -55,6 +60,7 @@
       "prUrl": "https://github.com/eval-org/alpha-copy/pull/1",
       "sourceFindingIds": ["71d4c81dded07198144e9dc7f4d8cc93702149df67c24db908c4fc773b3ea0b7"],
       "extractedText": "The retry counter is incremented by workers with no lock, and a missing delivery answers 200 with an empty body",
+      "officialFp": false,
       "extraction": { "model": "gpt-5.2", "step": "step2_extract_comments", "file": "results/gpt-5.2/candidates.json" },
       "dedupGroup": 0
     },
@@ -63,6 +69,7 @@
       "prUrl": "https://github.com/eval-org/alpha-copy/pull/1",
       "sourceFindingIds": ["ff5fe000450a2da5c8133eec7b6179b2a022ddcf1103ae4c771a9a45cc258010"],
       "extractedText": "The retry counter has no lock, so concurrent workers race on it",
+      "officialFp": false,
       "extraction": { "model": "gpt-5.2", "step": "step2_extract_comments", "file": "results/gpt-5.2/candidates.json" },
       "dedupGroup": 0
     }

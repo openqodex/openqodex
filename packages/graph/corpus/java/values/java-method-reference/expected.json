@@ -1,0 +1,41 @@
+{
+  "guards": "lists a Java method reference passed to a repository method that calls its parameter as a possible caller of the method referenced, and keeps every method reference as a value use",
+  "callers": [
+    {
+      "to": "src/main/java/v/Registry.java#Registry.register",
+      "site": "src/main/java/v/Registry.java:18",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/v/Worker.java#Worker.run",
+      "site": "src/main/java/v/Registry.java:18",
+      "tier": "possible",
+      "kind": "may_invoke"
+    }
+  ],
+  "references": [
+    {
+      "to": "src/main/java/v/Worker.java#Worker.run",
+      "site": "src/main/java/v/Registry.java:18",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/v/Registry.java#Registry.handle",
+      "site": "src/main/java/v/Registry.java:19",
+      "kind": "uses_value",
+      "tier": "certain"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/v/Registry.java#Registry.handle",
+      "site": "src/main/java/v/Registry.java:19",
+      "kind": "may_invoke"
+    }
+  ],
+  "floor": {
+    "src/main/java/v/Worker.java#Worker.run": true
+  }
+}

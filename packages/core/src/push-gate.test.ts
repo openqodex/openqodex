@@ -9,7 +9,8 @@
 // 5. Its message does not say what to run.
 // 6. A review judged with no threshold, or another one, passes a push after
 //    block_on_severity is set (the config is outside the change id).
-// 7. An incomplete record blocks a push, even with block_on_severity set.
+// 7. An incomplete record of this change blocks a push, or passes without
+//    saying the review did not finish, even with block_on_severity set.
 // 8. A legacy receipt (the old two-step protocol) counts as a complete
 //    record, or suddenly blocks a push the old version let through.
 // 9. A complete passing review of this change is not silent.
@@ -19,6 +20,7 @@
 //     longer gives its message.
 // 11. A blocked push tells the agent to fix everything, where the developer
 //     chooses what to fix.
+// 12. An unread-only failure omits the first range from the push message.
 import { describe, expect, it } from "vitest";
 import { finalizeReview } from "./finalize.js";
 import { checkPush, gateReceipt } from "./push-gate.js";
@@ -131,4 +133,12 @@ describe("checkPush", () => {
     expect(d.decision).toBe("deny");
     expect(d.message).toContain("under the current block_on_severity");
   });
+});
+
+it("C3 fix 6. an unread-only push message names its heading and first range", () => {
+  const report = { ...judged(null), verdict: "incomplete", completion: { status: "incomplete", missing: ["2 changed ranges were not examined", "a.py:4-5 (deletion a.py#0)", "b.py:6-7"] } } as Report;
+  const receipt = gateReceipt(report, "incomplete", DIR);
+  const result = checkPush({ currentChangeId: change.id, receipt, config: makeConfig() });
+  expect(result.message).toContain("2 changed ranges were not examined; a.py:4-5 (deletion a.py#0)");
+  expect(result.message).not.toContain("b.py:6-7");
 });

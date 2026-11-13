@@ -1,0 +1,26 @@
+{
+  "guards": "rejects the unrelated TestNG Test annotation",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 0,
+    "none": [
+      "role",
+      "tests",
+      "registration"
+    ],
+    "notUnknowns": [
+      {
+        "file": "src/test/java/shop/ServiceTest.java",
+        "line": 4,
+        "cause": "ambiguous"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:4",
+      "tier": "certain"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "guards": "closes a sibling package for annotation lookup while keeping each module application separate",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 2,
+    "roles": [
+      {
+        "target": "app/src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "role": "test"
+      },
+      {
+        "target": "lib/src/test/java/other/LibraryTest.java#LibraryTest.reads",
+        "role": "test"
+      }
+    ],
+    "edges": [
+      {
+        "kind": "tests",
+        "from": "app/src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "to": "app/src/main/java/shop/Service.java#Service.read",
+        "tier": "certain",
+        "category": "direct-call"
+      }
+    ],
+    "notUnknowns": [
+      {
+        "file": "app/src/test/java/shop/ServiceTest.java",
+        "line": 5,
+        "cause": "ambiguous"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "app/src/main/java/shop/Service.java#Service.read",
+      "site": "app/src/test/java/shop/ServiceTest.java:5",
+      "tier": "certain"
+    }
+  ]
+}

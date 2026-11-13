@@ -1,11 +1,12 @@
-import { FINDER_CONFIDENCE_FLOOR, VERIFY_BATCH_SIZE, checkSubmission, findingKey, modelCoverage, outsideSnapshot, readCoverage, requiredCandidates, severityRank } from "@openqodex/core";
-import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
+import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, hunkFragmentLabel, matchesGlob, oldPathOf, redactByFingerprint, redactSecrets, VERIFY_BATCH_SIZE, verifyPartDistance, hunksBlock, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank, stagedDiffCache } from "@openqodex/core";
+import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, HunkRef, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
 import { MAX_CORRECTIONS, converse, deliverRanges } from "./conversation.js";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Conversation, CorrectionRound, Speaker } from "./conversation.js";
 import { checkFindAnswer, checkVerifyAnswer } from "./evidence-check.js";
-import { snapshotText, lineCounter } from "./snapshot.js";
-import { MAX_UNIT_DIFF_BYTES, hunkRefs, unitsOf } from "./units.js";
+import { fragmentSnapshotText } from "./line-fragments.js";
+import { lineCounter } from "./snapshot.js";
+import { MAX_BRIEF_BYTES, longestBrief, obligations, unitsOf, citedDigest } from "./units.js";
 import { modelToolEntry } from "./model-loop.js";
 import { usageTotals } from "./usage.js";
 import type { CallRecord, ReviewerRole, ToolLogEntry } from "./usage.js";
@@ -14,8 +15,11 @@ export const FINDERS_CONCURRENCY = 4;
 export const VERIFIERS_CONCURRENCY = 3;
 export type StagedSession = Speaker & { close(): void | Promise<void>; kill?(): void; pid?: number | null; calls?: () => CallRecord[]; attempts?: readonly CallRecord[]; sentRounds?: number };
 export type StagedArgs = {
+  inventory?: HunkRef[];
+  units?: ReviewUnit[];
+  onUnits?: (units: ReviewUnit[]) => void;
   openSession: (role: ReviewerRole) => StagedSession;
-  findBrief: (unit: ReviewUnit, pass: FindPass) => { text: string; diffFiles: Set<string> };
+  findBrief: (unit: ReviewUnit, pass: FindPass) => { text: string; diffFiles: Set<string>; carried: HunkRef[] };
   verifyBrief: (batch: VerifyBatch) => { text: string };
   snapshotDir: string;
   change: Change;
@@ -53,11 +57,13 @@ export type StagedResult = {
   missing: string[];
   required: number;
   disposed: number;
-  briefFiles: Set<string>;
+  obligations: HunkRef[];
+  briefCarried: HunkRef[];
+  digestCarried: HunkRef[];
   delivered: Hunk[];
 };
 export type StagedSessionRecord = ReviewerSessionRecord & { dropped?: { title: string; file_path: string; line_number: number; reason: string; confidence: number }[] };
-type Run = { order: number; name: string; dropped?: StagedSessionRecord["dropped"]; role: ReviewerRole; unit?: string; session: StagedSession; talk: Conversation; examined?: string[] };
+type Run = { order: number; name: string; dropped?: StagedSessionRecord["dropped"]; role: ReviewerRole; unit?: string; session: StagedSession; talk: Conversation; briefCarried: HunkRef[]; digestCarried: HunkRef[]; examined?: string[] };
 type Verified = { batch: VerifyBatch; run: Run; answer: VerifyAnswer; brief: string; number: number; corrections: number };
 const emptyUsage = (): ReviewerUsage => ({ turns: 0, input_tokens: null, output_tokens: null, cost_usd: null });
 const noDelivery = () => ({ text: "", delivered: [], left: [], later: 0, leak: false });
@@ -81,17 +87,23 @@ async function pool<T>(jobs: T[], limit: number, work: (job: T) => Promise<void>
 export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const { change, scan, config } = args;
   const citationChange = args.citationChange ?? change;
-  const read = snapshotText(args.snapshotDir);
+  const read = fragmentSnapshotText(args.snapshotDir);
   const lineCount = lineCounter(args.snapshotDir);
-  const hunks = hunkRefs(change);
-  const units = unitsOf(change, hunks);
+  const hunks = args.inventory ?? obligations(change, read, stagedDiffCache(change, args.secrets));
+  const units = args.units ?? unitsOf(change, hunks, (unit, both) => longestBrief(unit, args.findBrief, both));
+  for (const unit of units) if (unit.digest) {
+    unit.digest.text = redactSecrets(unit.digest.text, args.secrets);
+    unit.digest.omitted = unit.digest.omitted.map((o) => ({ ...o, why: redactSecrets(o.why, args.secrets) }));
+  }
+  args.onUnits?.(units);
   const startedAt = args.now();
   const findDeadline = startedAt + (args.deadline - startedAt) / 2;
   const runs: Run[] = [];
   const missing: string[] = [];
-  const notes = units.filter((u) => u.diffBytes > MAX_UNIT_DIFF_BYTES).map((u) => `Unit ${u.id} has ${u.diffBytes} bytes of diff in an indivisible hunk; it was kept as one unit.`);
+  // A fragment entry is named by its fragment label, never by a bare line.
+  const noteLine = (h: HunkRef, note: string) => `${h.id} ${h.fragment ? hunkFragmentLabel({ ...h, fragment: h.fragment }, oldPathOf(change, h.path)) : `${h.path}:${h.start}-${h.end}`}: ${note}`;
+  const notes = hunks.flatMap((h) => h.note ? [noteLine(h, h.note)] : []);
   const rounds: CorrectionRound[] = [];
-  const briefFiles = new Set<string>();
   const closedRuns = new Map<Run, Promise<void>>();
   let live = 0;
   let done = 0;
@@ -117,13 +129,13 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     rounds.push(round);
     emit(() => args.onRound?.(round));
   };
-  const failed = (talk: Conversation) => talk.failure ?? (args.traced && talk.trace.some(outsideSnapshot) ? "the reviewer tried to read outside the snapshot" : talk.errors.length > 0 ? talk.errors.join("; ") : null);
+  const failed = (talk: Conversation) => talk.failure ?? (args.traced && talk.trace.some(leftSnapshot) ? "the reviewer read outside the snapshot" : talk.errors.length > 0 ? talk.errors.join("; ") : null);
   const recordOf = (r: Run): StagedSessionRecord => ({ role: r.role, ...(r.unit ? { unit: r.unit } : {}), rounds: r.talk.rounds, usage: r.talk.usage, failure: failed(r.talk), ...(r.examined ? { examined: r.examined } : {}), ...(r.dropped?.length ? { dropped: r.dropped } : {}) });
   const start = (role: ReviewerRole, order: number, name: string, brief: string, unit?: string): Run => {
     emit(() => args.onBrief?.(role, brief));
     const session = args.openSession(role);
     const talk: Conversation = { rounds: 0, trace: [], usage: emptyUsage(), report: null, checked: null, errors: [], required: 0, disposed: 0, failure: null, submission: null, delivered: [], carried: [], startedAt: args.now(), endedAt: args.now() };
-    const run = { role, order, name, ...(unit ? { unit } : {}), session, talk };
+    const run = { role, order, name, ...(unit ? { unit } : {}), session, talk, briefCarried: [], digestCarried: [] };
     runs.push(run);
     live++;
     emit(() => args.onStarted?.(role, session.pid ?? null));
@@ -156,11 +168,12 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   // them out (a hunk over the diff budget, or without diff rows), no read
   // carried their lines and no earlier round delivered them. The same rule as
   // the single pass: coverage never rests on the finder's own `examined` list.
-  const undelivered = (unit: ReviewUnit, briefFiles: ReadonlySet<string>, trace: TraceEntry[], delivered: Hunk[]): Hunk[] => {
+  const undelivered = (unit: ReviewUnit, briefCarried: HunkRef[], trace: TraceEntry[], delivered: Hunk[]): Hunk[] => {
+    if (unit.digest) return [];
     const coverage = args.model
-      ? modelCoverage({ change, briefSent: true, briefFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount })
-      : readCoverage({ change, briefFiles, trace: args.traced ? trace : [], lineCount, delivered });
-    return coverage.unread.filter((h) => unit.hunks.some((u) => u.path === h.path && u.deletion === h.deletion && u.start <= h.end && h.start <= u.end));
+      ? modelCoverage({ change, obligations: unit.hunks, fragmentParts: true, briefSent: true, briefCarried, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount })
+      : readCoverage({ change, obligations: unit.hunks, fragmentParts: true, briefCarried, trace: args.traced ? trace : [], lineCount, delivered });
+    return coverage.unread;
   };
   const findings: { run: Run; answer: FindAnswer; passRole: string }[] = [];
   const verified: Verified[] = [];
@@ -177,26 +190,32 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         let run: Run | null = null;
         try {
           const brief = args.findBrief(unit, pass);
+          if (Buffer.byteLength(brief.text, "utf8") > MAX_BRIEF_BYTES) {
+            last = "its finder brief exceeds MAX_BRIEF_BYTES";
+            for (const h of unit.hunks) { h.note = last; notes.push(noteLine(h, last)); }
+            break;
+          }
           run = start(attempt === 0 ? passRole : `${passRole}:retry1`, index * 10 + attempt, `Finder for unit ${unit.id} (${pass === "local" ? "correctness and safety" : "interfaces and conventions"})`, brief.text, unit.id);
+          run.briefCarried = unit.digest ? [] : brief.carried;
+          run.digestCarried = unit.digest ? unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)) : [];
           began = true;
           let checked: ReturnType<typeof checkFindAnswer> | null = null;
-          run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, deadline: findDeadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role),
+          run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, earlier: [...run.briefCarried, ...run.digestCarried], deadline: findDeadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role),
             check: (value, trace, delivered) => {
               const result = checkFindAnswer(value, unit, citationChange, read, args.manifest.lenses.map((lens) => lens.name));
               checked = result;
               run!.examined = result.answer.examined;
-              const unread: Hunk[] = result.parsed && pass === "local" ? unit.hunks.filter((h) => !result.answer.examined.includes(h.id)) : [];
-              if (result.parsed && pass === "local") for (const h of undelivered(unit, brief.diffFiles, trace, delivered)) if (!unread.some((u) => u.path === h.path && u.start === h.start && u.end === h.end && u.deletion === h.deletion)) unread.push(h);
+              const unread: Hunk[] = result.parsed && pass === "local" && !unit.digest ? unit.hunks.filter((h) => !result.answer.examined.includes(h.id)) : [];
+              if (result.parsed && pass === "local") for (const h of undelivered(unit, brief.carried, trace, delivered)) if (!unread.some((u) => u.path === h.path && u.start === h.start && u.end === h.end && JSON.stringify(u.deletion) === JSON.stringify(h.deletion))) unread.push(h);
               return { report: null, errors: result.errors, unread, required: 0, disposed: 0 };
             },
-            deliver: (unread, earlier) => deliverRanges({ snapshotDir: args.snapshotDir, unread, earlier, secrets: args.secrets, change }),
+            deliver: (unread, earlier) => deliverRanges({ snapshotDir: args.snapshotDir, unread: unread.filter((h) => unit.hunks.some((u) => u.id === h.id)), earlier, secrets: args.secrets, change }),
           });
-          // Model briefs count only after the transport received them.
-          if (run.session.sentRounds === undefined || run.session.sentRounds > 0) for (const file of brief.diffFiles) briefFiles.add(file);
+
           noteRefusal(run);
           last = failed(run.talk);
           const result = checked as ReturnType<typeof checkFindAnswer> | null;
-          if (result && result.answerErrors.length === 0 && run.talk.errors.every((error) => result.errors.includes(error)) && run.talk.failure === null && (!args.traced || !run.talk.trace.some(outsideSnapshot))) {
+          if (result && result.answerErrors.length === 0 && run.talk.errors.every((error) => result.errors.includes(error)) && run.talk.failure === null && (!args.traced || !run.talk.trace.some(leftSnapshot))) {
             const rejected = new Set(result.rejected.map((r) => r.candidate));
             answer = { ...result.answer, candidates: result.answer.candidates.filter((c) => !rejected.has(c)) };
             run.dropped = result.rejected.map(({ candidate: c }) => ({ title: c.title, file_path: c.file_path, line_number: c.line_number, confidence: c.confidence, reason: "evidence not found" }));
@@ -214,7 +233,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       }
       if (answer === null) {
         missing.push(!began ? `unit ${unit.id} was not started: ${last ?? (stopped() ? "the review stopped" : ranOut("the finders' time ran out"))}` : `unit ${unit.id} was not examined by ${pass}: ${last ?? ranOut("the finders' time ran out")}`);
-        for (const h of unit.hunks) missing.push(`hunk ${h.id} of ${h.path} was not examined by the ${pass} pass`);
+        for (const h of unit.hunks) missing.push(`hunk ${h.id} of ${h.path}:${h.start}-${h.end} was not examined by the ${pass} pass`);
       }
     });
 
@@ -235,8 +254,16 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     allCandidates = candidates;
     const files = new Map<string, VerifyCandidate[]>();
     for (const c of candidates) files.set(candidateFile(c), [...(files.get(candidateFile(c)) ?? []), c]);
+    const abandon = (batch: VerifyBatch, reason: string) => {
+      batch.candidates.forEach((c) => unverified.add(c.id));
+      missing.push(`candidates ${batch.candidates.map((c) => c.id).join(", ")} were not verified: ${reason}`);
+    };
+    const briefs = new Map<VerifyBatch, string>();
     const batches: VerifyBatch[] = [];
     for (const [file, list] of files) {
+      const fileHunks = hunks.filter((h) => h.path === file);
+      const digestUnit = units.find((u) => u.digest && u.files.includes(file));
+      const sizes = new Map(fileHunks.map((h) => [h.id, digestUnit ? 0 : Buffer.byteLength(hunksBlock(change, [h], args.secrets).text, "utf8") + 2]));
       list.sort((a, b) => candidateLine(a) - candidateLine(b) || Number(a.kind === "finder") - Number(b.kind === "finder"));
       for (let i = 0; i < list.length;) {
         let end = Math.min(i + VERIFY_BATCH_SIZE, list.length);
@@ -249,7 +276,51 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           while (last < list.length && candidateLine(list[last]!) === candidateLine(list[end]!)) last++;
           if (list.slice(first, last).some((c) => c.kind !== list[first]!.kind)) end = last;
         }
-        batches.push({ file, hunks: hunks.filter((h) => h.path === file), candidates: list.slice(i, end) });
+        const addBatch = (selected: VerifyCandidate[]) => {
+          // Candidate parts come first, then cited old fragments, then
+          // neighbours. Sum isolated blocks conservatively: their repeated
+          // headers and the base's omitted headings only overestimate the join.
+          const parts = fileHunks.map((h) => ({ h, distance: verifyPartDistance(h, selected, change) }))
+            .sort((a, b) => (a.distance === 0 ? -2 : a.distance) - (b.distance === 0 ? -2 : b.distance));
+          // Selection runs nearest first; the brief keeps the file's own order.
+          const batch: VerifyBatch = { file, hunks: fileHunks, candidates: selected, shown: [], ...(digestUnit ? {
+            digest: citedDigest(units, file, selected.flatMap((c): [number, number][] => c.kind === "finder"
+              ? [[c.candidate.line_number, c.candidate.line_end ?? c.candidate.line_number], ...c.candidate.evidence.filter((e) => e.file_path === file && !e.removed).map((e): [number, number] => [e.line_number, e.line_number])]
+              : [[c.candidate.lineStart, c.candidate.lineEnd]]), selected.flatMap((c) => c.kind === "finder" ? c.candidate.evidence.map((e) => e.file_path) : [])),
+            citedText: selected.map((c) => {
+              const line = candidateLine(c);
+              const from = Math.max(1, line - 2);
+              const text = read.readLines?.(file, from, line + 2, 16 * 1024) ?? null;
+              return text === null ? `${file}:${line}: read the cited lines with your tools.` : `${file} lines ${from}-${line + 2} from the snapshot:\n${text.split("\n").map((row, i) => `${from + i}\t${row}`).join("\n")}`;
+            }).join("\n\n"),
+          } : {}) };
+          let bytes = Buffer.byteLength(args.verifyBrief(batch).text, "utf8");
+          const own = parts.filter((p) => p.distance === 0);
+          if (bytes + own.reduce((n, p) => n + sizes.get(p.h.id)!, 0) > MAX_BRIEF_BYTES) {
+            if (selected.length === 1) {
+              abandon(batch, "its candidate part and fixed blocks exceed MAX_BRIEF_BYTES");
+              return;
+            }
+            const middle = Math.ceil(selected.length / 2);
+            addBatch(selected.slice(0, middle));
+            addBatch(selected.slice(middle));
+            return;
+          }
+          for (const { h } of parts) {
+            const size = sizes.get(h.id)!;
+            if (bytes + size > MAX_BRIEF_BYTES) continue;
+            bytes += size;
+            batch.shown!.push(h.id);
+          }
+          const brief = args.verifyBrief(batch).text;
+          if (Buffer.byteLength(brief, "utf8") > MAX_BRIEF_BYTES) {
+            abandon(batch, "its rendered brief exceeds MAX_BRIEF_BYTES");
+            return;
+          }
+          briefs.set(batch, brief);
+          batches.push(batch);
+        };
+        addBatch(list.slice(i, end));
         i = end;
       }
     }
@@ -257,10 +328,6 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       const result = checkVerifyAnswer(value, batch, citationChange, read, lineCount, scan);
       accept(result.answer);
       return { report: null, errors: result.errors, unread: [], required: batch.candidates.length, disposed: result.errors.length === 0 ? batch.candidates.length : 0 };
-    };
-    const abandon = (batch: VerifyBatch, reason: string) => {
-      batch.candidates.forEach((c) => unverified.add(c.id));
-      missing.push(`candidates ${batch.candidates.map((c) => c.id).join(", ")} were not verified: ${reason}`);
     };
     // Only item errors can be isolated. A malformed or incomplete batch is retried.
     const isolate = (batch: VerifyBatch, answer: VerifyAnswer | null, errors: string[]): answer is VerifyAnswer => {
@@ -279,25 +346,29 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     };
     await pool(batches.map((batch, index) => ({ batch, index })), VERIFIERS_CONCURRENCY, async ({ batch, index }) => {
       let accepted = false;
+      const failures: string[] = [];
       for (let attempt = 0; attempt < 2 && !stopped() && args.now() < args.deadline; attempt++) {
         let run: Run | null = null;
         try {
-          const brief = args.verifyBrief(batch);
+          const brief = { text: briefs.get(batch)! };
           run = start(`verifier:${index + 1}${attempt ? ":retry1" : ""}`, jobs.length * 10 + index * 10 + attempt, `Verifier ${index + 1} for ${batch.file}`, brief.text);
           let answer: VerifyAnswer | null = null;
           run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, deadline: args.deadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role), check: verifyCheck(batch, (a) => { answer = a; }), deliver: noDelivery });
           noteRefusal(run);
-          if (run.talk.failure === null && (!args.traced || !run.talk.trace.some(outsideSnapshot)) && answer !== null && (failed(run.talk) === null || isolate(batch, answer, run.talk.errors))) {
+          if (run.talk.failure === null && (!args.traced || !run.talk.trace.some(leftSnapshot)) && answer !== null && (failed(run.talk) === null || isolate(batch, answer, run.talk.errors))) {
             verified.push({ batch, run, answer, brief: brief.text, number: index + 1, corrections: 0 }); accepted = true; break;
           }
+          failures.push(failed(run.talk) ?? "the verifier gave no answer that could be checked");
         } catch (error) {
           if (hostFailure !== null) throw hostFailure;
-          if (run) run.talk.failure = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
+          const failure = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
+          failures.push(failure);
+          if (run) run.talk.failure = failure;
         } finally {
           if (run) await close(run);
         }
       }
-      if (!accepted) abandon(batch, stopped() ? "the review stopped" : args.now() >= args.deadline ? ranOut("the verifier did not finish in time") : "the verifier session failed twice");
+      if (!accepted) abandon(batch, stopped() ? "the review stopped" : args.now() >= args.deadline ? ranOut("the verifier did not finish in time") : `the verifier session failed twice (${failures.map((failure, i) => `attempt ${i + 1}: ${failure}`).join("; ")})`);
     });
 
     if (hostFailure !== null) throw hostFailure;
@@ -362,7 +433,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           // The saved answer is context, not a call in this new session.
           run.talk.rounds--;
           noteRefusal(run);
-          if (answer !== null && run.talk.failure === null && (!args.traced || !run.talk.trace.some(outsideSnapshot)) && (failed(run.talk) === null || isolate(owner.batch, answer, run.talk.errors))) owner.answer = answer;
+          if (answer !== null && run.talk.failure === null && (!args.traced || !run.talk.trace.some(leftSnapshot)) && (failed(run.talk) === null || isolate(owner.batch, answer, run.talk.errors))) owner.answer = answer;
           else {
             if (!isolate(owner.batch, owner.answer, problems)) {
               abandon(owner.batch, "the verifier did not correct its answer");
@@ -424,6 +495,77 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     report.below_threshold = Math.max(0, report.below_threshold - observations.filter((o) => !shownKeys.has(findingKey(o))).length);
     report.observations = observations.slice(0, 12);
     report.observations_omitted = Math.max(0, observations.length - 12);
+    // A shown member owns its whole duplicate chain, in either direction.
+    const neighbours = new Map<string, Set<string>>();
+    for (const item of built.items) {
+      const target = item.v.duplicate_of ? byId.get(item.v.duplicate_of) : undefined;
+      if (!target) continue;
+      const key = keyOf(item);
+      const targetKey = keyOf(target);
+      if (!neighbours.has(key)) neighbours.set(key, new Set());
+      if (!neighbours.has(targetKey)) neighbours.set(targetKey, new Set());
+      neighbours.get(key)!.add(targetKey);
+      neighbours.get(targetKey)!.add(key);
+    }
+    const owned = new Set([...report.findings, ...observations].map(findingKey));
+    const ownComponent = (keys: Set<string>, start: string[]) => {
+      const pending = [...start];
+      for (const key of start) keys.add(key);
+      for (let i = 0; i < pending.length; i++) for (const key of neighbours.get(pending[i]!) ?? []) {
+        if (keys.has(key)) continue;
+        keys.add(key);
+        pending.push(key);
+      }
+    };
+    ownComponent(owned, [...owned]);
+    const lowConfidenceOf = (f: FindingV2) => {
+      if (f.source && config.disabledRules.some((glob) => matchesGlob(f.source!, glob))) return null;
+      const lens = f.source?.startsWith("lens:") ? args.manifest.lenses.find((l) => l.name === f.source!.slice("lens:".length)) : undefined;
+      const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lens?.confidenceFloor ?? 0);
+      if (f.confidence >= floor) return null;
+      return { title: redactByFingerprint(f.title, scan.secretFingerprints), file_path: redactByFingerprint(f.file_path, scan.secretFingerprints), confidence: f.confidence, floor };
+    };
+    const matchesLow = (low: Report["low_confidence"][number], entry: Report["low_confidence"][number]) => low.title === entry.title && low.file_path === entry.file_path && low.confidence === entry.confidence && low.floor === entry.floor;
+    const removeLow = (entry: Report["low_confidence"][number]) => {
+      const index = report.low_confidence.findIndex((low) => matchesLow(low, entry));
+      if (index !== -1) report.low_confidence.splice(index, 1);
+    };
+    const shownPossibleKeys = new Set(report.possible.map(findingKey));
+    // Account for under-floor observations even below the severity threshold.
+    // Do not use the visible check to restore possible defects.
+    const lowObservationKeys = new Set<string>();
+    for (const item of built.items) {
+      const key = keyOf(item);
+      if (item.v.tier !== "observation" || !observationKeys.has(key) || lowObservationKeys.has(key)) continue;
+      const entry = lowConfidenceOf(item.finding);
+      if (!entry) continue;
+      lowObservationKeys.add(key);
+      if (duplicateKeys.has(key) || owned.has(key)) {
+        if (!shownPossibleKeys.has(key)) removeLow(entry);
+        continue;
+      }
+      // wording: session
+      const reason = "observation under the floor";
+      const existing = report.low_confidence.find((low) => matchesLow(low, entry));
+      if (existing) existing.reason = reason;
+      else report.low_confidence.push({ ...entry, reason });
+    }
+    const possibleOwned = new Set(owned);
+    report.possible = report.possible
+      .filter((f) => !observationKeys.has(findingKey(f)))
+      .sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || (b.confidence ?? 0) - (a.confidence ?? 0))
+      .filter((f) => {
+        const key = findingKey(f);
+        if (possibleOwned.has(key)) return false;
+        ownComponent(possibleOwned, [key]);
+        return true;
+      });
+    for (const item of built.items) {
+      const key = keyOf(item);
+      if (item.v.tier !== "finding" || shownPossibleKeys.has(key) || !possibleOwned.has(key) && !duplicateKeys.has(key)) continue;
+      const entry = lowConfidenceOf(item.finding);
+      if (entry) removeLow(entry);
+    }
     report.not_reviewed = requiredCandidates(scan, config).filter((c) => unverified.has(c.id));
     for (const c of allCandidates) {
       const verdict = verified.flatMap((o) => o.answer.verdicts).find((v) => v.id === c.id);
@@ -450,7 +592,12 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       const key = findingKey({ ...item.finding, line_end: item.finding.line_end ?? item.finding.line_number, candidate: null });
       return item.v.tier === "finding" && !duplicateKeys.has(key);
     }) };
-    return { report, submission, sessions, trace, usage: { calls, totals: usageTotals(calls) }, rounds, missing: [...new Set(missing)], required: requiredCandidates(scan, config).length, disposed: requiredCandidates(scan, config).filter((c) => !unverified.has(c.id)).length, briefFiles, delivered: runs.flatMap((r) => r.session.sentRounds === undefined ? r.talk.delivered : r.talk.carried.slice(0, Math.max(0, r.session.sentRounds - 1)).flat()) };
+    const sent = runs.filter((r) => (r.session.sentRounds ?? r.talk.rounds) > 0);
+    const digested = new Set(sent.filter((r) => r.digestCarried.length).map((r) => r.unit));
+    for (const unit of units) if (unit.digest && digested.has(unit.id)) {
+      (report.notes ??= []).push(`structural summary coverage (${unit.digest.kind}): ${unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)).map((h) => `${h.path}:${h.start}-${h.end}`).join(", ")}`);
+    }
+    return { report, submission, sessions, trace, usage: { calls, totals: usageTotals(calls) }, rounds, missing: [...new Set(missing)], required: requiredCandidates(scan, config).length, disposed: requiredCandidates(scan, config).filter((c) => !unverified.has(c.id)).length, obligations: hunks, briefCarried: sent.flatMap((r) => r.briefCarried), digestCarried: sent.flatMap((r) => r.digestCarried), delivered: runs.flatMap((r) => r.talk.carried.slice(0, Math.max(0, (r.session.sentRounds ?? r.talk.rounds) - 1)).flat()) };
   } finally {
     clearInterval(heartbeat);
     await Promise.all(runs.map(close));

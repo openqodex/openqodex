@@ -6,7 +6,13 @@
 // readMartianEvaluation reads.
 //
 //   node benchmark/outside/boards/martian-judge.mjs <run> --checkout <their offline folder>
-//        --python <their venv python> [--dry-run]
+//        --python <their venv python> (--wave <id> | --dry-run)
+//
+// The judging pays a model, so it names its wave (lib/wave.mjs) and
+// reserves a forecast before the pipeline starts: the newest complete
+// Martian calibration's cost per review it judged, times the reviews sent
+// here. Their pipeline calls the judge itself and reports no cost, so the
+// reservation is settled at the forecast, marked estimated.
 //
 // In <run>/outside/martian/work/, a folder of its own, it writes
 // results/benchmark_data.json (the converter's entries) and runs, with that
@@ -66,15 +72,18 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { boardFolder, checkoutState, leaksIn, outsideRepo, redactor } from "../../lib/board-files.mjs";
-import { MARTIAN_BETA, MARTIAN_BOARD, MARTIAN_PROFILES, MARTIAN_STEPS, martianEvaluations, releaseGate } from "../../lib/martian-board.mjs";
+import { MARTIAN_BETA, MARTIAN_BOARD, MARTIAN_CITED, MARTIAN_PROFILES, MARTIAN_STEPS, martianEvaluations, martianSideBySide, releaseGate } from "../../lib/martian-board.mjs";
 import { endpointSecrets, loadModelEnv, modelEnvPath, probedDeployment } from "../../lib/model-env.mjs";
-import { canonicalJson } from "../../lib/suites.mjs";
+import { benchRoot } from "../../lib/cases.mjs";
+import { validateComparison, validateRunManifest } from "../../lib/comparison.mjs";
+import { canonicalJson, readSuite } from "../../lib/suites.mjs";
 import { accessLogPath } from "../convert/martian.mjs";
 import { withoutCore } from "./aacr-judge.mjs";
+import { openWave, reserve, settle } from "../../lib/wave.mjs";
 
 const BOARDS = JSON.parse(readFileSync(new URL("../boards.json", import.meta.url), "utf8"));
 const shown = (p) => (p.startsWith(`${homedir()}/`) ? `~${p.slice(homedir().length)}` : p);
@@ -116,11 +125,19 @@ function steps(model) {
   ];
 }
 
+export function calibrationSteps(model) {
+  return steps(model).map((s) => {
+    if (s.step === MARTIAN_STEPS.score) return { ...s, args: [...s.args.slice(0, -3), "--profile", MARTIAN_CITED.profile, "--beta", String(MARTIAN_CITED.beta)] };
+    if (s.stdout) return { ...s, args: [...s.args.slice(0, -1), String(MARTIAN_CITED.beta)] };
+    return s;
+  });
+}
+
 // Runs one step, each of its two streams through a filter of its own into
 // the terminal and the log (`emit`); with `stdout`, its standard output
 // (filtered) is kept apart and returned instead. Returns { code, signal,
 // text, stdout }, text being what was emitted.
-function runStep(command, args, { cwd, env, emit, secrets, keepStdout }) {
+function runStep(command, args, { cwd, env, emit, secrets, keepStdout, signal }) {
   return new Promise((done) => {
     let text = "";
     let kept = "";
@@ -131,6 +148,8 @@ function runStep(command, args, { cwd, env, emit, secrets, keepStdout }) {
     const err = redactor(secrets, sink);
     const out = redactor(secrets, keepStdout ? (t) => (kept += t) : sink);
     const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const abort = () => child.kill();
+    signal?.addEventListener("abort", abort, { once: true });
     child.stdout.on("data", (c) => out.write(c));
     child.stderr.on("data", (c) => err.write(c));
     child.on("close", (code, signal) => {
@@ -138,22 +157,25 @@ function runStep(command, args, { cwd, env, emit, secrets, keepStdout }) {
       err.end();
       done({ code, signal, text, stdout: kept });
     });
+    child.on("error", () => done({ code: 2, signal: null, text: "pipeline process could not start", stdout: "" }));
   });
 }
 
-export async function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2), { root = benchRoot } = {}) {
   let folder = null;
   let dry = false;
   let checkout = null;
   let python = null;
+  let waveId = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--dry-run") dry = true;
+    else if (argv[i] === "--wave") waveId = argv[++i];
     else if (argv[i] === "--checkout") checkout = argv[++i];
     else if (argv[i] === "--python") python = argv[++i];
     else if (folder === null && !argv[i].startsWith("--")) folder = resolve(argv[i]);
     else throw new Error(`unknown argument ${argv[i]}`);
   }
-  if (folder === null || checkout === null || python === null) throw new Error("usage: martian-judge.mjs <run> --checkout <their offline folder> --python <path> [--dry-run]");
+  if (folder === null || checkout === null || python === null) throw new Error("usage: martian-judge.mjs <run> --checkout <their offline folder> --python <path> (--wave <id> | --dry-run)");
   checkout = resolve(checkout);
   const out = boardFolder(folder, "martian");
   if (!existsSync(join(out, "convert.json"))) throw new Error(`${out} holds no convert.json; martian.sh converts the run first`);
@@ -162,6 +184,12 @@ export async function main(argv = process.argv.slice(2)) {
   // The conversion is the one the gate let through, of this very manifest (failure 7).
   const manifestBytes = readFileSync(join(folder, "manifest.json"));
   if (createHash("sha256").update(manifestBytes).digest("hex") !== convert.manifestSha256) throw new Error(`refused: the run's manifest is not the one ${out}/convert.json was written for (its sha256 differs); convert the run again`);
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  if (manifest.package?.spec === "local") {
+    const record = JSON.parse(readFileSync(join(root, "index/comparisons", `${manifest.release}.json`), "utf8"));
+    validateRunManifest(manifest, record);
+    if (!validateComparison(record, { root, build: record.build }).accepted) throw new Error("the comparison record is not accepted");
+  }
   const accessLog = accessLogPath();
   const logged = existsSync(accessLog) ? readFileSync(accessLog, "utf8").split("\n").filter((l) => l.trim() !== "") : [];
   const same = (line) => {
@@ -174,6 +202,9 @@ export async function main(argv = process.argv.slice(2)) {
   if (!convert.access || !logged.some(same)) throw new Error(`refused: the held-out access the conversion recorded is not in ${accessLog}; a conversion is judged only when its access is logged`);
   outsideRepo(checkout, "Martian's checkout");
   outsideRepo(dirname(dirname(resolve(python))), "the venv of Martian's pipeline");
+  // The wave, before the judge's settings are read.
+  if (!dry && !waveId) throw new Error("--wave <id> is required: the judging pays a model, so its forecast is reserved in the wave's journal first (node benchmark/lib/wave.mjs --wave-new <id> starts one)");
+  const wave = dry ? null : openWave(waveId, { root });
   const judge = martianJudge();
   // Refuses, naming the file or the field and never a value, when the settings are missing.
   const settings = loadModelEnv();
@@ -198,7 +229,31 @@ export async function main(argv = process.argv.slice(2)) {
   const state = checkoutState(dirname(checkout));
   if (state.commit !== MARTIAN_BOARD.commit) throw new Error(`their checkout is at ${state.commit || "no commit"}, not the commit boards.json pins (${MARTIAN_BOARD.commit})`);
   if (state.problems.length > 0) throw new Error(`their checkout ${shown(dirname(checkout))} is not the pinned commit as it stands: ${state.problems.join("; ")}. Their code is never patched: move the checkout to the Trash and run martian.sh --prepare`);
-  return runPipeline({ out, convert, checkout, python, state, judge, settings });
+  const forecastUsd = martianForecast(join(out, "benchmark_data.json"), sent, { root });
+  const id = `${manifest.runId ?? basename(folder)}:judge-martian`;
+  reserve(wave, { id, path: "judge-martian", forecastUsd });
+  // Their pipeline reports no cost: settled at the forecast, estimated. A kill leaves it standing.
+  try {
+    return await runPipeline({ out, convert, checkout, python, state, judge, settings, split: readSuite("martian", { root }).split });
+  } finally {
+    settle(wave, id, forecastUsd, { estimated: true });
+  }
+}
+
+/**
+ * The forecast of judging the reviews of `sent` tool names in a converted
+ * benchmark_data.json: the newest complete Martian calibration's cost per
+ * review it judged (its labels name each review's URL), times those reviews.
+ */
+export function martianForecast(dataFile, sent, { root = benchRoot } = {}) {
+  const dir = join(root, "index/calibration");
+  const newest = (existsSync(dir) ? readdirSync(dir) : []).filter((f) => /^martian-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort().reverse()
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8"))).find((c) => c.status === "complete" && c.costUsd > 0);
+  if (!newest) throw new Error(`refused: no complete Martian calibration in ${dir} to forecast the judging from`);
+  const calibrated = new Set(newest.labels.map((l) => l.id.slice(0, l.id.lastIndexOf("#g")))).size;
+  const data = existsSync(dataFile) ? JSON.parse(readFileSync(dataFile, "utf8")) : {};
+  const reviews = Object.values(data).flatMap((e) => e.reviews ?? []).filter((r) => sent.some((t) => t.tool === r.tool)).length;
+  return (newest.costUsd / calibrated) * reviews;
 }
 
 /**
@@ -210,9 +265,9 @@ export async function main(argv = process.argv.slice(2)) {
  * returns 0, or 1 with the problems printed. main() verifies the checkout
  * first.
  */
-export async function runPipeline({ out, convert, checkout, python, state, judge, settings }) {
+export async function runPipeline({ out, convert, checkout, python, state, judge, settings, calibration = false, signal, beforeStep, split = null }) {
   const secrets = endpointSecrets(settings.baseUrl, settings.apiKey);
-  const plan = steps(judge.id);
+  const plan = calibration ? calibrationSteps(judge.id) : steps(judge.id);
   const work = join(out, "work");
   const sent = convert.tools.filter((t) => !t.held);
   const held = convert.tools.filter((t) => t.held);
@@ -243,8 +298,10 @@ export async function runPipeline({ out, convert, checkout, python, state, judge
   const problems = [];
   let dedupFallbacks = null;
   for (const s of plan) {
+    signal?.throwIfAborted();
+    await beforeStep?.({ step: s.step, work });
     say(`\n== ${s.step} ==\n`);
-    const r = await runStep(...withoutCore(python, s.args), { cwd: work, env: s.judge ? withJudge : base, emit, secrets, keepStdout: Boolean(s.stdout) });
+    const r = await runStep(...withoutCore(python, s.args), { cwd: work, env: s.judge ? withJudge : base, emit, secrets, keepStdout: Boolean(s.stdout), signal });
     if (s.stdout) writeFileSync(join(work, s.stdout), r.stdout);
     if (s.step === MARTIAN_STEPS.dedup) dedupFallbacks = Number(/Fallbacks\s*:\s*(\d+)/.exec(r.text)?.[1] ?? NaN);
     ran.push({ step: s.step, exit: r.code, signal: r.signal });
@@ -278,6 +335,13 @@ export async function runPipeline({ out, convert, checkout, python, state, judge
     }
     tools.push({ tool: t.tool, evaluation: ok ? relative(out, path) : null, problems: t.problems, core: t.evaluation?.totals?.core ?? null });
   }
+  // The Core score on the cases no reader saw, beside the one on all cases
+  // (the exposure block of the Martian split).
+  const sideBySide = split?.exposure && Object.values(data).some((e) => split.exposure.cases[e.openqodex?.case]) ? martianSideBySide(read.tools, data, split) : [];
+  for (const row of tools) {
+    const side = sideBySide.find((r) => r.tool === row.tool);
+    if (side) row.unexposed = side.unexposed;
+  }
   for (const t of held) tools.push({ tool: t.tool, evaluation: null, problems: [`held by the converter: ${t.why}`], core: null });
   const leaks = filesUnder(out).filter((p) => leaksIn(readFileSync(p, "latin1"), secrets));
   problems.push(...read.tools.flatMap((t) => t.problems), ...leaks.map((p) => `${relative(out, p)} holds the judge's key or base URL; move outside/martian to the Trash`));
@@ -288,7 +352,7 @@ export async function runPipeline({ out, convert, checkout, python, state, judge
     commit: MARTIAN_BOARD.commit,
     checkout: { commit: state.commit, tree: state.tree },
     judge: { deployment: judge.id, boardsKey: judge.key, probed: judge.probed, servedAtProbe: judge.served ?? null },
-    beta: MARTIAN_BETA,
+    beta: calibration ? MARTIAN_CITED.beta : MARTIAN_BETA,
     python: `${version.stdout}${version.stderr}`.trim(),
     startedAt,
     endedAt: new Date().toISOString(),
@@ -301,8 +365,12 @@ export async function runPipeline({ out, convert, checkout, python, state, judge
     log: "work/pipeline.log",
   };
   writeFileSync(join(out, "eval.json"), `${JSON.stringify(record, null, 2)}\n`);
-  console.log(`\nMartian's ${MARTIAN_PROFILES.join(", ")} totals are in each tool name's evaluation.json; the Core profile:`);
+  console.log(`\nMartian's ${MARTIAN_PROFILES.join(", ")} totals are in each tool name's evaluation.json; the Core profile${convert.half ? ` over the ${convert.half.subset} cases of a ${convert.half.purpose} run, ${convert.half.cases} cases` : ""}:`);
   for (const t of tools) console.log(`  ${t.tool}: ${t.core ? `precision ${t.core.precision.toFixed(3)}, recall ${t.core.recall.toFixed(3)}, F1 ${t.core.f1.toFixed(3)}` : "not scored"}`);
+  if (sideBySide.length > 0) {
+    console.log("The Core profile on all cases and on the cases no reader saw (unexposed), side by side:");
+    for (const r of sideBySide) console.log(r.line);
+  }
   console.log(`eval.json written: ${join(out, "eval.json")}.`);
   if (problems.length > 0) {
     console.error([...new Set(problems)].join("\n"));
@@ -315,7 +383,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   main().then(
     (code) => process.exit(code),
     (error) => {
-      console.error(error.message);
+      console.error(error.message.replaceAll("\n", " "));
       process.exit(2);
     },
   );

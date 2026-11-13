@@ -205,13 +205,21 @@ export function scoreBrief(spec, brief) {
 // Every finding the developer is shown: on the change, outside it (except
 // scanner information), and the observations of a staged review (shown
 // apart, never counted toward the verdict, judged here all the same because
-// the developer reads them). Each carries `tier`: "finding" or "observation".
+// the developer reads them). Each carries its presentation tier.
+// 45. A possible item is shown apart and judged like a finding:
+//     shownFindings lists report.possible after the observations, tier possible,
+//     and an outside-change item under its floor with them, not before the
+//     observations; a report without the field scores exactly as under version 11.
 export function shownFindings(report) {
   if (!report) return [];
+  const outside = (report.outside_change ?? []).filter((f) => f.origin !== "scanner");
+  const underFloor = (f) => f.confidence != null && f.floor != null && f.confidence < f.floor;
   return [
     ...(report.findings ?? []).map((f) => ({ ...f, tier: "finding" })),
-    ...(report.outside_change ?? []).filter((f) => f.origin !== "scanner").map((f) => ({ ...f, tier: "finding" })),
+    ...outside.filter((f) => !underFloor(f)).map((f) => ({ ...f, tier: "finding" })),
     ...(report.observations ?? []).map((f) => ({ ...f, tier: "observation" })),
+    ...outside.filter(underFloor).map((f) => ({ ...f, tier: "possible" })),
+    ...(report.possible ?? []).map((f) => ({ ...f, tier: "possible" })),
   ];
 }
 
@@ -585,14 +593,27 @@ export function regressions(oldSamples, newSamples) {
 //     that names the truth item, for a finding on a line the change added in
 //     that item's file; it scores as any same-issue ruling does, a hit on
 //     that item on that spec version.
-// Rules version 10 scores observations (version 9 made scanner outside
-// advisories information). Failure list, written before the code:
+// Rules version 9 (PR 229): scanner outside advisories are information; legacy untagged findings still count.
+// Rules version 10: wave8 adds Greptile scoring with a fixed denominator of 50; main scores observations with tiers.
+// Rules version 11 (2026-10-22): merge of the two version-10 rule sets.
+// Failure list, written before the code:
 // 44. An observation of a staged review is shown to the developer and never
 //     judged: shownFindings() lists report.observations after the findings,
 //     each marked tier "observation", so every score, board file and judge
 //     export sees it like a finding. A report without the field, or with an
-//     empty list, scores exactly as under version 8.
-export const RULES_VERSION = 10;
+//     empty list, scores exactly as under version 9.
+// Rules version 12: possible issues are shown and judged with tier possible.
+// Failure list, written before the code (issue 284):
+// 45. A review whose only output is a network error scores as a review and
+//     its error text reaches a judge: reviewHealth() reads each first
+//     attempt's saved evidence once (reviewPopulation), and an unhealthy one
+//     (an "API Error" body, a run stopped before it completed, a missing or
+//     mixed model identity, a model review with zero tokens) credits no
+//     finding, builds no board comment and counts as failed. It stays in the
+//     denominator as a miss. A scanner-only sample has no model and no tokens
+//     to check.
+// Rules version 13: a health result on every review, gated at every scorer.
+export const RULES_VERSION = 13;
 export const AACR_LINE_K = 1;
 // The order classify() tries the rules in; the first that holds decides.
 export const OUTCOME_ORDER = ["test-gap", "accepted", "hit", "wrong-kind", "near", "false"];
@@ -618,7 +639,7 @@ export const SEVERITY_LABEL = "Each found truth item once, by the first finding 
 export const FINDER_LABEL = "Each found truth item once, judged from the review's own scan.json: a scanner found it when one of its candidates, or a finding merged into one, sits on the item's lines and is either from a scanner found_by names or names the item's words; else the reviewer found it alone. found_by is the expectation: a scanner it names is met when that scanner located the item, reasoning and graph when no scanner did.";
 
 // The kind of case a suite holds.
-const ORIGINS = { planted: "planted", aacr: "real", clean: "real", martian: "injected" };
+const ORIGINS = { planted: "planted", aacr: "real", clean: "real", martian: "injected", greptile: "injected" };
 export const originOf = (suite) => ORIGINS[suite ?? "planted"] ?? null;
 
 // Register authored suites separately from the frozen scoring rules.
@@ -923,11 +944,47 @@ export function population(manifest, attempts) {
   return { from, jobs: out, retries: attempts.filter((a) => a.attempt > 1), unplanned: attempts.filter((a) => a.attempt === 1 && !planned.has(key(a))), problems };
 }
 
+// Whether a saved review is evidence of a review, from its sample record
+// (`row`) and report: { ok: true } or { ok: false, reason }. Identity counts
+// only where the reviewer records it (modelStatus, or a model review's
+// servedModels); a reviewer whose record names no model (codex, older
+// samples) is not judged on it. A scanner-only sample (no reviewer) is
+// never judged on tokens. A stopped run marks only a review that did not
+// complete: a model review that finished before the halt is whole.
+// The "API Error" body check is Claude Code's: only the native control
+// (lib/claude-control.mjs) saves a nativeBody, and Claude Code prints
+// "API Error:" there when its call fails. Codex, the model reviewers and
+// the OpenQodex CLI save no body; a failed call of theirs shows as a
+// failed sample or a record that names no model.
+export function reviewHealth(row, report = null) {
+  if (row === null || typeof row !== "object") return { ok: true };
+  const body = typeof row.nativeBody === "string" ? row.nativeBody.trimStart() : "";
+  // The reason may reach an index entry, so an em dash becomes a comma there (the scrub).
+  if (body.startsWith("API Error")) return { ok: false, reason: `its body is an API error: ${body.split("\n")[0].slice(0, 200).replace(/\s*\u2014\s*/g, ", ")}` };
+  if (typeof row.stopped === "string" && row.stopped !== "" && row.status !== "complete") return { ok: false, reason: `the run stopped while it ran: ${row.stopped}` };
+  const served = Array.isArray(row.servedModels) ? row.servedModels : null;
+  if (row.modelStatus === "none" || (row.modelStatus === undefined && served?.length === 0)) return { ok: false, reason: "its record names no model" };
+  if (row.modelStatus === "mixed" || (row.modelStatus === undefined && served?.length > 1)) return { ok: false, reason: `its record names more than one model: ${(row.models ?? served ?? []).join(", ")}` };
+  const usage = row.usage ?? report?.completion?.reviewer?.usage ?? null;
+  const tokens = [usage?.input_tokens, usage?.output_tokens];
+  if (typeof row.reviewer === "string" && row.reviewer !== "" && tokens.every((n) => typeof n === "number" && Number.isFinite(n)) && tokens[0] + tokens[1] === 0) return { ok: false, reason: "its usage record has zero tokens" };
+  return { ok: true };
+}
+
+// The population the review scorers read: population() with each job's
+// health computed once. A job with no attempt has no review to judge.
+export function reviewPopulation(manifest, attempts) {
+  const pop = population(manifest, attempts);
+  return { ...pop, jobs: pop.jobs.map((j) => ({ ...j, health: j.first === null ? { ok: false, reason: "it never started" } : reviewHealth(j.first.row, j.first.report) })) };
+}
+
 // One planned job, scored from its first attempt: `report`, `brief` and
 // `scan` are that attempt's (null when it wrote none), and `started` is
 // false for a job with no attempt. `origin` is the kind of case (originOf),
-// and `rulings` the rulings in force (lib/rulings.mjs resolveRulings).
-export function scoreJob({ job, spec, report = null, brief = null, scan = null, row = {}, origin = "planted", started = true, rulings = resolveRulings([]) }) {
+// and `rulings` the rulings in force (lib/rulings.mjs resolveRulings). An
+// unhealthy review (job.health) is scored as one that wrote no report.
+export function scoreJob({ job, spec, report: saved = null, brief = null, scan = null, row = {}, origin = "planted", started = true, rulings = resolveRulings([]) }) {
+  const report = started && job.health?.ok === false ? null : saved;
   const planted = origin === "planted";
   const base = scoreSample({ spec, report, brief, row: { ...row, config: job.config, repeat: job.repeat, attempt: 1 }, testOnly: planted });
   const shown = shownFindings(report);
@@ -1079,7 +1136,7 @@ export function scoreAttempts({ manifest, attempts, specs, decisions = [], peopl
   const suite = manifest.suite ?? "planted";
   const origin = originOf(suite);
   if (origin === null) throw new Error(`the run names the suite ${suite}, which the scorer does not know`);
-  const pop = population(manifest, attempts);
+  const pop = reviewPopulation(manifest, attempts);
   if (pop.problems.length > 0) throw new Error(`the run's samples do not match its plan:\n${pop.problems.join("\n")}`);
   const rulings = resolveRulings(decisions, people);
   // The version of each case's spec, which a ruling on one of its truth items names.
@@ -1314,6 +1371,8 @@ const RULES_BLOCK = {
   usage: "A review's cost and tokens are its laptop completion record's usage; a model review's, whose completion record holds none, are its sample record's usage, the library's totals over every model call. No rule reads them.",
   // Version 8.
   specVersion: "A bug ruling and a match ruling (same-issue, different-issue) name the spec version they judged as specHash, the sha256 of the spec's JSON with every object's keys sorted, and apply only to a job whose case is scored against a spec with that hash, the run's own copy or the one --specs names; a line that names none applies to no version and is listed as ignored. A same-issue ruling may name a truth item the finding does not sit on by the location rule: queue.mjs decide records it only when the finding is on a line the change added in a file of that item, and it scores as any same-issue ruling.",
+  // Version 13.
+  health: "Each first attempt has a health result from its saved evidence: unhealthy when its body starts with API Error, when the run stopped before it completed, when its record names no model or more than one (only where the reviewer records the model), or when a model review's usage has zero tokens. An unhealthy review is failed: it credits no finding and misses every truth item of its case.",
   code: ruleCodeHash(),
 };
 export const RULES = Object.freeze({ ...RULES_BLOCK, hash: rulesHash(RULES_BLOCK) });
@@ -1372,6 +1431,9 @@ export const MARTIAN_VERDICTS = ["match", "no-match"];
 // What Martian's judge reads of a finding.
 export const JUDGE_FIELDS = ["title", "problem", "consequence", "fix"];
 
+// Re-exported by board-reviews for converters and native readback alike.
+export const nativeFindingId = (caseId, config, repeat, nativeBody) => createHash("sha256").update(JSON.stringify({ caseId, config, repeat, attempt: 1, nativeBody })).digest("hex");
+
 export const judgeFieldsMissing = (f) => JUDGE_FIELDS.filter((k) => typeof f?.[k] !== "string" || f[k].trim() === "");
 const lackingLines = (findings) =>
   findings
@@ -1423,7 +1485,7 @@ function totalsProblems(totals) {
 // for this tool name (martianFindings, in report order), `golden` the golden
 // comments of the cases it covers (martianGolden). Returns { toolName,
 // board, judge, official, candidates, matches } as given, and `ours`.
-export function readMartianEvaluation(evaluation, { findings, golden }) {
+export function readMartianEvaluation(evaluation, { findings, golden, isNative = () => false }) {
   const e = evaluation;
   const shape = [];
   if (!e || typeof e !== "object") throw new Error("the evaluation is not an object");
@@ -1435,7 +1497,12 @@ export function readMartianEvaluation(evaluation, { findings, golden }) {
   shape.push(...totalsProblems(e.totals));
   if (shape.length > 0) throw new Error(`the evaluation is not in Martian's shape (PLAN-benchmark 4.5): ${shape.join("; ")}`);
 
-  const lacking = lackingLines(findings);
+  const native = findings.filter((f) => f.source === "native" && isNative(f));
+  if (new Set(native.map((f) => f.caseId)).size !== native.length) throw new Error("a control review must have one native source per case");
+  for (const f of native) {
+    if (typeof f.text !== "string" || !f.text.trim() || f.findingId !== nativeFindingId(f.caseId, f.config, f.repeat, f.text)) throw new Error(`the native source id of ${f.caseId} does not match its body or tool`);
+  }
+  const lacking = lackingLines(findings.filter((f) => !native.includes(f)));
   if (lacking.length > 0) throw new Error(`the evaluation of ${e.toolName} is not scored: these findings were saved for Martian's judge without what it reads:\n${lacking.join("\n")}`);
   const byFinding = new Map();
   for (const f of findings) if (!byFinding.has(f.findingId)) byFinding.set(f.findingId, f);
@@ -1451,6 +1518,8 @@ export function readMartianEvaluation(evaluation, { findings, golden }) {
       continue;
     }
     if (byCandidate.has(id)) problems.push(`candidate ${id} is listed twice`);
+    if (typeof c.extractedText !== "string" || !c.extractedText.trim()) problems.push(`candidate ${id} has no saved text`);
+    if (typeof c.officialFp !== "boolean") problems.push(`candidate ${id} has no official false positive verdict`);
     if (!Array.isArray(c.sourceFindingIds) || c.sourceFindingIds.length === 0) problems.push(`candidate ${id} names no source finding`);
     for (const f of Array.isArray(c.sourceFindingIds) ? c.sourceFindingIds : []) if (!byFinding.has(f)) problems.push(`candidate ${id} names finding ${String(f).slice(0, 12)}, which the run did not send`);
     if (!c.extraction || typeof c.extraction !== "object") problems.push(`candidate ${id} has no extraction provenance`);
@@ -1482,6 +1551,30 @@ export function readMartianEvaluation(evaluation, { findings, golden }) {
     }
   }
   if (behind.size !== e.totals.all.tp) throw new Error(`the official totals count ${e.totals.all.tp} golden comments found (all profile), but the matches name ${behind.size}: a match was lost or added on the way from Martian's evaluations, so our numbers would not rest on the official matches`);
+  // withmartian/code-review-benchmark@e616e849755441da38f18bf3adba2c9583b03803:
+  // offline/analysis/score_profiles.py:19-25,103-120 includes only core
+  // golden categories in TP/FN, and every FP, even a match outside core.
+  // offline/code_review_benchmark/step3_judge_comments.py:304-331,357-358
+  // keys candidates by text within a PR and spares matched dedup siblings.
+  // A superseded winner also stays matched, so FP verdicts come from
+  // Martian's saved false_positives, not just the final winning matches.
+  const coreCategories = new Set(["bug", "security", "concurrency", "data", "api", "perf", "test_gap", "doc_defect"]);
+  const coreGolden = golden.filter((g) => coreCategories.has(g.rawCategory));
+  const tp = coreGolden.filter((g) => behind.has(g.goldenId)).length;
+  const fn = coreGolden.length - tp;
+  const foundCandidates = new Set(e.matches.filter((m) => m.verdict === "match").map((m) => m.candidateId));
+  const sameCase = (a, b) => caseOfCandidate(a)[0] === caseOfCandidate(b)[0];
+  const falsePositives = e.candidates.filter((c) => c.officialFp);
+  for (const c of falsePositives) {
+    if (e.candidates.some((m) => foundCandidates.has(m.candidateId) && sameCase(c, m) && (m.extractedText === c.extractedText || (m.dedupGroup !== null && m.dedupGroup !== undefined && m.dedupGroup === c.dedupGroup)))) throw new Error(`candidate ${c.candidateId} is an official false positive but is a winning match or its dedup sibling`);
+  }
+  const fp = new Set(falsePositives.map((c) => JSON.stringify([caseOfCandidate(c)[0], c.extractedText]))).size;
+  const precision = tp + fp === 0 ? 0 : tp / (tp + fp);
+  const recall = tp + fn === 0 ? 0 : tp / (tp + fn);
+  const f1 = precision + recall === 0 ? 0 : 2 * precision * recall / (precision + recall);
+  for (const [key, count] of Object.entries({ tp, fp, fn, precision, recall, f1 })) {
+    if (Math.abs(e.totals.core[key] - count) > 1e-12) throw new Error(`the core ${key} is ${e.totals.core[key]}, but the saved matches and candidates give ${count}`);
+  }
   const judged = golden
     .filter((g) => behind.has(g.goldenId))
     .map((g) => {

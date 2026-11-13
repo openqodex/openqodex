@@ -1,26 +1,33 @@
 // The code graph on real code. Two failures this file guards against:
 // 1. The graph misses a real caller (recall) or invents one (precision) on a
-//    large public repo. Three repos are pinned to a commit; for five symbols
+//    large public repo. Four repos are pinned to a commit; for selected symbols
 //    in each, every call site below was read by hand from `git grep -n` at
 //    that commit. `calls` are the sites the resolution rules can bind (an
 //    import, a known receiver type, self); `gaps` are real calls the rules do
 //    not bind by design (a receiver whose type no annotation or constructor
-//    names), kept so the overall recall is honest. The test checks each
-//    listed site against grep, requires every `calls` site, prints recall and
-//    precision, and fails when precision drops under 0.9.
+//    names), kept so the overall recall is honest. `dispatch` are the sites
+//    of calls through an interface or a base type that must reach the
+//    target's implementations and overrides as `dispatches_to`. The test
+//    checks each listed site against grep, requires every `calls` and
+//    `dispatch` site, prints recall and precision, and fails when precision
+//    drops under 0.9.
 // 2. The brief's blast radius block does not name a caller's call line on a
 //    cross-file change (TypeScript and Python), run through the built CLI.
+// 3. The saved report of a Java change does not name its callers with their
+//    tiers: a static call from the same package (certain) and a call through
+//    an interface field (possible, to the implementation the change edits).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, openStore } from "../../packages/graph/src/index.js";
-import { git, run } from "./support.js";
+import { git, readJson, reportDir, run } from "./support.js";
+import type { ImpactSummary } from "@openqodex/core";
 import { cacheFolder, removeTempDirs, tempDir } from "../temp-dirs.mjs";
 
 afterAll(removeTempDirs);
 
-type Target = { file: string; symbol: string; grep: string[]; calls: string[]; gaps?: string[] };
+type Target = { file: string; symbol: string; grep: string[]; calls: string[]; gaps?: string[]; dispatch?: string[] };
 type Repo = { name: string; url: string; sha: string; targets: Target[] };
 
 const REPOS: Repo[] = [
@@ -29,6 +36,23 @@ const REPOS: Repo[] = [
     url: "https://github.com/nestjs/nest.git",
     sha: "35142c3eca8edaaf6abc5984d915da2fbd458aa2",
     targets: [
+      {
+        // Three calls have a result type whose source the graph can resolve.
+        file: "packages/common/interfaces/features/arguments-host.interface.ts",
+        symbol: "WsArgumentsHost.getPattern",
+        grep: ["getPattern"],
+        calls: [
+          "integration/websockets/src/request.filter.ts:8",
+          "integration/websockets/src/request.interceptor.ts:7",
+          "packages/websockets/exceptions/base-ws-exception-filter.ts:59",
+        ],
+        // Both hosts are typed ExecutionContextHost values. Its result imports WsArgumentsHost through @nestjs/common/internal.
+        // The graph does not read the referenced build config's source mapping for that JavaScript entry.
+        gaps: [
+          "packages/core/test/helpers/execution-context-host.spec.ts:75",
+          "packages/websockets/test/context/ws-context-creator.spec.ts:302",
+        ],
+      },
       {
         file: "packages/common/utils/validate-each.util.ts",
         symbol: "validateEach",
@@ -200,6 +224,16 @@ const REPOS: Repo[] = [
     sha: "64f26db45f5feb2c491a9eb82768a2f41fc857df",
     targets: [
       {
+        // KV returns WatchableKV, which embeds KV. Both chained calls bind to KV.Commit.
+        file: "server/storage/mvcc/kv.go",
+        symbol: "KV.Commit",
+        grep: ["Commit"],
+        calls: [
+          "server/etcdserver/server.go:2099",
+          "server/etcdserver/snapshot_merge.go:36",
+        ],
+      },
+      {
         file: "client/v3/op.go",
         symbol: "WithCountOnly",
         grep: ["WithCountOnly"],
@@ -276,6 +310,88 @@ const REPOS: Repo[] = [
       },
     ],
   },
+  {
+    // Java, a Maven build with several modules: nested classes named
+    // `Adapter` in three files, and overloads with different argument counts.
+    name: "gson",
+    url: "https://github.com/google/gson.git",
+    sha: "57731049da3e415be3d5d34db1ca3b80f3c73810",
+    targets: [
+      {
+        // Bare calls from the nested classes of GsonTypes to their outer
+        // type's static method, and a call from the same package with no import.
+        file: "gson/src/main/java/com/google/gson/internal/GsonTypes.java",
+        symbol: "GsonTypes.canonicalize",
+        grep: ["canonicalize"],
+        calls: [
+          ...[107, 526, 527, 532, 590, 640, 647].map((l) => `gson/src/main/java/com/google/gson/internal/GsonTypes.java:${l}`),
+          "gson/src/main/java/com/google/gson/reflect/TypeToken.java:82",
+          "gson/src/main/java/com/google/gson/reflect/TypeToken.java:100",
+          "gson/src/test/java/com/google/gson/internal/GsonTypesTest.java:111",
+        ],
+      },
+      {
+        // An explicit import in every package but its own.
+        file: "gson/src/main/java/com/google/gson/internal/TroubleshootingGuide.java",
+        symbol: "TroubleshootingGuide.createUrl",
+        grep: ["createUrl"],
+        calls: [
+          "gson/src/main/java/com/google/gson/internal/ConstructorConstructor.java:86",
+          "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java:338",
+          "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java:78",
+          "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java:86",
+          "gson/src/main/java/com/google/gson/internal/reflect/ReflectionHelper.java:54",
+          "gson/src/main/java/com/google/gson/reflect/TypeToken.java:114",
+          "gson/src/main/java/com/google/gson/reflect/TypeToken.java:130",
+          "gson/src/main/java/com/google/gson/stream/JsonReader.java:1945",
+          "gson/src/main/java/com/google/gson/stream/JsonReader.java:1959",
+        ],
+      },
+      {
+        // An interface method called through fields, typed locals, declared
+        // results and `var` locals set from a call's result, two of them
+        // inside lambdas; ThrowingObjectConstructor and
+        // InstanceCreatorConstructor implement it.
+        file: "gson/src/main/java/com/google/gson/internal/ObjectConstructor.java",
+        symbol: "ObjectConstructor.construct",
+        grep: ["construct"],
+        calls: [
+          "gson/src/main/java/com/google/gson/internal/bind/CollectionTypeAdapterFactory.java:81",
+          "gson/src/main/java/com/google/gson/internal/bind/JsonAdapterAnnotationTypeAdapterFactory.java:96",
+          "gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java:183",
+          "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java:577",
+          ...[59, 73, 128, 149, 161, 164, 168, 177, 245, 257].map((l) => `gson/src/test/java/com/google/gson/internal/ConstructorConstructorTest.java:${l}`),
+        ],
+        dispatch: [
+          "gson/src/main/java/com/google/gson/internal/bind/CollectionTypeAdapterFactory.java:81",
+          "gson/src/main/java/com/google/gson/internal/bind/JsonAdapterAnnotationTypeAdapterFactory.java:96",
+          "gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java:183",
+          "gson/src/main/java/com/google/gson/internal/bind/ReflectiveTypeAdapterFactory.java:577",
+          ...[59, 73, 128, 149, 161, 164, 168, 177, 245, 257].map((l) => `gson/src/test/java/com/google/gson/internal/ConstructorConstructorTest.java:${l}`),
+        ],
+      },
+      {
+        // A static import, and bare calls inside its own class.
+        file: "gson/src/main/java/com/google/gson/GsonBuilder.java",
+        symbol: "GsonBuilder.newImmutableList",
+        grep: ["newImmutableList"],
+        calls: [
+          "gson/src/main/java/com/google/gson/Gson.java:263",
+          "gson/src/main/java/com/google/gson/Gson.java:264",
+          "gson/src/main/java/com/google/gson/Gson.java:267",
+          "gson/src/main/java/com/google/gson/GsonBuilder.java:999",
+        ],
+      },
+      {
+        // `get(TypeToken)`, the first of two overloads; the calls with two
+        // arguments are `get(TypeToken, boolean)`'s and must not be counted here.
+        file: "gson/src/main/java/com/google/gson/internal/ConstructorConstructor.java",
+        symbol: "ConstructorConstructor.get",
+        grep: ["get"],
+        calls: [58, 72, 127, 148, 161, 164, 168, 176, 244, 256].map((l) => `gson/src/test/java/com/google/gson/internal/ConstructorConstructorTest.java:${l}`),
+      },
+    ],
+  },
 ];
 
 const CLONES = cacheFolder("openqodex-graph-acceptance");
@@ -308,7 +424,7 @@ function grepSites(dir: string, words: string[]): Set<string> {
   return out;
 }
 
-describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")("graph acceptance on three public repos", () => {
+describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")("graph acceptance on four public repos", () => {
   for (const repo of REPOS) {
     it(`${repo.name} at ${repo.sha.slice(0, 12)}: every bindable caller found, precision at least 0.9`, async () => {
       const dir = clone(repo);
@@ -330,7 +446,7 @@ describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")("graph acceptance on 
       for (const t of repo.targets) {
         const grep = grepSites(dir, t.grep);
         const truth = [...t.calls, ...(t.gaps ?? [])];
-        for (const site of truth) expect(grep, `${site} is not a grep hit for ${t.grep.join(", ")}`).toContain(site);
+        for (const site of [...truth, ...(t.dispatch ?? [])]) expect(grep, `${site} is not a grep hit for ${t.grep.join(", ")}`).toContain(site);
         const id = (cold.defsByFile.get(t.file) ?? []).find((n) => n.id.includes(`#${t.symbol}@`))?.id;
         expect(id, `${t.symbol} in ${t.file}`).toBeDefined();
         const found = new Set(
@@ -344,6 +460,31 @@ describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")("graph acceptance on 
         graphTotal += found.size;
         graphTrue += inTruth;
         lines.push(`  ${t.symbol}: ${found.size} found, ${t.calls.length} bindable, ${(t.gaps ?? []).length} by design out of reach, ${found.size - inTruth} false`);
+        if (t.dispatch) {
+          // The implementations and overrides of the target, through every
+          // level (`overrides` edges are references, not calls).
+          const impls = new Set<string>();
+          const queue = [id as string];
+          while (queue.length > 0) {
+            for (const e of cold.refsIn.get(queue.pop() as string) ?? []) {
+              if (e.kind === "overrides" && !impls.has(e.from)) {
+                impls.add(e.from);
+                queue.push(e.from);
+              }
+            }
+          }
+          const dispatched = new Set(
+            [...impls].flatMap((i) => (cold.in.get(i) ?? []).filter((e) => e.kind === "dispatches_to").flatMap((e) => e.sites.map((s) => `${s.file}:${s.line}`))),
+          );
+          const missedDispatch = t.dispatch.filter((s) => !dispatched.has(s));
+          expect(missedDispatch, `${t.symbol}: calls that do not dispatch to its ${impls.size} implementations`).toEqual([]);
+          const dispatchTrue = [...dispatched].filter((s) => t.dispatch?.includes(s)).length;
+          truthTotal += t.dispatch.length;
+          truthFound += dispatchTrue;
+          graphTotal += dispatched.size;
+          graphTrue += dispatchTrue;
+          lines.push(`  ${t.symbol} dispatch: ${dispatched.size} found to ${impls.size} implementations, ${t.dispatch.length} expected, ${dispatched.size - dispatchTrue} false`);
+        }
       }
       const precision = graphTotal === 0 ? 1 : graphTrue / graphTotal;
       lines.push(`  recall ${(truthFound / truthTotal).toFixed(3)} (${truthFound}/${truthTotal}), precision ${precision.toFixed(3)} (${graphTrue}/${graphTotal})`);
@@ -404,4 +545,39 @@ describe("blast radius in the brief", () => {
       expect(off.stdout).toContain("The code graph is off: --no-graph was given.");
     });
   }
+});
+
+describe("the saved report of a Java change", () => {
+  // An interface, two implementations and a service that calls through a
+  // field typed by the interface. The change edits one implementation.
+  const files = {
+    "src/main/java/shop/Repo.java": "package shop;\n\npublic interface Repo {\n  String find(String id);\n}\n",
+    "src/main/java/shop/SqlRepo.java":
+      'package shop;\n\npublic class SqlRepo implements Repo {\n  public static String normalize(String id) {\n    return id.trim();\n  }\n\n  public String find(String id) {\n    return "sql:" + id;\n  }\n}\n',
+    "src/main/java/shop/MemRepo.java": 'package shop;\n\npublic class MemRepo implements Repo {\n  public String find(String id) {\n    return "mem:" + id;\n  }\n}\n',
+    "src/main/java/shop/Service.java":
+      "package shop;\n\npublic class Service {\n  private final Repo repo;\n\n  public Service(Repo repo) {\n    this.repo = repo;\n  }\n\n  public String lookup(String id) {\n    String key = SqlRepo.normalize(id);\n    return repo.find(key);\n  }\n}\n",
+  };
+  const change = {
+    "src/main/java/shop/SqlRepo.java":
+      'package shop;\n\npublic class SqlRepo implements Repo {\n  public static String normalize(String id) {\n    return id.trim().toLowerCase();\n  }\n\n  public String find(String id) {\n    return "sql:" + id.toLowerCase();\n  }\n}\n',
+  };
+
+  it("names the certain caller and the possible caller through the interface, with their lines", () => {
+    const dir = plantedRepo(files, change);
+    const r = run("graph-java-report", dir, ["review", "--agent", "--only", "gitleaks", "--no-install", "--offline"]);
+    expect(r.status, r.stderr).toBe(0);
+    const saved = reportDir(dir);
+    const impact = readJson<ImpactSummary>(join(saved, "impact.json"));
+    expect(impact.status).toBe("ok");
+    const sites = (paths: ImpactSummary["callers"]) =>
+      paths.flatMap((p) => p.edges.flatMap((e) => e.sites.map((s) => `${e.kind} ${e.from.split("#")[1]?.split("@")[0]} -> ${e.to.split("#")[1]?.split("@")[0]} ${s.file}:${s.line} ${s.tier}`)));
+    expect(sites(impact.callers)).toContain("calls Service.lookup -> SqlRepo.normalize src/main/java/shop/Service.java:11 certain");
+    expect(sites(impact.possible ?? [])).toContain("dispatches_to Service.lookup -> SqlRepo.find src/main/java/shop/Service.java:12 possible");
+    // MemRepo did not change, so its dispatch is not part of this change's reach.
+    expect(sites([...impact.callers, ...(impact.possible ?? [])]).filter((l) => l.includes("MemRepo"))).toEqual([]);
+    const brief = readFileSync(join(saved, "brief.md"), "utf8");
+    expect(brief).toContain("- src/main/java/shop/Service.java:11 in `lookup` calls `normalize` (1 hop, certain)");
+    expect(brief).toContain("- src/main/java/shop/Service.java:12 in `lookup` may call `SqlRepo.find` (1 hop, possible");
+  });
 });

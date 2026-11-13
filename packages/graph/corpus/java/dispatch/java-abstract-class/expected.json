@@ -1,0 +1,55 @@
+{
+  "guards": "binds a bare call in a Java abstract class to its abstract member and dispatches it to every subclass override",
+  "callers": [
+    {
+      "to": "src/main/java/jobs/Base.java#Base.run",
+      "site": "src/main/java/jobs/Base.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/jobs/Fast.java#Fast.run",
+      "site": "src/main/java/jobs/Base.java:7",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/jobs/Slow.java#Slow.run",
+      "site": "src/main/java/jobs/Base.java:7",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/jobs/Base.java#Base",
+      "site": "src/main/java/jobs/Fast.java:3",
+      "tier": "certain",
+      "kind": "inherits"
+    },
+    {
+      "to": "src/main/java/jobs/Base.java#Base",
+      "site": "src/main/java/jobs/Slow.java:3",
+      "tier": "certain",
+      "kind": "inherits"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/main/java/jobs/Base.java:7",
+      "candidates": [
+        "src/main/java/jobs/Fast.java#Fast.run",
+        "src/main/java/jobs/Slow.java#Slow.run"
+      ]
+    }
+  ],
+  "references": [
+    {
+      "to": "src/main/java/jobs/Base.java#Base.run",
+      "site": "src/main/java/jobs/Fast.java:4",
+      "kind": "overrides",
+      "tier": "likely"
+    }
+  ],
+  "floor": {
+    "src/main/java/jobs/Fast.java#Fast.run": true
+  }
+}

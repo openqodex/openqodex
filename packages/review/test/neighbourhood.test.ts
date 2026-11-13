@@ -20,6 +20,7 @@
 // 19. The name-frequency cap removes certain graph evidence.
 // 20. An ignored site directory also hides its changed-file candidates.
 // 21. Repeated rendering makes the byte budget quadratic in symbol count.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -58,7 +59,7 @@ function change(dir: string, lines: Record<string, number[]>, diffs: Change["dif
     repoRoot: dir,
     files: paths.map((path) => ({ path, status: "modified", oldPath: null, binary: false })),
     changedPaths: Object.keys(lines),
-    coverage: new Map(Object.entries(lines).map(([path, numbers]) => [path, new Set(numbers)])),
+    coverage: new Map(Object.entries(lines).map(([path, numbers]) => [path, makeLineSet(numbers)])),
     deletionPoints: new Map(),
     diffs,
     diff: diffs!.map((d) => d.text).join("\n"),
@@ -440,7 +441,9 @@ it("measures the repository's own tree as a snapshot and marks any time cap", ()
   const repo = fileURLToPath(new URL("../../../", import.meta.url));
   const dir = snapshot();
   const ignored = new Set([".git", "node_modules", "dist", "build", "target", ".pnpm-store", ".openqodex", ".openqodex-review", ".private", ".claude", ".agents", ".codex", ".aws", "credentials"]);
-  cpSync(repo, dir, { recursive: true, filter: (path) => !relative(repo, path).split(/[\\/]/).some((part) => ignored.has(part) || part.startsWith(".env") || part === "settings.local.json") });
+  // Saved benchmark runs are ignored data, not the tree; a laptop may hold hundreds of megabytes of them.
+  const isRunData = (rel: string) => rel === "benchmark/results" || rel.startsWith("benchmark/results/");
+  cpSync(repo, dir, { recursive: true, filter: (path) => { const rel = relative(repo, path); return !isRunData(rel.split("\\").join("/")) && !rel.split(/[\\/]/).some((part) => ignored.has(part) || part.startsWith(".env") || part === "settings.local.json"); } });
   const path = "packages/review/src/neighbourhood.ts";
   const line = readFileSync(join(dir, path), "utf8").split("\n").findIndex((row) => row.startsWith("export function buildNeighbourhood")) + 1;
   expect(line).toBeGreaterThan(0);

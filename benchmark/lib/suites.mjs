@@ -40,6 +40,18 @@
 //    are not exactly the ones the suite entry counts; realSpecProblems checks
 //    a saved copy the same way, and against the committed suite while it
 //    still holds the case.
+// A run's purpose and the exposure on record (docs/benchmark.md, "Tune and
+// score"), for a suite whose split file carries an exposure block:
+// 11. A tuned number is read as a score: a tune run reads tune cases only.
+//    A tune purpose is refused on any score case, whether named by id, by
+//    the test split (all), by the score subset or by a run made for a loop
+//    change (--change), before any truth is read.
+// 12. A run names no purpose, so nobody can tell its number from a tuned
+//    one: a suite with exposure on record refuses a selection without one.
+// 13. An exposed case is scored: the split file's exposure block names every
+//    case with its reasons, every exposed or unknown case is a tune case,
+//    and every score case has the reason none, affirmatively;
+//    exposureSplitProblems recomputes the placement from the file itself.
 // The clean suite (benchmark/ingest/clean.mjs):
 // 10. A clean case enters a run without a person's ruling: every read of
 //    the clean suite (listCases, readCase, selectCases, realSpecProblems)
@@ -47,10 +59,12 @@
 //    is not clean, signed by a person on review-queue/people.json
 //    (lib/rulings.mjs). A clean case is clean and has no truth.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { benchRoot, buildCase, caseIdFromHash, casesRoot, git, parseCaseId, readCase as readPlantedSpec, readLock } from "./cases.mjs";
 import { cacheRoot } from "./licence.mjs";
+import { comparisonRelease } from "./comparison.mjs";
+import { greptileEntryProblems, greptileRows } from "./greptile.mjs";
 import { MERGE_BASE_RULE, materialisePr, mergeBasesOf } from "./materialise.mjs";
 import { readDecisions, resolveRulings } from "./rulings.mjs";
 
@@ -70,6 +84,7 @@ export function canonicalJson(v) {
 export const SUITES = {
   aacr: { board: "aacr", cases: "suites/aacr/cases.json", split: "splits/aacr-v1.json", origin: "real", heldOutOnly: false },
   martian: { board: "martian", cases: "suites/martian/cases.json", split: "splits/martian-v1.json", origin: "injected", heldOutOnly: true },
+  greptile: { board: "greptile", cases: "suites/greptile/cases.json", split: "splits/greptile-v2.json", origin: "injected", heldOutOnly: false },
   clean: { board: null, cases: "suites/clean/cases.json", split: "splits/clean-v1.json", origin: "real", heldOutOnly: false, clean: true },
 };
 
@@ -93,6 +108,19 @@ export function martianTruth(row) {
       category: MARTIAN_CATEGORY[g.category] ?? null,
       rawCategory: g.category ?? null,
     })),
+  };
+}
+
+// Original labels and corrected comments stay in separately named sets.
+// Neither set silently becomes the other's scoring denominator.
+export function greptileTruth(original, corrected, sources) {
+  return {
+    kind: "lines",
+    items: [],
+    sets: {
+      greptile: { kind: "prose", source: sources.greptile, items: [{ id: "g1", text: original.bugDescription, file: original.filePath, severity: MARTIAN_SEVERITY[original.severity] ?? null, rawSeverity: original.severity, severityDetail: original.severityDetail ?? null }] },
+      augment: { ...martianTruth(corrected), source: sources.augment },
+    },
   };
 }
 
@@ -137,7 +165,9 @@ export const truthHashOf = (items) => sha256(canonicalJson(items));
 // scored against. Licence, group, split and status are bookkeeping that
 // never changes a review or a score, so a new licence reading keeps the id.
 export const HASHED = ["name", "prUrl", "repo", "cloneUrl", "prRef", "baseSha", "headSha", "mergeBaseSha", "language", "changeLines", "truthHash", "matchSignatures"];
-export const entryHash = (entry) => sha256(canonicalJson(Object.fromEntries(HASHED.map((k) => [k, entry[k] ?? null]))));
+export const GREPTILE_HASHED = [...HASHED, "title", "body", "change", "truthSets", "correctedTitle"];
+export const entryHash = (entry) => sha256(canonicalJson(Object.fromEntries((entry.truthSets ? GREPTILE_HASHED : HASHED).map((k) => [k, entry[k] ?? null]))));
+export const suiteHashOf = (cases) => sha256(canonicalJson([...cases].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0).map((e) => ({ name: e.name, hash: entryHash(e) }))));
 export const realCaseId = (suite, name, hash) => `${suite}/${name}@${hash.slice(0, 8)}`;
 
 // ---------- pinned raw files ----------
@@ -171,6 +201,13 @@ export function readSuite(suite, { root = benchRoot } = {}) {
   const path = join(root, def.cases);
   if (!existsSync(path)) throw new Error(`${path} is missing; run node benchmark/ingest/${suite}.mjs`);
   const file = JSON.parse(readFileSync(path, "utf8"));
+  if (suite === "greptile") {
+    for (const entry of file.cases) {
+      const problems = greptileEntryProblems(entry);
+      if (problems.length > 0) throw new Error(`${entry.name}: ${problems.join("; ")}`);
+    }
+    if (suiteHashOf(file.cases) !== file.hash) throw new Error(`${path}: the suite hash differs; a changed case changes the suite hash`);
+  }
   const split = existsSync(join(root, def.split)) ? JSON.parse(readFileSync(join(root, def.split), "utf8")) : null;
   const splitBytes = split ? readFileSync(join(root, def.split)) : null;
   const dev = split?.cases?.dev ?? [];
@@ -202,6 +239,121 @@ export function splitRewriteProblems(old, next) {
     if (JSON.stringify(next?.subsets?.[subset] ?? null) !== JSON.stringify(names)) out.push(`the subset ${subset} would change`);
   }
   return out;
+}
+
+// ---------- purpose and exposure ----------
+
+// What a run of a suite with exposure on record is for. A tune run may
+// shape the product on what it reads; a score run is a measurement on cases
+// nobody tuned on; a diagnostic run may read any case the gates admit and is
+// never attached to a comparison.
+export const PURPOSES = ["tune", "score", "diagnostic"];
+
+// Why a case counts as exposed: its truth was read in a saved file
+// ("dossier", "golden-read"), or it is the same pull request or the same
+// commits as a case whose truth was read. "unknown" is a case whose
+// exposure the saved files cannot settle; "none" is a case they clear.
+export const EXPOSURE_REASONS = ["dossier", "golden-read", "shares-pr-with-read-martian", "shares-commits-with-read-martian", "shares-pr-with-greptile-dossier", "unknown"];
+
+// Whether a split file makes its runs name a purpose: it carries exposure.
+export const needsPurpose = (split) => Boolean(split?.exposure);
+
+// The order a repository group is taken in, from the split's salt.
+export const groupOrder = (salt, group) => sha256(`${salt}\0${group}`);
+
+/**
+ * The score side of a tune/score split (failure 13): the clean cases (reason
+ * none), grouped by repository group; the groups, ordered by
+ * sha256(salt, NUL, group), are taken one at a time, and a group's clean
+ * cases join tune while the score side keeps at least `floor` cases without
+ * them. Returns { score, tune, groups } with names sorted and each group's
+ * order, clean count and side.
+ */
+export function exposurePlacement({ cases, exposure, salt, floor }) {
+  const clean = cases.filter((c) => canonicalJson(exposure[c.name]?.reasons) === canonicalJson(["none"]));
+  const byGroup = new Map();
+  for (const c of clean) byGroup.set(c.repoGroup, [...(byGroup.get(c.repoGroup) ?? []), c.name]);
+  const groups = [...byGroup.keys()].map((group) => ({ group, order: groupOrder(salt, group), clean: byGroup.get(group).length })).sort((a, b) => (a.order < b.order ? -1 : 1));
+  let score = clean.length;
+  for (const g of groups) {
+    g.side = score - g.clean >= floor ? "tune" : "score";
+    if (g.side === "tune") score -= g.clean;
+  }
+  const scoreNames = groups.filter((g) => g.side === "score").flatMap((g) => byGroup.get(g.group));
+  const sorted = (names) => [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return { score: sorted(scoreNames), tune: sorted(cases.map((c) => c.name).filter((n) => !scoreNames.includes(n))), groups };
+}
+
+// What is wrong with a tune/score split file against its suite's entries
+// (failure 13): empty when every case has its exposure, every exposed or
+// unknown case is a tune case, every score case is clean, the placement is
+// the one exposurePlacement gives, the sides are the subsets, at least
+// `floor` cases are scored, and the counts add up.
+export function exposureSplitProblems(split, entries) {
+  const p = [];
+  const names = entries.map((e) => e.name);
+  const exposure = split?.exposure?.cases ?? {};
+  for (const n of names) if (!exposure[n]) p.push(`${n} has no exposure value`);
+  for (const n of Object.keys(exposure)) if (!names.includes(n)) p.push(`the exposure block names ${n}, which the suite does not hold`);
+  for (const [n, e] of Object.entries(exposure)) {
+    const r = e?.reasons;
+    if (!Array.isArray(r) || r.length === 0) p.push(`${n}: its exposure names no reason`);
+    else if (r.includes("none") ? r.length !== 1 : r.some((x) => !EXPOSURE_REASONS.includes(x))) p.push(`${n}: ${JSON.stringify(r)} is not none alone or a list of ${EXPOSURE_REASONS.join(", ")}`);
+  }
+  const dev = split?.cases?.dev ?? [];
+  const test = split?.cases?.test ?? [];
+  if (canonicalJson(split?.subsets?.tune ?? null) !== canonicalJson(dev)) p.push("the tune subset is not the development side");
+  if (canonicalJson(split?.subsets?.score ?? null) !== canonicalJson(test)) p.push("the score subset is not the test side");
+  for (const n of test) if (canonicalJson(exposure[n]?.reasons) !== canonicalJson(["none"])) p.push(`${n} is a score case, and its exposure is ${JSON.stringify(exposure[n]?.reasons ?? null)}, not none`);
+  if (!Number.isInteger(split?.floor) || test.length < split.floor) p.push(`the score side holds ${test.length} cases, under its floor of ${split?.floor}`);
+  if (typeof split?.salt !== "string" || split.salt === "") p.push("the split names no salt");
+  else {
+    const placed = exposurePlacement({ cases: entries, exposure, salt: split.salt, floor: split.floor });
+    if (canonicalJson(placed.score) !== canonicalJson(test) || canonicalJson(placed.tune) !== canonicalJson(dev)) p.push("the sides are not the placement its salt, floor and exposure give");
+  }
+  const byReason = {};
+  for (const e of Object.values(exposure)) for (const r of e?.reasons ?? []) byReason[r] = (byReason[r] ?? 0) + 1;
+  const counts = { dev: dev.length, test: test.length, tune: dev.length, score: test.length, exposed: names.length - (byReason.none ?? 0), clean: byReason.none ?? 0, byReason };
+  if (canonicalJson(split?.counts) !== canonicalJson(counts)) p.push(`the counts are not ${canonicalJson(counts)}`);
+  if (dev.length + test.length !== names.length) p.push(`tune ${dev.length} and score ${test.length} do not add up to the suite's ${names.length} cases`);
+  return p;
+}
+
+/**
+ * Why a selection of a suite with exposure on record may not run under
+ * `purpose` (failures 11 and 12): one line per refusal, empty when it may.
+ * `split` is the side selected, `subset` the subset named, `names` the
+ * cases selected and `change` the loop change the run measures, if any.
+ */
+export function purposeProblems({ suite, splitFile, purpose, split = null, subset = null, names = [], change = null }) {
+  if (!needsPurpose(splitFile)) return purpose === null || PURPOSES.includes(purpose) ? [] : [`--purpose takes ${PURPOSES.join(", ")}, not ${JSON.stringify(purpose)}`];
+  if (purpose === null || purpose === undefined) return [`a ${suite} run names its purpose (--purpose ${PURPOSES.join("|")}): ${splitFile.name} has exposure on record, so a tuned number and a score must not be told apart by memory`];
+  if (!PURPOSES.includes(purpose)) return [`--purpose takes ${PURPOSES.join(", ")}, not ${JSON.stringify(purpose)}`];
+  const out = [];
+  if (change !== null && purpose !== "tune") out.push(`--change ${change} measures a reviewer-loop change, which is tuning: its purpose is tune, not ${purpose}`);
+  if (purpose === "tune") {
+    if (split === "test") out.push(`a tune run reads tune cases only, and the ${suite} test split holds the score cases`);
+    if (subset === "score") out.push(`a tune run reads tune cases only, and the subset score is the score cases`);
+    for (const n of names) if (sideIn(splitFile, n) === "test") out.push(`${suite}/${n} is a score case: a tune run never reads it`);
+  }
+  if (purpose === "score") {
+    if (split === "dev") out.push(`a score run reads the score cases, which are the ${suite} test split: use --split test with --release`);
+    for (const n of names) if (sideIn(splitFile, n) === "dev") out.push(`${suite}/${n} is a tune case: a score run reads score cases only`);
+  }
+  return out;
+}
+
+/**
+ * The half of a suite a run's purpose reads: tune the development side,
+ * score the test side, diagnostic or no purpose every case. `cases` are
+ * real cases (their `split` is their side). Returns { subset, cases }.
+ */
+// A diagnostic run's half is the cases it planned (`planned`, their ids),
+// so it is never judged over cases it never meant to run.
+export function purposeHalf(purpose, cases, planned = null) {
+  if (purpose === "diagnostic" && planned !== null) return { subset: "planned", cases: cases.filter((c) => planned.has(c.id)) };
+  const side = purpose === "tune" ? "dev" : purpose === "score" ? "test" : null;
+  return { subset: side === "dev" ? "tune" : side === "test" ? "score" : "all", cases: side === null ? cases : cases.filter((c) => c.split === side) };
 }
 
 const sideIn = (split, name) => (split?.cases?.dev?.includes(name) ? "dev" : split?.cases?.test?.includes(name) ? "test" : null);
@@ -240,6 +392,7 @@ function realCase(suite, s, entry) {
     truthHash: entry.truthHash,
     matchSignatures: entry.matchSignatures,
     truthCount: entry.truth,
+    ...(suite === "greptile" ? { title: entry.title, body: entry.body, change: entry.change, truthSets: entry.truthSets, correctedTitle: entry.correctedTitle } : {}),
   };
 }
 
@@ -370,6 +523,7 @@ export function freezeMergeBase(suite, name, { root = benchRoot, cache = cacheRo
   next.hash = entryHash(next);
   next.id = realCaseId(suite, name, next.hash);
   const file = { ...s.file, cases: s.file.cases.map((e) => (e.name === name ? next : e)) };
+  if (suite === "greptile") file.hash = suiteHashOf(file.cases);
   writeFileSync(join(root, s.def.cases), `${JSON.stringify(file, null, 2)}\n`);
   return { name, from, to: next.id, bases, mergeBaseSha: pick, frozen: true, rule };
 }
@@ -383,6 +537,23 @@ export function truthOf(c, { cache = cacheRoot() } = {}) {
   if (def.clean) {
     const truth = { kind: "lines", items: [] };
     if (truthHashOf(truth.items) !== c.truthHash) throw new Error(`${c.id}: a clean case has no truth, and its entry's truthHash is not the hash of none`);
+    return truth;
+  }
+  if (c.suite === "greptile") {
+    const sets = c.truthSets;
+    const originalPin = sets.greptile;
+    const originalPath = rawPath(cache, def.board, { path: originalPin.file });
+    if (!existsSync(originalPath)) throw new Error(`${originalPath} is not in the cache; run node benchmark/ingest/greptile.mjs --data-only`);
+    const text = checkPinned(readFileSync(originalPath), { path: originalPin.file, sha256: originalPin.sha256 }, originalPath).toString("utf8");
+    const original = greptileRows(text).find((r) => r.prUrl === c.source.prUrl);
+    const corrected = readPinned(cache, def.board, { path: sets.augment.file, sha256: sets.augment.sha256 }).find((r) => r.pr_title === c.correctedTitle);
+    if (!original || !corrected) throw new Error(`${c.id}: a pinned truth set has no row for this case`);
+    const sources = Object.fromEntries(Object.entries(sets).map(([name, set]) => [name, set.source]));
+    const truth = greptileTruth(original, corrected, sources);
+    for (const [name, set] of Object.entries(truth.sets)) {
+      if (set.items.length !== sets[name].items || truthHashOf(set.items) !== sets[name].hash) throw new Error(`${c.id}: ${name} truth differs from its frozen count or hash`);
+    }
+    if (truthHashOf(truth.sets) !== c.truthHash) throw new Error(`${c.id}: its two truth sets differ from their frozen hash`);
     return truth;
   }
   if (c.suite === "martian") {
@@ -417,23 +588,41 @@ const FULL_ID = /^[a-z][a-z0-9-]*\/[^@\s]+@[0-9a-f]{8}$/;
 // The cases of a real suite one run uses (failures 7 and 8): every usable
 // case on the split's development side, or the subset the split file names,
 // or the cases `refs` names (<suite>/<name> or a full case id), each of
-// which must be on that side and in that subset. The test split is held
-// out: only a release run reads it, and there is none yet. `heldOut` true
+// which must be on that side and in that subset. An accepted comparison
+// release admits the test split on its pinned clean build and logs access.
+// `heldOut` true
 // (run.mjs --materialise-only, which builds and proves cases and reviews
 // none, and logs the access) may select the test split. Throws one error
 // whose lines name every refusal; nothing is fetched or built here.
-export function selectCases({ suite, split = "dev", subset = null, refs = null, root = benchRoot, heldOut = false }) {
+export function selectCases({ suite, split = "dev", subset = null, refs = null, root = benchRoot, heldOut = false, release = null, build = null, packageRecord = null, runId = null, by = null, accessLog = join(cacheRoot(), "heldout-access.jsonl"), purpose = null, change = null }) {
   if (!SUITES[suite]) throw new Error(`no real suite named ${suite}; the real suites are ${Object.keys(SUITES).join(", ")}`);
-  if (split === "test" && !heldOut) throw new Error(`the ${suite} test split is held out: no held-out case runs before a release, and run.mjs has no release run yet; run.mjs --materialise-only builds and proves held-out cases without a review`);
   if (split !== "dev" && split !== "test") throw new Error(`--split takes dev or test, not ${JSON.stringify(split)}`);
   const s = readSuite(suite, { root });
+  // Failures 11 and 12: the purpose, before the release gate and before any
+  // case is read. Named cases are checked by name, so a tune run naming a
+  // score case is refused here.
+  const named = (refs ?? []).map((ref) => (FULL_ID.test(ref) ? ref.slice(ref.indexOf("/") + 1, ref.lastIndexOf("@")) : ref.slice(ref.indexOf("/") + 1)));
+  const refused = purposeProblems({ suite, splitFile: s.split, purpose, split, subset, names: named, change });
+  if (refused.length > 0) throw new Error(refused.join("\n"));
+  if (split === "test" && !heldOut && release === null) throw new Error(`the ${suite} test split is held out: no held-out case runs before a release; use --release with an accepted comparison, or --materialise-only to prove cases without a review`);
+  const gate = split === "test" && !heldOut ? comparisonRelease({ release, suite, split, splitHash: s.splitHash, build, package: packageRecord }, { root, admit: true }) : null;
+  const admitted = (cases) => {
+    if (gate) {
+      const access = { at: new Date().toISOString(), suite, caseCount: cases.length, caseIds: cases.map((c) => c.id), purpose: "release-run", ...(purpose !== null ? { runPurpose: purpose } : {}), runId, release, by, comparisonHash: gate.comparison.hash, build: gate.buildLabel };
+      try {
+        mkdirSync(dirname(accessLog), { recursive: true });
+        appendFileSync(accessLog, `${JSON.stringify(access)}\n`);
+      } catch (error) { throw new Error(`the held-out access log cannot be written (${error.message.split("\n")[0]}), so no truth is read`); }
+    }
+    return cases;
+  };
   if (!s.split) throw new Error(`${s.def.split} is missing; run node benchmark/ingest/${suite}.mjs`);
   const subsets = Object.keys(s.split.subsets ?? {}).sort();
   if (subset !== null && subset !== "all" && !subsets.includes(subset)) throw new Error(`${s.def.split} lists no subset ${subset}; its subsets are ${subsets.join(", ")}, or all`);
   const ids = listCases({ suite, split, subset, root });
   if (refs === null) {
     if (ids.length === 0) throw new Error(`the ${split} split of ${suite}${subset ? `, subset ${subset},` : ""} holds no usable case`);
-    return ids.map((id) => readCase(id, { root }));
+    return admitted(ids.map((id) => readCase(id, { root })));
   }
   const problems = [];
   const chosen = [];
@@ -457,7 +646,7 @@ export function selectCases({ suite, split = "dev", subset = null, refs = null, 
     else chosen.push(readCase(realCaseId(suite, name, entry.hash), { root }));
   }
   if (problems.length > 0) throw new Error(problems.join("\n"));
-  return chosen;
+  return admitted(chosen);
 }
 
 // The truth copy of a real case that a run saves as cases/<name>.json and
@@ -470,6 +659,20 @@ export function selectCases({ suite, split = "dev", subset = null, refs = null, 
 // scanner-only score too, a scan rules change (a new SCAN_RULES_VERSION and
 // a new accepted scan entry).
 export function specCopy(c, truth) {
+  if (c.suite === "greptile") return { ...c, bugs: [], truthSets: Object.fromEntries(Object.entries(truth.sets).map(([name, set]) => [name, { ...c.truthSets[name], ...set }])) };
+  if (truth.kind === "prose") {
+    // Martian: the board judge reads the golden comments (g1, g2, ...) from
+    // the pinned file at conversion; the copy carries no line truth. The
+    // suite's count must be the count read, or the copy would score against
+    // another set.
+    const want = c.truthCount?.kind === "prose" ? c.truthCount.items : undefined;
+    const ids = truth.items.map((t) => t.id);
+    const expected = Number.isInteger(want) ? Array.from({ length: want }, (_, i) => `g${i + 1}`) : null;
+    if (expected === null || ids.join("\n") !== expected.join("\n")) {
+      throw new Error(`${c.id}: its suite lists ${want ?? "no count of"} golden comments, and the truth read holds ${ids.length === 0 ? "none" : ids.join(", ")}; the copy would score against another set`);
+    }
+    return { ...c, bugs: [] };
+  }
   const accepted = truth.items.filter((t) => t.valid !== false);
   const want = c.truthCount?.accepted;
   const ids = accepted.map((t) => t.id);
@@ -496,8 +699,41 @@ export function realSpecProblems(spec, name, { suite, root = benchRoot } = {}) {
   need(SUITES[suite] !== undefined, `the suite ${suite} has no truth copy rules`);
   need(id !== null && id.suite === suite && id.name === name, `id must be the case id of ${suite}/${name}, not ${JSON.stringify(spec.id)}`);
   const clean = SUITES[suite]?.clean === true;
-  need(spec.origin === "real" && spec.clean === clean, clean ? "a clean suite case is real and clean" : "a pull request case is real and never clean");
+  if (suite === "greptile") {
+    need(spec.origin === "injected" && spec.clean === false, "a Greptile case is injected and never clean");
+    need(typeof spec.repoGroup === "string" && spec.repoGroup !== "", "repoGroup is missing");
+    need(Array.isArray(spec.bugs) && spec.bugs.length === 0, "Greptile has no line truth; its board judge scores the prose sets");
+    const sets = spec.truthSets;
+    need(sets && Object.keys(sets).sort().join(",") === "augment,greptile", "both named judge truth sets are required");
+    const truth = {};
+    for (const name of ["greptile", "augment"]) {
+      const set = sets?.[name];
+      need(Array.isArray(set?.items) && set.items.length > 0 && truthHashOf(set.items) === set.hash, `${name}: judge truth does not match its frozen hash`);
+      truth[name] = { kind: set?.kind, source: set?.source, items: set?.items };
+    }
+    need(truthHashOf(truth) === spec.truthHash, "the judge truth sets differ from their combined identity");
+    if (id !== null) {
+      const entry = readSuite(suite, { root }).byName.get(id.name);
+      if (entry?.hash.startsWith(id.hash8)) need(entry.truthHash === spec.truthHash, "its truthHash is not the suite's");
+    }
+    return p;
+  }
+  const origin = SUITES[suite]?.origin ?? "real";
+  need(spec.origin === origin && spec.clean === clean, clean ? "a clean suite case is real and clean" : `a pull request case is ${origin} and never clean`);
   need(typeof spec.repoGroup === "string" && spec.repoGroup !== "", "repoGroup is missing");
+  if (spec.truthCount?.kind === "prose") {
+    const golden = spec.truthCount.items;
+    need(Number.isInteger(golden), "truthCount.items, the number of golden comments its suite lists, is missing");
+    need(Array.isArray(spec.bugs) && spec.bugs.length === 0, "prose truth carries no line truth: bugs must be empty; the board judge reads the golden comments from the pinned file");
+    if (id !== null && SUITES[suite]) {
+      const entry = readSuite(suite, { root }).byName.get(id.name);
+      if (entry?.hash.startsWith(id.hash8)) {
+        need(entry.truth?.items === golden, `the suite lists ${entry.truth?.items} golden comments, and the copy says ${golden}`);
+        need(entry.truthHash === spec.truthHash, "its truthHash is not the suite's");
+      }
+    }
+    return p;
+  }
   const count = spec.truthCount?.accepted;
   need(Number.isInteger(count), "truthCount.accepted, the number of accepted comments its suite lists, is missing");
   need(Array.isArray(spec.bugs), "bugs must be the list of its accepted comments");

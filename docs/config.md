@@ -23,7 +23,7 @@ An unknown key prints a warning and is ignored. A name in `scanners.disable` tha
 | `review.default_base` | `null` | The branch or ref to diff against when the branch has no upstream; null uses the remote's default branch. |
 | `review.include_fixtures` | `false` | Keep scanner findings in test fixtures, mocks and snapshots. |
 | `review.instructions_files` | `[]` | Repo-relative convention paths or globs the owners chose for the reviewer. Empty reads none. |
-| `review.stages` | `true` | The staged review when openqodex starts its own reviewer: two finder sessions per changed file, then a fresh verifier per batch of candidates. false runs one pass. --agent and --all always run one pass. |
+| `review.stages` | `true` | Staged review, the default, splits the change into units. A unit holds a few small files, one measured part or one [structural summary](claude-code-review.md#structural-summaries). Two fresh finder sessions read each unit. A fresh verifier then checks the candidates on each changed file. `false` selects the legacy single pass, without parts, structural summaries or coverage labels. The single pass brief carries at most 200 KB of diff text. Only the single pass has that cap. Its delivery pages hold at most 4,000 rows and 512 KB, as in the staged review. Both routes cut a line over 2,000 bytes into fragments. The single pass does not require a replaced line's old text; its pages still carry pure deletions in fragments. `--agent` and `--all` always run one pass. |
 | `scanners.disable` | `[]` | Built-in scanners to switch off, by name. |
 | `scanners.custom` | `[]` | Open source scanners to add by GitHub link; each runs only after openqodex trust. |
 | `graph.enabled` | `true` | Show the callers and importers of the changed code in the brief. |
@@ -130,13 +130,21 @@ A finding below this severity is left out of the report's findings and counted i
 One of `critical`, `major`, `minor`, `nitpick`, `info`. The default is unset.
 
 - Unset: OpenQodex warns and never blocks. No command exits 1. The push gate never denies a push.
-- Set: the verdict is `blocked` when a finding on a changed line is at or above this severity. `scan` and `review` exit 1. The push gate denies a push unless a finished review of the current change passed.
+- Set: the verdict is `blocked` when a finding on a changed line is at or above this severity. `scan` and `review` exit 1. The push gate denies a push unless a finished review of the current change passed. One exception: a review of the current change that did not finish never blocks the push. The hook prints one line saying the review is incomplete.
 
 Findings outside the changed lines never count toward the verdict.
 
 ## review.paths.exclude
 
 A list of globs. The default is an empty list. A matching file is left out of the change. The brief does not show it, and no finding in it is kept. Scanners do not receive it as a changed file. A scanner that reads a whole project, such as brakeman or golangci-lint, may still read it.
+
+A big file needs no exclusion.
+The default staged review cuts a large changed range into measured parts.
+Each part holds at most 4,000 rendered rows and 120 KB of rendered diff.
+A big JSON file or dependency store can get a [structural summary](claude-code-review.md#structural-summaries) instead.
+A structural summary is text that code builds from the parsed file.
+Smaller JSON changes are shown as rows.
+Use exclusions only when you want a file left out of the review.
 
 A renamed file has two paths, and each is matched on its own. A file renamed out of an excluded path is reviewed as a new file, with none of the excluded file's removed lines. A file renamed into an excluded path is reviewed as a deleted file.
 

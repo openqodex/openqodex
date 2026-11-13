@@ -7,7 +7,7 @@
 //   node benchmark/run.mjs --max-usd <n> --max-minutes <n>
 //                          [--max-tokens <n>] [--max-reviews <n>] [--allow-over]
 //                          [--repeat 3] [--cases a,b] [--graph off,on]
-//                          [--reviewers claude[,codex]] [--concurrency 1]
+//                          [--reviewers claude[,codex]|control] [--concurrency 1]
 //                          [--timeout 900] [--out <folder>] [--resume]
 //                          [--add-repeats <n>] [--change <RC-id>]
 //                          [--model <id>] [--web off|on] [--dry-run]
@@ -22,10 +22,12 @@
 //                          [--check-identical] [--scanner-config <file>]
 //                          [--allow-missing-scanners] [--timeout 120]
 //                          [--out <folder>] [--dry-run] [--draft]
-//   either mode also takes --suite planted|conventions|aacr|clean [--split dev]
+//   either mode also takes --suite planted|conventions|aacr|clean|martian|greptile [--split dev]
+//                          [--release <comparison> --split test --package local]
 //                          [--subset <name>|all] [--cases <suite>/<name>,...]
 //                          [--package local|npm:<version>|file:<path.tgz>]
-//   a review run also takes --smoke
+//   a review run also takes --smoke, and --wave <id> (required unless every
+//                          reviewer is model:scripted or it is a dry run)
 //   node benchmark/run.mjs --materialise-only [--suite <suite>] [--split dev|test]
 //                          [--subset <name>] [--cases a,b] [--out <folder>]
 //                          [--reviewers <the run's reviewers> | --mode scan]
@@ -57,7 +59,7 @@
 // request cases); for a real suite (aacr, clean), without --cases, every usable
 // case on the development side of its split file runs, or the subset that
 // --subset names there (dev-smoke, dev-laptop). The test split is held out
-// and refused: no held-out case runs before a release (lib/suites.mjs
+// and refused outside an accepted comparison release (lib/suites.mjs
 // selectCases). The manifest records suite, split, splitHash and subset.
 // A real suite's development cases run in scan mode and with laptop or
 // model reviewers, scored against the same saved truth.
@@ -172,7 +174,15 @@
 //    pass --max-usd by the reviews already running, and its manifest says
 //    so (ended.how "budget", limitKind "forecast", spentUsd). Hard caps that
 //    hold every model call before it is sent are lib/budget.mjs's, for the
-//    model reviewers and the judge.
+//    model reviewers and the judge. On top of the run's own caps, a review
+//    run that pays a model (any reviewer but model:scripted) names its wave
+//    with --wave and reserves its ceiling in the wave journal
+//    (lib/wave.mjs) before it spends: the run's --max-usd room, never its
+//    estimate, and a ceiling above the wave's room is refused before
+//    anything is spent, the dry run too. --allow-over never passes the
+//    wave cap. At its end it settles with what its ledger says it spent
+//    (the larger of that and the forecast, marked estimated, when a
+//    reviewer reported no cost).
 // 12. A review outlives the script after Ctrl-C: running reviews are
 //    stopped, saved as stopped attempts, and the run says why it stopped.
 // 13. Parallel reviews slow each other, which reads as a slower build: the
@@ -285,9 +295,15 @@
 //    suite's held-out cases first, reads no truth and runs no review.
 // 35. A board's run names no board revision: the manifest's `board` names
 //    the board, its repository and the commit boards.json pins.
+// 36. A number tuned on its cases is read as a score: a suite whose split
+//    has exposure on record (greptile, martian) takes --purpose tune, score
+//    or diagnostic. selectCases refuses a tune run on any score case, a
+//    score run on any tune case, and --change under any purpose but tune,
+//    before any case is read; the manifest records the purpose, and a
+//    release run's held-out access is logged in the index's access log.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { cpus, homedir, totalmem, tmpdir, platform, arch, release } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -295,17 +311,20 @@ import { pathToFileURL } from "node:url";
 import { benchRoot, casesRoot, buildCase, caseHash, caseIdFromHash, generatedValue, git, listCases, loadRunLock, lockPath, lockRefusals, readCase, repoRoot, snapshotCases } from "./lib/cases.mjs";
 import { estimateRun, loadPrices, manifestBudget, readLedger, runBudget, startRefusals } from "./lib/budget.mjs";
 import { externalOf, toolchainOf } from "./lib/external.mjs";
-import { haltRules, rateLimitRetry, smokeCap } from "./lib/halts.mjs";
+import { haltRules, reasonClass, resumeWaitMs, retryOnce, smokeCap } from "./lib/halts.mjs";
 import { comparePasses } from "./lib/identical.mjs";
 import { heldOutAccessPath } from "./lib/index.mjs";
+import { controlCaseData, controlEnv, controlSample, probeControl } from "./lib/claude-control.mjs";
 import { materialiseOnly } from "./lib/materialise-only.mjs";
 import { parsePackageSpec, preparePackage } from "./lib/package.mjs";
-import { probeReviewer, BLOCKED } from "./lib/reviewers.mjs";
-import { attemptDir, bundleHash, CLAUDE_MODEL_FROM, claudeRunModels, executeRun, failureOf, jobState, laptopReviewArgs, planJobs, preflightRefusals, provenanceProblems, resumeProblems, runManifest, saveSampleRow, sampleRecord, savedSampleRows, scannerPreflight, scanSampleRecord } from "./lib/runner.mjs";
+import { laptopMetered, probeReviewer, BLOCKED } from "./lib/reviewers.mjs";
+import { attemptDir, bundleHash, CLAUDE_MODEL_FROM, claudeRunModels, executeRun, failureOf, jobState, laptopInvocation, planJobs, preflightRefusals, provenanceProblems, resumeProblems, runManifest, saveSampleRow, sampleRecord, savedSampleRows, scannerPreflight, scanSampleRecord } from "./lib/runner.mjs";
 import { SCAN_CONFIG, SCAN_RULES_VERSION } from "./lib/scan-score.mjs";
 import { createModelReviewer, isModelReviewer, makeWorkRoot, recordServed, resolveModelReviewer, SCRIPTED, serverAttempt } from "./lib/server-review.mjs";
 import { DEFAULT_SCRIPT } from "./lib/scripted-model.mjs";
 import { SUITES, materialise, selectCases, specCopy, truthOf } from "./lib/suites.mjs";
+import { BOARD_REPEATS } from "./lib/noise.mjs";
+import { openWave, reserve, settle, waveState } from "./lib/wave.mjs";
 import { renderScan, saveScore } from "./score.mjs";
 
 // Authored suites use the same base/change folders. Only the published corpus has a frozen lock.
@@ -314,15 +333,15 @@ const AUTHORED_SUITES = {
   conventions: { root: join(benchRoot, "suites/conventions"), lock: null, conventions: true },
 };
 
-const USAGE = "usage: node benchmark/run.mjs --max-usd <n> --max-minutes <n> [--max-tokens <n>] [--max-reviews <n>] [--allow-over] [--repeat 3] [--cases a,b] [--graph off,on] [--reviewers claude[,codex]] [--concurrency 1] [--timeout 900] [--out <folder>] [--resume] [--add-repeats <n>] [--change <RC-id>] [--model <id>] [--web off|on] [--dry-run] [--draft] [--allow-retired] [--allow-missing-scanners]\n       node benchmark/run.mjs --reviewers model:<deployment>|model:scripted --max-usd <n> --max-minutes <n> --review-max-usd <n> [--cases a,b | <suite>/<name>,...] [--model-effort <level>] [--max-output-tokens <n>] [--model-script <file>] [--install-root <dir>/tools] [--concurrency 2] [--timeout <s>] [--repeat 3] [--out <folder>] [--resume] [--dry-run] [--allow-missing-scanners]\n       node benchmark/run.mjs --mode scan [--cases a,b] [--repeat 1] [--check-identical] [--scanner-config <file>] [--allow-missing-scanners] [--timeout 120] [--out <folder>] [--dry-run] [--draft] [--allow-retired]\n       either mode: [--suite planted|conventions|aacr|clean] [--split dev] [--subset <name>|all] [--cases <suite>/<name>,...] [--package local|npm:<version>|file:<path.tgz>]; a review run: [--smoke]\n       node benchmark/run.mjs --materialise-only [--suite <suite>] [--split dev|test] [--subset <name>] [--cases a,b] [--reviewers <names> | --mode scan] [--out <folder>]";
+const USAGE = "usage: node benchmark/run.mjs --max-usd <n> --max-minutes <n> [--max-tokens <n>] [--max-reviews <n>] [--allow-over] [--repeat 3] [--cases a,b] [--graph off,on] [--reviewers claude[,codex]] [--concurrency 1] [--timeout 900] [--out <folder>] [--resume] [--add-repeats <n>] [--change <RC-id>] [--model <id>] [--web off|on] [--dry-run] [--draft] [--allow-retired] [--allow-missing-scanners]\n       node benchmark/run.mjs --reviewers model:<deployment>|model:scripted --max-usd <n> --max-minutes <n> --review-max-usd <n> [--cases a,b | <suite>/<name>,...] [--model-effort <level>] [--max-output-tokens <n>] [--model-script <file>] [--install-root <dir>/tools] [--concurrency 2] [--timeout <s>] [--repeat 3] [--out <folder>] [--resume] [--dry-run] [--allow-missing-scanners]\n       node benchmark/run.mjs --mode scan [--cases a,b] [--repeat 1] [--check-identical] [--scanner-config <file>] [--allow-missing-scanners] [--timeout 120] [--out <folder>] [--dry-run] [--draft] [--allow-retired]\n       either mode: [--suite planted|conventions|aacr|clean] [--split dev] [--subset <name>|all] [--cases <suite>/<name>,...] [--purpose tune|score|diagnostic] [--package local|npm:<version>|file:<path.tgz>]; a review run: [--smoke]\n       node benchmark/run.mjs --materialise-only [--suite <suite>] [--split dev|test] [--subset <name>] [--cases a,b] [--purpose tune|score|diagnostic] [--reviewers <names> | --mode scan] [--out <folder>]\n       a review run that pays a model (any reviewer but model:scripted) names its wave: --wave <id> (node benchmark/lib/wave.mjs --wave-new <id>)";
 
 // Flags only a review run reads, flags only a scanner-only run reads, and
 // flags only a model reviewer reads.
-const REVIEW_ONLY = ["--reviewers", "--graph", "--web", "--model", "--resume", "--max-usd", "--max-minutes", "--max-tokens", "--max-reviews", "--review-max-usd", "--add-repeats", "--change", "--allow-over", "--model-effort", "--max-output-tokens", "--model-script", "--install-root", "--smoke"];
+const REVIEW_ONLY = ["--reviewers", "--graph", "--web", "--model", "--resume", "--max-usd", "--max-minutes", "--max-tokens", "--max-reviews", "--review-max-usd", "--add-repeats", "--change", "--allow-over", "--model-effort", "--max-output-tokens", "--model-script", "--install-root", "--smoke", "--wave"];
 const SCAN_ONLY = ["--scanner-config", "--check-identical"];
 const MODEL_ONLY = ["--model-effort", "--max-output-tokens", "--model-script", "--install-root"];
 // The flags --materialise-only reads: which cases, in which shape, and where the proof goes.
-const MATERIALISE_FLAGS = ["--materialise-only", "--mode", "--suite", "--split", "--subset", "--cases", "--reviewers", "--out", "--draft", "--allow-retired", "--cli"];
+const MATERIALISE_FLAGS = ["--materialise-only", "--mode", "--suite", "--split", "--subset", "--cases", "--reviewers", "--out", "--draft", "--allow-retired", "--cli", "--purpose"];
 // The most reviews a smoke run makes per configuration (P4-10's smoke: 5 pull requests per configuration).
 const SMOKE_MAX_REVIEWS = 5;
 
@@ -337,7 +356,7 @@ const positive = (flag, value, whole = false) => {
 };
 
 function parseArgs(argv) {
-  const o = { mode: "review", suite: null, split: null, subset: null, repeat: null, repeatGiven: false, cases: null, graph: null, reviewers: ["claude"], concurrency: null, timeout: null, out: null, resume: false, addRepeats: null, change: null, model: null, web: "off", dryRun: false, allowMore: false, draft: false, allowRetired: false, allowMissingScanners: false, allowOver: false, maxUsd: null, maxMinutes: null, maxTokens: null, maxReviews: null, reviewMaxUsd: null, scannerConfig: null, checkIdentical: false, modelEffort: undefined, maxOutputTokens: 32000, modelScript: DEFAULT_SCRIPT, installRoot: null, package: "local", smoke: false, materialiseOnly: false, cli: join(repoRoot, "packages/cli/dist/bin.js") };
+  const o = { mode: "review", suite: null, split: null, subset: null, purpose: null, repeat: null, repeatGiven: false, cases: null, graph: null, reviewers: ["claude"], concurrency: null, timeout: null, out: null, resume: false, addRepeats: null, change: null, model: null, web: "off", dryRun: false, allowMore: false, draft: false, allowRetired: false, allowMissingScanners: false, allowOver: false, maxUsd: null, maxMinutes: null, maxTokens: null, maxReviews: null, reviewMaxUsd: null, scannerConfig: null, checkIdentical: false, modelEffort: undefined, maxOutputTokens: 32000, modelScript: DEFAULT_SCRIPT, installRoot: null, package: "local", smoke: false, materialiseOnly: false, cli: join(repoRoot, "packages/cli/dist/bin.js") };
   const given = new Set();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -348,9 +367,12 @@ function parseArgs(argv) {
       return v;
     };
     if (a === "--mode") o.mode = next();
+    else if (a === "--release") o.release = next();
+    else if (a === "--wave") o.wave = next();
     else if (a === "--suite") o.suite = next();
     else if (a === "--split") o.split = next();
     else if (a === "--subset") o.subset = next();
+    else if (a === "--purpose") o.purpose = next();
     else if (a === "--scanner-config") o.scannerConfig = resolve(next());
     else if (a === "--check-identical") o.checkIdentical = true;
     else if (a === "--repeat") {
@@ -394,6 +416,8 @@ function parseArgs(argv) {
   // Model reviewers are the server path; Claude Code and Codex the laptop path.
   const models = o.reviewers.filter(isModelReviewer);
   const server = !scan && models.length > 0;
+  o.control = !scan && o.reviewers.includes("control");
+  if (o.control && o.reviewers.length !== 1) throw new Error("the control reviewer runs on its own: use --reviewers control");
   o.path = server ? "server" : "laptop";
   const real = (o.cases ?? []).filter(isRealRef);
   o.realRefs = real.length > 0 ? real : null;
@@ -414,6 +438,7 @@ function parseArgs(argv) {
   if (!o.real && o.subset !== null) throw new Error(`--subset ${o.subset}: the planted suite has no subsets`);
   if (o.materialiseOnly) return materialiseArgs(o, given, real);
   if (o.smoke && o.split === "test") throw new Error("--smoke runs development cases only: the test split is held out, and no held-out case runs before a release");
+  if (o.split === "test" && !o.release) throw new Error(`the ${o.suite} test split is held out: no held-out case runs before a release; use --release with an accepted comparison`);
   if (o.smoke && o.addRepeats !== null) throw new Error("--add-repeats grows a run into a measurement, and a smoke run is never one: it stays at most 5 reviews per configuration");
   o.split ??= "dev";
   // --subset all is the whole split, which a run with no subset names.
@@ -423,7 +448,10 @@ function parseArgs(argv) {
   o.repeat ??= scan || o.smoke ? 1 : 3;
   o.timeout ??= scan ? 120 : o.real ? 1800 : 900;
   // The server profile always builds the code graph.
-  o.graph ??= server ? ["on"] : ["off", "on"];
+  o.graph ??= o.control ? ["off"] : server ? ["on"] : ["off", "on"];
+  if (o.control && (o.graph.some((g) => g !== "off") || o.web !== "off")) throw new Error("the control reviewer uses no OpenQodex graph or web tools: use --graph off --web off");
+  if (o.release && (o.smoke || o.draft || o.package !== "local" || o.split !== "test" || !o.real)) throw new Error("--release requires a comparison's local build and a real suite's test split, without --smoke or --draft");
+  if (o.release && !scan && SUITES[o.suite]?.board && o.repeat < BOARD_REPEATS) throw new Error(`--repeat ${o.repeat}: a release review run of a board suite attaches with ${BOARD_REPEATS} repeats (the comparison record's pin), so a run of fewer is refused before it spends`);
   // Model reviews wait on the endpoint, not this machine, so two run at once.
   o.concurrency ??= server ? 2 : 1;
   const wrong = (scan ? REVIEW_ONLY : SCAN_ONLY).filter((f) => given.has(f));
@@ -448,13 +476,18 @@ function parseArgs(argv) {
   if (!Number.isInteger(o.concurrency) || o.concurrency < 1) throw new Error("--concurrency takes a whole number from 1");
   if (!Number.isInteger(o.timeout) || o.timeout < 60) throw new Error("--timeout takes whole seconds, at least 60");
   if (o.graph.some((g) => g !== "off" && g !== "on")) throw new Error("--graph takes off, on or off,on");
-  if (o.reviewers.some((r) => r !== "claude" && r !== "codex" && !isModelReviewer(r))) throw new Error("--reviewers takes claude, codex or both, or model reviewers (model:<deployment>, model:scripted)");
+  if (o.reviewers.some((r) => r !== "claude" && r !== "codex" && r !== "control" && !isModelReviewer(r))) throw new Error("--reviewers takes claude, codex, control, or model reviewers (model:<deployment>, model:scripted)");
   if (o.web !== "on" && o.web !== "off") throw new Error("--web takes on or off");
   if (o.model !== null && o.reviewers.includes("codex")) {
     throw new Error("--model cannot be used with Codex: the Codex reviewer runs with --ignore-user-config and takes no model setting; run without --model, and the run records the model Codex names in its own output");
   }
   const all = listCases(AUTHORED_SUITES[o.suite]?.root);
   for (const c of o.real ? [] : (o.cases ?? [])) if (!all.includes(c)) throw new Error(`no case ${c}; cases: ${all.join(", ")}`);
+  // The wave this run spends from (lib/wave.mjs): every reviewer but the
+  // scripted model pays a model; a scan and a dry run spend nothing.
+  o.paid = !scan && o.reviewers.some((r) => r !== SCRIPTED);
+  if (o.paid && !o.dryRun && !o.wave) throw new Error("--wave <id> is required: a review run that pays a model reserves its forecast in the wave's journal before it spends (node benchmark/lib/wave.mjs --wave-new <id> starts one)");
+  if (o.wave) o.waveJournal = openWave(o.wave);
   return o;
 }
 
@@ -502,8 +535,8 @@ function modelChecks(o, given, models) {
 // now from the pinned files, saved as the run's spec copy with the accepted
 // comments only (failure 30, lib/suites.mjs specCopy). Exits 2 on a
 // refusal, leaving no temp folder.
-function realCases(o) {
-  const tempRoot = mkdtempSync(join(tmpdir(), "oq-bench-run-"));
+function realCases(o, { build, packageRecord, out } = {}) {
+  const tempRoot = makeTempRoot();
   const refuse = (lines) => {
     rmSync(tempRoot, { recursive: true, force: true });
     console.error("The run cannot start:");
@@ -512,7 +545,7 @@ function realCases(o) {
   };
   let picked = [];
   try {
-    picked = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs });
+    picked = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, release: o.release ?? null, build, packageRecord, runId: out ? basename(out) : null, by: gitUserName(), purpose: o.purpose, change: o.change, ...(o.purpose !== null ? { accessLog: heldOutAccessPath() } : {}) });
   } catch (error) {
     refuse(error.message.split("\n"));
   }
@@ -545,7 +578,7 @@ function lockedCases(o) {
     process.exit(2);
   }
   const cases = o.cases ?? listCases(authored.root).filter((c) => lock?.cases[c]?.retired !== true);
-  const tempRoot = mkdtempSync(join(tmpdir(), "oq-bench-run-"));
+  const tempRoot = makeTempRoot();
   const refuse = (lines) => {
     rmSync(tempRoot, { recursive: true, force: true });
     console.error("The run cannot start:");
@@ -607,6 +640,21 @@ function packageBuild(pkg) {
   };
 }
 
+// Development cases are validated first. A comparison release needs its
+// build validated before selecting held-out cases or reading their truth.
+async function prepareRunBuild(o, date) {
+  let pkg = null;
+  try { pkg = await preparePackage(o.package); }
+  catch (error) { throw new Error(`--package ${o.package}: ${error.message}`); }
+  if (pkg) o.cli = pkg.cli;
+  const controlBuild = o.control && !o.release ? { problems: [], build: { commit: git(repoRoot, "rev-parse", "HEAD").trim(), short: git(repoRoot, "rev-parse", "--short=7", "HEAD").trim(), bundleHash: null, cliVersion: null, dirty: git(repoRoot, "status", "--porcelain").trim() !== "" } } : null;
+  const { problems, build } = controlBuild ?? (pkg ? packageBuild(pkg) : buildInfo(o.cli));
+  if (problems.length > 0) throw new Error(problems.join("\n"));
+  const packageRecord = pkg ? (({ files, ...rest }) => ({ ...rest, fileCount: Object.keys(files).length }))(pkg.record) : { spec: "local", commit: build.commit, dirty: build.dirty };
+  const out = o.out ?? join(benchRoot, "results", o.mode === "scan" ? `${date}-${build.short}-${o.suite}-scan-laptop` : o.control ? `${date}-${build.short}-control` : o.path === "server" ? `${date}-${build.short}-${o.suite}-review-server` : `${date}-${build.short}`);
+  return { pkg, build, packageRecord, out };
+}
+
 // The board a real suite's cases come from, at the commit boards.json pins (failure 35).
 function boardOf(name) {
   const b = JSON.parse(readFileSync(join(benchRoot, "outside", "boards.json"), "utf8")).boards?.[name];
@@ -641,10 +689,57 @@ function filesUnder(dir) {
 
 const children = new Set();
 
-function runCli(cli, args, env, cwd, timeoutMs, graceMs = 120_000) {
+// The run's temp roots (oq-bench-run-*), each removed on every way out:
+// success, a refusal, an exception and SIGTERM or Ctrl-C (issue 237). The
+// exit hook first stops any child still running and waits for it to end, so
+// no child writes into a root after it is removed. Before the run installs
+// its own handlers (halt, which stops the children and lets the run end), a
+// signal ends the run at once through the same hook. SIGKILL cannot be
+// caught: a run killed that way leaves its root, so whoever starts run.mjs
+// and may kill it gives it a TMPDIR of its own and removes that
+// (benchmark/test/loop.test.mjs).
+const tempRoots = new Set();
+function makeTempRoot() {
+  const dir = mkdtempSync(join(tmpdir(), "oq-bench-run-"));
+  tempRoots.add(dir);
+  return dir;
+}
+process.on("exit", () => {
+  for (const c of children) {
+    try {
+      process.kill(-c.pid, "SIGKILL");
+    } catch {
+      // gone already
+    }
+  }
+  // At most five seconds in all: a group whose leader is not yet reaped
+  // can still answer on Linux, and its processes are already killed.
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  const until = Date.now() + 5000;
+  for (const c of children) {
+    while (Date.now() < until) {
+      try {
+        process.kill(-c.pid, 0);
+      } catch {
+        break;
+      }
+      Atomics.wait(pause, 0, 0, 20);
+    }
+  }
+  for (const dir of tempRoots) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+});
+for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]]) {
+  process.on(signal, () => {
+    if (process.listenerCount(signal) === 1) process.exit(code);
+  });
+}
+
+function runCli(cli, args, env, cwd, timeoutMs, graceMs = 120_000, invocation = null) {
   return new Promise((done) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [cli, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const child = spawn(invocation?.command ?? process.execPath, invocation?.args ?? [cli, ...args], { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    child.stdin.on("error", () => {});
+    child.stdin.end(invocation?.input ?? "");
     children.add(child);
     let stdout = "";
     let stderr = "";
@@ -771,9 +866,7 @@ function firstAttempts(folder, jobs) {
 
 // A scanner-only run: the preflight, the overlay's trust step, one pass (or
 // two with --check-identical), each scored, and the comparison.
-async function scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, packageRecord, board, startedAt }) {
-  const date = startedAt.slice(0, 10);
-  const out = o.out ?? join(benchRoot, "results", `${date}-${build.short}-${o.suite}-scan-laptop`);
+async function scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, packageRecord, board, startedAt, out }) {
   const runId = basename(out);
   const folders = o.checkIdentical ? [out, `${out}-pass2`] : [out];
   const shown = (p) => (p.startsWith(process.cwd()) ? relative(process.cwd(), p) || "." : p);
@@ -829,11 +922,14 @@ async function scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, 
   const settings = {
     runId,
     mode: "scan",
+    ...(o.release ? { release: o.release, buildLabel: `local build ${build.commit}` } : {}),
     path: "laptop",
     suite: o.suite,
     split: o.split,
     splitHash: real?.splitHash ?? null,
     subset: o.subset,
+    // Why the run reads its cases: tune, score or diagnostic (failure 36).
+    ...(o.purpose !== null ? { purpose: o.purpose } : {}),
     board,
     package: packageRecord,
     build,
@@ -880,7 +976,7 @@ async function scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, 
       // Every case is built at the one path the overlay's approval names, and
       // moved aside after its scan; a pull request case in the laptop shape,
       // from the clone cache (lib/suites.mjs materialise).
-      const { dir: repo } = real ? materialise(real.byName[job.case].case, repoPath, { shape: "laptop" }) : buildCase(job.case, repoPath, snap);
+      const { dir: repo } = real ? materialise(real.byName[job.case].case, repoPath, { shape: "laptop", heldOut: real.byName[job.case].case.split === "test" }) : buildCase(job.case, repoPath, snap);
       const args = ["scan", "--cwd", repo, "--report-dir", reportDir, "--no-color", "--no-install", ...(overlay ? ["--config", overlay.file] : [])];
       const startedAt = new Date().toISOString();
       let result;
@@ -958,6 +1054,9 @@ async function scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, 
     }
   }
   console.log(`Score: ${folders.map((f) => shown(join(f, "score.json"))).join(" and ")}`);
+  // As on the review path: a real suite's case copies are removed once the
+  // scan ends; a planted case's laptop repositories are kept to look at.
+  if (!real) tempRoots.delete(tempRoot);
   if (!o.checkIdentical) process.exit(0);
   const cmp = comparePasses(folders[0], folders[1]);
   const record = { version: 1, runId, identical: cmp.identical, cause: cmp.cause, inputs: cmp.inputs, differences: cmp.differences, passes: folders.map((f, i) => ({ folder: basename(f), elapsedMin: ends[i].elapsedMin })) };
@@ -1000,7 +1099,7 @@ function materialiseMain(o) {
   let casesDir;
   if (o.real) {
     try {
-      cases = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, heldOut: true });
+      cases = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, heldOut: true, purpose: o.purpose });
     } catch (error) {
       refuse(error.message.split("\n"));
     }
@@ -1023,7 +1122,7 @@ function materialiseMain(o) {
   clean();
   const { version, purpose, ...rest } = doc;
   mkdirSync(out, { recursive: true });
-  writeFileSync(join(out, "proof.json"), `${JSON.stringify({ version, purpose, suite: o.suite, split: o.split, subset: o.subset, ...rest }, null, 2)}\n`);
+  writeFileSync(join(out, "proof.json"), `${JSON.stringify({ version, purpose, ...(o.purpose !== null ? { runPurpose: o.purpose } : {}), suite: o.suite, split: o.split, subset: o.subset, ...rest }, null, 2)}\n`);
   console.log(`${doc.proved} of ${doc.cases.length} cases proved${doc.heldOut > 0 ? `; ${doc.heldOut} held-out cases logged in ${relative(repoRoot, heldOutAccessPath())} first` : ""}. Proof: ${join(out, "proof.json")}`);
   process.exit(doc.failed === 0 ? 0 : 1);
 }
@@ -1046,9 +1145,14 @@ async function main() {
     console.error(`--out must start with ${date}, the UTC date this run starts, not ${outDate}`);
     process.exit(2);
   }
+  let prepared = null;
+  if (o.release) {
+    try { prepared = await prepareRunBuild(o, date); }
+    catch (error) { console.error(error.message); process.exit(2); }
+  }
   // Planted cases come from a copy checked against the lock; pull request
   // cases from their suite, with their truth read now.
-  const real = o.real ? realCases(o) : null;
+  const real = o.real ? realCases(o, prepared ?? {}) : null;
   const { cases, snap, hashes, tempRoot } = real
     ? { cases: Object.keys(real.byName), snap: null, hashes: Object.fromEntries(Object.entries(real.byName).map(([n, x]) => [n, x.case.hash])), tempRoot: real.tempRoot }
     : lockedCases(o);
@@ -1056,7 +1160,10 @@ async function main() {
   const suite = o.suite;
   const server = o.path === "server";
   // Every exit before the reviews start leaves no copy behind.
+  // A wave reservation this run holds, settled on every exit but a kill.
+  let settleWave = null;
   const leave = (code) => {
+    settleWave?.();
     rmSync(tempRoot, { recursive: true, force: true });
     process.exit(code);
   };
@@ -1065,31 +1172,17 @@ async function main() {
     console.error(`--smoke runs at most ${SMOKE_MAX_REVIEWS} reviews per configuration, and this plan has ${o.cases.length} cases x ${o.repeat} repeats; name at most ${SMOKE_MAX_REVIEWS} cases with --cases (or --subset), once each`);
     leave(2);
   }
-  // The build under test: this checkout's, or a package build (failure 31).
-  let pkg = null;
-  try {
-    pkg = await preparePackage(o.package);
-  } catch (error) {
-    console.error(`--package ${o.package}: ${error.message}`);
-    leave(2);
-  }
-  if (pkg) o.cli = pkg.cli;
-  const { problems, build } = pkg ? packageBuild(pkg) : buildInfo(o.cli);
-  if (problems.length > 0) {
-    for (const p of problems) console.error(p);
-    leave(2);
-  }
-  // The manifest names the package and how many files it unpacked; the cache's record holds each file's sha256.
-  const packageRecord = pkg ? (({ files, ...rest }) => ({ ...rest, fileCount: Object.keys(files).length }))(pkg.record) : { spec: "local", commit: build.commit, dirty: build.dirty };
+  try { prepared ??= await prepareRunBuild(o, date); }
+  catch (error) { console.error(error.message); leave(2); }
+  const { pkg, build, packageRecord, out } = prepared;
   if (pkg) console.log(`Package ${pkg.record.name} ${pkg.record.version} (${pkg.record.spec}, sha256 ${pkg.record.sha256.slice(0, 12)})`);
   const board = real ? boardOf(SUITES[suite].board) : null;
-  if (o.mode === "scan") return scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, packageRecord, board, startedAt });
-  const out = o.out ?? join(benchRoot, "results", server ? `${date}-${build.short}-${suite}-review-server` : `${date}-${build.short}`);
+  if (o.mode === "scan") return scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, packageRecord, board, startedAt, out });
   // The repository a review of the case reads, in the shape its path needs:
   // laptop, the change uncommitted; server, the base and the change as two
   // commits (lib/suites.mjs).
   const buildRepo = (name, into, shape) => {
-    if (real) return materialise(real.byName[name].case, into, { shape });
+    if (real) return materialise(real.byName[name].case, into, { shape, heldOut: real.byName[name].case.split === "test" });
     return materialise({ name, materialise: { kind: "folders" } }, into, { shape, casesDir: snap });
   };
   // The spec each case is scored against: a planted case's own, or a pull
@@ -1129,7 +1222,7 @@ async function main() {
   // A review is done once any of its attempts is saved; one whose first attempt never saved runs again in its next attempt folder.
   const todo = jobs.filter((j) => !jobState(out, j).done);
   console.log(`Benchmark: ${o.cases.length} cases x ${configs.length} configurations (${configs.map((c) => c.id).join(", ")}) x ${o.repeat} repeats = ${jobs.length} reviews; ${todo.length} to run, ${o.concurrency} at a time.`);
-  console.log(`Build ${build.short}${build.dirty ? ", built from a tree the commit does not hold (dirty)" : ""}, openqodex ${build.cliVersion}. Results: ${shown(out)}`);
+  console.log(o.control ? `Claude Code native control. Results: ${shown(out)}` : `Build ${build.short}${build.dirty ? ", built from a tree the commit does not hold (dirty)" : ""}, openqodex ${build.cliVersion}. Results: ${shown(out)}`);
   const caseIds = o.cases.map((c) => idOf[c]);
   console.log(`Cases: ${caseIds.join(", ")}`);
   if (o.draft) console.log("A draft run: its cases need not match the lock, and it is never accepted.");
@@ -1177,8 +1270,8 @@ async function main() {
   // repository (failure 18).
   let preflight;
   try {
-    const repos = o.cases.map((c) => ({ case: c, dir: buildRepo(c, join(tempRoot, "preflight", c, "repo"), server ? "server" : "laptop").dir }));
-    preflight = scannerPreflight({ cli: o.cli, repos, env: doctorEnv });
+    const repos = o.control ? [] : o.cases.map((c) => ({ case: c, dir: buildRepo(c, join(tempRoot, "preflight", c, "repo"), server ? "server" : "laptop").dir }));
+    preflight = o.control ? { complete: true, missing: [] } : scannerPreflight({ cli: o.cli, repos, env: doctorEnv });
   } catch (error) {
     console.error(`The scanner preflight failed: ${error.message}`);
     leave(2);
@@ -1186,7 +1279,8 @@ async function main() {
   // Only a planted case's laptop copy is kept: a pull request case's
   // checkout can be large, and the clone cache rebuilds it in seconds.
   if (server || real) rmSync(join(tempRoot, "preflight"), { recursive: true, force: true });
-  if (preflight.complete) console.log(`Scanners: every scanner the cases call for is installed${server ? ` in ${hideHome(installRoot)}` : ""}.`);
+  if (o.control) console.log("Native control: no scanner preflight.");
+  else if (preflight.complete) console.log(`Scanners: every scanner the cases call for is installed${server ? ` in ${hideHome(installRoot)}` : ""}.`);
   else {
     console.log(`Scanners missing: ${preflight.missing.map((m) => `${m.scanner} for ${m.case} (${m.state})`).join(", ")}.`);
     if (o.allowMissingScanners) console.log("--allow-missing-scanners: the run records scannersComplete false and is never accepted.");
@@ -1197,9 +1291,46 @@ async function main() {
     for (const r of refusals) console.error(`- ${r}`);
     leave(2);
   }
+  // The wave cap, after the run's own caps and --allow-over, and above them
+  // (lib/wave.mjs): the run reserves its hard ceiling, the room --max-usd
+  // leaves it, never its estimate, since it may spend up to that ceiling;
+  // it settles what it really spent. A run whose reviewers bill nothing per call
+  // (Claude Code on the subscription, Codex on a ChatGPT login) reserves 0
+  // and settles its reported dollars as not metered; a model reviewer
+  // always bills, and a run with any billed reviewer counts as billed.
+  const waveMetered = o.shape === "server" || o.reviewers.filter((r) => r !== SCRIPTED).some((r) => laptopMetered(r, env));
+  const waveForecast = !waveMetered ? 0 : Math.max(0, o.maxUsd - spentBefore);
+  const waveId = basename(out);
+  if (o.waveJournal) {
+    const s = waveState(o.waveJournal);
+    console.log(`Wave ${o.wave}: ${usd(s.settledUsd)} settled (metered), ${usd(s.unmeteredUsd)} reported but not metered, and ${usd(s.reservedUsd)} reserved of its ${usd(s.cap)} cap; this run reserves ${usd(waveForecast)}${!waveMetered ? " (its reviewers bill nothing per call, so its dollars are recorded as not metered)" : " (its --max-usd room, the most it may spend)"}.`);
+    // Refused before anything is spent, the dry run too: the run's ceiling
+    // must fit in the room the wave has left.
+    if (Math.round(waveForecast * 1e9) > Math.round(s.roomUsd * 1e9)) {
+      console.error(`The run cannot start: the wave ${o.wave} has ${usd(s.roomUsd)} of room left of its ${usd(s.cap)} cap, and this run may spend up to ${usd(waveForecast)} (its --max-usd room). Lower --max-usd to ${usd(s.roomUsd + spentBefore)} or less, or start a new wave with node benchmark/lib/wave.mjs --wave-new <id>. Nothing was spent.`);
+      leave(2);
+    }
+  }
   if (o.dryRun) {
     for (const j of todo) console.log(`  ${j.case} ${j.config} #${j.repeat}`);
     leave(0);
+  }
+  let waveUnpriced = 0;
+  if (o.waveJournal) {
+    try {
+      reserve(o.waveJournal, { id: waveId, path: process.env.OPENQODEX_WAVE_PATH === "loop" ? "loop" : "run", forecastUsd: waveForecast, metered: waveMetered });
+    } catch (error) {
+      console.error(`The run cannot start: ${error.message}`);
+      leave(2);
+    }
+    // What the run's ledger says this invocation spent; when a reviewer
+    // reported no cost, the larger of that and the forecast, estimated.
+    settleWave = () => {
+      settleWave = null;
+      const spent = Math.max(0, readLedger(out).spentUsd - spentBefore);
+      if (waveUnpriced > 0) settle(o.waveJournal, waveId, Math.max(spent, waveForecast), { estimated: true, metered: waveMetered });
+      else settle(o.waveJournal, waveId, spent, { metered: waveMetered });
+    };
   }
 
   // The reviewers, before anything is spent (failure 3), with the model each
@@ -1207,7 +1338,7 @@ async function main() {
   // recorded in each sample (failure 26).
   const reviewers = Object.fromEntries(Object.entries(models).map(([name, m]) => [name, m.record]));
   for (const name of server ? [] : o.reviewers) {
-    const p = await probeReviewer(name, { env });
+    const p = await (name === "control" ? probeControl({ env }) : probeReviewer(name, { env }));
     if (!p.ok) {
       console.error(`The ${name} reviewer cannot run: ${p.text}`);
       leave(2);
@@ -1217,17 +1348,21 @@ async function main() {
       console.error(`Asked for the model ${o.model}, but Claude Code answered with ${JSON.stringify(p.model)}; nothing runs.`);
       leave(2);
     }
-    reviewers[name] = { name, version: p.version, model: name === "claude" ? null : p.model, ...(name === "claude" ? { requestedModel: o.model } : {}), modelFrom: name === "claude" ? CLAUDE_MODEL_FROM : "the model line of the header Codex prints" };
+    const claude = name === "claude" || name === "control";
+    reviewers[name] = { name, version: p.version, model: claude ? null : p.model, ...(claude ? { requestedModel: o.model } : {}), modelFrom: claude ? CLAUDE_MODEL_FROM : "the model line of the header Codex prints" };
     console.log(`Reviewer ${name} ${p.version}, model ${JSON.stringify(p.model)}`);
   }
 
   const settings = {
     runId: basename(out),
     mode: "review",
+    ...(o.release ? { release: o.release, buildLabel: `local build ${build.commit}` } : {}),
     suite,
     split: o.split,
     splitHash: real?.splitHash ?? null,
     subset: o.subset,
+    // Why the run reads its cases: tune, score or diagnostic (failure 36).
+    ...(o.purpose !== null ? { purpose: o.purpose } : {}),
     path: o.path,
     // A smoke run checks the runner and is never indexed (failure 33).
     smoke: o.smoke,
@@ -1239,6 +1374,7 @@ async function main() {
     reviewers,
     review: server
       ? { web: "off", timeoutSeconds: o.timeout, profile: "server", installRoot: hideHome(installRoot), flags: "reviewChange in the server profile: a workDir per review, the budget from the run's ledger, scanners preinstalled, tools { web: false, shell: false }" }
+      : o.control ? { web: "off", timeoutSeconds: o.timeout, native: true, command: laptopInvocation({ job: { reviewer: "control" }, maxUsd: o.maxUsd }) }
       : { web: o.web, timeoutSeconds: o.timeout, reportDir: true, flags: "review --report-dir <sample>/report --reviewer <name> --reviewer-web <on|off> --timeout <s> [--no-graph]" },
     cases: o.cases,
     // The frozen ids (planted/<name>@<hash8>) that scores and the index key by.
@@ -1350,33 +1486,58 @@ async function main() {
     return { rec, ownUsd: meter.spentUsd ?? 0 };
   };
 
-  // A model job (failure 32): its attempt, and when the provider rate
-  // limited it (a 429 that is not a quota or billing refusal), one more
-  // after a bounded wait, in its next attempt folder with a meter of its
+  // A model job (failure 32): its attempt, and after a transport failure or
+  // rate limit, one shared retry, after a bounded wait for a rate limit,
+  // in its next attempt folder with a meter of its
   // own; then the halt rules, once per job, with what its attempts spent.
   // A smoke run counts every attempt against its cap (failure 33).
-  const modelJob = async (job, k, ticket) => {
+  const modelJob = async (job, k, ticket, retriesUsed) => {
     let meter = ticket;
     let attemptNo = k;
     let ownUsd = 0;
+    let first = null;
+    let savedAt = 0;
+    // A crash can leave rows.jsonl behind, so read the saved attempt itself.
+    for (let n = k - 1; n >= 1; n--) {
+      const sample = join(attemptDir(out, job, n), "sample.json");
+      if (existsSync(sample)) {
+        first = JSON.parse(readFileSync(sample, "utf8"));
+        savedAt = statSync(sample).mtimeMs;
+        break;
+      }
+    }
     try {
-      for (let retries = 0; ; retries++) {
-        const capped = cap?.take(job.config, { retry: retries > 0 });
+      // A resumed rate-limit retry keeps the provider's wait, less the time
+      // already gone since the attempt was saved.
+      const owed = first === null ? 0 : resumeWaitMs(first, retriesUsed, savedAt);
+      if (owed > 0) {
+        console.log(`  ${job.case} ${job.config} #${job.repeat}: ${reasonClass(first.failure)} saved ${Math.round((Date.now() - savedAt) / 1000)} s ago; waiting ${Math.round(owed / 1000)} s more, then once more`);
+        const until = Date.now() + owed;
+        while (stop === null && Date.now() < until) await new Promise((wake) => setTimeout(wake, Math.min(500, until - Date.now())));
+        if (stop !== null) return;
+      }
+      for (let retries = retriesUsed; ;) {
+        const capped = cap?.take(job.config, { retry: first !== null || retries > 0 });
         if (capped) return halt(capped.why, capped.rule);
         const done = await serverJob(job, attemptNo, meter);
         ownUsd += done.ownUsd;
-        const again = stop === null ? rateLimitRetry(done.rec, retries) : null;
+        // Live and resumed retries use the same allowance from saved samples.
+        retries = jobState(out, job).retriesUsed;
+        const same = first !== null && done.rec.status !== "complete" && reasonClass(first.failure) === reasonClass(done.rec.failure);
+        const again = stop === null && !same ? retryOnce(done.rec, retries) : null;
         const next = again ? budget.openReview(job) : null;
         if (next?.ok) {
-          console.log(`  ${job.case} ${job.config} #${job.repeat}: rate limited; waiting ${again.waitMs / 1000} s, then once more`);
+          console.log(`  ${job.case} ${job.config} #${job.repeat}: ${reasonClass(done.rec.failure)}; waiting ${again.waitMs / 1000} s, then once more`);
           const until = Date.now() + again.waitMs;
           while (stop === null && Date.now() < until) await new Promise((wake) => setTimeout(wake, Math.min(500, until - Date.now())));
           meter = next.review;
           if (stop !== null) return;
           attemptNo = jobState(out, job).next;
+          first = done.rec;
           continue;
         }
         const h = rules.after(done.rec, { ownUsd, reservedUsd: budget.summary().reservedUsd });
+        if (same) halt(`${job.case} ${job.config} #${job.repeat}: the same reason twice (${reasonClass(done.rec.failure)}): attempt ${first.attempt}: ${first.failure}; attempt ${done.rec.attempt}: ${done.rec.failure}`, "same-reason-twice");
         if (h) halt(`${job.case} ${job.config} #${job.repeat}: ${h.why}`, h.rule);
         return;
       }
@@ -1393,40 +1554,48 @@ async function main() {
     const { dir: repo, base } = buildRepo(job.case, join(caseDir, "repo"), "laptop");
     const reportDir = join(dir, "report");
     mkdirSync(dir, { recursive: true });
-    const args = laptopReviewArgs({ repo, reportDir, job, web: o.web, timeout: o.timeout, instructionsRef: AUTHORED_SUITES[suite]?.conventions ? base : undefined, configPath: AUTHORED_SUITES[suite]?.conventions ? join(repo, ".openqodex/config.yaml") : undefined });
+    const caseData = o.control ? controlCaseData(repo, readJson(specFile(job.case))) : undefined;
+    const invocation = laptopInvocation({ cli: o.cli, repo, reportDir, job, web: o.web, timeout: o.timeout, maxUsd: Math.max(0, o.maxUsd - budget.summary().spentUsd) / o.concurrency, caseData, instructionsRef: AUTHORED_SUITES[suite]?.conventions ? base : undefined, configPath: AUTHORED_SUITES[suite]?.conventions ? join(repo, ".openqodex/config.yaml") : undefined });
     const startedAt = new Date().toISOString();
     let result;
     try {
-      result = await runCli(o.cli, args, env, repo, o.timeout * 1000);
+      result = await runCli(o.cli, [], o.control ? controlEnv(env) : env, repo, o.timeout * 1000, o.control ? 0 : 120_000, invocation);
     } finally {
       if (real) rmSync(caseDir, { recursive: true, force: true });
     }
     const replacements = [[reportDir, "<sample>/report"], [repo, "<repo>"], [tempRoot, "<temp>"], [out, "<results>"], [process.env.HOME, "~"]];
-    writeFileSync(join(dir, "receipt.txt"), sanitize(result.stdout, replacements));
+    result.stdout = sanitize(result.stdout, replacements);
+    writeFileSync(join(dir, "receipt.txt"), result.stdout);
     writeFileSync(join(dir, "stderr.txt"), sanitize(result.stderr, replacements));
     const report = readJson(join(reportDir, "report.json"));
     const who = readJson(join(reportDir, "reviewer.json"));
     const stoppedHere = stop;
     const failure = stoppedHere !== null && !report ? { cause: `stopped by the run: ${stoppedHere}`, infra: false, unavailable: false } : failureOf(result, report);
-    const rec = sampleRecord({ job, attempt: k, result, report, who, startedAt, failure, stopped: stoppedHere, usageRecord: readJson(join(reportDir, "usage.json")) });
+    const rec = o.control ? controlSample({ job, attempt: k, result, command: invocation, version: reviewers.control.version, startedAt, stopped: stoppedHere }) : sampleRecord({ job, attempt: k, result, report, who, startedAt, failure, stopped: stoppedHere, usageRecord: readJson(join(reportDir, "usage.json")) });
+    if (o.control) {
+      writeFileSync(join(dir, "native-output.json"), result.stdout);
+      writeFileSync(join(dir, "usage.json"), `${JSON.stringify({ modelUsage: readJson(join(dir, "native-output.json"))?.modelUsage ?? {}, usage: rec.usage }, null, 2)}\n`);
+    }
     saveSampleRow(out, attemptDir(out, job, k), rec);
     const tokens = Number.isInteger(rec.usage?.input_tokens) && Number.isInteger(rec.usage?.output_tokens) ? rec.usage.input_tokens + rec.usage.output_tokens : null;
     budget.recordReview({ jobId: job.jobId, usd: typeof rec.usage?.cost_usd === "number" ? rec.usage.cost_usd : null, tokens, wallMs: rec.wallMs });
+    if (typeof rec.usage?.cost_usd !== "number") waveUnpriced++;
     const cost = rec.usage?.cost_usd;
     console.log(`  ${job.case} ${job.config} #${job.repeat}${k > 1 ? ` attempt ${k}` : ""}: ${rec.status}, ${rec.findings ?? "no"} findings, ${(rec.wallMs / 1000).toFixed(0)} s${typeof cost === "number" ? `, $${cost.toFixed(2)}` : ""}${rec.failure ? ` (${rec.failure.slice(0, 160)})` : ""}`);
     checkSaved(dir);
+    if (o.control) return rec.status === "complete" ? null : { cause: rec.failure || result.stderr || `Claude Code exited ${result.code}`, infra: true, unavailable: false };
     return failure;
   };
 
   // One job's reviews: its next free attempt (a first attempt that started
   // and never saved is kept, and the work goes to the next folder), and one
   // more after a reviewer failure. A model review's ticket is its meter,
-  // which holds its cap; it gets one more attempt only when rate limited
+  // which holds its cap; transport failures and rate limits share one retry
   // (modelJob).
-  const runJob = async (job, k, ticket) => {
+  const runJob = async (job, k, ticket, retriesUsed) => {
     if (server) {
       try {
-        await modelJob(job, k, ticket);
+        await modelJob(job, k, ticket, retriesUsed);
       } catch (error) {
         halt(`${job.case} ${job.config} #${job.repeat}: the benchmark itself failed: ${error.message}`, "benchmark-failed");
       }
@@ -1441,6 +1610,7 @@ async function main() {
       if (!first?.infra) return;
       // A limit or a login wall in the failure itself stops the run at once, without a probe.
       if (BLOCKED.test(first.cause)) return halt(`${job.case} ${job.config}: ${first.cause}`, "reviewer-blocked");
+      if (o.control) return halt(`${job.case} ${job.config}: ${first.cause}`, "control-failed");
       const p = await probeReviewer(job.reviewer, { env });
       if (!p.ok) return halt(`${job.case} ${job.config}: the reviewer failed (${first.cause}) and the probe says: ${p.text}${p.blocked ? " (a limit or login wall)" : ""}`, "reviewer-blocked");
       const cappedRetry = cap?.take(job.config, { retry: true });
@@ -1475,9 +1645,10 @@ async function main() {
       // The models the provider named as answering, per configuration, over every saved attempt.
       finish: () => {
         if (server) return { servedModels: servedByConfig(out) };
-        if (!reviewers.claude) return {};
-        const observed = claudeRunModels(savedSampleRows(out), o.model);
-        const actual = { ...reviewers, claude: { ...reviewers.claude, model: observed.model, models: observed.models } };
+        const name = o.control ? "control" : "claude";
+        if (!reviewers[name]) return {};
+        const observed = claudeRunModels(savedSampleRows(out), o.model, name);
+        const actual = { ...reviewers, [name]: { ...reviewers[name], model: observed.model, models: observed.models } };
         return { reviewers: actual, reviewer: o.reviewers.length === 1 ? actual[o.reviewers[0]] : null, modelRefusal: observed.why };
       },
       budget,
@@ -1496,12 +1667,13 @@ async function main() {
   // removed once the review ends, so those runs keep no temp folder; a
   // planted case's laptop repositories are kept to look at.
   if (workRoot) rmSync(workRoot, { recursive: true, force: true });
-  if (server || real) rmSync(tempRoot, { recursive: true, force: true });
+  if (!server && !real) tempRoots.delete(tempRoot);
   const finished = ended.reviewsWithAnAttempt;
   const spent = typeof ended.spentUsd === "number" ? `; $${ended.spentUsd.toFixed(2)} spent` : "";
   if (ended.how === "finished") console.log(`Done: ${finished} reviews saved in ${shown(out)}${spent}`);
   else console.log(`Stopped${ended.how === "budget" ? " by the budget" : ended.halt ? ` by the halt rule ${ended.halt.rule}` : ""} after ${finished} of ${jobs.length} reviews${spent}: ${ended.why}${ended.how === "budget" ? `. Resume with --resume and a larger limit to finish it; until then it is not a full run.` : ended.halt && ended.halt.rule !== "signal" ? ". Every finished review is saved; look at the cause, then --resume runs the rest." : ""}`);
   console.log(`Score it: node benchmark/score.mjs ${shown(out)}`);
+  settleWave?.();
   process.exit(ended.how === "finished" ? 0 : 1);
 }
 

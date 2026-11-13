@@ -19,7 +19,7 @@ export type FrameworkExpected = {
   apps?: number; // the applications the plugin detects
   registrations?: { site: string; methods?: string[]; pattern?: string | null; name?: string | null; handler?: string | null; status?: HandlerStatus; mounted?: boolean }[];
   edges?: { kind: FrameworkEdgeKind; from: string; to: string; tier?: Tier; category?: TestCategory }[];
-  roles?: { target: string; role: Role; detail?: string }[];
+  roles?: { target: string; role: Role; detail?: string; tier?: Tier; note?: string }[];
   unknowns?: { file: string; line?: number; cause: string }[];
   notUnknowns?: { file: string; line: number; cause: string }[];
   partials?: { site: string; partial: string | null }[]; // the known part of a computed pattern
@@ -27,7 +27,8 @@ export type FrameworkExpected = {
   // Kinds the plugin must emit none of: an edge kind, an entity kind, or
   // "role" for any role at all.
   none?: string[];
-  // Edges that must not exist (an unrelated same-name function bound as a handler).
+  // Roles and edges that must not exist (an unrelated same-name function bound as a handler).
+  notRoles?: { target: string; role: Role }[];
   notEdges?: { kind: FrameworkEdgeKind; from?: string; to?: string }[];
   // Files that must hold no registration of the plugin (a file that looks like a route table and is not one).
   noRegistrationsIn?: string[];
@@ -142,6 +143,11 @@ export function scoreFrameworks(expected: FrameworkExpected | undefined, graph: 
     const found = mine.roles.filter((x) => endpoint(r.target, x.target) && x.role === r.role);
     if (found.some((x) => r.detail === undefined || x.detail === r.detail)) out.recall.hit++;
     else out.failures.push(found.length > 0 ? `role ${r.role} on ${r.target} has detail ${found.map((x) => x.detail).join(", ")}, expected ${r.detail}` : `role not found: ${r.role} on ${r.target}`);
+    if (r.tier !== undefined || r.note !== undefined) {
+      out.recall.of++;
+      if (found.some((x) => (r.detail === undefined || x.detail === r.detail) && (r.tier === undefined || x.evidence.tier === r.tier) && (r.note === undefined || x.evidence.note === r.note))) out.recall.hit++;
+      else out.failures.push(`role evidence mismatch: ${r.role} on ${r.target}, expected ${r.tier ?? "any tier"}, ${r.note ?? "any note"}`);
+    }
   }
 
   for (const u of expected.unknowns ?? []) {
@@ -193,6 +199,12 @@ export function scoreFrameworks(expected: FrameworkExpected | undefined, graph: 
     const bad = mine.entities.filter((e) => e.kind === "registration" && e.site.file === file);
     if (bad.length === 0) out.controls.hit++;
     else out.failures.push(`negative control broken: ${bad.length} registrations in ${file}, which is not a route table`);
+  }
+  for (const n of expected.notRoles ?? []) {
+    out.controls.of++;
+    const bad = mine.roles.filter((r) => r.role === n.role && endpoint(n.target, r.target));
+    if (bad.length === 0) out.controls.hit++;
+    else out.failures.push(`negative control broken: ${n.role} role on ${n.target}`);
   }
   for (const n of expected.notEdges ?? []) {
     out.controls.of++;

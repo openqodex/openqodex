@@ -1,0 +1,48 @@
+{
+  "guards": "binds a call to a Java default method through the interface, and dispatches the abstract call inside it to the implementing class",
+  "callers": [
+    {
+      "to": "src/main/java/shapes/Shape.java#Shape.describe",
+      "site": "src/main/java/shapes/Main.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/shapes/Shape.java#Shape.describe",
+      "site": "src/main/java/shapes/Main.java:10",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/shapes/Shape.java#Shape.area",
+      "site": "src/main/java/shapes/Shape.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/shapes/Circle.java#Circle.area",
+      "site": "src/main/java/shapes/Shape.java:7",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/main/java/shapes/Shape.java:7",
+      "candidates": [
+        "src/main/java/shapes/Circle.java#Circle.area"
+      ]
+    }
+  ],
+  "references": [
+    {
+      "to": "src/main/java/shapes/Shape.java#Shape.area",
+      "site": "src/main/java/shapes/Circle.java:4",
+      "kind": "overrides",
+      "tier": "likely"
+    }
+  ],
+  "floor": {
+    "src/main/java/shapes/Circle.java#Circle.area": true
+  }
+}

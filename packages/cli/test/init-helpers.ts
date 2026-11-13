@@ -44,9 +44,10 @@ export function sandbox(files: Record<string, string> = {}, rootName = "oq test 
 }
 
 // What ties a run to the developer's own agents: their config folders, which
-// would point init at the real ones, and the markers of the agent session the
-// tests may run in, which would decide init's consent and the reviewer order.
-export const AGENT_ENV = ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "CLAUDECODE", "CODEX_THREAD_ID", "CODEX_SANDBOX", "CURSOR_AGENT"];
+// would point init at the real ones (Goose's moves with XDG_CONFIG_HOME and
+// GOOSE_PATH_ROOT), and the markers of the agent session the tests may run
+// in, which would decide init's consent and the reviewer order.
+export const AGENT_ENV = ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "GOOSE_PATH_ROOT", "CLAUDECODE", "CODEX_THREAD_ID", "CODEX_SANDBOX", "CURSOR_AGENT"];
 
 // A PATH with git, node and the system folders and no coding agent, so
 // init's reviewer check never runs a real claude or codex, which would write

@@ -62,6 +62,8 @@ import { dirname, join, resolve } from "node:path";
 import { REVIEWER_FAILED } from "./reviewers.mjs";
 import { SCAN_CONFIG } from "./scan-score.mjs";
 import { RULES_VERSION, jobIdOf, shownFindings } from "./score.mjs";
+import { controlArgs, controlInput } from "./claude-control.mjs";
+import { retryOnce } from "./halts.mjs";
 
 // The arguments of one laptop review (Claude Code or Codex through
 // `openqodex review`), the same for planted and pull request cases.
@@ -71,6 +73,11 @@ export function laptopReviewArgs({ repo, reportDir, job, web, timeout, instructi
   if (instructionsRef !== undefined) args.push("--instructions-ref", instructionsRef);
   if (!job.graph) args.push("--no-graph");
   return args;
+}
+
+export function laptopInvocation(options) {
+  if (options.job.reviewer === "control") return { command: "claude", args: controlArgs(options), input: controlInput(options.caseData) };
+  return { command: process.execPath, args: [options.cli, ...laptopReviewArgs(options)], input: "" };
 }
 
 // The jobs of a run in run order: per repeat, every case, every
@@ -85,7 +92,10 @@ export function planJobs({ cases, caseIds, reviewers = [], graph = [], repeat, m
   // A model reviewer's name (model:<deployment>) holds a colon, which a
   // configuration id, a folder name, writes as a dash.
   if (mode === "scan") configs.push({ id: SCAN_CONFIG, reviewer: null, graph: false });
-  else for (const reviewer of reviewers) for (const g of graph) configs.push({ id: `${reviewer.replace(/:/g, "-")}-graph-${g}`, reviewer, graph: g === "on" });
+  else for (const reviewer of reviewers) for (const g of graph) {
+    if (reviewer === "control" && g !== "off") throw new Error("the control reviewer has no graph configuration; use --graph off");
+    configs.push({ id: `${reviewer.replace(/:/g, "-")}-graph-${g}`, reviewer, graph: g === "on" });
+  }
   const jobs = [];
   for (let r = 1; r <= repeat; r++) {
     const order = r % 2 === 1 ? configs : [...configs].reverse();
@@ -107,16 +117,36 @@ export function runManifest({ startedAt, settings, jobs }) {
 }
 
 // One job in a run folder: whether its first attempt folder exists (it
-// started), whether any attempt was saved with its sample.json (it is done),
-// and the next free attempt number (failure 10).
+// started), the next free attempt number, and whether the last saved sample
+// leaves a retry pending. Unsaved folders use a number but no retry (failure 10).
 export function jobState(out, job) {
   let next = 1;
-  let done = false;
+  let last = null;
+  let retryFailures = 0;
   while (existsSync(attemptDir(out, job, next))) {
-    if (existsSync(join(attemptDir(out, job, next), "sample.json"))) done = true;
+    const sample = join(attemptDir(out, job, next), "sample.json");
+    // A sample cut short by a crash mid-write reads as not saved.
+    const saved = existsSync(sample) ? readSample(sample) : null;
+    if (saved !== null) {
+      last = saved;
+      if (retryOnce(last, 0) !== null) retryFailures++;
+    }
     next++;
   }
-  return { started: next > 1, done, next };
+  // The first failure asks for a retry; only later saved failures consume it.
+  const retriesUsed = Math.max(0, retryFailures - 1);
+  // A manifest job carries no reviewer; its saved sample does.
+  const reviewer = job.reviewer ?? last?.reviewer ?? null;
+  const retryPending = typeof reviewer === "string" && reviewer.startsWith("model:") && last !== null && retryOnce(last, retriesUsed) !== null;
+  return { started: next > 1, saved: last !== null, done: last !== null && !retryPending, retryPending, retriesUsed, next };
+}
+
+function readSample(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 export const LOCK_FILE = ".run.lock";
@@ -276,7 +306,8 @@ export async function executeRun({ out, manifest, resume = false, checkResume = 
         running++;
         try {
           // Read again now: the attempt number is the next free folder at the time the job starts.
-          await runJob(job, jobState(out, job).next, ticket);
+          const state = jobState(out, job);
+          await runJob(job, state.next, ticket, state.retriesUsed);
         } finally {
           running--;
           ticket?.close?.();
@@ -298,7 +329,7 @@ export async function executeRun({ out, manifest, resume = false, checkResume = 
       ...(halt ? { halt } : {}),
       ...(how === "budget" ? { limit: spent.limit, limitKind: spent.limitKind } : {}),
       ...(budget ? budget.summary() : {}),
-      reviewsWithAnAttempt: jobs.filter((j) => jobState(out, j).done).length,
+      reviewsWithAnAttempt: jobs.filter((j) => jobState(out, j).saved).length,
       planned: jobs.length,
       elapsedMin: Math.round((Date.now() - started) / 600) / 100,
     };
@@ -354,8 +385,33 @@ export function failureOf(result, report) {
     return { cause: unavailable ? `no reviewer could start: ${last}` : `no report.json (exit ${result.code ?? result.signal}): ${last}`, infra: true, unavailable };
   }
   if (reviewerFailed) return { cause: reviewerFailed, infra: true, unavailable: false };
-  if (report.completion?.status !== "complete") return { cause: missing.join("; ") || "incomplete", infra: false, unavailable: false };
+  if (report.completion?.status !== "complete") return { cause: shortenedMissing(missing).join("; ") || "incomplete", infra: false, unavailable: false };
   return null;
+}
+
+// Benchmarks also run from standalone copies without the core package.
+// Match the receipt's unread-block shortening, keeping other failures.
+const RANGE_ROW = /^(?: {2})?(?:(?:(?!: ).)+:\d+(?:-\d+)?|(?:(?!: ).)+: (?:old )?line \d+, bytes [\d,]+ to [\d,]+ of [\d,]+)(?: \(deletion(?: [^)]+)?\))?(?: \(part \d+ of \d+\))?$/;
+function shortenedMissing(missing) {
+  const out = [];
+  for (let i = 0; i < missing.length; i++) {
+    const line = missing[i];
+    out.push(line);
+    const heading = /^(\d+) changed (?:range was|ranges were) not examined$/.exec(line);
+    if (!heading) continue;
+    // A split range is one unindented row followed by indented gap rows;
+    // the heading's count names ranges, not rows.
+    let end = i + 1;
+    let ranges = 0;
+    while (end < missing.length && RANGE_ROW.test(missing[end])) {
+      if (!missing[end].startsWith("  ")) ranges++;
+      if (ranges <= 10) out.push(missing[end]);
+      end++;
+    }
+    if (ranges > 10) out.push(`and ${ranges - 10} more; the report names each one`);
+    i = end - 1;
+  }
+  return out;
 }
 
 // Failure list: requested models replace served ones, mixed usage looks single,
@@ -374,8 +430,8 @@ export function claudeModels(usage) {
   return { model: models.length > 1 ? models : modelStatus === "known" ? models[0] : null, models, modelFrom: CLAUDE_MODEL_FROM, modelStatus };
 }
 
-export function claudeRunModels(rows, requested = null) {
-  const samples = rows.filter((r) => r.reviewer === "claude");
+export function claudeRunModels(rows, requested = null, reviewer = "claude") {
+  const samples = rows.filter((r) => r.reviewer === reviewer);
   const models = [...new Set(samples.flatMap((r) => Array.isArray(r.model) ? r.model : typeof r.model === "string" ? [r.model] : r.models ?? []))].sort();
   const unknown = models.length === 0 || samples.some((r) => r.modelFrom !== CLAUDE_MODEL_FROM || (r.modelStatus !== "none" && r.model == null));
   const why = models.length > 1 ? `Claude Code samples have mixed models: ${models.join(", ")}` : unknown ? "Claude Code samples have an unknown per-review model" : requested && models[0] !== requested ? `Claude Code requested model ${requested}, but samples were served by ${models[0]}` : null;
@@ -486,7 +542,7 @@ export function resumeProblems(earlier, now) {
     // answered review, which a new invocation does not know yet; the model it
     // asks for is what must match. The served id is held by
     // lib/server-review.mjs recordServed.
-    if (e?.kind === "model" || w?.kind === "model" || (n === "claude" && e?.modelFrom === CLAUDE_MODEL_FROM)) same(`${n} requested model`, e?.requestedModel, w?.requestedModel);
+    if (e?.kind === "model" || w?.kind === "model" || (["claude", "control"].includes(n) && e?.modelFrom === CLAUDE_MODEL_FROM)) same(`${n} requested model`, e?.requestedModel, w?.requestedModel);
     else same(`${n} model`, e?.model, w?.model);
     // A model reviewer's settings (effort, maxOutputTokens), the alias that
     // named it and the scripted model's script.
@@ -506,7 +562,9 @@ export function resumeProblems(earlier, now) {
   same("suite", earlier.suite ?? "planted", now.suite ?? "planted");
   same("split", earlier.split ?? "dev", now.split ?? "dev");
   same("split file hash", earlier.splitHash ?? null, now.splitHash ?? null);
+  same("comparison release", earlier.release, now.release);
   same("subset", earlier.subset ?? null, now.subset ?? null);
+  same("purpose", earlier.purpose ?? null, now.purpose ?? null);
   if (earlier.cases !== undefined || now.cases !== undefined) same("cases", earlier.cases, now.cases);
   if (earlier.configs !== undefined || now.configs !== undefined) same("configurations", earlier.configs, now.configs);
   if (earlier.repeat !== undefined || now.repeat !== undefined) same("repeats", earlier.repeat, now.repeat);
@@ -649,10 +707,27 @@ export function preflightRefusals(preflight, { allowMissing }) {
 const NAME = "[\\p{L}\\p{N}_@+~-]";
 const wholePath = (root) => new RegExp(`(?<!${NAME}|\\.)${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!${NAME}|\\.${NAME})`, "gu");
 
+// The run root and the home folder as placeholders, in that order, since
+// a run can live inside home.
+const pathReplacements = (runRoot) => [[resolve(runRoot), "<run>"], [homedir(), "<home>"]].filter(([root]) => root.length > 1).map(([root, placeholder]) => [wholePath(root), placeholder]);
+
+// Any text of a run can hold a machine path outside a reason field: a
+// scanner's own message (rubocop quotes the absolute checkout path in
+// Lint/DuplicateMethods), a hook command in a control row, a trace. The
+// text with every such path replaced, and how many lines changed.
+export function redactMachinePaths(text, runRoot) {
+  let clean = text;
+  for (const [pattern, placeholder] of pathReplacements(runRoot)) clean = clean.replace(pattern, placeholder);
+  if (clean === text) return { text, lines: 0 };
+  const before = text.split("\n");
+  const after = clean.split("\n");
+  return { text: clean, lines: before.filter((line, i) => line !== after[i]).length };
+}
+
 // A row's reason fields can quote scanner paths. Replace the run root
 // before home, since a run can live inside home. Count changed fields.
 export function redactRowReasons(row, runRoot) {
-  const replacements = [[resolve(runRoot), "<run>"], [homedir(), "<home>"]].filter(([root]) => root.length > 1).map(([root, placeholder]) => [wholePath(root), placeholder]);
+  const replacements = pathReplacements(runRoot);
   let count = 0;
   const reasons = new Map();
   const visit = (value) => {

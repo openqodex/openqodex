@@ -1,0 +1,14 @@
+{
+  "guards": "binds a Java import in a repository with no build file and no standard source folder",
+  "callers": [
+    {
+      "to": "lib/java/A.java#A.go",
+      "site": "tools/Run.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "floor": {
+    "lib/java/A.java#A.go": false
+  }
+}

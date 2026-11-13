@@ -1,0 +1,83 @@
+{
+  "guards": "follows declared method results on typed receivers and leaves untyped chains unresolved",
+  "callers": [
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/run.go:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/run.go:8",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/run.go:12",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/run.go:15",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/reassign.go:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/depth.go:4",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "app/run.go",
+      "line": 18,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "app/depth.go",
+      "line": 7,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "app/svc.go",
+      "line": 3,
+      "cause": "no-receiver-type"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/run.go:18"
+    },
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/run.go:22"
+    },
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/depth.go:7"
+    },
+    {
+      "to": "model/item.go#Item.Normalize",
+      "site": "app/svc.go:3"
+    }
+  ],
+  "external": {
+    "min": 1,
+    "sites": [
+      "app/run.go:22"
+    ]
+  },
+  "allRead": true
+}

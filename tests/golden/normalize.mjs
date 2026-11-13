@@ -134,7 +134,7 @@ export function normalizedLastReview(rawReceipt, rawReport, normalizedReport, co
   return normalized.replace(receipt.report_sha256, sha256(normalizedReport));
 }
 
-// review-run.ts reads a file over this size by its size and time instead.
+// Golden fixtures stay small enough to normalise each file in memory.
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 // The snapshot's files as review-run.ts lists them: every regular file, the
@@ -156,7 +156,7 @@ function snapshotFiles(dir) {
 function hashFiles(dir, content) {
   const h = createHash("sha256");
   for (const path of snapshotFiles(dir)) {
-    if (lstatSync(join(dir, path)).size > MAX_FILE_BYTES) throw new Error(`snapshot file ${path} is over 5 MB; its hash would hold its modification time`);
+    if (lstatSync(join(dir, path)).size > MAX_FILE_BYTES) throw new Error(`snapshot file ${path} is over the golden normaliser's 5 MB in-memory limit`);
     h.update(`${path}\0`);
     h.update(content(path, readFileSync(join(dir, path))));
     h.update("\0");
@@ -164,7 +164,7 @@ function hashFiles(dir, content) {
   return h.digest("hex");
 }
 
-// The snapshot hash the way review-run.ts takes it.
+// The content hash snapshot.ts takes, for the bounded golden fixtures.
 export const snapshotHash = (dir) => hashFiles(dir, (_, bytes) => bytes);
 
 // Step one: the copy's raw hash must equal every raw hash the run recorded.

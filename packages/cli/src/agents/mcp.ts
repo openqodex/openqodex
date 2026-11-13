@@ -51,7 +51,7 @@ type McpFile = { data: Record<string, unknown>; servers: Record<string, unknown>
 
 // The file as an object whose mcpServers, when present, is an object; the
 // reason when it must be left alone. An absent file is an empty object.
-function parseMcpFile(text: string | null): McpFile | string {
+export function parseMcpFile(text: string | null): McpFile | string {
   if (text === null) return { data: {}, servers: undefined };
   let data: unknown;
   try {

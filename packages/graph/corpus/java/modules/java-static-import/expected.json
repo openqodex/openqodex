@@ -1,0 +1,20 @@
+{
+  "guards": "binds a bare call to the member a Java static import names",
+  "callers": [
+    {
+      "to": "src/main/java/a/b/Util.java#Util.helper",
+      "site": "src/main/java/c/App.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/c/Other.java#Other.helper",
+      "site": "src/main/java/c/App.java:7"
+    }
+  ],
+  "floor": {
+    "src/main/java/a/b/Util.java#Util.helper": false
+  }
+}

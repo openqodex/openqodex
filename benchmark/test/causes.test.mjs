@@ -72,7 +72,7 @@ function review({ submitted = [], dropped = [], low = [], status = "complete", e
     dropped,
     scanners: [],
     impact: { status: "off" },
-    completion: { status, missing: status === "complete" ? [] : ["1 changed range was not read"], trace_complete: true, reviewer: { duration_ms: 1000, rounds: 1, usage: { turns: 1, input_tokens: 10, output_tokens: 5, cost_usd: 0.01 } } },
+    completion: { status, missing: status === "complete" ? [] : ["1 changed range was not examined", "scripts/deploy.sh:11-11"], trace_complete: true, reviewer: { duration_ms: 1000, rounds: 1, usage: { turns: 1, input_tokens: 10, output_tokens: 5, cost_usd: 0.01 } } },
     ...extra,
   };
   return { report, submission: { version: 2, change_id: "x", summary: "s", findings: submitted, dropped: dropped.map((d) => ({ candidate: d.candidate.id, reason: d.reason })) } };
@@ -114,7 +114,7 @@ async function savedRun(reviews, caseSpec = spec) {
     const r = reviews[job.repeat - 1];
     if (r === null) return;
     const dir = attemptDir(out, job, 1);
-    write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: 1, result: { code: 0, signal: null, wallMs: 1000 }, report: r.report, who: null, startedAt: "t", failure: null, stopped: null })));
+    write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, signal: null, wallMs: 1000 }, report: r.report, who: null, startedAt: "t", failure: null, stopped: null })));
     write(join(dir, "report", "report.json"), JSON.stringify(r.report));
     // A file set to null was not saved, as by an older review.
     if (r.submission !== null) write(join(dir, "report", "submission.json"), JSON.stringify(r.submission));

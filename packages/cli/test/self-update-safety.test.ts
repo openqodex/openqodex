@@ -61,7 +61,7 @@
 //     from removing runtime/.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundleChildEntry } from "./bundle.js";
@@ -74,6 +74,14 @@ const version = (JSON.parse(readFileSync(join(BIN, "..", "..", "package.json"), 
 const OLDER = "0.98.0";
 const NEWER = "0.99.0";
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// How long an activation here waits for its home's lock. The lock is a port
+// hashed from the home folder (agents/lock.ts), so the home of another test,
+// in this file or one running beside it, can land on the same port and hold
+// it for a moment; with no wait the activation then reports busy (#326).
+// An init on a loaded machine holds it for seconds, so this waits as long as
+// init and a foreground update do. The case that expects busy passes 0, as
+// the daily worker does.
+const LOCK_WAIT = 60_000;
 // The contract this build declares, as the registry would report it.
 const CONTRACT = (() => {
   const p = JSON.parse(readFileSync(join(BIN, "..", "..", "package.json"), "utf8")) as { openqodex: { agentContract: number; configFormat: number } };
@@ -110,6 +118,19 @@ function unpacked(s: Sandbox, v: string, edit?: (dir: string) => void): string {
   const tmp = join(s.oqHome, "runtime", `${v}.tmp-test${Math.random().toString(16).slice(2, 8)}`);
   copyRuntime(rt(s, version), join(tmp, "unpacked", "package"), v, edit);
   return tmp;
+}
+
+// One `init --project` with Claude Code, Cursor and Cline, made on first
+// use and only read after: what project scope writes into the repository.
+let projectHome: Sandbox | null = null;
+function project(): Sandbox {
+  if (projectHome === null) {
+    const s = sandbox();
+    const r = cli(s, ["init", "--yes", "--project", "--agent", "claude-code", "--agent", "cursor", "--agent", "cline"]);
+    expect(r.status, r.stderr).toBe(0);
+    projectHome = s;
+  }
+  return projectHome;
 }
 
 let child = "";
@@ -156,10 +177,10 @@ async function noCheckRuns(s: Sandbox, ms: number): Promise<boolean> {
   return checkedAt(s) === before;
 }
 // A worker's last step: activateUnpacked in a child, printing its result as JSON.
-function activation(s: Sandbox, v: string, from: string, extra: Record<string, string> = {}) {
+function activation(s: Sandbox, v: string, from: string, extra: Record<string, string> = {}, wait = LOCK_WAIT) {
   const tmp = unpacked(s, v);
   const p = nodeChild(
-    `const r = await m.activateUnpacked({ home: process.env.H, version: ${JSON.stringify(v)}, from: ${JSON.stringify(from)}, running: ${JSON.stringify(from)}, tmp: ${JSON.stringify(tmp)}, env: process.env, wait: 0, contract: ${JSON.stringify(CONTRACT)} }); process.stdout.write(JSON.stringify(r));`,
+    `const r = await m.activateUnpacked({ home: process.env.H, version: ${JSON.stringify(v)}, from: ${JSON.stringify(from)}, running: ${JSON.stringify(from)}, tmp: ${JSON.stringify(tmp)}, env: process.env, wait: ${wait}, contract: ${JSON.stringify(CONTRACT)} }); process.stdout.write(JSON.stringify(r));`,
     { ...laptop(s), H: s.oqHome, ...extra },
   );
   return { p, done: exited(p), tmp };
@@ -185,7 +206,7 @@ describe("1. two workers with different candidates", () => {
     expect(active(s)).toEqual([NEWER, version]);
     expect(existsSync(rt(s, OLDER))).toBe(false);
     expect(existsSync(a.tmp)).toBe(false);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("2. rollback while a worker waits at the boundary", () => {
@@ -201,7 +222,7 @@ describe("2. rollback while a worker waits at the boundary", () => {
     expect(active(s)[0]).toBe(version);
     expect(readFileSync(join(s.oqHome, "config.yaml"), "utf8")).toMatch(new RegExp(`^skip_version: ${OLDER.replaceAll(".", "\\.")}$`, "m"));
     expect(launch(s, ["--version"]).stdout.trim()).toBe(version);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("3. uninstall while a worker waits at the boundary", () => {
@@ -249,9 +270,9 @@ describe("5. three processes contending for the boundary", () => {
 });
 
 describe("5b. the lock is per home folder", () => {
-  // Its port comes from the home folder, so two test files, each with homes
-  // of their own, never share one; only a process in the same home can
-  // hold it (#57).
+  // Its port comes from the home folder, so two homes rarely share one; a
+  // process in the same home holds it (#57), and so, now and then, does the
+  // lock of another home that lands on the same port (#326).
   it("activations in two homes at once both activate; one in a home whose lock another process holds reports busy", async () => {
     const [a, b, c] = [installed(), installed(), installed()];
     const both = await Promise.all([activation(a, NEWER, version).done, activation(b, NEWER, version).done]);
@@ -259,7 +280,7 @@ describe("5b. the lock is per home folder", () => {
     const holder = nodeChild(`await m.withBoundary(process.env.H, { wait: 0 }, async () => { process.stdout.write("held\\n"); await new Promise((r) => setTimeout(r, 30000)); });`, { H: c.oqHome });
     try {
       await new Promise<void>((resolve) => holder.stdout?.on("data", (d: Buffer) => d.toString().includes("held") && resolve()));
-      expect((await activation(c, NEWER, version).done).out).toMatch(/"outcome":"busy"/);
+      expect((await activation(c, NEWER, version, {}, 0).done).out).toMatch(/"outcome":"busy"/);
     } finally {
       holder.kill("SIGKILL");
     }
@@ -307,21 +328,20 @@ describe("6b. a program that holds the boundary's port", () => {
 });
 
 describe("7. runtime folders are never replaced", () => {
-  it("init refuses a runtime folder of its version that differs, names it, and leaves it as it is", () => {
+  it("init refuses a runtime folder of its version that differs in its bytes, or matches but holds an extra symbolic link, names it, and leaves it as it is", () => {
     const s = installed();
     writeFileSync(join(rt(s, version), "LOCAL-BUILD"), "x\n");
-    const r = cli(s, ["init", "--yes", "--hook", "none", "--no-repo", "--agent", "claude-code"]);
-    expect(r.status).toBe(2);
-    expect(r.stdout + r.stderr).toContain(rt(s, version));
+    const bytes = cli(s, ["init", "--yes", "--hook", "none", "--no-repo", "--agent", "claude-code"]);
+    expect(bytes.status).toBe(2);
+    expect(bytes.stdout + bytes.stderr).toContain(rt(s, version));
     expect(existsSync(join(rt(s, version), "LOCAL-BUILD"))).toBe(true);
-  });
-
-  it("init refuses a runtime folder that matches but holds an extra symbolic link", () => {
-    const s = installed();
+    // The same folder with the extra file gone and an extra link in its place.
+    rmSync(join(rt(s, version), "LOCAL-BUILD"));
     symlinkSync("/etc/passwd", join(rt(s, version), "docs", "leak.md"));
-    const r = cli(s, ["init", "--yes", "--hook", "none", "--no-repo", "--agent", "claude-code"]);
-    expect(r.status).toBe(2);
-    expect(r.stdout + r.stderr).toContain(rt(s, version));
+    const link = cli(s, ["init", "--yes", "--hook", "none", "--no-repo", "--agent", "claude-code"]);
+    expect(link.status).toBe(2);
+    expect(link.stdout + link.stderr).toContain(rt(s, version));
+    expect(lstatSync(join(rt(s, version), "docs", "leak.md")).isSymbolicLink()).toBe(true);
   });
 
   it("the worker skips a release whose folder exists with other bytes, and reuses an identical one", async () => {
@@ -335,7 +355,7 @@ describe("7. runtime folders are never replaced", () => {
     const second = await activation(s, NEWER, version).done;
     expect(second.out).toMatch(/"outcome":"activated"/);
     expect(active(s)).toEqual([NEWER, version]);
-  }, 120_000);
+  }, 180_000);
 });
 
 describe("8. a crash between publishing the runtime and writing the active record", () => {
@@ -350,7 +370,7 @@ describe("8. a crash between publishing the runtime and writing the active recor
     expect(launch(s, ["--version"]).stdout.trim()).toBe(version);
     expect((await activation(s, NEWER, version).done).out).toMatch(/"outcome":"activated"/);
     expect(launch(s, ["--version"]).stdout.trim()).toBe(NEWER);
-  }, 120_000);
+  }, 180_000);
 
   it("a record naming a missing runtime runs the baked-in version; the second line is never run", () => {
     const s = installed();
@@ -376,7 +396,7 @@ describe("9. rollback when skip_version cannot be written", () => {
       chmodSync(locked, 0o755);
     }
     expect(active(s)).toEqual([NEWER, version]);
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("10. uninstall", () => {
@@ -418,6 +438,13 @@ describe("11. a launcher path with a wildcard character", () => {
 
 describe("12 and 13. the user-scope skill and the rules", () => {
   const skillPath = (s: Sandbox): string => join(s.home, ".claude/skills/openqodex/SKILL.md");
+  // One home with all five agents for the cases that only read what init
+  // wrote; `guide skill` through the launcher writes nothing (no update
+  // check starts after it).
+  let all: Sandbox;
+  beforeAll(() => {
+    all = installed(["claude-code", "codex", "cursor", "cline", "goose"]);
+  }, 120_000);
 
   it("a full-text skill an earlier init wrote, still as written, is replaced by the stub (failure 12)", () => {
     const s = installed();
@@ -433,8 +460,8 @@ describe("12 and 13. the user-scope skill and the rules", () => {
   });
 
   it("the user-scope skill is a stub with no procedure and no reviewer, that sends the agent to guide skill (failure 13)", () => {
-    const s = installed(["claude-code", "codex", "cursor", "cline"]);
-    for (const p of [".claude/skills", ".agents/skills", ".cursor/skills", ".cline/skills"]) {
+    const s = all;
+    for (const p of [".claude/skills", ".agents/skills", ".cursor/skills", ".cline/skills", ".config/goose/skills"]) {
       const text = readFileSync(join(s.home, p, "openqodex/SKILL.md"), "utf8");
       expect(text, p).toMatch(/^---\nname: openqodex\ndescription: /);
       expect(text, p).not.toContain("## Who reviews");
@@ -445,7 +472,7 @@ describe("12 and 13. the user-scope skill and the rules", () => {
   });
 
   it("guide skill through the launcher prints the full procedure with the launcher and no pinned npx line (failure 13)", () => {
-    const s = installed();
+    const s = all;
     const r = launch(s, ["guide", "skill"]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain("## Reviewing a branch or a pull request");
@@ -464,7 +491,7 @@ describe("12 and 13. the user-scope skill and the rules", () => {
   });
 
   it("user-scope Cursor and Cline rules send the agent to the launcher's guide skill, with no pinned npx line and no review command (failure 13)", () => {
-    const s = installed(["cursor", "cline"]);
+    const s = all;
     const launcher = `'${join(s.oqHome, "bin/openqodex")}'`;
     for (const p of [join(s.repo, ".cursor/rules/openqodex.mdc"), join(s.home, "Documents/Cline/Rules/openqodex.md")]) {
       const text = readFileSync(p, "utf8");
@@ -475,8 +502,7 @@ describe("12 and 13. the user-scope skill and the rules", () => {
   });
 
   it("project scope keeps the pinned npx line in the Cursor and Cline rules", () => {
-    const s = sandbox();
-    expect(cli(s, ["init", "--yes", "--project", "--agent", "cursor", "--agent", "cline"]).status).toBe(0);
+    const s = project();
     for (const p of [".cursor/rules/openqodex.mdc", ".clinerules/openqodex.md"]) {
       expect(readFileSync(join(s.repo, p), "utf8"), p).toContain(`npx -y openqodex@${version} review\``);
     }
@@ -500,20 +526,18 @@ describe("14. Claude Code permission rules", () => {
   }
   const allow = (settings: string): string[] => (JSON.parse(readFileSync(settings, "utf8")) as { permissions?: { allow?: string[] } }).permissions?.allow ?? [];
 
-  // Claude Code's matching as its permissions page states it: a rule without
-  // `*` matches one exact command; a trailing " *" also matches the bare command.
-  const covers = (rules: string[], command: string): boolean =>
-    rules.some((r) => {
-      const body = r.slice("Bash(".length, -1);
-      return body.endsWith(" *") ? command === body.slice(0, -2) || command.startsWith(body.slice(0, -1)) : command === body;
-    });
   const EXACT = ["review", "review --all"];
   const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // One home for the two cases that only read what a first init wrote.
+  let first: ReturnType<typeof plain>;
+  beforeAll(() => {
+    first = plain();
+    const r = first.run(["init", "--yes", "--hook", "none", "--no-repo", "--no-review", "--agent", "claude-code"]);
+    expect(r.status, String(r.stderr)).toBe(0);
+  }, 120_000);
 
   it("allows exactly the review command lines and guide, with no wildcard after review", () => {
-    const p = plain();
-    const r = p.run(["init", "--yes", "--hook", "none", "--no-repo", "--no-review", "--agent", "claude-code"]);
-    expect(r.status, String(r.stderr)).toBe(0);
+    const p = first;
     const launcher = join(p.oqHome, "bin/openqodex");
     const rules = allow(join(p.home, ".claude/settings.json"));
     expect(rules).toEqual([...EXACT, ...EXACT.map((c) => `${c} --offline`), "guide", "guide *", "findings *", "graph *"].map((c) => `Bash(${launcher} ${c})`));
@@ -523,8 +547,7 @@ describe("14. Claude Code permission rules", () => {
   });
 
   it("every review or guide line the stub and guide skill give the agent is allowed; trust, report and doctor lines are not", () => {
-    const p = plain();
-    expect(p.run(["init", "--yes", "--hook", "none", "--no-repo", "--no-review", "--agent", "claude-code"]).status).toBe(0);
+    const p = first;
     const launcher = join(p.oqHome, "bin/openqodex");
     const rules = allow(join(p.home, ".claude/settings.json"));
     const texts = [readFileSync(join(p.home, ".claude/skills/openqodex/SKILL.md"), "utf8")];
@@ -533,40 +556,32 @@ describe("14. Claude Code permission rules", () => {
     texts.push(guide.stdout);
     // The procedure is one command now: no findings file to write, no finalize step.
     for (const t of texts) expect(t).not.toMatch(/agent-findings\.json|findings file|--finalize/);
-    const lines = texts.flatMap((x) => [...x.matchAll(new RegExp(`${escape(launcher)} [^\`\n]*`, "g"))].map((m) => m[0].trim()));
-    // A review of a branch or a pull request names its target, which no exact rule can cover: the developer is asked.
-    const isTarget = (l: string) => / review [^-]/.test(l);
-    const targetRuns = lines.filter(isTarget);
-    expect(targetRuns.length).toBeGreaterThan(0);
-    for (const l of targetRuns) expect(covers(rules, l), l).toBe(false);
-    const agentRuns = lines.filter((l) => / (review|guide|findings)\b/.test(l) && !l.includes("<topic>") && !isTarget(l));
-    expect(agentRuns).toContain(`${launcher} guide skill`);
-    expect(agentRuns).toContain(`${launcher} review`);
-    expect(agentRuns).toContain(`${launcher} review --all`);
-    expect(agentRuns.filter((l) => / findings /.test(l)).length).toBeGreaterThan(0);
-    expect(agentRuns.filter((l) => / review --(agent|finalize)\b/.test(l))).toEqual([]);
-    for (const l of agentRuns) expect(covers(rules, l), l).toBe(true);
-    const asked = lines.filter((l) => / (trust|report --send-last|doctor --install)\b/.test(l));
-    expect(asked.length).toBeGreaterThan(0);
-    for (const l of asked) expect(covers(rules, l), l).toBe(false);
-    for (const l of [`${launcher} review --output /etc/x`, `${launcher} review && rm -rf x`]) expect(covers(rules, l), l).toBe(false);
+    const lines = texts.flatMap((x) => [...x.matchAll(new RegExp(`${escape(launcher)} [^\`\n]*`, "g"))].map((m) => m[0].trim().slice(launcher.length + 1)));
+    const given = [...new Set(lines)].sort();
+    // Every command line the two texts give, and the rule each needs, written
+    // out by hand: a line added to a text fails here until its rule is
+    // decided. "" means no rule: the developer is asked.
+    const needs: Record<string, string> = {
+      review: "review",
+      "review --all": "review --all",
+      guide: "guide",
+      "guide skill": "guide *",
+      "guide <topic>": "guide *",
+      "findings 1,3": "findings *",
+      "graph help": "graph *",
+      // A review of a branch or a pull request names its target, which no exact rule can cover.
+      "review feature/login": "",
+      "review '#42'": "",
+      trust: "",
+      "report --send-last": "",
+      "doctor --install": "",
+    };
+    expect(given).toEqual(Object.keys(needs).sort());
+    for (const [line, rule] of Object.entries(needs)) {
+      if (rule !== "") expect(rules, line).toContain(`Bash(${launcher} ${rule})`);
+      else expect(rules, line).not.toContain(`Bash(${launcher} ${line})`);
+    }
   }, 180_000);
-
-  it("the two-step rules an earlier version granted are removed by the next init", () => {
-    const p = plain();
-    expect(p.run(["init", "--yes", "--hook", "none", "--no-repo", "--no-review", "--agent", "claude-code"]).status).toBe(0);
-    const launcher = join(p.oqHome, "bin/openqodex");
-    const settings = join(p.home, ".claude/settings.json");
-    const old = ["review --agent", "review --finalize", "review --agent --all", "review --finalize --all"].flatMap((l) => [l, `${l} --offline`]).map((l) => `Bash(${launcher} ${l})`);
-    const data = JSON.parse(readFileSync(settings, "utf8")) as { permissions: { allow: string[] } };
-    data.permissions.allow.push(...old);
-    writeFileSync(settings, `${JSON.stringify(data, null, 2)}\n`);
-    const rec = JSON.parse(readFileSync(join(p.oqHome, "install.json"), "utf8")) as { allowRules: { path: string; rule: string }[] };
-    rec.allowRules.push(...old.map((rule) => ({ path: settings, rule })));
-    writeFileSync(join(p.oqHome, "install.json"), JSON.stringify(rec, null, 2));
-    expect(p.run(["init", "--yes", "--hook", "none", "--no-repo", "--no-review", "--agent", "claude-code"]).status).toBe(0);
-    for (const rule of old) expect(allow(settings)).not.toContain(rule);
-  });
 
   it("a second init adds no rule, and uninstall removes only the rules init added", () => {
     const p = plain();
@@ -581,47 +596,49 @@ describe("14. Claude Code permission rules", () => {
     expect(allow(join(p.home, ".claude/settings.json"))).toEqual(["Bash(ls *)", `Bash(${launcher} guide)`]);
   });
 
-  it("a rule an earlier version granted is removed by the next init; the developer's own rule stays", () => {
+  it("rules an earlier version granted (the two-step review lines, a scan wildcard) are removed by the next init; the developer's own rule stays", () => {
     const p = plain();
-    expect(p.run(["init", "--yes", "--hook", "none", "--no-repo", "--agent", "claude-code"]).status).toBe(0);
+    expect(p.run(["init", "--yes", "--hook", "none", "--no-repo", "--no-review", "--agent", "claude-code"]).status).toBe(0);
     const launcher = join(p.oqHome, "bin/openqodex");
     const settings = join(p.home, ".claude/settings.json");
-    const stale = `Bash(${launcher} scan *)`;
+    const twoStep = ["review --agent", "review --finalize", "review --agent --all", "review --finalize --all"].flatMap((l) => [l, `${l} --offline`]).map((l) => `Bash(${launcher} ${l})`);
+    const old = [...twoStep, `Bash(${launcher} scan *)`];
     const mine = `Bash(${launcher} doctor *)`;
     const data = JSON.parse(readFileSync(settings, "utf8")) as { permissions: { allow: string[] } };
-    data.permissions.allow.push(stale, mine);
+    data.permissions.allow.push(...old, mine);
     writeFileSync(settings, `${JSON.stringify(data, null, 2)}\n`);
+    // The record as that version left it: it names the rules it granted.
     const rec = JSON.parse(readFileSync(join(p.oqHome, "install.json"), "utf8")) as { allowRules: { path: string; rule: string }[] };
-    rec.allowRules.push({ path: settings, rule: stale });
+    rec.allowRules.push(...old.map((rule) => ({ path: settings, rule })));
     writeFileSync(join(p.oqHome, "install.json"), JSON.stringify(rec, null, 2));
-    expect(p.run(["init", "--yes", "--hook", "none", "--no-repo", "--agent", "claude-code"]).status).toBe(0);
-    expect(allow(settings)).not.toContain(stale);
+    expect(p.run(["init", "--yes", "--hook", "none", "--no-repo", "--no-review", "--agent", "claude-code"]).status).toBe(0);
+    for (const rule of old) expect(allow(settings)).not.toContain(rule);
     expect(allow(settings)).toContain(mine);
   });
 
   it("--project writes no permission rule into the repository", () => {
-    const s = sandbox();
-    expect(cli(s, ["init", "--yes", "--project", "--agent", "claude-code"]).status).toBe(0);
+    const s = project();
     expect(allow(join(s.repo, ".claude/settings.json"))).toEqual([]);
   });
 });
 
 describe("15. a command that did not parse", () => {
-  it("--offline with a bad flag, and a bad flag alone, start no worker", async () => {
-    const a = installed();
-    const b = installed();
-    launch(a, ["scan", "--offline", "--bad-flag"]);
-    launch(b, ["scan", "--bad-flag"]);
+  it("--offline with a bad flag, and a bad flag alone, fail to parse and start no worker", async () => {
+    const s = installed();
+    const offline = launch(s, ["scan", "--offline", "--bad-flag"]);
+    const bare = launch(s, ["scan", "--bad-flag"]);
+    expect(offline.status, offline.stderr).not.toBe(0);
+    expect(bare.status, bare.stderr).not.toBe(0);
+    expect(offline.stderr + bare.stderr).toMatch(/--bad-flag/);
+    // A worker writes update.json as its first act; one wait covers both runs.
     await sleep(2500);
-    expect(existsSync(join(a.oqHome, "update.json"))).toBe(false);
-    expect(existsSync(join(b.oqHome, "update.json"))).toBe(false);
+    expect(existsSync(join(s.oqHome, "update.json"))).toBe(false);
   }, 60_000);
 });
 
 describe("16 and 17. what init writes into a repository", () => {
   it("a project-scope skill keeps only the pinned npx commands (failure 16)", () => {
-    const s = sandbox();
-    expect(cli(s, ["init", "--yes", "--project", "--agent", "claude-code"]).status).toBe(0);
+    const s = project();
     const text = readFileSync(join(s.repo, ".claude/skills/openqodex/SKILL.md"), "utf8");
     expect(text).not.toContain("~/.openqodex/bin/openqodex");
     expect(text).toContain(`npx -y openqodex@${version} review\n`);
@@ -639,7 +656,7 @@ describe("16 and 17. what init writes into a repository", () => {
 });
 
 describe("18. a queued daily worker", () => {
-  it("does not check when another checked under an hour ago", () => {
+  it("does not check when another checked an hour ago", () => {
     const s = installed();
     const at = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     writeFileSync(join(s.oqHome, "update.json"), JSON.stringify({ checkedAt: at }));

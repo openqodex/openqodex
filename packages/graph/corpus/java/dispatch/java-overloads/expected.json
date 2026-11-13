@@ -1,0 +1,50 @@
+{
+  "guards": "binds a call of an overloaded Java method to the members whose parameter count fits its arguments, varargs included",
+  "callers": [
+    {
+      "to": "src/main/java/logx/Log.java#Log.log@4",
+      "site": "src/main/java/logx/Use.java:5",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/logx/Log.java#Log.log@8",
+      "site": "src/main/java/logx/Use.java:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/logx/Log.java#Log.log@12",
+      "site": "src/main/java/logx/Use.java:7",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/logx/Log.java#Log.fmt",
+      "site": "src/main/java/logx/Use.java:8",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/logx/Log.java#Log.log@8",
+      "site": "src/main/java/logx/Use.java:5"
+    },
+    {
+      "to": "src/main/java/logx/Log.java#Log.log@8",
+      "site": "src/main/java/logx/Use.java:7"
+    },
+    {
+      "to": "src/main/java/logx/Log.java#Log.log@4",
+      "site": "src/main/java/logx/Use.java:6"
+    },
+    {
+      "to": "src/main/java/logx/Log.java#Log.log@12",
+      "site": "src/main/java/logx/Use.java:6"
+    }
+  ],
+  "floor": {
+    "src/main/java/logx/Log.java#Log.log@8": false
+  }
+}

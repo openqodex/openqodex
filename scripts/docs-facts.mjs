@@ -7,7 +7,9 @@
 //  1. every "<number> built-in scanners" in the pages equals the adapter list;
 //  2. the table in docs/scanners.md names each built-in scanner once, with
 //     its version from packages/scanners/toolchain.json, and the README's
-//     category counts equal that table's;
+//     category counts equal that table's; every other version on that page
+//     (each scanner's section, the other tables, prose) is a pin of its tool
+//     in toolchain.json (scripts/scanner-page-versions.mjs);
 //  3. every sentence that says what `--offline` skips names exactly the
 //     scanners whose adapters skip themselves when offline;
 //  4. every command in a code example is one the CLI's own help knows, and
@@ -15,13 +17,22 @@
 //  5. every pinned `openqodex@x.y.z` names the package version;
 //  6. every README link is absolute, so it works on the npm page; every
 //     link into this repository names a file that exists, at main or at a
-//     tag that GitHub already has.
+//     tag that GitHub already has;
+//  7. AGENTS.md states where CI runs each tier as ci.yml runs it: the events
+//     that get the fast tier, the four cases of the full condition, macOS
+//     and the benchmark only under it, and the required check names; no
+//     sentence in AGENTS.md or CONTRIBUTING.md says less; and the gate
+//     action's steps equal scripts/gate.sh's, one for one;
+//  8. the staged part and brief budgets, the long-line limits and the
+//     --timeout maximum match the code, on every page that states them.
 // It cannot check what a sentence means, a measured time or a privacy
 // promise. Those are in the manual claims ledger.
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DISPLAY, pinsOf, scannerPageVersionProblems } from "./scanner-page-versions.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (rel) => readFileSync(join(root, rel), "utf8");
@@ -41,8 +52,7 @@ for (const page of [README, "docs/scanners.md"]) {
 if (ADAPTERS.find((a) => a.source === "osv-scanner")?.tree !== true) fail(README, "the every supported lockfile claim needs a tree adapter");
 const AGENT_PAGES = [README, "docs/for-agents.md", "docs/quickstart.md", "skills/openqodex/SKILL.md"];
 
-// The names the pages use for a scanner, by adapter source.
-const DISPLAY = { golangci: "golangci-lint", checkov: "Checkov", tflint: "TFLint", sqlfluff: "SQLFluff" };
+// The names the pages use for a scanner (DISPLAY, from scanner-page-versions.mjs).
 const display = (source) => DISPLAY[source] ?? source;
 const sources = ADAPTERS.map((a) => a.source);
 const sourceOf = new Map(sources.map((s) => [display(s).toLowerCase(), s]));
@@ -112,6 +122,7 @@ else {
   }
   for (const source of sources) if (!seen.has(source)) fail(SCANNERS_PAGE, `the table leaves out ${display(source)}`);
 }
+for (const problem of scannerPageVersionProblems(read(SCANNERS_PAGE), pinsOf(toolchain))) fail(SCANNERS_PAGE, problem);
 const readmeText = read(README);
 const section = readmeText.slice(readmeText.indexOf("## Built-in scanners"));
 const readmeRows = tableRows(section, "What it checks", "\n\n");
@@ -256,6 +267,147 @@ for (const rel of [README, ...docsPages]) {
       fail(rel, `links ${href}, which does not exist`);
     }
   }
+}
+
+// 7. Where CI runs each tier. The YAML parser is core's own dependency.
+const YAML = createRequire(join(root, "packages/core/package.json"))("yaml");
+const CI = ".github/workflows/ci.yml";
+const ACTION = ".github/actions/gate/action.yml";
+const AGENTS = "AGENTS.md";
+const CONTRIBUTING = "CONTRIBUTING.md";
+const ci = YAML.parse(read(CI));
+const action = YAML.parse(read(ACTION));
+const expression = (value) => /^\$\{\{\s*([\s\S]*?)\s*\}\}$/.exec(String(value ?? ""))?.[1] ?? null;
+const jobs = ci.jobs ?? {};
+const full = expression(jobs.gate?.steps?.find((s) => s.uses === "./.github/actions/gate")?.with?.full);
+// The full condition, taken apart into its four cases and put back together:
+// any other shape is a change this check and AGENTS.md do not know yet.
+const queue = /contains\(github\.event\.merge_group\.head_commit\.message, '([^']+)'\)/.exec(full ?? "")?.[1];
+const branch = /github\.head_ref == '([^']+)'/.exec(full ?? "")?.[1];
+const label = /contains\(github\.event\.pull_request\.labels\.\*\.name, '([^']+)'\)/.exec(full ?? "")?.[1];
+const pushBranches = ci.on?.push?.branches ?? [];
+const shape = `github.event_name == 'push' || (github.event_name == 'merge_group' && contains(github.event.merge_group.head_commit.message, '${queue}')) || (github.event_name == 'pull_request' && ((github.head_ref == '${branch}' && github.event.pull_request.head.repo.full_name == github.repository) || contains(github.event.pull_request.labels.*.name, '${label}')))`;
+const events = Object.keys(ci.on ?? {}).sort().join(", ");
+if (full === null) fail(CI, "the Gate job's action step has no full condition");
+else if (full !== shape) fail(CI, "the full condition is not push, the queue run naming the version branch, the version branch's pull request and the label; update AGENTS.md and this check");
+if (events !== "merge_group, pull_request, push") fail(CI, `runs on ${events}; AGENTS.md describes merge_group, pull_request and push`);
+if (pushBranches.join(", ") !== "main") fail(CI, `a push to ${pushBranches.join(", ")} runs it; AGENTS.md says a push to main`);
+if (queue !== `/${branch}`) fail(CI, `the queue case names ${queue}, not the version branch /${branch}`);
+// The Linux gate runs on every event, fast or full; the other two jobs run
+// only under the full condition, and macOS runs the action's full default.
+if (jobs.gate?.if !== undefined) fail(CI, "the Linux gate has a condition; AGENTS.md says it runs on every event");
+for (const [id, job] of Object.entries(jobs)) {
+  if (id !== "gate" && expression(job.if) !== full) fail(CI, `${job.name ?? id} runs under a condition other than the full condition; AGENTS.md says only under it`);
+}
+const macStep = jobs["gate-macos"]?.steps?.find((s) => s.uses === "./.github/actions/gate");
+if (macStep?.with?.full !== undefined || action.inputs?.full?.default !== "true") fail(CI, "the macOS gate does not run the full gate by default");
+// The sentences AGENTS.md must hold, made from ci.yml's values.
+const required = [
+  "In CI, an ordinary pull request and its merge queue run get the fast tier, on Linux only.",
+  `CI runs the real-programs tier in four cases: a push to \`${pushBranches[0]}\`; a merge queue run whose merge commit message names \`${queue}\`; a pull request from the branch \`${branch}\` of this repository; a pull request with the label \`${label}\`.`,
+  "The macOS gate and the scanner-only benchmark run only in those four cases.",
+];
+const agentsText = read(AGENTS);
+const flat = (text) => text.replace(/\s*\n\s*(?:- )?/g, " ");
+for (const sentence of required) if (!flat(agentsText).includes(sentence)) fail(AGENTS, `must say "${sentence}" (from ${CI})`);
+// The required check names: each named check is a job, and every job is named.
+const names = Object.values(jobs).map((j) => j.name);
+const checks = /The (\w+) required checks are ([^.]+)\./.exec(flat(agentsText));
+if (checks === null) fail(AGENTS, "never names the required checks");
+else {
+  const listed = [...checks[2].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  if (numberOf(checks[1]) !== listed.length) fail(AGENTS, `says ${checks[1]} required checks and names ${listed.length}`);
+  for (const name of listed) if (!names.includes(name)) fail(AGENTS, `names the required check \`${name}\`, which is not a job in ${CI}`);
+  for (const name of names) if (!listed.includes(name)) fail(AGENTS, `leaves out the check \`${name}\` (${CI})`);
+}
+// No sentence in either page says less than ci.yml: a sentence that says
+// where the full tier runs names all four cases, and no sentence gives every
+// pull request the fast tier (only an ordinary one gets it).
+const CASES = [
+  ["a push to main", new RegExp(String.raw`\bpush(?:es)? to ${pushBranches[0]}\b`)],
+  ["the merge queue run", /\bmerge queue\b|\bqueue run\b/],
+  ["the version pull request", new RegExp(String.raw`version pull request|${branch}`)],
+  [`the label ${label}`, new RegExp(String.raw`\b${label}\b`)],
+];
+for (const rel of [AGENTS, CONTRIBUTING]) {
+  const sentences = flat(read(rel)).replace(/`/g, "").split(/(?<=[.:])\s+(?=[A-Z#])/);
+  for (const sentence of sentences) {
+    const s = sentence.toLowerCase();
+    if (/\b(?:full gate|full tier|real-programs tier) runs\b/.test(s)) {
+      const missing = CASES.filter(([, test]) => !test.test(s)).map(([what]) => what);
+      if (missing.length) fail(rel, `"${sentence.slice(0, 80)}..." says where the full tier runs and leaves out ${missing.join(", ")}`);
+    }
+    if (/\bfast (?:gate|tier)\b/.test(s) && /\b(?:a|every|each|any) pull request(?: and its merge queue run)? (?:gets?|runs?)\b/.test(s)) {
+      fail(rel, `"${sentence.slice(0, 80)}..." gives a pull request the fast tier; a pull request from ${branch} or with the label ${label} gets the full one`);
+    }
+  }
+}
+if (!read(CONTRIBUTING).includes("AGENTS.md")) fail(CONTRIBUTING, "must point at AGENTS.md for the gate and test rules");
+// The action's named steps and scripts/gate.sh's steps, in order.
+const actionSteps = (action.runs?.steps ?? []).filter((s) => s.name !== undefined && s.run !== undefined).map((s) => s.run.trim());
+const gateSteps = [...read("scripts/gate.sh").matchAll(/^step "[^"]+" (.+)$/gm)].map((m) => m[1].trim());
+for (let i = 0; i < Math.max(actionSteps.length, gateSteps.length); i++) {
+  if (actionSteps[i] !== gateSteps[i]) {
+    fail(ACTION, `step ${i + 1} runs ${actionSteps[i] ?? "nothing"}; scripts/gate.sh step ${i + 1} runs ${gateSteps[i] ?? "nothing"}`);
+    break;
+  }
+}
+
+// 8. The staged part and brief budgets, and the limits beside them, as the
+// built packages export them. The review page names each budget's constant
+// once; every page that states a budget states the code's value, and a
+// paragraph that names a budget holds no other KB or rendered-row number.
+const { MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, DELIVER_LINES, GROUP_DIFF_BYTES } = await import(join(root, "packages/review/dist/index.js"));
+const { DELIVERY_ROW_BYTES, MAX_DIFF_BYTES } = await import(join(root, "packages/core/dist/index.js"));
+const fmt = (n) => n.toLocaleString("en-US");
+const kb = (bytes) => fmt(bytes / 1024);
+const reviewPage = "docs/claude-code-review.md";
+const BUDGET_PAGES = [reviewPage, "docs/cli.md", "docs/config.md", "docs/library.md", "docs/internal-reviewer-drivers.md"];
+const BUDGETS = [
+  { name: "DELIVER_LINES", text: `${fmt(DELIVER_LINES)} rendered rows`, pattern: /\b(\d[\d,]*) rendered rows\b/g },
+  { name: "MAX_UNIT_DIFF_BYTES", text: `${kb(MAX_UNIT_DIFF_BYTES)} KB of rendered diff`, pattern: /\b(\d[\d,]*) KB of rendered diff\b/g },
+  { name: "MAX_BRIEF_BYTES", text: `${kb(MAX_BRIEF_BYTES)} KB`, pattern: /\b(\d[\d,]*) KB brief bound\b|\bbrief holds at most (\d[\d,]*) KB\b/g },
+];
+for (const { name, text } of BUDGETS) {
+  if (!read(reviewPage).includes(`${text} (\`${name}\`)`)) fail(reviewPage, `must say ${text} (\`${name}\`)`);
+}
+// The other KB values a budget paragraph may hold: each is an exported constant.
+const KB_VALUES = new Set([MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, GROUP_DIFF_BYTES, MAX_DIFF_BYTES].map(kb));
+const BUDGET_NAME = /\b(?:DELIVER_LINES|MAX_UNIT_DIFF_BYTES|MAX_BRIEF_BYTES)\b|rendered rows|KB of rendered diff|brief bound/;
+for (const rel of BUDGET_PAGES) {
+  const text = read(rel);
+  for (const { name, text: want, pattern } of BUDGETS) {
+    for (const m of text.matchAll(pattern)) {
+      const got = (m[1] ?? m[2]).replace(/,/g, "");
+      if (got !== want.split(" ")[0].replace(/,/g, "")) fail(rel, `says "${m[0]}"; the code's ${name} is ${want}`);
+    }
+    if (rel !== reviewPage && text.includes(`\`${name}\``)) fail(rel, `names \`${name}\`; only ${reviewPage} names the budget constants`);
+  }
+  for (const paragraph of text.split(/\n\s*\n/)) {
+    if (!BUDGET_NAME.test(paragraph)) continue;
+    for (const m of paragraph.matchAll(/\b(\d[\d,.]*) KB\b/g)) {
+      if (!KB_VALUES.has(m[1])) fail(rel, `says "${m[0]}" beside a budget; the code has no such value (${[...KB_VALUES].join(", ")} KB)`);
+    }
+    for (const m of paragraph.matchAll(/\b(\d[\d,]*) rendered rows\b/g)) {
+      if (m[1] !== fmt(DELIVER_LINES)) fail(rel, `says "${m[0]}" beside a budget; DELIVER_LINES is ${fmt(DELIVER_LINES)}`);
+    }
+  }
+}
+// The long-line byte cut and the single pass's diff cap.
+const LIMITS = [
+  [reviewPage, `line over ${fmt(DELIVERY_ROW_BYTES)} bytes`, "DELIVERY_ROW_BYTES"],
+  [reviewPage, `bytes 2,001 to 4,000 of 50,000,000`, "fragmentLabel"],
+  [reviewPage, `until their diff reaches ${kb(GROUP_DIFF_BYTES)} KB`, "GROUP_DIFF_BYTES"],
+  ["docs/config.md", `at most ${kb(MAX_DIFF_BYTES)} KB of diff text`, "MAX_DIFF_BYTES"],
+  ["docs/config.md", `line over ${fmt(DELIVERY_ROW_BYTES)} bytes`, "DELIVERY_ROW_BYTES"],
+];
+for (const [rel, phrase, name] of LIMITS) if (!read(rel).includes(phrase)) fail(rel, `must say "${phrase}" (${name})`);
+// The longest --timeout, from the expression in the review command's source.
+const maxTimeout = /const MAX_TIMEOUT_SECONDS = Math\.floor\(\(2 \*\* (\d+) - 1\) \/ 1000\);/.exec(read("packages/cli/src/commands/review.ts"));
+if (maxTimeout === null) fail("docs/cli.md", "the --timeout maximum is no longer 2 ** n - 1 milliseconds in commands/review.ts; update this check");
+else {
+  const most = Math.floor((2 ** Number(maxTimeout[1]) - 1) / 1000);
+  if (!read("docs/cli.md").includes(`The maximum is ${most} seconds`)) fail("docs/cli.md", `must say "The maximum is ${most} seconds" (MAX_TIMEOUT_SECONDS)`);
 }
 
 if (errors.length) {

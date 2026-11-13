@@ -175,9 +175,9 @@ describe("a lens a scanner rule covers (7)", () => {
 });
 
 describe("the shipped catalog", () => {
-  it("parses every lens, 48 of them, with unique names and usable bodies", () => {
+  it("parses every lens, 49 of them, with unique names and usable bodies", () => {
     const catalog = loadLensCatalog();
-    expect(catalog).toHaveLength(48);
+    expect(catalog).toHaveLength(49);
     const names = catalog.map((l) => l.name);
     expect(new Set(names).size).toBe(names.length);
     for (const l of catalog) {

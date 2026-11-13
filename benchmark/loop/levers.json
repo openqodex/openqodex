@@ -16,7 +16,8 @@
   "companions": [
     { "glob": ".changeset/*.md", "paths": [] },
     { "glob": "packages/*/test/**", "paths": [] },
-    { "glob": "packages/**/*.test.ts", "paths": [] }
+    { "glob": "packages/**/*.test.ts", "paths": [] },
+    { "glob": "tests/golden/expected/**", "paths": [] }
   ],
   "modelNames": ["gpt", "chatgpt", "o1", "o3", "o4", "claude", "opus", "sonnet", "haiku", "fable", "codex", "cursor", "cline", "copilot", "gemini", "gemma", "llama", "mistral", "mixtral", "deepseek", "qwen", "grok", "astra", "sol", "luna", "terra", "openai", "anthropic", "azure", "google", "vertex", "bedrock", "openrouter", "ollama", "groq", "xai", "cohere"],
   "levers": [
