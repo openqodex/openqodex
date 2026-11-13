@@ -17,7 +17,7 @@ import type { BuiltinScanner } from "@openqodex/core";
 import { AGENT_NAMES, AGENTS, detectAgents, type AgentId } from "../agents/detect.js";
 import { readText } from "../agents/files.js";
 import { Guard } from "../agents/guarded-fs.js";
-import { claudeHome, codexHome } from "../agents/homes.js";
+import { claudeHome, codexHome, gooseHome } from "../agents/homes.js";
 import { excludeLine, gitDirs, gitPath, inWorkTree, planExclude, planUnexclude, repoRootOf } from "../agents/git.js";
 import { planInstall, planMcpOff, planUninstall, type Action, type Ctx } from "../agents/plan.js";
 import { withBoundary } from "../agents/lock.js";
@@ -40,7 +40,7 @@ type HookChoice = "pre-push" | "none";
 type Flags = { agents: AgentId[]; project: boolean; yes: boolean; uninstall: boolean; dryRun: boolean; hook: HookChoice | null; noRepo: boolean; noReview: boolean; mcp: boolean | null };
 
 const USAGE =
-  "usage: openqodex init [--agent <claude-code|cursor|codex|cline|all>]... [--project] [--hook <pre-push|none>] [--no-repo] [--mcp | --no-mcp] [--no-review] [--yes] [--uninstall] [--dry-run]";
+  "usage: openqodex init [--agent <claude-code|cursor|codex|cline|goose|all>]... [--project] [--hook <pre-push|none>] [--no-repo] [--mcp | --no-mcp] [--no-review] [--yes] [--uninstall] [--dry-run]";
 
 // The one question init asks, after the whole plan.
 const WRITE_QUESTION = "Write these files?";
@@ -67,7 +67,7 @@ function parseFlags(args: string[]): Flags | string {
       const value = arg === "--agent" ? args[++i] : arg.slice("--agent=".length);
       if (value === "all") flags.agents.push(...AGENTS);
       else if ((AGENTS as readonly string[]).includes(value)) flags.agents.push(value as AgentId);
-      else return `unknown agent: ${value ?? "(missing)"}. Choose claude-code, cursor, codex, cline or all.`;
+      else return `unknown agent: ${value ?? "(missing)"}. Choose claude-code, cursor, codex, cline, goose or all.`;
     } else return `unknown argument: ${arg}`;
   }
   flags.agents = AGENTS.filter((a) => flags.agents.includes(a));
@@ -369,6 +369,9 @@ async function runLocked(s: Setup): Promise<Outcome> {
   const { targets, notes } = collectTargets(s, mcp.on);
   if (!s.flags.uninstall && s.agents.includes("cursor") && s.repoRoot !== null) {
     notes.push("Cursor has no global instruction file: its rule in this repo carries the review instructions");
+  }
+  if (!s.flags.uninstall && s.agents.includes("goose")) {
+    notes.push("Goose push hook: not written, because OpenQodex has not been tested with Goose's hooks. The hints ask Goose to review before a push, and the git pre-push hook checks every push where init adds it");
   }
   const actions: Action[] = [];
   const runtimeActions = new Set<Action>();
@@ -738,7 +741,7 @@ export async function run(args: string[]): Promise<number> {
     runner: flags.project ? `npx -y openqodex@${__OPENQODEX_VERSION__}` : launcherRunner(launcherPath(openqodexHomeDir())),
     gitFolders,
     // Every folder this run may write, each opened once, here.
-    guard: new Guard({ repoRoot, gitFolders, roots: [home, claudeHome(home), codexHome(home), openqodexHomeDir()] }),
+    guard: new Guard({ repoRoot, gitFolders, roots: [home, claudeHome(home), codexHome(home), gooseHome(home), openqodexHomeDir()] }),
   };
   try {
     // A dry run writes nothing and takes no lock. Otherwise everything runs

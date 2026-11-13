@@ -4,6 +4,7 @@
 // cases guard that a scanner opens no connection; the settings cases guard
 // what each one reads from the repository and that it writes nothing there.
 // Run by the end-to-end config, not the unit config.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { parseConfig, SUPPRESSION_RULE } from "@openqodex/core";
@@ -69,7 +70,7 @@ async function scanAt(repoDir: string, scanner: BuiltinScanner, files: Record<st
     mkdirSync(dirname(join(repoDir, name)), { recursive: true });
     writeFileSync(join(repoDir, name), body);
   }
-  const coverage = new Map(changed.map((p) => [p, new Set(readFileSync(join(repoDir, p), "utf8").split("\n").map((_, i) => i + 1))]));
+  const coverage = new Map(changed.map((p) => [p, makeLineSet(readFileSync(join(repoDir, p), "utf8").split("\n").map((_, i) => i + 1))]));
   return runScanners({ repoDir, changedPaths: changed, coverage, config: parseConfig("").config, resolveTool: installedOnly(), only: [scanner] });
 }
 

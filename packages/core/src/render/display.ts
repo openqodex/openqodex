@@ -16,6 +16,7 @@
 // display.json beside the brief; finalize uses it only when this machine's
 // record of the run still vouches for it (the CLI checks), and only for the
 // change it was made for (checkDisplay).
+import { diffHunks, diffIndex } from "../diff.js";
 import { REDACTED, redactSecrets, redactSecretsKeepingLines, secretTexts } from "../redact.js";
 import type { Change, ChangedFile } from "../types.js";
 
@@ -65,9 +66,9 @@ export type DisplayFile = {
   additions: number | null;
   deletions: number | null;
   hunks: DisplayHunk[];
-  // Why the file's lines are left out, in a few plain words the page puts
-  // after "Diff not shown:"; null when its lines are shown, or when it has
-  // none to show (a rename or a mode change with no line changed).
+  // Why some or all of the file's lines are left out, in a few plain words;
+  // null when all requested lines are shown, or when it has none to show
+  // (a rename or a mode change with no line changed).
   note: string | null;
 };
 
@@ -161,11 +162,78 @@ function redactHunk(hunk: DisplayHunk, secrets: string[], texts: string[]): Disp
   return { ...hunk, section: redactSecrets(hunk.section, secrets), rows };
 }
 
+// The hunks of a file's diff pages, each page parsed, redacted and cut
+// before the next is read. Redaction works on one hunk at a time, so this
+// order gives the same rows as parsing every page first. A row's text and
+// a hunk's section are parts of their page until copied, and a part keeps
+// the whole page alive; each is copied to a string of its own, so only the
+// page being read is held beside the cut rows.
+//
+// `cutOf`: the rows of the page just read that the reader cut at its byte
+// cap (cutRowBytes), counted over the page's rows. Such a row may end in
+// part of a secret, which redaction cannot match, so it loses that end
+// before redaction (withoutPartialSecret) and is marked cut.
+export function* displayHunks(pages: Iterable<string>, secrets: string[], texts: string[], cutOf?: () => ReadonlySet<number>): Generator<DisplayHunk> {
+  for (const page of pages) {
+    const cut = cutOf?.();
+    let row = 0;
+    for (const h of parseHunks(page)) {
+      const rows = h.rows.map((r) => (cut?.has(row++) ? { ...r, text: withoutPartialSecret(r.text, texts), cut: true as const } : r));
+      const red = redactHunk({ ...h, rows }, secrets, texts);
+      yield { ...red, section: own(red.section), rows: red.rows.map((r) => { const shown = cutRow(r); return { ...shown, text: own(shown.text) }; }) };
+    }
+  }
+}
+
+// A row the reader cut, without any end that is the start of a text
+// redaction looks for. A character the cut split decodes to a replacement
+// character, which goes first. Cutting one end can leave the front of a
+// whole secret that overlapped it, so the check runs until no end is the
+// start of a text.
+function withoutPartialSecret(text: string, texts: string[]): string {
+  let out = text.replace(/\uFFFD+$/, "");
+  // Whether `out` ends with the first k units of `t`.
+  const endsWithStart = (t: string, k: number) => {
+    for (let j = 1; j <= k; j++) if (out.charCodeAt(out.length - j) !== t.charCodeAt(k - j)) return false;
+    return true;
+  };
+  for (;;) {
+    let longest = 0;
+    for (const t of texts) for (let k = Math.min(t.length - 1, out.length); k > longest; k--) if (endsWithStart(t, k)) { longest = k; break; }
+    if (longest === 0) return out;
+    out = out.slice(0, out.length - longest);
+  }
+}
+
+// A copy of `text` that shares no memory with it. UTF-16 copies each code
+// unit as it is, so half of a surrogate pair left by a cut stays as it was.
+const own = (text: string): string => Buffer.from(text, "utf16le").toString("utf16le");
+
+// The bytes of a diff row read from a page over the 512 KB page limit: the
+// marker, then three bytes for each UTF-16 unit kept (UTF-8 never takes
+// more), and four more for a character the read cuts, so the units cutRow
+// keeps all come from whole characters and the row is still marked cut.
+// The units kept are the shown ones and `longest` more, the longest text
+// redaction looks for, so a secret that starts in the shown part is read
+// whole and redacted.
+const cutRowBytes = (longest: number): number => 1 + 3 * (DISPLAY_MAX_ROW_CHARS + longest) + 4;
+
 function cutRow(row: DisplayRow): DisplayRow {
   return row.text.length > DISPLAY_MAX_ROW_CHARS ? { ...row, text: row.text.slice(0, DISPLAY_MAX_ROW_CHARS), cut: true } : row;
 }
 
 const LIMIT_NOTE = `this page holds at most ${DISPLAY_MAX_ROWS.toLocaleString("en-US")} lines of code, the display limit, and this file is past it`;
+const BYTES_NOTE = `this page holds at most ${Math.floor(ROWS_BUDGET / (1024 * 1024))} MB of code, the display limit, and this file is past it`;
+
+// An estimate of the bytes the file's rows take once each is cut, for an
+// early refusal only: it counts patch bytes against a cut measured in
+// characters, and leaves out redaction and the JSON around each row, so it
+// is no bound. budget.take is the exact check.
+function cutBytes(index: NonNullable<ReturnType<typeof diffIndex>>): number {
+  let n = 0;
+  for (let r = 0; r < index.rows.count; r++) n += Math.min(index.rows.offsets[2 * r + 1]! - index.rows.offsets[2 * r]!, DISPLAY_MAX_ROW_CHARS);
+  return n;
+}
 
 function noteFor(f: ChangedFile, tooLarge: boolean): string | null {
   if (f.binary) return "binary file";
@@ -215,7 +283,6 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
   const { change, secrets } = args;
   const texts = secretTexts(secrets);
   const red = (s: string) => redactSecrets(s, secrets);
-  const diffs = new Map((change.diffs ?? []).map((d) => [d.path, d.text]));
   const tooLarge = new Set(change.notReviewed);
   const budget = new Budget();
   const files: DisplayFile[] = [];
@@ -224,22 +291,25 @@ export function buildDisplay(args: { change: Change; secrets: string[] }): Displ
     // The name is listed first, with the longest note it can get, so the
     // file bound holds whatever happens to its rows.
     if (!budget.list(meta)) continue;
-    const text = diffs.get(f.path);
-    const parsed = f.binary || text === undefined ? [] : parseHunks(text);
-    if (parsed.length === 0) {
+    const index = f.binary ? null : diffIndex(change, f.path);
+    if (!index?.hunks.length) {
       files.push({ ...meta, note: noteFor(f, tooLarge.has(f.path)) });
       continue;
     }
-    const count = parsed.reduce((n, h) => n + h.rows.length, 0);
-    const all = parsed.flatMap((h) => h.rows);
-    const sums = { additions: all.filter((r) => r.kind === "add").length, deletions: all.filter((r) => r.kind === "del").length };
+    const sums = { additions: index.hunks.reduce((n, h) => n + h.additions, 0), deletions: index.hunks.reduce((n, h) => n + h.deletions, 0) };
+    const count = index.hunks.reduce((n, h) => n + h.rows, 0);
+    // A cheap early refusal of a file whose cut rows plainly cannot fit.
+    if (index.bytes > ROWS_BUDGET - budget.rowBytes && cutBytes(index) > ROWS_BUDGET - budget.rowBytes) { files.push({ ...meta, ...sums, note: BYTES_NOTE }); continue; }
     if (!budget.roomFor(count)) {
       files.push({ ...meta, ...sums });
       continue;
     }
-    const hunks = parsed.map((h) => redactHunk(h, secrets, texts)).map((h) => ({ ...h, rows: h.rows.map(cutRow) }));
-    if (!budget.take(hunks, count)) {
-      files.push({ ...meta, ...sums });
+    let cutNow: ReadonlySet<number> = new Set();
+    const pages = diffHunks(change, f.path, undefined, 512 * 1024, { cutRows: cutRowBytes(Math.max(0, ...texts.map((t) => t.length))), onCutRows: (rows) => { cutNow = rows; } });
+    const hunks = [...displayHunks(pages, secrets, texts, () => cutNow)];
+    const shownCount = hunks.reduce((n, h) => n + h.rows.length, 0);
+    if (!budget.take(hunks, shownCount)) {
+      files.push({ ...meta, ...sums, note: BYTES_NOTE });
       continue;
     }
     files.push({ ...meta, ...sums, hunks, note: null });
@@ -278,11 +348,11 @@ function linesOf(text: string, spans: [number, number][]): string[][] {
 // The display of a review of the whole repository: a few lines around each
 // cited line, read through `read` (the redacted snapshot), redacted again.
 // The spans are merged and measured against the file's line count before
-// any row is made: a file past a bound is left out at once.
+// any row is made. Spans past the byte budget keep earlier spans on the page.
 export function buildExcerptDisplay(args: {
   changeId: string;
   cited: { file_path: string; line_number: number; line_end: number }[];
-  read: (path: string) => string | null;
+  read: ((path: string) => string | null) & { lineCount?: (path: string) => number | null; readLines?: (path: string, from: number, to: number, maxBytes?: number) => string | null };
   secrets: string[];
 }): Display {
   const { secrets } = args;
@@ -298,12 +368,13 @@ export function buildExcerptDisplay(args: {
   for (const path of [...byFile.keys()].sort()) {
     const meta: DisplayFile = { path: redactSecrets(path, secrets), old_path: null, status: "modified", binary: false, additions: null, deletions: null, hunks: [], note: LIMIT_NOTE };
     if (!budget.list(meta)) continue;
-    const raw = args.read(path);
-    if (raw === null) {
+    const readLines = args.read.lineCount ? args.read.readLines : undefined;
+    const raw = readLines ? null : args.read(path);
+    const total = readLines ? args.read.lineCount!(path) : raw === null ? null : lineCount(raw);
+    if (total === null) {
       files.push({ ...meta, note: "the file could not be read for this page" });
       continue;
     }
-    const total = lineCount(raw);
     // Overlapping or touching spans become one; each is cut at the file's end.
     const merged: [number, number][] = [];
     for (const [s, e] of (byFile.get(path) ?? []).sort((a, b) => a[0] - b[0])) {
@@ -311,8 +382,8 @@ export function buildExcerptDisplay(args: {
       if (last && s <= last[1] + 1) last[1] = Math.max(last[1], e);
       else merged.push([s, e]);
     }
-    const spans = merged.map(([s, e]): [number, number] => [s, Math.min(e, total)]).filter(([s, e]) => s <= e);
-    const count = spans.reduce((n, [s, e]) => n + (e - s + 1), 0);
+    let spans = merged.map(([s, e]): [number, number] => [s, Math.min(e, total)]).filter(([s, e]) => s <= e);
+    let count = spans.reduce((n, [s, e]) => n + (e - s + 1), 0);
     if (spans.length === 0) {
       files.push({ ...meta, note: "the cited lines are past the end of the file" });
       continue;
@@ -321,7 +392,28 @@ export function buildExcerptDisplay(args: {
       files.push(meta);
       continue;
     }
-    const cut = linesOf(raw, spans);
+    let cut: string[][];
+    let limited = false;
+    if (readLines) {
+      cut = [];
+      let bytesLeft = ROWS_BUDGET - budget.rowBytes;
+      for (const [s, e] of spans) {
+        const text = readLines(path, s, e, bytesLeft);
+        if (text === null) { limited = true; break; }
+        bytesLeft -= Buffer.byteLength(text, "utf8");
+        const lines = text === "" ? [] : text.split("\n");
+        if (lines.at(-1) === "") lines.pop();
+        cut.push(lines);
+      }
+      // A bounded range read stops at EOF; keep only actual rows and numbers.
+      spans = spans.slice(0, cut.length).map(([s], k): [number, number] => [s, s + cut[k]!.length - 1]).filter(([s, e]) => s <= e);
+      cut = cut.filter((lines) => lines.length > 0);
+      count = cut.reduce((n, lines) => n + lines.length, 0);
+      if (count === 0) {
+        files.push({ ...meta, note: limited ? LIMIT_NOTE : "the cited lines are past the end of the file" });
+        continue;
+      }
+    } else cut = linesOf(raw!, spans);
     const hunks = spans.map(([s], k): DisplayHunk => {
       const lines = redactSecretsKeepingLines(cut[k]!.join("\n"), secrets).split("\n");
       const rows = lines.map((text, k): DisplayRow => {
@@ -334,7 +426,7 @@ export function buildExcerptDisplay(args: {
       files.push(meta);
       continue;
     }
-    files.push({ ...meta, hunks, note: null });
+    files.push({ ...meta, hunks, note: limited ? LIMIT_NOTE : null });
   }
   return { version: DISPLAY_VERSION, change_id: args.changeId, kind: "excerpts", files, omitted_files: budget.omitted, rows: budget.rows };
 }

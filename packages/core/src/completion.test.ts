@@ -26,11 +26,18 @@
 //     snapshot leaves the model record complete.
 // 10. The model record's reviewer line prints an unknown cost or token count
 //     as a number instead of "not reported".
+// 13. Eleven unread ranges collapse to ten names, or parts and deletion
+//     fragments lose their identity in either completion record.
+// 16. Two of three byte fragments credit a line, or missing bytes lose their label.
+// 15. Plain unread deletions lose their id in missing and per-file labels.
+// 14. Overlapping delivery sources list one range twice or credit reads first.
+// 12. Partial brief ranges or deletion fragments credit a whole obligation.
 // 11. The markdown, HTML or SARIF of a model review loses the model record
 //     or prints the agent's reviewer line instead of the model's.
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { budgetRefusedLine, completionRecord, modelCompletionRecord, modelCoverage, readCoverage } from "./completion.js";
+import { makeLineSet } from "../../../tests/line-set.mjs";
+import { budgetRefusedLine, completionRecord, modelCompletionRecord, modelCoverage, singlePassModelCoverage, readCoverage, singlePassCoverage } from "./completion.js";
 import type { Hunk } from "./completion.js";
 import { checkSubmission } from "./finalize.js";
 import { buildDisplay } from "./render/display.js";
@@ -44,19 +51,20 @@ import type { ModelAttempt, ModelCompletionRecord, ModelToolEntry, Report, Revie
 // fixture inputs below. Any difference is a change to the agent record or its
 // report, which the push hooks, the Action and the golden run read. The
 // verdict's count of scanners that did not run was added on 2026-10-12
-// (issue 166): the fixture scan has one scanner not installed.
+// (issue 166): the fixture scan has one scanner not installed. C3 updates
+// only unread entries, the receipt coverage line and their report hashes.
 const FROZEN = {
   traced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"complete\",\"missing\":[],\"refused\":[],\"reviewer\":{\"driver\":\"claude\",\"version\":\"2.1.289\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":10,\"input_tokens\":45000,\"output_tokens\":3000,\"cost_usd\":0.31}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"candidates\":{\"total\":3,\"disposed\":3},\"coverage\":{\"hunks\":2,\"covered\":2,\"unread\":[],\"files_read\":[\"app/search.py\"],\"files_not_read\":[\"app/settings.py\"]},\"outside_reads\":[],\"trace_complete\":true}",
-  untraced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"incomplete\",\"missing\":[\"the reviewer timed out and was stopped\",\"the snapshot changed while the reviewer read it\",\"1 scanner candidate has no disposition\",\"the reviewer's answer still failed 1 check after the correction rounds\",\"1. a problem\",\"2 changed ranges were not given to the reviewer: app/search.py:14-15, app/settings.py:1-3\"],\"refused\":[],\"reviewer\":{\"driver\":\"codex\",\"version\":\"0.160.0\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":2,\"input_tokens\":2000,\"output_tokens\":1000,\"cost_usd\":null}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":null,\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"candidates\":{\"total\":3,\"disposed\":2},\"coverage\":{\"hunks\":2,\"covered\":0,\"unread\":[{\"path\":\"app/search.py\",\"start\":14,\"end\":15,\"deletion\":false},{\"path\":\"app/settings.py\",\"start\":1,\"end\":3,\"deletion\":false}],\"files_read\":[],\"files_not_read\":[]},\"outside_reads\":[],\"trace_complete\":false}",
+  untraced: "{\"version\":1,\"contract\":\"openqodex-review-2\",\"status\":\"incomplete\",\"missing\":[\"the reviewer timed out and was stopped\",\"the snapshot changed while the reviewer read it\",\"1 scanner candidate has no disposition\",\"the reviewer's answer still failed 1 check after the correction rounds\",\"1. a problem\",\"2 changed ranges were not examined\",\"app/search.py:14-15\",\"app/settings.py:1-3\"],\"refused\":[],\"reviewer\":{\"driver\":\"codex\",\"version\":\"0.160.0\",\"pid\":4242,\"started_at\":\"2026-10-03T10:00:00.000Z\",\"ended_at\":\"2026-10-03T10:01:12.000Z\",\"duration_ms\":72000,\"rounds\":2,\"usage\":{\"turns\":2,\"input_tokens\":2000,\"output_tokens\":1000,\"cost_usd\":null}},\"snapshot\":{\"change_id\":\"3f9a1c0b2d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4\",\"tree\":null,\"before\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"after\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"candidates\":{\"total\":3,\"disposed\":2},\"coverage\":{\"hunks\":2,\"covered\":0,\"unread\":[{\"path\":\"app/search.py\",\"start\":14,\"end\":15,\"deletion\":false},{\"path\":\"app/settings.py\",\"start\":1,\"end\":3,\"deletion\":false}],\"files_read\":[],\"files_not_read\":[]},\"outside_reads\":[],\"trace_complete\":false}",
   md: "# Blocked: 1 finding at or above major \\(1 critical\\); 1 of 4 scanners did not run\n\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\n\nSummary: Builds the search query from request input and adds a settings module.\n\nCounts: 1 finding \\(1 critical\\), 2 scanner candidates dropped\n\n## Findings \\(1\\)\n\n### 1. Critical security: Query built from request input\n\n- **Where:** app/search.py:14\n- **Problem:** The search query puts q from the request straight into the SQL text.\n- **Why it matters:** Anyone who can call search can read or change every row.\n- **Fix:** Pass q as a bound parameter to cur.execute.\n- **Source:** semgrep:python.lang.security.audit.formatted-sql-query\n\n## Dropped scanner candidates \\(2\\)\n\n### c2 at app/settings.py:3: The key is a documented local sample. \\(see app/settings.py:3\\)\n\n- **Source:** gitleaks:generic-api-key\n\n### c3 at app/settings.py:1: The import is used by the next change. \\(see app/settings.py:1\\)\n\n- **Source:** ruff:F401\n\n## Coverage\n\n- **Files the reviewer opened:** app/search.py\n- **Files not opened (their changed lines were in the brief):** app/settings.py\n- **Changed ranges given to the reviewer:** 2 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included \\(brakeman: needs Ruby 2.7 or newer\\)\n\nReviewer: claude 2.1.289, 72 s, 10 turns, 1 correction round, 45,000 tokens in, 3,000 out, $0.31\n\nMade by Qodex: review on every pull request at https://qodex.ai\n",
   term: "Blocked: 1 finding at or above major (1 critical); 1 of 4 scanners did not run\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\nSummary: Builds the search query from request input and adds a settings module.\nCounts: 1 finding (1 critical), 2 scanner candidates dropped\n\nFindings (1)\n1. Critical security: Query built from request input\n   Where: app/search.py:14\n   Problem: The search query puts q from the request straight into the SQL text.\n   Why it matters: Anyone who can call search can read or change every row.\n   Fix: Pass q as a bound parameter to cur.execute.\n   Source: semgrep:python.lang.security.audit.formatted-sql-query\n\nDropped scanner candidates (2)\nc2 at app/settings.py:3: The key is a documented local sample. (see app/settings.py:3)\n   Source: gitleaks:generic-api-key\nc3 at app/settings.py:1: The import is used by the next change. (see app/settings.py:1)\n   Source: ruff:F401\n\nCoverage\n   Files the reviewer opened: app/search.py\n   Files not opened (their changed lines were in the brief): app/settings.py\n   Changed ranges given to the reviewer: 2 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included (brakeman: needs Ruby 2.7 or newer)\nReviewer: claude 2.1.289, 72 s, 10 turns, 1 correction round, 45,000 tokens in, 3,000 out, $0.31\nMade by Qodex: review on every pull request at https://qodex.ai\n",
-  mdIncomplete: "# Review incomplete: this is not a review of the change\n\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\n\nSummary: Builds the search query from request input and adds a settings module.\n\n## Missing\n\n### the reviewer timed out and was stopped\n\n### the snapshot changed while the reviewer read it\n\n### 1 scanner candidate has no disposition\n\n### the reviewer's answer still failed 1 check after the correction rounds\n\n### 1. a problem\n\n### 2 changed ranges were not given to the reviewer: app/search.py:14-15, app/settings.py:1-3\n\n## Findings so far \\(the change was not fully reviewed\\) \\(1\\)\n\n### 1. Critical security: Query built from request input\n\n- **Where:** app/search.py:14\n- **Problem:** The search query puts q from the request straight into the SQL text.\n- **Why it matters:** Anyone who can call search can read or change every row.\n- **Fix:** Pass q as a bound parameter to cur.execute.\n- **Source:** semgrep:python.lang.security.audit.formatted-sql-query\n\n## Dropped scanner candidates \\(2\\)\n\n### c2 at app/settings.py:3: The key is a documented local sample. \\(see app/settings.py:3\\)\n\n- **Source:** gitleaks:generic-api-key\n\n### c3 at app/settings.py:1: The import is used by the next change. \\(see app/settings.py:1\\)\n\n- **Source:** ruff:F401\n\n## Coverage\n\n- **Files the reviewer opened:** not recorded by Codex\n- **Reads outside the snapshot:** not recorded by Codex\n- **Changed ranges given to the reviewer:** 0 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included \\(brakeman: needs Ruby 2.7 or newer\\)\n\nReviewer: codex 0.160.0, 72 s, 2 turns, 1 correction round, 2,000 tokens in, 1,000 out\n\nMade by Qodex: review on every pull request at https://qodex.ai\n",
-  receipt: "Blocked: 1 finding at or above major (1 critical); 1 of 4 scanners did not run\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\nSummary: Builds the search query from request input and adds a settings module.\n1. Critical security: Query built from request input (app/search.py:14)\nReport: /r/report.html\nMarkdown: /r/report.md\n",
+  mdIncomplete: "# Review incomplete: this is not a review of the change\n\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\n\nSummary: Builds the search query from request input and adds a settings module.\n\n## Missing\n\n### the reviewer timed out and was stopped\n\n### the snapshot changed while the reviewer read it\n\n### 1 scanner candidate has no disposition\n\n### the reviewer's answer still failed 1 check after the correction rounds\n\n### 1. a problem\n\n### 2 changed ranges were not examined\n\n### app/search.py:14-15\n\n### app/settings.py:1-3\n\n## Findings so far \\(the change was not fully reviewed\\) \\(1\\)\n\n### 1. Critical security: Query built from request input\n\n- **Where:** app/search.py:14\n- **Problem:** The search query puts q from the request straight into the SQL text.\n- **Why it matters:** Anyone who can call search can read or change every row.\n- **Fix:** Pass q as a bound parameter to cur.execute.\n- **Source:** semgrep:python.lang.security.audit.formatted-sql-query\n\n## Dropped scanner candidates \\(2\\)\n\n### c2 at app/settings.py:3: The key is a documented local sample. \\(see app/settings.py:3\\)\n\n- **Source:** gitleaks:generic-api-key\n\n### c3 at app/settings.py:1: The import is used by the next change. \\(see app/settings.py:1\\)\n\n- **Source:** ruff:F401\n\n## Coverage\n\n- **Files the reviewer opened:** not recorded by Codex\n- **Reads outside the snapshot:** not recorded by Codex\n- **Changed ranges given to the reviewer:** 0 of 2\nScanners: 3 scanners ran, 1 had nothing to check, 1 not included \\(brakeman: needs Ruby 2.7 or newer\\)\n\nReviewer: codex 0.160.0, 72 s, 2 turns, 1 correction round, 2,000 tokens in, 1,000 out\n\nMade by Qodex: review on every pull request at https://qodex.ai\n",
+  receipt: "Blocked: 1 finding at or above major (1 critical); 1 of 4 scanners did not run\nChange 3f9a1c0b2d4e against origin/main, 2 files, +5 -1\nSummary: Builds the search query from request input and adds a settings module.\n1. Critical security: Query built from request input (app/search.py:14)\nChanged ranges: 2 examined, 0 not examined; coverage labels not recorded\nReport: /r/report.html\nMarkdown: /r/report.md\n",
   sarif: "437a5b05d3a6d134cb617113c6ff5eb8934bc6c3e1d2559ecabc93cb3e6284e3",
-  sarifIncomplete: "af49b4b3be1ff4bdcd3bc0669474de26dc58588aeaba0994599c68424ac1744c",
-  // Dependency-tree accounting keeps the original candidate wording and HTML hashes.
-  html: "b8bf53915323299ed4307b07042356498d5940905f874bd9a332a88c5cb84efb",
-  htmlIncomplete: "707bbba16177709f0199be7d615636456cc3e3fed95171138a6849b265a52feb",
+  sarifIncomplete: "9d7b14b501dd0a2446dcf9dcd964b8a861e701df3f8d0b235b0c2c4fb9c0fb3a",
+  // Change reports omit the retired size-exclusion accounting row and list per-file coverage.
+  html: "5815cf09810313cced518d9a713bd7bedaccd40b0b62d515cd49ae4dfb417cf2",
+  htmlIncomplete: "0f4ca725f547dbb3db4a6bd4bca799368327320de0ac93708b985176cd31ebe3",
 };
 
 const reviewer: ReviewerRecord = {
@@ -112,14 +120,14 @@ describe("1, 2. the agent record and its report", () => {
     { tool: "Read", path: "app/search.py", inside: true, range: [1, 40] as [number, number], ok: true },
     { tool: "Grep", path: null, inside: true, range: null, ok: true },
   ];
-  const coverage = readCoverage({ change, briefFiles: new Set(["app/settings.py"]), trace, lineCount });
+  const coverage = singlePassCoverage({ change, diffFiles: new Set(["app/settings.py"]), trace, lineCount });
   const traced = completionRecord({ change, reviewer, snapshot: { tree: "a".repeat(40), before: "b".repeat(64), after: "b".repeat(64) }, candidates: { total: 3, disposed: 3 }, coverage, trace, submissionErrors: [], wholeRepo: false });
   const untraced = completionRecord({
     change,
     reviewer: { ...reviewer, driver: "codex", version: "0.160.0", usage: { turns: 2, input_tokens: 2000, output_tokens: 1000, cost_usd: null } },
     snapshot: { tree: null, before: "b".repeat(64), after: "c".repeat(64) },
     candidates: { total: 3, disposed: 2 },
-    coverage: readCoverage({ change, briefFiles: new Set(), trace: [], lineCount }),
+    coverage: singlePassCoverage({ change, diffFiles: new Set(), trace: [], lineCount }),
     trace: [{ tool: "exec", path: null, inside: null, range: null, ok: true, detail: "cat x" }],
     submissionErrors: ["1. a problem"],
     wholeRepo: false,
@@ -206,20 +214,20 @@ function refused(callId: string, purpose: string): ModelAttempt {
   return { callId, purpose, attempt: 1, authorized: false, outcome: "refused", usage: null, durationMs: 0 };
 }
 
-type Log = { briefSent?: boolean; briefFiles?: Set<string>; delivered?: Hunk[]; toolLog?: ModelToolEntry[] };
+type Log = { briefSent?: boolean; diffFiles?: Set<string>; delivered?: Hunk[]; toolLog?: ModelToolEntry[] };
 
 // A model review that read both changed files with read_file in its first
 // reply; the second request carried both results and got the answer. The
 // brief carried no diff, so coverage comes from the reads alone.
 function modelArgs(over: Partial<Parameters<typeof modelCompletionRecord>[0]> & Log = {}): Parameters<typeof modelCompletionRecord>[0] {
-  const { briefSent = true, briefFiles = new Set<string>(), delivered = [], toolLog = [read("app/search.py", [1, 40]), read("app/settings.py", [1, 3])], ...rest } = over;
+  const { briefSent = true, diffFiles = new Set<string>(), delivered = [], toolLog = [read("app/search.py", [1, 40]), read("app/settings.py", [1, 3])], ...rest } = over;
   const change = makeChange();
   return {
     changeId: change.id,
     model: "m-1",
     snapshot: { tree: "a".repeat(40), before: "b".repeat(64), after: "b".repeat(64) },
     candidates: { total: 3, disposed: 3 },
-    coverage: modelCoverage({ change, briefSent, briefFiles, toolLog, delivered, lineCount }),
+    coverage: singlePassModelCoverage({ change, briefSent, diffFiles, toolLog, delivered, lineCount }),
     toolLog,
     attempts: [answered("call-1", "brief", 2000, 100, 0.01), answered("call-2", "brief", 3000, 500, 0.01)],
     tools: TOOLS,
@@ -248,7 +256,7 @@ describe("the model record", () => {
   });
 
   it("counts the brief, a correction round and a sent read alike", () => {
-    const r = modelCompletionRecord(modelArgs({ briefFiles: new Set(["app/settings.py"]), delivered: [{ path: "app/search.py", start: 14, end: 15, deletion: false }], toolLog: [] }));
+    const r = modelCompletionRecord(modelArgs({ diffFiles: new Set(["app/settings.py"]), delivered: [{ path: "app/search.py", start: 14, end: 15, deletion: false }], toolLog: [] }));
     expect(r.status).toBe("complete");
     expect(r.coverage.covered).toBe(2);
   });
@@ -257,7 +265,7 @@ describe("the model record", () => {
     const r = modelCompletionRecord(modelArgs({ toolLog: [read("app/search.py", [1, 40]), read("app/settings.py", [1, 3], { delivered: false })] }));
     expect(r.status).toBe("incomplete");
     expect(r.coverage.unread).toEqual([{ path: "app/settings.py", start: 1, end: 3, deletion: false }]);
-    expect(r.missing).toContain("1 changed range was not sent to the reviewer: app/settings.py:1-3");
+    expect(r.missing).toEqual(["1 changed range was not examined", "app/settings.py:1-3"]);
     expect(r.tool_log[1]).toMatchObject({ served: true, delivered: false });
   });
 
@@ -268,9 +276,9 @@ describe("the model record", () => {
   });
 
   it("5. the brief's diff does not count when the request carrying it was never sent", () => {
-    const sent = modelCompletionRecord(modelArgs({ briefFiles: new Set(["app/search.py", "app/settings.py"]), toolLog: [] }));
+    const sent = modelCompletionRecord(modelArgs({ diffFiles: new Set(["app/search.py", "app/settings.py"]), toolLog: [] }));
     expect(sent.coverage.covered).toBe(2);
-    const r = modelCompletionRecord(modelArgs({ briefSent: false, briefFiles: new Set(["app/search.py", "app/settings.py"]), toolLog: [], attempts: [refused("call-1", "brief")] }));
+    const r = modelCompletionRecord(modelArgs({ briefSent: false, diffFiles: new Set(["app/search.py", "app/settings.py"]), toolLog: [], attempts: [refused("call-1", "brief")] }));
     expect(r.status).toBe("incomplete");
     expect(r.coverage.covered).toBe(0);
     expect(r.reviewer.calls).toBe(0);
@@ -385,4 +393,165 @@ describe("the model review's report", () => {
     expect(failed.invocations[0].executionSuccessful).toBe(false);
     expect(failed.invocations[0].toolExecutionNotifications[0].message.text).toContain("budget refused before brief call 1");
   });
+});
+
+it("credits exact intervals once and leaves the rest of a file unread", () => {
+  const change = makeChange({ coverage: new Map([["app/search.py", makeLineSet([1, 2, 8, 9])]]) });
+  const first = { path: "app/search.py", start: 1, end: 2, deletion: false };
+  const coverage = readCoverage({ change, briefCarried: [first, first], trace: [] });
+  expect(coverage.covered).toBe(1);
+  expect(coverage.unread).toEqual([{ ...first, start: 8, end: 9 }]);
+  expect(coverage.given).toEqual([{ path: first.path, start: 1, end: 2, by: "brief" }]);
+});
+it("does not credit a deletion parent for only one old-side fragment", () => {
+  const change = makeChange({ coverage: new Map(), deletionPoints: new Map([["app/search.py", [{ after: 1, anchors: [1, 2], lines: 4 }]]]) });
+  const base = { path: "app/search.py", start: 1, end: 2, deletion: { id: "app/search.py#0", oldStart: 1, oldEnd: 4 } };
+  const refs = [1, 3].map((from, i) => ({ ...base, id: `h${i + 1}`, old: [from, from + 1] as [number, number], deletion: { ...base.deletion, oldStart: from, oldEnd: from + 1 } }));
+  const partial = readCoverage({ change, obligations: refs, briefCarried: [refs[0]!], trace: [] });
+  expect(partial.unread).toHaveLength(1);
+  expect(partial.covered).toBe(1);
+  const full = readCoverage({ change, obligations: refs, briefCarried: refs, delivered: refs, trace: [] });
+  expect(full.unread).toEqual([]);
+  expect(full.given).toHaveLength(2);
+  expect(full.given!.every((g) => g.by === "brief")).toBe(true);
+});
+
+it("records each source's exact interval before fallback reads", () => {
+  const change = makeChange({ coverage: new Map([["app/search.py", makeLineSet(Array.from({ length: 10 }, (_, i) => i + 1))]]) });
+  const coverage = readCoverage({ change, briefCarried: [{ path: "app/search.py", start: 1, end: 4, deletion: false }], delivered: [{ path: "app/search.py", start: 5, end: 6, deletion: false }], trace: [{ tool: "Read", path: "app/search.py", range: [1, 10], inside: true, ok: true }] });
+  expect(coverage.unread).toEqual([]);
+  expect(coverage.given).toEqual([
+    { path: "app/search.py", start: 1, end: 4, by: "brief" },
+    { path: "app/search.py", start: 5, end: 6, by: "page" },
+    { path: "app/search.py", start: 7, end: 10, by: "read" },
+  ]);
+});
+
+it.each([true, false, "model"] as const)("7k. eleven unread ranges lose separate missing entries, trace %s", (traced) => {
+  const change = makeChange();
+  const obligations: Hunk[] = Array.from({ length: 11 }, (_, i) => ({ path: "src/big.ts", start: i * 10 + 1, end: i * 10 + 5, deletion: false }));
+  const coverage = traced === "model" ? modelCoverage({ change, obligations, briefSent: true, toolLog: [] }) : readCoverage({ change, obligations, trace: [] });
+  const record = traced === "model" ? modelCompletionRecord(modelArgs({ coverage, toolLog: [] })) : completionRecord({ change, reviewer, coverage, trace: [], snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, submissionErrors: [], wholeRepo: false, traced });
+  expect(record.status).toBe("incomplete");
+  expect(record.missing).toEqual([
+    "11 changed ranges were not examined",
+    "src/big.ts:1-5", "src/big.ts:11-15", "src/big.ts:21-25", "src/big.ts:31-35",
+    "src/big.ts:41-45", "src/big.ts:51-55", "src/big.ts:61-65", "src/big.ts:71-75",
+    "src/big.ts:81-85", "src/big.ts:91-95", "src/big.ts:101-105",
+  ]);
+  expect(record.coverage.unread).toEqual(obligations);
+});
+
+it.each([false, true])("7k. unread parts and deletion fragments lose their identity, model %s", (model) => {
+  const change = makeChange();
+  const obligations: Hunk[] = [
+    { path: "src/big.ts", start: 11, end: 20, deletion: false, part: { n: 2, of: 3, whole: "h1" } },
+    { path: "src/old.ts", start: 1, end: 2, deletion: { id: "src/old.ts#0", oldStart: 21, oldEnd: 30 }, part: { n: 3, of: 3, whole: "h2" } },
+  ];
+  const coverage = readCoverage({ change, obligations, trace: [] });
+  const record = model ? modelCompletionRecord(modelArgs({ coverage })) : completionRecord({ change, reviewer, coverage, trace: [], snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, submissionErrors: [], wholeRepo: false });
+  expect(record.missing).toEqual([
+    "2 changed ranges were not examined",
+    "src/big.ts:11-20 (part 2 of 3)",
+    "src/old.ts:1-2 (deletion src/old.ts#0, old lines 21-30) (part 3 of 3)",
+  ]);
+});
+
+it("14. overlapping brief, digest, page and read coverage lists each interval once in tool order", () => {
+  const change = makeChange();
+  const hunk = { path: "src/big.ts", start: 1, end: 10, deletion: false };
+  const coverage = readCoverage({ change, obligations: [hunk], briefCarried: [{ ...hunk, end: 3 }], digestCarried: [{ ...hunk, end: 5 }], delivered: [{ ...hunk, end: 7 }], trace: [{ tool: "Read", path: hunk.path, range: [1, 10], ok: true, inside: true }] });
+  expect(coverage.given).toEqual([
+    { path: "src/big.ts", start: 1, end: 3, by: "brief" },
+    { path: "src/big.ts", start: 4, end: 5, by: "digest" },
+    { path: "src/big.ts", start: 6, end: 7, by: "page" },
+    { path: "src/big.ts", start: 8, end: 10, by: "read" },
+  ]);
+});
+
+it("C3 fix 2. unread plain deletion anchors name the deletion in missing and per-file lines", () => {
+  for (const status of ["modified", "deleted"] as const) {
+    const change = makeChange({ files: [{ path: "a.py", status, oldPath: null, binary: false }], coverage: new Map(), deletionPoints: new Map([["a.py", [{ after: 4, anchors: status === "deleted" ? [1] : [4, 5], lines: 3 }]]]) });
+    const coverage = readCoverage({ change, trace: [] });
+    const label = status === "deleted" ? "a.py:1 (deletion a.py#0)" : "a.py:4-5 (deletion a.py#0)";
+    for (const record of [completionRecord({ change, reviewer, coverage, trace: [], snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, submissionErrors: [], wholeRepo: false }), modelCompletionRecord(modelArgs({ coverage }))]) {
+      expect(record.missing).toEqual(["1 changed range was not examined", label]);
+      const r = { ...checkedReport(), completion: record };
+      const fileLabel = status === "deleted" ? "a.py: 1 (deletion a.py#0)" : "a.py: 4-5 (deletion a.py#0)";
+      expect(renderReview(r, { format: "terminal" })).toContain(fileLabel + " not examined");
+      expect(renderHtml({ report: r, display: null })).toContain(fileLabel + " not examined");
+    }
+  }
+});
+
+it("7m waits for every byte fragment and lists the missing bytes", () => {
+  const change = makeChange({ coverage: new Map([["app/search.py", makeLineSet([7])]]), deletionPoints: new Map() });
+  const base = { path: "app/search.py", start: 7, end: 7, deletion: false, lineBytes: 6000 };
+  const fragments = [1, 2001, 4001].map((from) => ({ ...base, fragment: { of: "h1", from, to: from + 1999 } }));
+  const partial = readCoverage({ change, delivered: fragments.slice(0, 2), trace: [] });
+  expect(partial.given).toEqual([]);
+  expect(partial.covered).toBe(0);
+  expect(partial.unread).toHaveLength(1);
+  const record = completionRecord({ change, coverage: partial, reviewer, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, trace: [], submissionErrors: [], wholeRepo: false });
+  expect(record.missing.join("\n")).toContain("bytes 4,001 to 6,000 of 6,000");
+  const full = readCoverage({ change, delivered: [...fragments, fragments[0]!], trace: [] });
+  expect(full.unread).toEqual([]);
+  expect(full.covered).toBe(1);
+  expect(full.given).toEqual([{ path: "app/search.py", start: 7, end: 7, lineBytes: 6000, by: "page", fragment: { of: "h1", from: 1, to: 6000 } }]);
+  // A Read credits a long line only by the bytes it recorded for it.
+  const plain = readCoverage({ change, delivered: fragments.slice(0, 2), trace: [{ tool: "Read", path: "app/search.py", range: [7, 7], ok: true, inside: true }] });
+  expect(plain.unread).toEqual([expect.objectContaining({ fragment: { of: "h1", from: 4001, to: 6000 } })]);
+  const read = readCoverage({ change, delivered: fragments.slice(0, 2), trace: [{ tool: "Read", path: "app/search.py", range: [7, 7], ok: true, inside: true, byteRanges: [{ line: 7, from: 1, to: 6000 }] }] });
+  expect(read.unread).toEqual([]);
+  expect(read.given).toEqual([
+    { path: "app/search.py", start: 7, end: 7, lineBytes: 6000, by: "page", fragment: { of: "h1", from: 1, to: 4000 } },
+    { path: "app/search.py", start: 7, end: 7, lineBytes: 6000, by: "read", fragment: { of: "h1", from: 4001, to: 6000 } },
+  ]);
+});
+
+it("does not lose uncarried neighbouring lines while naming missing bytes", () => {
+  const change = makeChange({ coverage: new Map([["app/search.py", makeLineSet([1, 2, 3])]]), deletionPoints: new Map() });
+  const coverage = readCoverage({ change, trace: [], delivered: [{ path: "app/search.py", start: 1, end: 1, deletion: false, lineBytes: 6000, fragment: { of: "h1", from: 1, to: 4000 } }] });
+  expect(coverage.unread).toEqual([
+    expect.objectContaining({ start: 1, end: 1, fragment: { of: "h1", from: 4001, to: 6000 } }),
+    expect.objectContaining({ start: 2, end: 3 }),
+  ]);
+});
+
+it("R2.15 keeps byte gaps under their own hunk", () => {
+  const change = makeChange();
+  const short = { id: "h1", path: "a.txt", start: 3, end: 3, deletion: false };
+  const long = { id: "h2", path: "a.txt", start: 10, end: 10, deletion: false, lineBytes: 5000, fragment: { of: "h2", from: 1, to: 5000 } };
+  const coverage = readCoverage({ change, obligations: [short, long], briefCarried: [short], delivered: [{ ...long, fragment: { ...long.fragment, to: 2500 } }], trace: [] });
+  expect(coverage.unread).toEqual([{ ...long, part: undefined, fragment: { of: "h2", from: 2501, to: 5000 } }]);
+});
+it("R2.9 credits only the byte intervals each source carried", () => {
+  const change = makeChange();
+  const h = { path: "a.txt", start: 10, end: 10, deletion: false, lineBytes: 6000, fragment: { of: "h1", from: 1, to: 6000 } };
+  const coverage = readCoverage({ change, obligations: [h], briefCarried: [{ ...h, fragment: { ...h.fragment, to: 2000 } }], delivered: [{ ...h, fragment: { ...h.fragment, from: 2001 } }], trace: [] });
+  expect(coverage.given).toEqual([
+    { path: "a.txt", start: 10, end: 10, lineBytes: 6000, by: "brief", fragment: { of: "h1", from: 1, to: 2000 } },
+    { path: "a.txt", start: 10, end: 10, lineBytes: 6000, by: "page", fragment: { of: "h1", from: 2001, to: 6000 } },
+  ]);
+  expect(coverage.inventory![0]!.by).toBe("page");
+});
+it("R2.8 and R2.10 count one range with two missing byte gaps", () => {
+  const change = makeChange();
+  const h = { path: "a.txt", start: 7, end: 7, deletion: false, lineBytes: 10000, fragment: { of: "h1", from: 1, to: 10000 } };
+  const coverage = readCoverage({ change, obligations: [h], delivered: [[1, 2000], [4001, 6000], [8001, 10000]].map(([from, to]) => ({ ...h, fragment: { of: "h1", from: from!, to: to! } })), trace: [] });
+  expect(coverage.given).toEqual([]);
+  const record = completionRecord({ change, reviewer, coverage, trace: [], snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: 0, disposed: 0 }, submissionErrors: [], wholeRepo: false });
+  expect(record.missing[0]).toBe("1 changed range was not examined");
+  expect(record.missing.join("\n")).toContain("line 7, bytes 2,001 to 4,000 of 10,000");
+  const rendered = renderReview({ ...checkedReport(), completion: record }, { format: "terminal" });
+  expect(rendered).toContain("line 7, bytes 6,001 to 8,000 of 10,000");
+  const receipt = renderReceipt({ ...checkedReport(), completion: record }, { html: "/r/report.html", md: "/r/report.md" }).split("\n");
+  expect(receipt.filter((l) => l.startsWith("Changed ranges"))).toEqual(["Changed ranges: 0 in a finder's brief, 0 structural summary, 0 by page, 0 read by the reviewer, 1 not examined"]);
+});
+it("R2.17 a cut Read credits only its returned bytes", () => {
+  const change = makeChange();
+  const h = { path: "a.txt", start: 10, end: 10, deletion: false, lineBytes: 5000, fragment: { of: "h1", from: 1, to: 5000 } };
+  const coverage = readCoverage({ change, obligations: [h], trace: [{ tool: "Read", path: "a.txt", range: [10, 10], inside: true, ok: true, byteRanges: [{ line: 10, from: 1, to: 2000 }] }] });
+  expect(coverage.covered).toBe(0);
+  expect(coverage.unread).toEqual([expect.objectContaining({ start: 10, fragment: { of: "h1", from: 2001, to: 5000 } })]);
 });

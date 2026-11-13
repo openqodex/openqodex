@@ -30,6 +30,7 @@
 //     under review.severity_threshold and leaves the report: in a scan, where
 //     it counts as minor, or raised by the reviewer at a low severity in
 //     either submission version.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { checkSubmission, finalizeReview, proseErrors, scanReport, sentences, SETTINGS_RULE, SUPPRESSION_RULE } from "./finalize.js";
 import {
@@ -324,7 +325,7 @@ describe("finalizeReview: review round 1", () => {
   it("R2: redacts possible paths and text alongside hidden entries and scanner reasons", () => {
     const change = makeChange();
     const scan = makeScan();
-    change.coverage.set(`possible/${SECRET}.py`, new Set([14]));
+    change.coverage.set(`possible/${SECRET}.py`, makeLineSet([14]));
     change.changedPaths.push(`possible/${SECRET}.py`);
     change.files.push({ path: `possible/${SECRET}.py`, status: "modified", oldPath: null, binary: false });
     const leakyScan = {

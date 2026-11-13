@@ -98,6 +98,13 @@ describe("the Claude Code stream reader, on a recorded run", () => {
     expect(pids.filter(alive)).toEqual([]);
   });
 
+  it("R2.17 a read whose line came back cut records the bytes it returned", async () => {
+    const cut = RECORDED.replace('"content":"def add(a, b):\\n    return a + b\\n"', `"content":"${"x".repeat(2000)}\\nshort\\n"`);
+    expect(cut).not.toBe(RECORDED);
+    const { turn, snapshotDir } = await runOnce(standIn(`${JSON.stringify(cut)}.split('__SNAPSHOT__').join(snapshot)`));
+    expect(turn.calls[0]!.read).toEqual({ path: join(snapshotDir, "calc.py"), start: 1, lines: 3, byteRanges: [{ line: 1, from: 1, to: 2000 }] });
+    expect(classify(snapshotDir, turn.calls[0]!)).toMatchObject({ path: "calc.py", range: [1, 3], byteRanges: [{ line: 1, from: 1, to: 2000 }] });
+  });
   it("7. a hook event in the stream ends the turn as a failure: the reviewer was not isolated", async () => {
     const bin = standIn(`${JSON.stringify(RECORDED_HOOK + RECORDED)}.split('__SNAPSHOT__').join(snapshot)`);
     const { turn, pids } = await runOnce(bin);

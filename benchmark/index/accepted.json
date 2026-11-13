@@ -1,10 +1,9 @@
 {
   "version": 1,
-  "runId": "2026-10-28-55a9d696-martian-control",
-  "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
-  "scoreHash": "72ce6abd366aa2808f56f686723057f1c2e30141c0797eaf029fac1baba216f3",
-  "boardHash": "31d3f763d16aa84b4ea86019d9b50d9765d44db9060a82279b5d470e01e4cc54",
-  "acceptedAt": "2026-11-01T07:08:45.383Z",
+  "runId": "2026-11-10-4dd7d9e-planted-scan-ci",
+  "commit": "4dd7d9e2c0eade119483081cd5a33ef623554e0b",
+  "scoreHash": "deaa0963f01cb62c6e2ad786d92e39da68c3c88a2517d9364453b97ecb7eb3f4",
+  "acceptedAt": "2026-11-10T09:47:57.817Z",
   "acceptedBy": "Sid",
   "groups": {
     "aacr|dev|edf0f4863eb81a3004d9319cb4fa8cea7085466c5774b6ad51567aff642585f4|review|laptop|claude|claude-opus-5-5|claude-graph-on|11|dev-laptop": {
@@ -110,10 +109,10 @@
       "acceptedBy": "Sid (recorded by the session on 2026-10-11 under the benchmark program he approved)"
     },
     "planted|dev|none|scan|laptop|none|none|scan|2": {
-      "runId": "2026-10-23-8b51d43-planted-scan-ci",
-      "commit": "8b51d43fadc5b87e7928edc38923a6d55a5d44c1",
-      "scoreHash": "dd11f8d5448b749fb389dbaddc2238b0bb05304d2139e79804129662311e6dee",
-      "acceptedAt": "2026-10-23T16:31:09.422Z",
+      "runId": "2026-11-10-4dd7d9e-planted-scan-ci",
+      "commit": "4dd7d9e2c0eade119483081cd5a33ef623554e0b",
+      "scoreHash": "deaa0963f01cb62c6e2ad786d92e39da68c3c88a2517d9364453b97ecb7eb3f4",
+      "acceptedAt": "2026-11-10T09:47:57.817Z",
       "acceptedBy": "Sid"
     }
   }

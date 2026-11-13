@@ -488,11 +488,7 @@ async function settingsFindings(args: SettingsArgs): Promise<StaticFinding[]> {
       const entry = files.find((f) => (f.anyFolder ? f.path === name : f.path === filePath));
       if (entry === undefined) continue;
       if (entry.reader && !(await touchesShared(args, filePath, entry.reader))) continue;
-      // A loop, not Math.min(...lines): a file can have more changed lines
-      // than a call can take as arguments.
-      let line = Infinity;
-      for (const n of args.coverage.get(filePath) ?? []) if (n < line) line = n;
-      if (line === Infinity) line = 1;
+      const line = args.coverage.get(filePath)?.min() ?? 1;
       out.push({
         source,
         ruleId: SETTINGS_RULE,

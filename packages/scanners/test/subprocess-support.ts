@@ -2,6 +2,7 @@
 // into, one scan of a tiny planted repo, and a proxy that logs every host a
 // scanner opens a connection to. Run by the end-to-end config, not the unit
 // config: tests/e2e/adapters.test.ts imports every *.subprocess.test.ts here.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -45,7 +46,7 @@ export function plant(spec: Case): string {
 // Every line of every planted file counts as changed, as for a new file.
 export async function scan(spec: Case, repo = plant(spec)) {
   const paths = Object.keys(spec.files);
-  const coverage = new Map(paths.map((p) => [p, new Set(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))]));
+  const coverage = new Map(paths.map((p) => [p, makeLineSet(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))]));
   return runScanners({ repoDir: repo, changedPaths: paths, coverage, config: parseConfig("").config, resolveTool: installedOnly(), only: [spec.scanner, ...(spec.also ?? [])] });
 }
 

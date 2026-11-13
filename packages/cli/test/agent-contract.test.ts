@@ -26,12 +26,14 @@ const COPIES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ag
 const LAUNCHER = "/home/dev/.openqodex/bin/openqodex";
 const VERSION = "9.9.9";
 
-// The sha256 of each checked-in copy (copyHash). A copy is never changed:
-// a new contract adds a folder and a line here.
+// The sha256 of each checked-in copy (copyHash). A copy's files are never
+// changed: a new contract adds a folder and a line here. The one exception
+// is an agent new in the running contract, whose files are added to its
+// copy, since no machine holds them yet (Goose, added under contract 3).
 const COPIES: Record<number, string> = {
   1: "6baaa371d9d814b0ca225ff82705403d607f4d0f02c137834050b8d7c2566ecc",
   2: "f34091e753bd8c0a0dce42cd5f7312d7e5609497e9dc941aff72048f4fce87a3",
-  3: "bb6b89b4295a19bdbfe8d41e977d02a5fb4f77c9fb5c2ac3875d35f7dadc72a7",
+  3: "ed9e38f9c3f0be5bdfc1d5f3b049776a8eaf5820899e737238911889644dcb45",
 };
 
 // Every file, hook and rule a user-scope init writes for every agent, for a
@@ -71,7 +73,7 @@ describe("the user-scope agent files", () => {
       expect(text, name).not.toMatch(/openqodex (review|scan|trust|report)\b/);
       expect(text, name).not.toMatch(/subagent|reviewer process|who reviews/i);
     }
-    for (const name of ["claude-code-SKILL.md", "cursor-openqodex.mdc", "cline-openqodex.md"]) expect(rendered()[name], name).toContain(`${LAUNCHER} guide skill`);
+    for (const name of ["claude-code-SKILL.md", "cursor-openqodex.mdc", "cline-openqodex.md", "goose-SKILL.md"]) expect(rendered()[name], name).toContain(`${LAUNCHER} guide skill`);
   });
 
   it("are the copy checked in for the running agentContract: changing one needs a new contract and a new copy (failure 2)", () => {

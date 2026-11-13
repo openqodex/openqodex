@@ -363,17 +363,23 @@ describe("an incomplete review and the scanner findings", () => {
     if (skip !== null) return void process.stdout.write(`action review with hostile text: skipped, ${skip}\n`);
     // Ruff prints the selector it cannot read; the backticks close its code span.
     const selector = "x` ![x](https://e.invalid/a.png) <img src=x> `y";
-    // A file over the 64 MiB the snapshot redaction checks: review names it raw in a warning.
+    // Keep the hostile fixture small now that redaction has no file size cap.
     const hostile = "big\n::error::INJECTED-7Q.txt";
     const { dir, base } = pullRequest("action-hostile-text", {}, { "ruff.toml": `[lint]\nselect = ["${selector}"]\n` }, (d) => {
-      writeFileSync(join(d, hostile), Buffer.alloc(65 * 1024 * 1024, "a\n"));
+      writeFileSync(join(d, hostile), `stripe_key = "${generatedSecret(d)}"\n`);
       git(d, "add", "-f", hostile);
     });
     const r = runAction("action-hostile-text", dir, { CLAUDE_CONFIG_DIR: tempDir("oq-e2e-no-login-"), ANTHROPIC_API_KEY: KEY, OQ_REVIEW_TIMEOUT: "1", BASE_SHA: base, BASE_REF: "main" });
     expect(r.status, r.stderr).toBe(0);
     expect(r.outputs["review-status"]).toBe("incomplete");
-    // The hostile line reached the log, and the runner reads no command in it.
-    expect(r.stdout).toContain("\n::error::INJECTED-7Q.txt");
+    // The hostile name reached the log (in the missing-range list and the
+    // scanner line) with its line break replaced, so no line starts with the
+    // planted command. Before files of any size were kept, the too-large
+    // warning printed the raw name; no output prints it raw now.
+    expect(r.stdout).toContain("big ::error::INJECTED-7Q.txt");
+    expect(r.stdout).not.toContain("\n::error::INJECTED-7Q.txt");
+    const scan = JSON.parse(readFileSync(join(dirname(r.outputs["sarif-file"]!), "scan", "scan.json"), "utf8")) as { candidates: { filePath: string }[] };
+    expect(scan.candidates.some((c) => c.filePath === hostile)).toBe(true);
     const log = runnerCommands(r.stdout);
     expect(log.open).toBe(false);
     expect(log.tokens.length).toBeGreaterThan(0);
