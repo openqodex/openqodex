@@ -187,37 +187,37 @@
       }
     },
     "ruff": {
-      "version": "0.8.4",
+      "version": "0.17.3",
       "method": "github-release",
       "repo": "astral-sh/ruff",
-      "tag": "0.8.4",
+      "tag": "0.17.3",
       "binary": "ruff",
       "assets": {
         "darwin-arm64": {
           "name": "ruff-aarch64-apple-darwin.tar.gz",
-          "url": "https://github.com/astral-sh/ruff/releases/download/0.8.4/ruff-aarch64-apple-darwin.tar.gz",
-          "sha256": "8893f3ede33a73740f69b10ee9356e5cf2933c0afe146f00176be12ef91bf9d9",
+          "url": "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-aarch64-apple-darwin.tar.gz",
+          "sha256": "118f7121aa838785672bf612487f755a89108bb5f44e0f3df96c5967a72614f9",
           "archive": "tar.gz",
           "binaryPath": "ruff-aarch64-apple-darwin/ruff"
         },
         "darwin-x64": {
           "name": "ruff-x86_64-apple-darwin.tar.gz",
-          "url": "https://github.com/astral-sh/ruff/releases/download/0.8.4/ruff-x86_64-apple-darwin.tar.gz",
-          "sha256": "b47e45fe5bf128eaaeaf9f477388934586d00c2c16469034c770d93ceb655a16",
+          "url": "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-apple-darwin.tar.gz",
+          "sha256": "17f95b1bee24d70de62ffe5beec7f71bb541c7e3d147a1c3d84f7cd6525f6fdf",
           "archive": "tar.gz",
           "binaryPath": "ruff-x86_64-apple-darwin/ruff"
         },
         "linux-x64": {
           "name": "ruff-x86_64-unknown-linux-gnu.tar.gz",
-          "url": "https://github.com/astral-sh/ruff/releases/download/0.8.4/ruff-x86_64-unknown-linux-gnu.tar.gz",
-          "sha256": "c4e6591ae1bb4f15c09c9022b7bfc57e1c3a567acdc9cd76021cd1304b5868c3",
+          "url": "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-unknown-linux-gnu.tar.gz",
+          "sha256": "2b0890f5a55900af741f133918c2656919bbf18c2ab7741b4ca8403a90e647a9",
           "archive": "tar.gz",
           "binaryPath": "ruff-x86_64-unknown-linux-gnu/ruff"
         },
         "linux-arm64": {
           "name": "ruff-aarch64-unknown-linux-gnu.tar.gz",
-          "url": "https://github.com/astral-sh/ruff/releases/download/0.8.4/ruff-aarch64-unknown-linux-gnu.tar.gz",
-          "sha256": "0dfe36fabb817638863375e0140ce03bf26ccc9a7fd9d2c8e8337b1a21697ed4",
+          "url": "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-aarch64-unknown-linux-gnu.tar.gz",
+          "sha256": "3f4639152c0e42bb5938e6c23d53d527a38f3133e000102934518f90529fa299",
           "archive": "tar.gz",
           "binaryPath": "ruff-aarch64-unknown-linux-gnu/ruff"
         }
