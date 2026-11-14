@@ -460,6 +460,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     // Survivors that are only observations while a kept duplicate is shown as a finding.
     const supersededKeys = new Set<string>();
     const byId = new Map(built.items.map((item) => [item.c.id, item]));
+    // The shown item each folded duplicate was folded into.
+    const foldedInto = new Map<string, typeof built.items[number]>();
     for (const item of built.items) {
       const key = keyOf(item);
       // Along a chain of duplicates, the first link that is shown folds this item.
@@ -475,7 +477,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         const shown = target.v.tier === "finding" ? shownKeys.has(targetKey) : item.v.tier === "observation" && shownObservationKeys.has(targetKey);
         if (targetKey !== key && shown) { folded = true; break; }
       }
-      if (folded) duplicateKeys.add(key);
+      if (folded) { duplicateKeys.add(key); foldedInto.set(key, target); }
       else if (target !== item) {
         const targetKey = keyOf(target);
         if (targetKey !== key && item.v.tier === "finding" && target.v.tier === "observation" && shownKeys.has(key) && observationKeys.has(targetKey)) supersededKeys.add(targetKey);
@@ -571,13 +573,15 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     // A confirmed finder candidate keeps the lines in other files its
     // evidence cites and its verdict names in `relied_on`. A finding whose
     // evidence is all in its own file, or on removed lines, is left as it was.
+    // A folded duplicate's lines go to the shown item it was folded into.
     const crossFile = new Map<string, NonNullable<ReportFinding["evidence"]>>();
     for (const item of built.items) {
       if (item.c.kind !== "finder") continue;
-      const kept = crossFile.get(keyOf(item)) ?? [];
+      const owner = foldedInto.get(keyOf(item)) ?? item;
+      const kept = crossFile.get(keyOf(owner)) ?? [];
       const relied = item.v.relied_on ?? [];
-      for (const e of item.c.candidate.evidence) if (!e.removed && e.file_path !== item.finding.file_path && relied.some((r) => r.file_path === e.file_path && r.line_number === e.line_number) && !kept.some((k) => k.file_path === e.file_path && k.line_number === e.line_number)) kept.push({ file_path: e.file_path, line_number: e.line_number });
-      if (kept.length) crossFile.set(keyOf(item), kept);
+      for (const e of item.c.candidate.evidence) if (!e.removed && e.file_path !== owner.finding.file_path && relied.some((r) => r.file_path === e.file_path && r.line_number === e.line_number) && !kept.some((k) => k.file_path === e.file_path && k.line_number === e.line_number)) kept.push({ file_path: e.file_path, line_number: e.line_number });
+      if (kept.length) crossFile.set(keyOf(owner), kept);
     }
     const withEvidence = (f: ReportFinding): ReportFinding => { const evidence = crossFile.get(findingKey(f)); return evidence ? { ...f, evidence } : f; };
     report.findings = report.findings.map(withEvidence);

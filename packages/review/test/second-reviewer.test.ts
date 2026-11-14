@@ -26,9 +26,13 @@
 //  8. A primary whose answer never passes, then a second reviewer that
 //     completes: the candidates the second disposed of are still listed as
 //     unchecked, beside its own drops.
+// Added after the code review of cross-file evidence:
+//  9. The second reviewer rates a shared finding higher, and the merged
+//     finding loses the evidence in other files the staged primary kept.
 import { DEFAULT_CONFIG } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { reviewChange } from "../src/review-change.js";
+import { mergeFindings } from "../src/second.js";
 import type { AuthorizeRequest, ReviewChangeOptions } from "../src/reviewer.js";
 import { fixtureModel } from "./fixture-model.js";
 import type { Finding, FixtureOptions } from "./fixture-model.js";
@@ -204,4 +208,12 @@ it.each([false, true])("keeps possible attribution equal in the report and resul
   expect(report.possible[0].found_by).toEqual(["fixture-model"]);
   expect(result.possible).toHaveLength(1);
   expect(result.possible[0]!.foundBy).toEqual(report.possible[0].found_by);
+});
+
+it("9. keeps the primary's evidence in other files when the second reviewer rates the finding higher", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 2, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const evidence = [{ file_path: "src/caller.ts", line_number: 5 }];
+  const merged = mergeFindings({ name: "primary", findings: [{ ...finding, evidence }] }, { name: "second", findings: [{ ...finding, severity: "major" }] });
+  expect(merged.findings).toEqual([expect.objectContaining({ severity: "major", evidence })]);
+  expect(merged.foundBy).toEqual([["primary", "second"]]);
 });
