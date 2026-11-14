@@ -11,7 +11,7 @@
 // For a file in a Django, FastAPI or Airflow project (detect.ts reads the
 // project's pyproject.toml, requirements files or Pipfile), ruff's own DJ,
 // FAST or AIR rules are added with --extend-select, on top of the repo's
-// own selection. Measured with ruff 0.8.4: a selection on the command line
+// own selection. Measured with ruff 0.17.3: a selection on the command line
 // comes after the repo's config, so its `ignore` does not take these
 // families off again; `# noqa`, per-file-ignores and review.disabled_rules
 // do.
@@ -89,7 +89,7 @@ export async function runRuff(args: {
 
   // --no-fix and --no-fix-only: report only, never rewrite the working
   // tree (a repo config with `fix-only = true` applies fixes even under
-  // --no-fix; checked against ruff 0.8.4). --no-cache:
+  // --no-fix; checked against ruff 0.17.3). --no-cache:
   // ruff otherwise writes .ruff_cache into the project. --output-format
   // json: the stable machine shape. We let Ruff honor the repo's own
   // pyproject/ruff.toml when present (near-zero config), but pass the
@@ -178,8 +178,9 @@ export function parseRuffJson(json: string): StaticFinding[] {
     const filePath = typeof raw.filename === "string" ? raw.filename : "";
     const lineStart = numberOrZero(raw.location?.row);
     const lineEnd = Math.max(lineStart, numberOrZero(raw.end_location?.row) || lineStart);
-    // Some diagnostics (e.g. a syntax error) report a null code.
-    const code = typeof raw.code === "string" && raw.code ? raw.code : "ruff";
+    // Some diagnostics (e.g. a syntax error) report a null code (ruff 0.8) or
+    // the code "invalid-syntax" (ruff 0.17). Both get the rule id "ruff".
+    const code = typeof raw.code === "string" && raw.code && raw.code !== "invalid-syntax" ? raw.code : "ruff";
     const message = typeof raw.message === "string" ? raw.message : "";
     if (!filePath || lineStart <= 0) continue;
     out.push({

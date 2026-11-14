@@ -55,4 +55,16 @@ describe("parseRuffJson", () => {
     expect(out[0].ruleId).toBe("ruff");
     expect(out[0].reference).toBeNull();
   });
+
+  it("a syntax error with the code invalid-syntax (ruff 0.17) gets the same rule id and severity as a null code", () => {
+    const report = [
+      { code: null, message: "syntax error", filename: "a.py", location: { row: 3 } },
+      { code: "invalid-syntax", message: "syntax error", filename: "a.py", location: { row: 3 } },
+    ];
+    const out = parseRuffJson(JSON.stringify(report));
+    expect(out).toHaveLength(2);
+    expect(out[1].ruleId).toBe("ruff");
+    expect(out[1].severity).toBe(out[0].severity);
+    expect(out[1].severity).toBe("info");
+  });
 });
