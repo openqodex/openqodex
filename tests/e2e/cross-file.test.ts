@@ -13,11 +13,13 @@
 //      file before confirming.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Report } from "@openqodex/core";
 import "./global-setup.js";
 import { git, modelTestsOff, readJson, reportDir, requireReviewer, reviewerMissing, run } from "./support.js";
-import { tempDir } from "../temp-dirs.mjs";
+import { removeTempDirs, tempDir } from "../temp-dirs.mjs";
+
+afterAll(removeTempDirs);
 
 const USERS_BEFORE = "export type User = { id: string; name: string };\n\nconst users = new Map<string, User>();\n\nexport function findUser(id: string): User {\n  const user = users.get(id);\n  if (!user) throw new Error(`no user ${id}`);\n  return user;\n}\n";
 const USERS_AFTER = "export type User = { id: string; name: string };\n\nconst users = new Map<string, User>();\n\nexport function findUser(id: string): User | undefined {\n  return users.get(id);\n}\n";
