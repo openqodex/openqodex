@@ -50,7 +50,7 @@ OpenQodex keeps the scanner findings on changed lines. Then it drops findings in
 | Security problems in code | brakeman | 6.2.1 | a Ruby or Rails file in a Rails app | Ruby 3.0 or newer |
 | Dependencies with known vulnerabilities | osv-scanner | 2.6.0 | every supported lockfile in the repository at every review and scan of a change, less excluded paths | osv.dev |
 | Dependencies with known vulnerabilities | cargo-deny | 0.20.2 | `Cargo.lock` | Cargo; github.com for the RustSec database |
-| Lint | ruff | 0.8.4 | a `.py` or `.pyi` file | nothing |
+| Lint | ruff | 0.17.3 | a `.py` or `.pyi` file | nothing |
 | Lint | oxlint | 1.86.0 | a JavaScript or TypeScript file | nothing |
 | Lint | rubocop | 1.69.2 | a `.rb`, `.rake` or `.gemspec` file, or a `Rakefile` | Ruby 2.7 or newer |
 | Lint | golangci-lint | 2.14.0 | a `.go` file | Go |
@@ -142,7 +142,7 @@ A download size is the size of the release asset, as GitHub reported it on 2026-
 | actionlint | 1.7.7 | 2.0 MB | 2.1 MB | 5 MiB |
 | hadolint | 2.15.1 | 102.6 MB | 55.7 MB | 98 MiB |
 | shellcheck | 0.10.0 | 7.2 MB | 2.4 MB | 58 MiB |
-| ruff | 0.8.4 | 9.9 MB | 11.2 MB | 27 MiB |
+| ruff | 0.17.3 | 9.4 MB | 10.2 MB | 22 MiB |
 | golangci-lint | 2.14.0 | 14.8 MB | 15.5 MB | not installed on that Mac (needs Go) |
 | oxlint | 1.86.0 | 5.5 MB | 6.4 MB | 12 MiB |
 | zizmor | 1.30.1 | 8.4 MB | 9.2 MB | 22 MiB |
@@ -246,7 +246,7 @@ A string, heredoc, template, raw string or block comment can be left open at the
 | semgrep | `nosemgrep` or `nosem`, in any case | anywhere on the line | the 1.94.0 binary; [docs](https://docs.semgrep.dev/ignoring-files-folders-code) |
 | gitleaks | `gitleaks:allow` | anywhere on the line | the 8.21.2 binary; [detect.go](https://github.com/gitleaks/gitleaks/blob/v8.21.2/detect/detect.go) |
 | bandit | `# nosec`, with or without the space | anywhere in a Python comment | the 1.9.4 binary; [manager.py](https://github.com/PyCQA/bandit/blob/1.9.4/bandit/core/manager.py) |
-| ruff | `# noqa` in any case; `# ruff: noqa` and `# flake8: noqa`; `isort: skip`, `isort: skip_file`, `# isort: off` | anywhere in a Python comment; `# ruff: noqa` and `# flake8: noqa` on a line of their own | the 0.8.4 binary; [noqa.rs](https://github.com/astral-sh/ruff/blob/0.8.4/crates/ruff_linter/src/noqa.rs), [directives.rs](https://github.com/astral-sh/ruff/blob/0.8.4/crates/ruff_linter/src/directives.rs) |
+| ruff | `# noqa` in any case; `# ruff: noqa` and `# flake8: noqa`; `isort: skip`, `isort: skip_file`, `# isort: off` | anywhere in a Python comment; `# ruff: noqa` and `# flake8: noqa` on a line of their own | the 0.17.3 binary; [noqa.rs](https://github.com/astral-sh/ruff/blob/0.17.3/crates/ruff_linter/src/noqa.rs), [directives.rs](https://github.com/astral-sh/ruff/blob/0.17.3/crates/ruff_linter/src/directives.rs) |
 | shellcheck | `disable=` or `extended-analysis=false` anywhere after `# shellcheck` | a shell comment | the 0.10.0 binary; [Parser.hs](https://github.com/koalaman/shellcheck/blob/v0.10.0/src/ShellCheck/Parser.hs) |
 | hadolint | `# hadolint ignore=`, `# hadolint global ignore=`, `# hadolint stage ignore=` | a Dockerfile comment line, also inside a continued instruction | the 2.15.1 binary; [Pragma.hs](https://github.com/hadolint/hadolint/blob/v2.15.1/src/Hadolint/Pragma.hs) |
 | oxlint | `eslint-disable`, `oxlint-disable`, each also with `-line` or `-next-line` | the start of a `//` or `/* */` comment | the 1.86.0 binary; [disable_directives.rs](https://github.com/oxc-project/oxc/blob/oxlint_v1.86.0/crates/oxc_linter/src/disable_directives.rs) |
@@ -355,7 +355,7 @@ Every reviewer brief explains that OpenQodex replaced matched values with `[reda
 
 ## ruff
 
-- Version: 0.8.4.
+- Version: 0.17.3.
 - Runs when: a `.py` or `.pyi` file changed.
 - Needs: nothing.
 - Settings: ruff reads the repository's own ruff settings. OpenQodex runs it with fixes and its cache switched off, so ruff writes no fix and no cache file.
