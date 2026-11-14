@@ -96,7 +96,7 @@ Observations remain outside `ReviewResult.findings` and `ReviewResult.possible`.
 
 ### The finding shape
 
-Each finding has `file`, `lineStart`, `lineEnd`, `title`, `problem`, `consequence`, `fix`, `suggestedChange` (the reviewer's literal replacement for the cited lines, or null), `severity` (`critical`, `major`, `minor`, `nitpick` or `info`), `category`, `confidence` (0 to 1), `foundBy` (the reviewers that raised it), `source` (null for the reviewer's own finding, a scanner rule such as `semgrep:<rule>`, or `lens:<name>`) and `candidate` (the scanner candidate's id, or null).
+Each finding has `file`, `lineStart`, `lineEnd`, `title`, `problem`, `consequence`, `fix`, `suggestedChange` (the reviewer's literal replacement for the cited lines, or null), `severity` (`critical`, `major`, `minor`, `nitpick` or `info`), `category`, `confidence` (0 to 1), `foundBy` (the reviewers that raised it), `source` (null for the reviewer's own finding, a scanner rule such as `semgrep:<rule>`, or `lens:<name>`) and `candidate` (the scanner candidate's id, or null). A finding whose evidence rests on lines in other files, such as a caller or a guard, also has `evidence`: those lines as `{ file, line }`. It is absent when all the evidence is in the finding's own file.
 
 ### Status reasons
 

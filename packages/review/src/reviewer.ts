@@ -218,6 +218,9 @@ export type ResultFinding = {
   foundBy: string[];
   source: string | null;
   candidate: string | null;
+  // The lines in other files the finding's evidence rests on; absent when
+  // all of it is in the finding's own file.
+  evidence?: { file: string; line: number }[];
 };
 
 // What the reviewer did with one scanner candidate: raised it in a finding,
