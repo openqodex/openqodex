@@ -9,6 +9,10 @@
 // changes the cap of 12 observations; the report files leave the citation
 // out; the verifier's brief does not ask for the citation or for a stated
 // exception to be checked. The model provider is the only fake.
+// Added after the code review of rule citations: a confirmed scanner
+// candidate leaves the verdict because the rule quote attached to it is
+// wrong; a rule written as a multi-line blockquote, or under a heading
+// underlined with = or -, is dropped as if it were invented.
 import { afterAll, expect, it } from "vitest";
 import { buildVerifyBrief, completionRecord, readCoverage, renderJson, renderReview } from "@openqodex/core";
 import type { FindAnswer, InstructionFile, VerifyAnswer, VerifyBatch, VerifyVerdict } from "@openqodex/core";
@@ -16,7 +20,7 @@ import { runStagedReview } from "../src/stages.js";
 import type { StagedArgs } from "../src/stages.js";
 import { modelSession } from "../src/model-loop.js";
 import type { ModelReviewer } from "../src/reviewer.js";
-import { candidate, cleanupFixtures, fixture, reply, verdict } from "./staged-fixture.js";
+import { candidate, cleanupFixtures, fixture, reply, scanner, verdict } from "./staged-fixture.js";
 
 afterAll(cleanupFixtures);
 
@@ -166,4 +170,39 @@ it("asks the verifier for the citation and for a stated exception to be checked 
   await runStagedReview(none.args);
   expect(none.briefs[0]).not.toContain("- `rule`:");
   expect(none.briefs[0]).toContain("Set `tier` to `observation` for style, naming, docs, clarity, conventions and test coverage items. Set it to `finding` for defects.");
+});
+
+it("keeps a confirmed scanner candidate whose rule quote is wrong, without the citation, and still drops the finder's", async () => {
+  const f = setup(verdicts((v) => { v.rule = { ...RULE, quote: "Every query is cached for an hour" }; }));
+  f.scan.candidates.push(scanner("a.txt"));
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.disposed).toBe(1);
+  expect(r.report.findings).toEqual([expect.objectContaining({ candidate: "c1" })]);
+  expect(r.report.findings[0]).not.toHaveProperty("rule");
+  expect(r.report.low_confidence).toEqual([expect.objectContaining({ title: "Unsafe operation", reason: "dropped: its rule quote is not in AGENTS.md" })]);
+});
+
+// The same rule under a blockquote, and under headings underlined with = and -.
+const FORMS: InstructionFile = {
+  path: "AGENTS.md",
+  text: "Team rules\n==========\n\nData access\n-----------\n\n> Every tenant-scoped query goes through the permission\n> gate, except in tests.\n\nLogging\n-------\n\n- Log with the request id.\n",
+  source: SOURCE,
+};
+
+it.each([
+  ["a multi-line blockquote, under a heading underlined with -", RULE],
+  ["a multi-line blockquote, under a heading underlined with =", { ...RULE, heading: "Team rules" }],
+])("keeps a rule written as %s", async (_label, rule) => {
+  const f = setup(verdicts((v) => { v.rule = rule; }), [FORMS]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.low_confidence).toEqual([]);
+  expect(r.report.findings).toEqual([expect.objectContaining({ rule: expect.objectContaining({ heading: rule.heading }) })]);
+});
+
+it("drops a rule from an underlined section cited under the next underlined heading", async () => {
+  const f = setup(verdicts((v) => { v.rule = { ...RULE, heading: "Logging" }; }), [FORMS]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings).toEqual([]);
+  expect(r.report.low_confidence).toEqual([expect.objectContaining({ reason: "dropped: its rule quote is not under its heading in AGENTS.md" })]);
 });

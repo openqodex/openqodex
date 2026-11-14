@@ -403,40 +403,42 @@ const findingV2Schema = z.object({
 // Why a finding's rule citation does not hold against the instruction files
 // the review supplied, or null when it does: the file must be one of them,
 // its quote must be in that file's text and, when a heading is given, in
-// that heading's section. Whitespace is normalised, and the brief's "> "
-// quote marks are taken off the quote's lines, so a rule copied across a
-// line break still matches.
+// that heading's section. Whitespace is normalised, and "> " quote marks
+// are taken off the lines of the quote and of the file, so a rule copied
+// across a line break, or from a blockquote, still matches.
 const spaced = (text: string) => text.replace(/\s+/g, " ").trim();
 const unquoted = (quote: string) => quote.replace(/^[ \t]*>[ \t]?/gm, "");
 function ruleProblem(rule: { file: string; heading?: string | null; quote: string }, files: readonly InstructionFile[]): string | null {
   const file = files.find((f) => f.path === rule.file);
   if (!file) return `its rule cites ${rule.file}, which is not an instruction file of this review`;
-  const text = spaced(file.text);
+  const text = spaced(unquoted(file.text));
   const quote = spaced(unquoted(rule.quote));
   if (quote === "" || !text.includes(quote)) return `its rule quote is not in ${rule.file}`;
   if (!rule.heading) return null;
   const sections = ruleSections(file.text, rule.heading);
   if (sections.length === 0) return `its rule heading is not in ${rule.file}`;
-  if (!sections.some((section) => spaced(section).includes(quote))) return `its rule quote is not under its heading in ${rule.file}`;
+  if (!sections.some((section) => spaced(unquoted(section)).includes(quote))) return `its rule quote is not under its heading in ${rule.file}`;
   return null;
 }
 
 // The text of each section `heading` names. A markdown heading (`#` to
-// `######`) whose text is the heading runs to the next heading of the same
-// or a higher level. A rule label, a list item or a bold line whose text
-// starts with the heading, runs to the next label at its indent or less, or
+// `######`, or a line underlined with `=` or `-`, levels 1 and 2) whose text
+// is the heading runs to the next heading of the same or a higher level. A
+// rule label, a list item or a bold line whose text starts with the heading, runs to the next label at its indent or less, or
 // the next heading. Lines inside code fences are never headings or labels.
 function ruleSections(text: string, heading: string): string[] {
   const plain = (title: string) => spaced(title.replace(/[*_`]/g, ""));
   const want = plain(heading.replace(/^#+\s*/, ""));
   const lines = text.split(/\r?\n/);
   let fence: string | null = null;
-  const marks = lines.map((line) => {
+  const marks = lines.map((line, i) => {
     const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (fence !== null) { if (open && open[0] === fence[0] && open.length >= fence.length) fence = null; return null; }
     if (open) { fence = open; return null; }
     const h = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
     if (h) return { level: h[1]!.length, indent: 0, title: plain(h[2]!) };
+    const underline = /^ {0,3}(=+|-+)[ \t]*$/.exec(lines[i + 1] ?? "")?.[1];
+    if (underline && /^ {0,3}\S/.test(line) && !/^[ \t]*(?:[-*+]|\d+[.)])[ \t]+/.test(line)) return { level: underline[0] === "=" ? 1 : 2, indent: 0, title: plain(line) };
     const label = /^([ \t]*)(?:(?:[-*+]|\d+[.)])[ \t]+|(?=\*\*|__))(.*)$/.exec(line);
     return label ? { level: 7, indent: label[1]!.length, title: plain(label[2]!) } : null;
   });
@@ -637,12 +639,14 @@ export function checkSubmission(args: {
       continue;
     }
     let rule: RuleCitation | null = null;
-    if (f.rule) {
-      const problem = ruleProblem(f.rule, args.instructionFiles ?? []);
-      if (problem !== null) {
-        lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor, reason: `dropped: ${problem}` });
-        continue;
-      }
+    const problem = f.rule ? ruleProblem(f.rule, args.instructionFiles ?? []) : null;
+    // A finding that raises a scanner candidate stands on the scanner's
+    // evidence: a citation that does not hold is dropped, never the finding.
+    if (problem !== null && !f.candidate) {
+      lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor, reason: `dropped: ${problem}` });
+      continue;
+    }
+    if (f.rule && problem === null) {
       const source = (args.instructionFiles ?? []).find((file) => file.path === f.rule!.file)?.source;
       rule = { file: f.rule.file, heading: f.rule.heading ?? null, quote: unquoted(f.rule.quote).trim(), ...(source ? { source } : {}) };
     }
