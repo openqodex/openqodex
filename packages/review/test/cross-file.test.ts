@@ -25,6 +25,9 @@
 //     never shown and its caller falls past the first one's cap.
 //  8. The confirmed finding keeps a line in another file that its candidate
 //     cited but the verifier did not rely on.
+// Added after the code review of the branch:
+//  9. A cited line in a text file whose window is too large to show is
+//     labelled as not a text file, so the verifier may skip reading it.
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -202,6 +205,16 @@ describe("cross-file evidence in the staged review", () => {
     expect(text).toContain("### k1 cites src/greet.ts:1");
     for (const path of ["../outside.ts", ".git/config", "src/link.ts", "src/missing.ts"]) expect(text).toContain(`${path}:1 (not a text file in the snapshot)`);
     expect(Buffer.byteLength(text)).toBeLessThanOrEqual(CITED_BLOCK_BYTES);
+  });
+
+  it("9. labels a cited text line too large to show as too large, not as a file that is not text", () => {
+    const snapshot = tempDir("oq-xf-cited-long-");
+    write(snapshot, "src/users.ts", HEAD_USERS);
+    write(snapshot, "src/long.ts", `export const a = 1;\nexport const b = "${"x".repeat(70 * 1024)}";\n`);
+    const candidate: VerifyCandidate = { id: "k1", kind: "finder", foundBy: ["finder:u1:contracts"], candidate: { severity: "major", category: "bug", confidence: 0.9, file_path: "src/users.ts", line_number: 3, title: "t", claim: "c", evidence: [{ file_path: "src/long.ts", line_number: 1, quote: "export const a = 1;" }] } };
+    const text = renderCitedBlock(snapshot, { file: "src/users.ts", candidates: [candidate] }, []);
+    expect(text).toContain("src/long.ts:1 (over 64 KB around the line; read it with your tools)");
+    expect(text).not.toContain("not a text file");
   });
 
   it("6. cuts a declaration with hundreds of callers to the cap and says so, within the brief's budget", async () => {

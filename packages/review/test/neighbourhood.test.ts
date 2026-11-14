@@ -22,6 +22,13 @@
 // 21. Repeated rendering makes the byte budget quadratic in symbol count.
 // 22. Changed declarations past the contracts cap are dropped without the
 //     interfaces finder's brief saying how many.
+// Added after the code review of the contracts block:
+// 23. A changed constructor or Python __init__ line becomes a contract, and
+//     every other class's constructor is listed as its caller.
+// 24. A declaration on a current line whose file was not read (an ignored
+//     folder) is told to the finder as declared on a removed line.
+// 25. A declaration whose callers are cut at the per-declaration cap pushes
+//     the block past its byte budget.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import fs from "node:fs";
@@ -464,4 +471,41 @@ it("says how many changed declarations past the contracts cap were left out", ()
   expect(block).toContain("### priced0, declared at changed.ts:1");
   expect(block).toContain("5 more changed declarations were left out because the change has more than 200: search for their callers with your tools.");
   expect(renderContractsBlock(packet, ["use.ts"])).toBe("");
+});
+
+it("never makes a changed constructor or __init__ line a contract of every class", () => {
+  const dir = snapshot({
+    "changed.ts": "export class Cart {\n  constructor(items: number) {\n    this.items = items;\n  }\n}\n",
+    "other.ts": "export class Other {\n  constructor() {\n    this.constructor.name;\n  }\n}\n",
+    "changed.py": "class Cart:\n    def __init__(self, items):\n        self.items = items\n",
+    "other.py": "class Other:\n    def __init__(self):\n        super().__init__()\n",
+  });
+  const packet = build(dir, change(dir, { "changed.ts": [2], "changed.py": [2] }));
+  const names = (packet.contracts ?? []).map((c) => c.name);
+  expect(names).not.toContain("constructor");
+  expect(names).not.toContain("__init__");
+  expect(renderContractsBlock(packet, ["changed.ts", "changed.py"])).toBe("");
+});
+
+it("never says a declaration in a file it did not read sits on a removed line", () => {
+  const dir = snapshot({
+    "vendor/prices.ts": "export function priceOf(id: string): number {\n  return id.length;\n}\n",
+    "src/cart.ts": "import { priceOf } from \"../vendor/prices\";\nexport const total = priceOf(\"a\");\n",
+  });
+  const block = renderContractsBlock(build(dir, change(dir, { "vendor/prices.ts": [1] })), ["vendor/prices.ts"]);
+  expect(block).toContain("### priceOf, declared at vendor/prices.ts:1 (its lines were not read for this brief: read them with your tools)");
+  expect(block).not.toContain("removed line");
+});
+
+it("keeps the contracts block within its byte budget when callers are cut at the per-declaration cap", () => {
+  const contract = (name: string) => ({
+    name, declaredIn: ["changed.ts"], sites: 20, files: 20,
+    declared: { path: "changed.ts", line: 1, from: "text" as const, context: `1\texport function ${name}() {}` },
+    callers: [{ path: "use.ts", line: 1, from: "text" as const, context: `1\t${name}();` }],
+  });
+  const packet: Neighbourhood = { symbols: [], packetPath: null, partial: null, durationMs: 0, contracts: [contract("alpha"), contract("bravo"), contract("charlie")] };
+  const over: number[] = [];
+  // From the smallest budget that holds the header and the notes.
+  for (let max = 600; max <= 2000; max++) if (Buffer.byteLength(renderContractsBlock(packet, ["changed.ts"], max)) > max) over.push(max);
+  expect(over).toEqual([]);
 });

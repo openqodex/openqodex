@@ -6,7 +6,7 @@ import { changedHunks, diffHunks, display, escapeMarkdown, redactSecrets, secret
 import type { Change, ImpactSummary, VerifyCandidate } from "@openqodex/core";
 import { PACKET_DIR, PACKET_ROOT } from "@openqodex/graph";
 import { redactStored } from "./redact.js";
-import { readLines, snapshotText } from "./snapshot.js";
+import { lineIndex, readLines, snapshotText } from "./snapshot.js";
 
 // One place a symbol occurs. `kind` says whether a declaration regex matched
 // the line (a label, never a selector). `context` is the lines around it,
@@ -35,7 +35,8 @@ export type Neighbourhood = {
 // A declaration the change adds, alters or removes, and where other files
 // call or use it, for the interfaces finder. `declaredIn`: the changed files
 // that declare it. `declared`: the declaration's first lines, null when only
-// a removed line declared it. `callers`: at most CONTRACT_CALLERS sites in
+// a removed line declared it; `declared.context` is empty when its file was
+// not read (an ignored folder, or the time cap). `callers`: at most CONTRACT_CALLERS sites in
 // other files, graph sites first. `sites` and `files` count every site and
 // file seen, so a brief can say how many were cut.
 export type ContractSite = { path: string; line: number; context: string; from: "graph" | "text" };
@@ -79,6 +80,10 @@ const CONTRACT_DECLARATIONS = [
   DECLARATIONS[0]!, DECLARATIONS[1]!, DECLARATIONS[3]!,
   /^\s*export\s+(?:default\s+)?(?:declare\s+)?(?:const|let|var|type|async\s+function)\s+([A-Za-z_][A-Za-z0-9_]{2,})\b/g,
 ];
+// A method name every class of its language shares (`constructor`, Python's
+// `__init__` and other dunders): other files mention it for their own
+// classes, so a name match is never a caller of this declaration.
+const SHARED_METHOD = /^(?:constructor|__[A-Za-z0-9_]+__)$/;
 const CONTRACTS_HEADER = "## Callers of the changed declarations\n\nEach declaration this change adds, alters or removes, and where other files call or use it. Graph entries are certain callers; name matches are unverified. Check that every caller still fits the declaration as changed: its arguments, its use of the result, the errors it expects.";
 const HEADER = "## Code around the change\n\nThe identifiers on the changed lines, and where the repository declares and uses them. Graph entries are certain callers; name matches are unverified. Read the other side of every changed call here before judging it.";
 const PACKET_PATH = `${PACKET_ROOT}/neighbourhood.md`;
@@ -289,6 +294,7 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     const contractsByName = new Map<string, Seed[]>();
     const leftOut = new Map<string, string>();
     const seed = (name: string, path: string, at: { line: number; end: number } | null): void => {
+      if (SHARED_METHOD.test(name)) return;
       const key = declarationKey(path, name);
       let c = contracts.get(key);
       if (!c) {
@@ -439,7 +445,10 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     const leftOutCounts = new Map<string, number>();
     for (const path of leftOut.values()) leftOutCounts.set(path, (leftOutCounts.get(path) ?? 0) + 1);
     const contractsLeftOut = leftOutCounts.size ? { contractsLeftOut: redactStored([...leftOutCounts].map(([path, count]) => ({ path, count })), args.secrets) } : {};
-    const found: Contract[] = redactStored([...contracts.values()].filter((c) => c.sites > 0).map((c) => ({ name: c.name, declaredIn: [...c.declaredIn], declared: c.declared, callers: [...c.graph, ...c.text].slice(0, CONTRACT_CALLERS), sites: c.sites, files: c.files })), args.secrets);
+    // A declaration on a current line whose file was never read keeps its
+    // place with no lines, so it is not mistaken for a removed one.
+    const declaredAt = (c: Seed): ContractSite | null => c.declared ?? (c.at ? { path: c.at.path, line: c.at.line, from: "text", context: "" } : null);
+    const found: Contract[] = redactStored([...contracts.values()].filter((c) => c.sites > 0).map((c) => ({ name: c.name, declaredIn: [...c.declaredIn], declared: declaredAt(c), callers: [...c.graph, ...c.text].slice(0, CONTRACT_CALLERS), sites: c.sites, files: c.files })), args.secrets);
     const timeReason = [timedOut ? `Time cap reached after ${filesRead} of ${totalFiles} files; file counts and sites are partial.` : null, skippedPages ? `Skipped ${skippedPages} diff pages over the 512 KB byte budget.` : null].filter(Boolean).join(" ") || null;
     if (symbols.length === 0) return { symbols, packetPath: null, partial: timeReason, durationMs: elapsed, contracts: found, ...contractsLeftOut };
     const sizeReason = (kept: number) => kept < symbols.length ? `${symbols.length - kept} symbols cut at the packet byte cap.` : null;
@@ -488,13 +497,13 @@ export function renderContractsBlock(packet: Neighbourhood, forFiles: readonly s
   let left = 0;
   for (const c of contracts) {
     const where = c.declared
-      ? `declared at ${escapeMarkdown(display(c.declared.path))}:${c.declared.line}\n\n${fenced(c.declared.context)}`
+      ? `declared at ${escapeMarkdown(display(c.declared.path))}:${c.declared.line}${c.declared.context ? `\n\n${fenced(c.declared.context)}` : " (its lines were not read for this brief: read them with your tools)"}`
       : `declared on a removed line of ${c.declaredIn.map((file) => escapeMarkdown(display(file))).join(", ")}`;
     const head = `### ${escapeMarkdown(display(c.name))}, ${where}`;
     const callers = c.callers.map((site) => `${site.from === "graph" ? "caller" : "use"} at ${escapeMarkdown(display(site.path))}:${site.line} (${fromLabel(site.from)})\n\n${fenced(site.context)}`);
     const count = (shown: number, why: string | null) => `The name appears at ${c.sites} ${c.sites === 1 ? "site" : "sites"} in ${c.files} other ${c.files === 1 ? "file" : "files"}.${shown < c.sites ? ` ${shown} shown; ${c.sites - shown} cut ${why}: search for the rest with your tools.` : ""}`;
     // The longest count line is reserved before any caller is kept.
-    const reserve = Buffer.byteLength(count(0, "at this brief's size budget")) + 2;
+    const reserve = Math.max(...["at this brief's size budget", `at the cap of ${CONTRACT_CALLERS} per declaration`].map((why) => Buffer.byteLength(count(0, why)))) + 2;
     let size = Buffer.byteLength(head) + 2 + reserve;
     if (bytes + size > maxBytes) { left++; continue; }
     const kept: string[] = [];
@@ -538,6 +547,7 @@ export function renderCitedBlock(snapshotDir: string, batch: { file: string; can
     const from = Math.max(1, line - CITED_CONTEXT);
     const text = readLines(snapshotDir, path, from, line + CITED_CONTEXT, 64 * 1024);
     const label = `${escapeMarkdown(display(path))}:${line}`;
+    if (text === null && lineIndex(snapshotDir, path)?.text) { notShown.push(`${label} (over 64 KB around the line; read it with your tools)`); continue; }
     if (text === null || text === "") { notShown.push(`${label} (not a text file in the snapshot)`); continue; }
     const rows = text.replace(/\n$/, "").split("\n").map((row, i) => {
       const clean = redactSecrets(row, secrets);
