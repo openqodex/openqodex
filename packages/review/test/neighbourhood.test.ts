@@ -20,6 +20,8 @@
 // 19. The name-frequency cap removes certain graph evidence.
 // 20. An ignored site directory also hides its changed-file candidates.
 // 21. Repeated rendering makes the byte budget quadratic in symbol count.
+// 22. Changed declarations past the contracts cap are dropped without the
+//     interfaces finder's brief saying how many.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import fs from "node:fs";
@@ -31,7 +33,7 @@ import type { Change, ImpactSummary } from "@openqodex/core";
 import { afterAll, expect, it, vi } from "vitest";
 import { makeChange } from "../../core/src/test-fixtures.js";
 import {
-  buildNeighbourhood, renderNeighbourhoodBlock, NEIGHBOURHOOD_BLOCK_BYTES,
+  buildNeighbourhood, renderContractsBlock, renderNeighbourhoodBlock, NEIGHBOURHOOD_BLOCK_BYTES,
   NEIGHBOURHOOD_MAX_BYTES, NEIGHBOURHOOD_SITES_PER_SYMBOL,
   NEIGHBOURHOOD_SYMBOLS_PER_FILE, NEIGHBOURHOOD_TIME_MS,
 } from "../src/neighbourhood.js";
@@ -452,3 +454,14 @@ it("measures the repository's own tree as a snapshot and marks any time cap", ()
   expect(packet.symbols.length).toBeGreaterThan(0);
   expect(packet.durationMs < NEIGHBOURHOOD_TIME_MS || packet.partial !== null).toBe(true);
 }, 120_000);
+
+it("says how many changed declarations past the contracts cap were left out", () => {
+  const count = 205;
+  const declarations = Array.from({ length: count }, (_, i) => `export function priced${i}(amount: number) {\n  return amount;\n}`).join("\n");
+  const dir = snapshot({ "changed.ts": `${declarations}\n`, "use.ts": "priced0(1);\n" });
+  const packet = build(dir, change(dir, { "changed.ts": Array.from({ length: count * 3 }, (_, i) => i + 1) }));
+  const block = renderContractsBlock(packet, ["changed.ts"]);
+  expect(block).toContain("### priced0, declared at changed.ts:1");
+  expect(block).toContain("5 more changed declarations were left out because the change has more than 200: search for their callers with your tools.");
+  expect(renderContractsBlock(packet, ["use.ts"])).toBe("");
+});

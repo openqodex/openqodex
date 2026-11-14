@@ -27,6 +27,9 @@ export type Neighbourhood = {
   partial: string | null;
   durationMs: number;
   contracts?: Contract[];
+  // Per declaring file, the changed declarations past CONTRACT_SYMBOLS that
+  // were never searched for callers.
+  contractsLeftOut?: { path: string; count: number }[];
 };
 
 // A declaration the change adds, alters or removes, and where other files
@@ -284,11 +287,12 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     type Seed = { key: string; name: string; declaredIn: Set<string>; at: { path: string; line: number; end: number } | null; declared: ContractSite | null; graph: ContractSite[]; text: ContractSite[]; sites: number; files: number; last: string | null };
     const contracts = new Map<string, Seed>();
     const contractsByName = new Map<string, Seed[]>();
+    const leftOut = new Map<string, string>();
     const seed = (name: string, path: string, at: { line: number; end: number } | null): void => {
       const key = declarationKey(path, name);
       let c = contracts.get(key);
       if (!c) {
-        if (contracts.size >= CONTRACT_SYMBOLS) return;
+        if (contracts.size >= CONTRACT_SYMBOLS) { leftOut.set(key, path); return; }
         contracts.set(key, (c = { key, name, declaredIn: new Set(), at: null, declared: null, graph: [], text: [], sites: 0, files: 0, last: null }));
         contractsByName.set(name, [...(contractsByName.get(name) ?? []), c]);
       }
@@ -432,16 +436,19 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     }
     duration();
     const symbols = redactStored([...selected.values()], args.secrets);
+    const leftOutCounts = new Map<string, number>();
+    for (const path of leftOut.values()) leftOutCounts.set(path, (leftOutCounts.get(path) ?? 0) + 1);
+    const contractsLeftOut = leftOutCounts.size ? { contractsLeftOut: redactStored([...leftOutCounts].map(([path, count]) => ({ path, count })), args.secrets) } : {};
     const found: Contract[] = redactStored([...contracts.values()].filter((c) => c.sites > 0).map((c) => ({ name: c.name, declaredIn: [...c.declaredIn], declared: c.declared, callers: [...c.graph, ...c.text].slice(0, CONTRACT_CALLERS), sites: c.sites, files: c.files })), args.secrets);
     const timeReason = [timedOut ? `Time cap reached after ${filesRead} of ${totalFiles} files; file counts and sites are partial.` : null, skippedPages ? `Skipped ${skippedPages} diff pages over the 512 KB byte budget.` : null].filter(Boolean).join(" ") || null;
-    if (symbols.length === 0) return { symbols, packetPath: null, partial: timeReason, durationMs: elapsed, contracts: found };
+    if (symbols.length === 0) return { symbols, packetPath: null, partial: timeReason, durationMs: elapsed, contracts: found, ...contractsLeftOut };
     const sizeReason = (kept: number) => kept < symbols.length ? `${symbols.length - kept} symbols cut at the packet byte cap.` : null;
     const fit = capped(symbols, NEIGHBOURHOOD_MAX_BYTES, (kept) => [timeReason, sizeReason(kept)].filter((x): x is string => x !== null));
     const text = redactSecrets(fit.text, args.secrets);
     if (secretTexts(args.secrets).some((secret) => PACKET_PATH.includes(secret) || text.includes(secret))) throw new Error("A secret remains in the neighbourhood packet or its path");
     writePacket(args.snapshotDir, args.impact, text);
     duration();
-    return { symbols: fit.symbols, packetPath: PACKET_PATH, partial: [timeReason, sizeReason(fit.symbols.length)].filter(Boolean).join(" ") || null, durationMs: elapsed, contracts: found };
+    return { symbols: fit.symbols, packetPath: PACKET_PATH, partial: [timeReason, sizeReason(fit.symbols.length)].filter(Boolean).join(" ") || null, durationMs: elapsed, contracts: found, ...contractsLeftOut };
   } catch (error) {
     try { duration(); } catch { /* Keep the last duration if the clock failed. */ }
     return { symbols: [], packetPath: null, partial: redactSecrets(`Could not build code around the change: ${display(error instanceof Error ? error.message : String(error))}`, args.secrets), durationMs: elapsed };
@@ -467,15 +474,17 @@ export function renderNeighbourhoodBlock(packet: Neighbourhood, forFiles?: reado
 // finder: each declaration changed in `forFiles`, its first lines and its
 // callers in other files, at most `maxBytes`. Whatever a cap or the budget
 // cut is said, with the count of what remains. Empty string when no changed
-// declaration has a caller in another file.
+// declaration has a caller in another file and none was left out at the cap.
 export function renderContractsBlock(packet: Neighbourhood, forFiles: readonly string[], maxBytes = CONTRACTS_BLOCK_BYTES): string {
   const files = new Set(forFiles);
   const contracts = (packet.contracts ?? []).filter((c) => c.declaredIn.some((file) => files.has(file)));
-  if (contracts.length === 0) return "";
+  const unsearched = (packet.contractsLeftOut ?? []).reduce((n, e) => n + (files.has(e.path) ? e.count : 0), 0);
+  if (contracts.length === 0 && unsearched === 0) return "";
   const out = [CONTRACTS_HEADER];
   const leftOutNote = (n: number) => `${n} more changed ${n === 1 ? "declaration was" : "declarations were"} left out at this brief's size budget: search for ${n === 1 ? "its" : "their"} callers with your tools.`;
-  // The longest note is reserved, so it always fits.
-  let bytes = Buffer.byteLength(CONTRACTS_HEADER) + Buffer.byteLength(leftOutNote(contracts.length)) + 4;
+  const capNote = unsearched > 0 ? `${unsearched} more changed ${unsearched === 1 ? "declaration was" : "declarations were"} left out because the change has more than ${CONTRACT_SYMBOLS}: search for ${unsearched === 1 ? "its" : "their"} callers with your tools.` : null;
+  // The longest notes are reserved, so they always fit.
+  let bytes = Buffer.byteLength(CONTRACTS_HEADER) + Buffer.byteLength(leftOutNote(contracts.length)) + 4 + (capNote ? Buffer.byteLength(capNote) + 2 : 0);
   let left = 0;
   for (const c of contracts) {
     const where = c.declared
@@ -500,6 +509,7 @@ export function renderContractsBlock(packet: Neighbourhood, forFiles: readonly s
     bytes += size;
   }
   if (left > 0) out.push(leftOutNote(left));
+  if (capNote) out.push(capNote);
   return out.join("\n\n") + "\n";
 }
 
