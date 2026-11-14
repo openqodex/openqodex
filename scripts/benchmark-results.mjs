@@ -50,7 +50,7 @@ const casesCells = (rows) => {
   const count = new Map();
   for (const r of rows) count.set(seen(r), (count.get(seen(r)) ?? 0) + 1);
   return new Map(rows.map((r) => [r, count.get(seen(r)) > 1
-    ? `${short(r)}, ${r.e.mode} mode, ${r.e.path} path${r.e.splitHash ? `, split hash ${r.e.splitHash.slice(0, 12)}` : ""}${r.e.purpose ? `, ${r.e.purpose} purpose` : ""}`
+    ? `${short(r)}, ${r.e.mode} mode, ${r.e.path} path${r.g.model !== modelName(r.e, r.g) ? `, reviewer model ${r.g.model}` : ""}${r.e.splitHash ? `, split hash ${r.e.splitHash.slice(0, 12)}` : ""}${r.e.purpose ? `, ${r.e.purpose} purpose` : ""}`
     : short(r)]));
 };
 const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, rulesLabel(e), ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : []), ...(e.purpose ? [`${e.purpose} purpose`] : [])].join(", ");

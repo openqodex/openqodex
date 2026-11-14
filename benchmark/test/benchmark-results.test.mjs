@@ -264,3 +264,43 @@ it("gives every README row a label of its own when two groups share a reviewer a
   expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`scoring rules ${rules.rulesVersion}`))).toBe(true);
   expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`${path.path} path`))).toBe(true);
 });
+
+it("distinguishes README rows when an unknown reviewer model resolves to the same display model", () => {
+  const root = fixture();
+  const accepted = pointer(root);
+  const [, record] = Object.entries(accepted.groups).find(([k]) =>
+    k.startsWith("planted|") && k.includes("|review|")
+  );
+  const entry = JSON.parse(readFileSync(entryFile(root, record.runId), "utf8"));
+
+  const twin = structuredClone(entry);
+  twin.runId = `${entry.runId}-unknown-model`;
+  twin.asset.url = entry.asset.url.replace(
+    `/${entry.runId}.tar.gz`,
+    `/${twin.runId}.tar.gz`
+  );
+  twin.reviewers = { "model:claude": { version: null, model: "claude-opus-5-5" } };
+
+  writeFileSync(entryFile(root, twin.runId), JSON.stringify(twin));
+
+  const twinKey = groupKeys(twin).find((g) => g.config === "claude-graph-on").key;
+  accepted.groups[twinKey] = {
+    ...record,
+    runId: twin.runId,
+    scoreHash: scoreHash(twin),
+  };
+
+  writeFileSync(join(root, "benchmark/index/accepted.json"), JSON.stringify(accepted));
+
+  const r = run(root);
+  expect(r.status, r.stderr).toBe(0);
+
+  const rows = readFileSync(join(root, "README.md"), "utf8")
+    .split("\n")
+    .filter((l) => l.startsWith("| ") && !l.startsWith("| Reviewer") && !l.startsWith("| ---"));
+
+  const labels = rows.map((l) => l.split(" | ").slice(0, 3).join(" | "));
+
+  expect(new Set(labels).size, `duplicate README rows:\n${labels.join("\n")}`)
+    .toBe(labels.length);
+});
