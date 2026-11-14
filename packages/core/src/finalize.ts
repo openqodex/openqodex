@@ -402,9 +402,10 @@ const findingV2Schema = z.object({
 
 // Why a finding's rule citation does not hold against the instruction files
 // the review supplied, or null when it does: the file must be one of them,
-// and its quote and heading must be in that file's text. Whitespace is
-// normalised, and the brief's "> " quote marks are taken off the quote's
-// lines, so a rule copied across a line break still matches.
+// its quote must be in that file's text and, when a heading is given, in
+// that heading's section. Whitespace is normalised, and the brief's "> "
+// quote marks are taken off the quote's lines, so a rule copied across a
+// line break still matches.
 const spaced = (text: string) => text.replace(/\s+/g, " ").trim();
 const unquoted = (quote: string) => quote.replace(/^[ \t]*>[ \t]?/gm, "");
 function ruleProblem(rule: { file: string; heading?: string | null; quote: string }, files: readonly InstructionFile[]): string | null {
@@ -413,8 +414,46 @@ function ruleProblem(rule: { file: string; heading?: string | null; quote: strin
   const text = spaced(file.text);
   const quote = spaced(unquoted(rule.quote));
   if (quote === "" || !text.includes(quote)) return `its rule quote is not in ${rule.file}`;
-  if (rule.heading && !text.includes(spaced(rule.heading))) return `its rule heading is not in ${rule.file}`;
+  if (!rule.heading) return null;
+  const sections = ruleSections(file.text, rule.heading);
+  if (sections.length === 0) return `its rule heading is not in ${rule.file}`;
+  if (!sections.some((section) => spaced(section).includes(quote))) return `its rule quote is not under its heading in ${rule.file}`;
   return null;
+}
+
+// The text of each section `heading` names. A markdown heading (`#` to
+// `######`) whose text is the heading runs to the next heading of the same
+// or a higher level. A rule label, a list item or a bold line whose text
+// starts with the heading, runs to the next label at its indent or less, or
+// the next heading. Lines inside code fences are never headings or labels.
+function ruleSections(text: string, heading: string): string[] {
+  const plain = (title: string) => spaced(title.replace(/[*_`]/g, ""));
+  const want = plain(heading.replace(/^#+\s*/, ""));
+  const lines = text.split(/\r?\n/);
+  let fence: string | null = null;
+  const marks = lines.map((line) => {
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence !== null) { if (open && open[0] === fence[0] && open.length >= fence.length) fence = null; return null; }
+    if (open) { fence = open; return null; }
+    const h = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    if (h) return { level: h[1]!.length, indent: 0, title: plain(h[2]!) };
+    const label = /^([ \t]*)(?:(?:[-*+]|\d+[.)])[ \t]+|(?=\*\*|__))(.*)$/.exec(line);
+    return label ? { level: 7, indent: label[1]!.length, title: plain(label[2]!) } : null;
+  });
+  const sections: string[] = [];
+  marks.forEach((mark, i) => {
+    if (!mark) return;
+    const named = mark.level < 7 ? mark.title === want : mark.title.startsWith(want) && !/^[\p{L}\p{N}]/u.test(mark.title.slice(want.length));
+    if (!named) return;
+    let end = i + 1;
+    while (end < lines.length) {
+      const next = marks[end];
+      if (next && (mark.level < 7 ? next.level <= mark.level : next.level < 7 || next.indent <= mark.indent)) break;
+      end++;
+    }
+    sections.push(lines.slice(i, end).join("\n"));
+  });
+  return sections;
 }
 
 const submissionV2Schema = z.object({

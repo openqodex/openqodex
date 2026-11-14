@@ -4,7 +4,8 @@
 // across a line break, or with the brief's quote marks, is dropped as if it
 // were invented; an invented quote, a heading the file does not have, or a
 // file the review did not supply is counted, or dropped with no recorded
-// reason; a docs or style item with no rule becomes a finding; a rule finding
+// reason; a quote that sits under another heading than the one cited is
+// counted as a rule of the cited heading; a docs or style item with no rule becomes a finding; a rule finding
 // changes the cap of 12 observations; the report files leave the citation
 // out; the verifier's brief does not ask for the citation or for a stated
 // exception to be checked. The model provider is the only fake.
@@ -92,6 +93,32 @@ it.each([
   expect(r.report.possible).toEqual([]);
   expect(r.report.observations).toEqual([]);
   expect(r.report.low_confidence).toEqual([expect.objectContaining({ title: "Unsafe operation", file_path: "a.txt", reason })]);
+});
+
+// Two sections: a quote from one must not be reported as a rule of the other.
+const SECTIONS: InstructionFile = {
+  path: "AGENTS.md",
+  text: "# Team rules\n\n## Production access\n\n- Never query the production database from a laptop.\n\n## Test exceptions\n\n```sh\n# Production access\n```\n\n- Tests may skip the permission gate when they use the\n  fixture tenant.\n",
+  source: SOURCE,
+};
+const EXCEPTION = "Tests may skip the permission gate when they use the fixture tenant";
+
+it.each([
+  ["its own heading", { file: "AGENTS.md", heading: "Production access", quote: "Never query the production database from a laptop" }],
+  ["its own heading, copied across the file's line break", { file: "AGENTS.md", heading: "Test exceptions", quote: "Tests may skip the permission gate when they use the\n  fixture tenant" }],
+])("keeps a rule whose quote sits under %s", async (_label, rule) => {
+  const f = setup(verdicts((v) => { v.rule = rule; }), [SECTIONS]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.low_confidence).toEqual([]);
+  expect(r.report.findings).toEqual([expect.objectContaining({ rule: expect.objectContaining({ heading: rule.heading }) })]);
+});
+
+it("drops a rule whose quote sits only under another heading than the one cited, and records why", async () => {
+  const f = setup(verdicts((v) => { v.rule = { file: "AGENTS.md", heading: "Production access", quote: EXCEPTION }; }), [SECTIONS]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings).toEqual([]);
+  expect(r.report.possible).toEqual([]);
+  expect(r.report.low_confidence).toEqual([expect.objectContaining({ title: "Unsafe operation", reason: "dropped: its rule quote is not under its heading in AGENTS.md" })]);
 });
 
 it("keeps a docs or style item with no rule an observation", async () => {
