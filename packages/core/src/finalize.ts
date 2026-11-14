@@ -16,8 +16,10 @@ import type {
   Category,
   Change,
   Config,
+  InstructionFile,
   Report,
   ReportFinding,
+  RuleCitation,
   RunManifest,
   ScannerSource,
   ScanResult,
@@ -395,7 +397,25 @@ const findingV2Schema = z.object({
   suggested_change: z.string().nullable().optional(),
   source: z.string().nullable().optional(),
   candidate: z.string().nullable().optional(),
+  rule: z.object({ file: z.string().min(1), heading: z.string().min(1).nullable().default(null), quote: z.string().min(1) }).nullable().optional(),
 });
+
+// Why a finding's rule citation does not hold against the instruction files
+// the review supplied, or null when it does: the file must be one of them,
+// and its quote and heading must be in that file's text. Whitespace is
+// normalised, and the brief's "> " quote marks are taken off the quote's
+// lines, so a rule copied across a line break still matches.
+const spaced = (text: string) => text.replace(/\s+/g, " ").trim();
+const unquoted = (quote: string) => quote.replace(/^[ \t]*>[ \t]?/gm, "");
+function ruleProblem(rule: { file: string; heading?: string | null; quote: string }, files: readonly InstructionFile[]): string | null {
+  const file = files.find((f) => f.path === rule.file);
+  if (!file) return `its rule cites ${rule.file}, which is not an instruction file of this review`;
+  const text = spaced(file.text);
+  const quote = spaced(unquoted(rule.quote));
+  if (quote === "" || !text.includes(quote)) return `its rule quote is not in ${rule.file}`;
+  if (rule.heading && !text.includes(spaced(rule.heading))) return `its rule heading is not in ${rule.file}`;
+  return null;
+}
 
 const submissionV2Schema = z.object({
   version: z.literal(2),
@@ -494,6 +514,8 @@ export function checkSubmission(args: {
   // states (buildReviewerBrief's confidenceFloor); GLOBAL_CONFIDENCE_FLOOR
   // when left out. A lens's higher floor still wins.
   confidenceFloor?: number;
+  // The instruction files the brief quoted: a finding's rule must quote one.
+  instructionFiles?: readonly InstructionFile[];
 }): SubmissionCheck {
   const { change, scan, manifest, config } = args;
   const clean = (text: string) => redactByFingerprint(text, scan.secretFingerprints);
@@ -575,6 +597,16 @@ export function checkSubmission(args: {
       lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor });
       continue;
     }
+    let rule: RuleCitation | null = null;
+    if (f.rule) {
+      const problem = ruleProblem(f.rule, args.instructionFiles ?? []);
+      if (problem !== null) {
+        lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor, reason: `dropped: ${problem}` });
+        continue;
+      }
+      const source = (args.instructionFiles ?? []).find((file) => file.path === f.rule!.file)?.source;
+      rule = { file: f.rule.file, heading: f.rule.heading ?? null, quote: unquoted(f.rule.quote).trim(), ...(source ? { source } : {}) };
+    }
     (f.confidence < floor ? possible : findings).push({
       origin: "agent",
       severity: f.severity,
@@ -592,6 +624,7 @@ export function checkSubmission(args: {
       problem: f.problem,
       consequence: f.consequence,
       fix: f.fix,
+      ...(rule ? { rule } : {}),
     });
   }
   const droppedBy = new Map(sub.dropped.map((d) => [d.candidate, d]));

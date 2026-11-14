@@ -74,6 +74,7 @@ openqodex review <branch | #number | pull request link> [--base <ref>] [--review
   A finding whose evidence rests on another file names those files and lines.
   `report.json` holds them under the finding's `evidence`, and the report shows them as "Evidence in other files".
   Only confirmed defects become findings or possible issues.
+  So does a confirmed break of a written rule in a chosen convention file, with the rule cited; see [Convention files](config.md#convention-files).
   Style, naming, docs and test items remain observations.
   Observations never count toward the verdict.
   Half the time left after the scan is kept for the verifiers.
@@ -85,6 +86,7 @@ openqodex review <branch | #number | pull request link> [--base <ref>] [--review
   `brief.md` stays the single-pass brief of the change.
   Unverified and unresolved candidates stay in `low_confidence` with a reason.
   Candidates without matching evidence also stay there.
+  So does a rule finding whose quote or heading is not in the file it cites.
   Observations below the confidence floor stay there with the reason `observation under the floor`.
   `review.stages: false` selects the legacy single pass.
   `--agent` and `--all` always run one pass.

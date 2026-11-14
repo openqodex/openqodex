@@ -6,7 +6,7 @@ import pc from "picocolors";
 import { deletionLabel, unreadRangeCount, deletionLabels, shortenedMissing } from "../completion.js";
 import { hunkFragmentLabel } from "../delivery.js";
 import type { CompletionRecord, ModelCompletionRecord, Report, ReportFinding, ReviewerRecord } from "../types.js";
-import { candidateLocation, coverageLine, display, escapeMarkdown, findingTitle, firstLine, location, lowConfidenceReason, notOpenedLabel, observationsOmittedLine, orderFindings, orderObservations, orderPossible, severityBreakdown, verdictLine } from "./common.js";
+import { candidateLocation, coverageLine, display, escapeMarkdown, findingTitle, firstLine, location, lowConfidenceReason, notOpenedLabel, observationsOmittedLine, orderFindings, orderObservations, orderPossible, ruleLabel, severityBreakdown, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
 
 type Line =
@@ -67,6 +67,7 @@ function findingLines(f: ReportFinding, n: number): Line[] {
     { kind: "field", label: "Why it matters", text: f.consequence ?? "" },
     { kind: "field", label: "Fix", text: f.fix ?? "" },
     { kind: "field", label: "Source", text: f.source ?? "the reviewer" },
+    ...(f.rule ? [{ kind: "field" as const, label: "Rule", text: ruleLabel(f.rule) }] : []),
     ...f.notes.map((text): Line => ({ kind: "field", label: "Note", text })),
     ...(f.found_by ? [{ kind: "field" as const, label: "Found by", text: f.found_by.join(", ") }] : []),
     ...(f.evidence?.length ? [{ kind: "field" as const, label: "Evidence in other files", text: f.evidence.map((e) => `${e.file_path}:${e.line_number}`).join(", ") }] : []),

@@ -1,5 +1,5 @@
 import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, hunkFragmentLabel, matchesGlob, oldPathOf, redactByFingerprint, redactSecrets, VERIFY_BATCH_SIZE, verifyPartDistance, hunksBlock, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank, stagedDiffCache } from "@openqodex/core";
-import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, HunkRef, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
+import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, HunkRef, InstructionFile, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
 import { MAX_CORRECTIONS, converse, deliverRanges } from "./conversation.js";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Conversation, CorrectionRound, Speaker } from "./conversation.js";
@@ -40,6 +40,8 @@ export type StagedArgs = {
   // of TIMED_OUT, and the first missing line when any stage ran out of time.
   timedOut?: string;
   confidenceFloor?: number;
+  // The instruction files the briefs quoted: a finding's rule must quote one.
+  instructionFiles?: readonly InstructionFile[];
   say: (line: string) => void;
   onRound?: (round: CorrectionRound) => void;
   onStarted?: (role: ReviewerRole, pid: number | null) => void;
@@ -375,7 +377,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     verified.sort((a, b) => a.number - b.number);
     const sourceOf = (c: VerifyCandidate) => c.kind === "scanner" ? c.candidate.token : c.candidate.lens ? `lens:${c.candidate.lens}` : null;
     const findingOf = (v: VerifyVerdict, c: VerifyCandidate): FindingV2 => {
-      return { severity: v.severity, category: v.category, confidence: v.confidence, file_path: v.file_path, line_number: v.line_number, ...(v.line_end !== undefined ? { line_end: v.line_end } : {}), title: v.title, problem: v.problem, consequence: v.consequence, fix: v.fix, suggested_change: v.suggested_change ?? null, source: sourceOf(c), candidate: c.kind === "scanner" ? c.id : null };
+      return { severity: v.severity, category: v.category, confidence: v.confidence, file_path: v.file_path, line_number: v.line_number, ...(v.line_end !== undefined ? { line_end: v.line_end } : {}), title: v.title, problem: v.problem, consequence: v.consequence, fix: v.fix, suggested_change: v.suggested_change ?? null, source: sourceOf(c), candidate: c.kind === "scanner" ? c.id : null, ...(v.rule ? { rule: v.rule } : {}) };
     };
     const analysis = findings.flatMap((f) => f.answer.analysis).map((a) => a.changed.trim().replace(/\s+/g, " ")).find(Boolean)?.split(/(?<=[.!?])\s+/)[0];
     const summary = `Reviewed ${findings.length === 0 ? "no completed finder units" : `units ${[...new Set(findings.map((f) => f.answer.unit))].join(", ")}`}.${analysis ? ` ${analysis}` : ""}`;
@@ -400,8 +402,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         }
       }
       const filteredScan = { ...scan, candidates: scan.candidates.filter((c) => !unverified.has(c.id)) };
-      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor });
-      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor }) : null;
+      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles });
+      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles }) : null;
       return { submission, findingOwners, droppedOwners, items, checked, visible };
     };
     let built = assemble();

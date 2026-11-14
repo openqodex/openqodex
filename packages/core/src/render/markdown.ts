@@ -1,5 +1,5 @@
 import type { Report, ReportFinding } from "../types.js";
-import { SEVERITIES_DESC, candidateLocation, coverageLine, escapeMarkdown, location, lowConfidenceReason, orderPossible, sourceLabel, verdictLine } from "./common.js";
+import { SEVERITIES_DESC, candidateLocation, coverageLine, escapeMarkdown, location, lowConfidenceReason, orderPossible, ruleLabel, sourceLabel, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
 import { renderObservations } from "./review.js";
 
@@ -47,7 +47,8 @@ function findingTable(findings: ReportFinding[]): string[] {
   for (const f of ordered) {
     const text = f.description ? `**${cell(f.title)}**<br>${cell(f.description)}` : `**${cell(f.title)}**`;
     const notes = f.notes.length > 0 ? `<br>_${cell(f.notes.join("; "))}_` : "";
-    rows.push(`| ${f.severity} | ${code(location(f))} | ${text}${notes} | ${code(sourceLabel(f))} |`);
+    const rule = f.rule ? `<br>Rule: ${cell(ruleLabel(f.rule))}` : "";
+    rows.push(`| ${f.severity} | ${code(location(f))} | ${text}${rule}${notes} | ${code(sourceLabel(f))} |`);
   }
   return rows;
 }
