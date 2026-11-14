@@ -872,6 +872,11 @@ export type ReportFinding = {
   fix?: string;
   // A model review only: the reviewers that raised it, the primary first.
   found_by?: string[];
+  // A staged review only: the lines in other files the finding's evidence
+  // rests on (a caller, a guard, a validator), as the finder cited them and
+  // the checks found them in the snapshot. Absent when all of it is in the
+  // finding's own file.
+  evidence?: { file_path: string; line_number: number }[];
 };
 
 // "incomplete": a review `review` ran whose completion record is incomplete.

@@ -31,7 +31,7 @@ json="$out/e2e-model.json"
 
 printf '\n== model cases ==\n'
 status=0
-pnpm vitest run --config vitest.e2e.config.ts tests/e2e/total-review.test.ts tests/e2e/action-review.test.ts --reporter=default --reporter=json --outputFile.json="$json" || status=$?
+pnpm vitest run --config vitest.e2e.config.ts tests/e2e/total-review.test.ts tests/e2e/action-review.test.ts tests/e2e/cross-file.test.ts --reporter=default --reporter=json --outputFile.json="$json" || status=$?
 
 # Every model case by its file and title: each must be in the report and
 # passed. A case added to those groups is added here too.
@@ -48,6 +48,10 @@ const expected = {
   "tests/e2e/action-review.test.ts": [
     "the Action's review mode with the real Claude Code R2, R3, R18, R20, R27, R30.",
     "the Action's review mode with the real Claude Code R6, R7, R11, R12.",
+  ],
+  "tests/e2e/cross-file.test.ts": [
+    "cross-file evidence with Claude Code as the reviewer X1.",
+    "cross-file evidence with Claude Code as the reviewer X2.",
   ],
 };
 let report;

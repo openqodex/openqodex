@@ -566,6 +566,20 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       const entry = lowConfidenceOf(item.finding);
       if (entry) removeLow(entry);
     }
+    // A confirmed finder candidate keeps the lines in other files its
+    // evidence cites. A finding whose evidence is all in its own file, or
+    // on removed lines, is left as it was.
+    const crossFile = new Map<string, NonNullable<ReportFinding["evidence"]>>();
+    for (const item of built.items) {
+      if (item.c.kind !== "finder") continue;
+      const kept = crossFile.get(keyOf(item)) ?? [];
+      for (const e of item.c.candidate.evidence) if (!e.removed && e.file_path !== item.finding.file_path && !kept.some((k) => k.file_path === e.file_path && k.line_number === e.line_number)) kept.push({ file_path: e.file_path, line_number: e.line_number });
+      if (kept.length) crossFile.set(keyOf(item), kept);
+    }
+    const withEvidence = (f: ReportFinding): ReportFinding => { const evidence = crossFile.get(findingKey(f)); return evidence ? { ...f, evidence } : f; };
+    report.findings = report.findings.map(withEvidence);
+    report.possible = report.possible.map(withEvidence);
+    report.observations = report.observations?.map(withEvidence);
     report.not_reviewed = requiredCandidates(scan, config).filter((c) => unverified.has(c.id));
     for (const c of allCandidates) {
       const verdict = verified.flatMap((o) => o.answer.verdicts).find((v) => v.id === c.id);

@@ -69,6 +69,7 @@ function findingLines(f: ReportFinding, n: number): Line[] {
     { kind: "field", label: "Source", text: f.source ?? "the reviewer" },
     ...f.notes.map((text): Line => ({ kind: "field", label: "Note", text })),
     ...(f.found_by ? [{ kind: "field" as const, label: "Found by", text: f.found_by.join(", ") }] : []),
+    ...(f.evidence?.length ? [{ kind: "field" as const, label: "Evidence in other files", text: f.evidence.map((e) => `${e.file_path}:${e.line_number}`).join(", ") }] : []),
   ];
 }
 

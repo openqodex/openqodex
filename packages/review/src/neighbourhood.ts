@@ -3,10 +3,10 @@
 import { lstatSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { changedHunks, diffHunks, display, escapeMarkdown, redactSecrets, secretTexts } from "@openqodex/core";
-import type { Change, ImpactSummary } from "@openqodex/core";
+import type { Change, ImpactSummary, VerifyCandidate } from "@openqodex/core";
 import { PACKET_DIR, PACKET_ROOT } from "@openqodex/graph";
 import { redactStored } from "./redact.js";
-import { snapshotText } from "./snapshot.js";
+import { readLines, snapshotText } from "./snapshot.js";
 
 // One place a symbol occurs. `kind` says whether a declaration regex matched
 // the line (a label, never a selector). `context` is the lines around it,
@@ -26,7 +26,17 @@ export type Neighbourhood = {
   packetPath: string | null;
   partial: string | null;
   durationMs: number;
+  contracts?: Contract[];
 };
+
+// A declaration the change adds, alters or removes, and where other files
+// call or use it, for the interfaces finder. `declaredIn`: the changed files
+// that declare it. `declared`: the declaration's first lines, null when only
+// a removed line declared it. `callers`: at most CONTRACT_CALLERS sites in
+// other files, graph sites first. `sites` and `files` count every site and
+// file seen, so a brief can say how many were cut.
+export type ContractSite = { path: string; line: number; context: string; from: "graph" | "text" };
+export type Contract = { name: string; declaredIn: string[]; declared: ContractSite | null; callers: ContractSite[]; sites: number; files: number };
 
 export const NEIGHBOURHOOD_TIME_MS = 10_000;
 export const NEIGHBOURHOOD_MAX_BYTES = 64 * 1024;
@@ -34,6 +44,12 @@ export const NEIGHBOURHOOD_BLOCK_BYTES = 24 * 1024;
 export const NEIGHBOURHOOD_MAX_FILES_PER_SYMBOL = 200;
 export const NEIGHBOURHOOD_SITES_PER_SYMBOL = 12;
 export const NEIGHBOURHOOD_SYMBOLS_PER_FILE = 30;
+export const CONTRACT_CALLERS = 8;
+export const CONTRACT_SYMBOLS = 200;
+export const CONTRACTS_BLOCK_BYTES = 12 * 1024;
+// Lines shown above and below a caller, and below a declaration.
+const CONTRACT_CONTEXT = 4;
+const CONTRACT_DECLARATION_LINES = 5;
 
 const MAX_TEXT_BYTES = 512 * 1024;
 const IGNORED = new Set([".git", "node_modules", "vendor", "dist", "build", "target", ".openqodex", PACKET_ROOT]);
@@ -54,6 +70,13 @@ const DECLARATIONS = [
   /\b(?:const|let|var|val)\s+([A-Za-z_][A-Za-z0-9_]{2,})\b/g,
   /\b(?:public|private|protected|internal)\s+(?:(?:static|final|abstract|virtual|override|async)\s+)*[A-Za-z_][A-Za-z0-9_<>,.?[\]]*\s+([A-Za-z_][A-Za-z0-9_]{2,})\s*\(/g,
 ];
+// The declarations a contract is seeded from: functions, types, methods
+// and exported values. A local `const` is not a contract between files.
+const CONTRACT_DECLARATIONS = [
+  DECLARATIONS[0]!, DECLARATIONS[1]!, DECLARATIONS[3]!,
+  /^\s*export\s+(?:default\s+)?(?:declare\s+)?(?:const|let|var|type|async\s+function)\s+([A-Za-z_][A-Za-z0-9_]{2,})\b/g,
+];
+const CONTRACTS_HEADER = "## Callers of the changed declarations\n\nEach declaration this change adds, alters or removes, and where other files call or use it. Graph entries are certain callers; name matches are unverified. Check that every caller still fits the declaration as changed: its arguments, its use of the result, the errors it expects.";
 const HEADER = "## Code around the change\n\nThe identifiers on the changed lines, and where the repository declares and uses them. Graph entries are certain callers; name matches are unverified. Read the other side of every changed call here before judging it.";
 const PACKET_PATH = `${PACKET_ROOT}/neighbourhood.md`;
 
@@ -68,11 +91,15 @@ function declaredNames(line: string): Set<string> {
   return new Set(DECLARATIONS.flatMap((pattern) => [...line.matchAll(pattern)].map((m) => m[1])));
 }
 
-function contextAt(lines: string[], index: number, secrets: string[]): string {
+function contractNames(line: string): string[] {
+  return [...new Set(CONTRACT_DECLARATIONS.flatMap((pattern) => [...line.matchAll(pattern)].map((m) => m[1]!)))].filter((name) => !STOP_WORDS.has(name));
+}
+
+function contextAt(lines: string[], index: number, secrets: string[], before = 2, after = 2): string {
   // Two lines above, the site, and two below, clipped at the file's ends.
   // Redact before clipping so a cut cannot leave part of a secret behind.
-  const start = Math.max(0, index - 2);
-  return lines.slice(start, index + 3).map((line, i) => {
+  const start = Math.max(0, index - before);
+  return lines.slice(start, index + after + 1).map((line, i) => {
     const clean = redactSecrets(line, secrets);
     return `${start + i + 1}\t${clean.length > 240 ? `${clean.slice(0, 240)} [cut]` : clean}`;
   }).join("\n");
@@ -102,17 +129,20 @@ function graphSites(impact: ImpactSummary | null, names: Map<string, Collected>)
   return out;
 }
 
+// A repository fence must not close the fence around its context.
+function fenced(context: string): string {
+  let longest = 2;
+  for (const match of context.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
+  const fence = "`".repeat(longest + 1);
+  return `${fence}\n${context}\n${fence}`;
+}
+
+const fromLabel = (from: "graph" | "text") => from === "graph" ? "from the code graph" : "by name, unverified: the same name may be another thing";
+
 function renderSymbol(symbol: NeighbourhoodSymbol): string {
   const count = symbol.filesOverCap === undefined ? String(symbol.files) : `over ${symbol.filesOverCap}`;
   const out = [`#### ${escapeMarkdown(display(symbol.name))}: ${count} snapshot files`];
-  for (const site of symbol.sites) {
-    const from = site.from === "graph" ? "from the code graph" : "by name, unverified: the same name may be another thing";
-    // A repository fence must not close the fence around its context.
-    let longest = 2;
-    for (const match of site.context.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
-    const fence = "`".repeat(longest + 1);
-    out.push(`${site.kind} at ${escapeMarkdown(display(site.path))}:${site.line} (${from})\n\n${fence}\n${site.context}\n${fence}`);
-  }
+  for (const site of symbol.sites) out.push(`${site.kind} at ${escapeMarkdown(display(site.path))}:${site.line} (${fromLabel(site.from)})\n\n${fenced(site.context)}`);
   return out.join("\n\n");
 }
 
@@ -238,10 +268,27 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
         addName(file, name);
       }
     };
+    // The declarations the change adds, alters or removes, at most
+    // CONTRACT_SYMBOLS, with where each is declared (none for a removed one).
+    type Seed = { name: string; declaredIn: Set<string>; at: { path: string; line: number; end: number } | null; declared: ContractSite | null; graph: ContractSite[]; text: ContractSite[]; sites: number; files: number; last: string | null };
+    const contracts = new Map<string, Seed>();
+    const seed = (name: string, path: string, at: { line: number; end: number } | null): void => {
+      let c = contracts.get(name);
+      if (!c) {
+        if (contracts.size >= CONTRACT_SYMBOLS) return;
+        contracts.set(name, (c = { name, declaredIn: new Set(), at: null, declared: null, graph: [], text: [], sites: 0, files: 0, last: null }));
+      }
+      c.declaredIn.add(path);
+      if (at && !c.at) c.at = { path, ...at };
+    };
     // A body edit need not spell its enclosing symbol's name. The graph
     // knows which declarations were touched or removed, even without text.
     const touched = new Set([...(args.impact?.touched ?? []), ...(args.impact?.removed ?? [])]);
-    for (const symbol of args.impact?.symbols ?? []) if (touched.has(symbol.id)) addName(symbol.file, symbol.name);
+    for (const symbol of args.impact?.symbols ?? []) {
+      if (!touched.has(symbol.id)) continue;
+      addName(symbol.file, symbol.name);
+      if (symbol.kind !== "file" && symbol.kind !== "module") seed(symbol.name, symbol.file, symbol.snapshot === "current" ? { line: symbol.startLine, end: symbol.endLine } : null);
+    }
 
     let skippedPages = 0;
     for (const diff of args.change.diffs ?? []) {
@@ -253,7 +300,10 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
         for (const line of redactSecrets(hunk, args.secrets).split("\n")) {
           if (n++ % 256 === 0 && expired()) break;
           if (line.startsWith("@@")) inHunk = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line);
-          else if (inHunk && line.startsWith("-")) add(diff.path, line.slice(1));
+          else if (inHunk && line.startsWith("-")) {
+            add(diff.path, line.slice(1));
+            if (!binary.has(diff.path)) for (const name of contractNames(line.slice(1))) seed(name, diff.path, null);
+          }
           else if (!/^[ +\\]/.test(line)) inHunk = false;
         }
       }
@@ -278,6 +328,7 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
         for (let i = Math.max(0, hunk.start - 1); i < Math.min(lines.length, hunk.end); i++) {
           if (i % 256 === 0 && expired()) break;
           add(path, lines[i]);
+          for (const name of contractNames(lines[i])) seed(name, path, { line: i + 1, end: i + 1 + CONTRACT_DECLARATION_LINES });
         }
         if (timedOut) break;
       }
@@ -292,10 +343,17 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
       const seen = new Set<string>();
       const changed = args.change.coverage.get(path);
       const graphLines = graph.get(path);
+      for (const c of contracts.values()) {
+        if (c.at?.path !== path || c.declared || c.at.line > lines.length) continue;
+        c.declared = { path, line: c.at.line, from: args.impact?.symbols.some((s) => s.file === path && s.name === c.name) ? "graph" : "text", context: contextAt(lines, c.at.line - 1, args.secrets, 0, Math.max(0, Math.min(CONTRACT_DECLARATION_LINES, c.at.end - c.at.line))) };
+      }
       for (let i = 0; i < lines.length; i++) {
         if (i % 256 === 0 && expired()) break;
         const matches = new Set<string>();
+        let callers: Set<string> | undefined;
         for (const [name] of lines[i].matchAll(IDENTIFIER)) {
+          const contract = contracts.get(name);
+          if (contract && !contract.declaredIn.has(path)) (callers ??= new Set()).add(name);
           const symbol = names.get(name);
           if (!symbol || symbol.files > maxFiles) continue;
           if (!seen.has(name)) {
@@ -307,6 +365,14 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
             }
           }
           matches.add(name);
+        }
+        // Every caller in another file is counted; the first few are kept.
+        for (const name of callers ?? []) {
+          const c = contracts.get(name)!;
+          const from = graphLines?.get(i + 1)?.has(name) ? "graph" : "text";
+          c.sites++;
+          if (c.last !== path) { c.last = path; c.files++; }
+          if (c[from].length < CONTRACT_CALLERS) c[from].push({ path, line: i + 1, from, context: contextAt(lines, i, args.secrets, CONTRACT_CONTEXT, CONTRACT_CONTEXT) });
         }
         if (changed?.has(i + 1)) continue;
         let context: string | undefined;
@@ -347,15 +413,16 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     }
     duration();
     const symbols = redactStored([...selected.values()], args.secrets);
+    const found: Contract[] = redactStored([...contracts.values()].filter((c) => c.sites > 0).map((c) => ({ name: c.name, declaredIn: [...c.declaredIn], declared: c.declared, callers: [...c.graph, ...c.text].slice(0, CONTRACT_CALLERS), sites: c.sites, files: c.files })), args.secrets);
     const timeReason = [timedOut ? `Time cap reached after ${filesRead} of ${totalFiles} files; file counts and sites are partial.` : null, skippedPages ? `Skipped ${skippedPages} diff pages over the 512 KB byte budget.` : null].filter(Boolean).join(" ") || null;
-    if (symbols.length === 0) return { symbols, packetPath: null, partial: timeReason, durationMs: elapsed };
+    if (symbols.length === 0) return { symbols, packetPath: null, partial: timeReason, durationMs: elapsed, contracts: found };
     const sizeReason = (kept: number) => kept < symbols.length ? `${symbols.length - kept} symbols cut at the packet byte cap.` : null;
     const fit = capped(symbols, NEIGHBOURHOOD_MAX_BYTES, (kept) => [timeReason, sizeReason(kept)].filter((x): x is string => x !== null));
     const text = redactSecrets(fit.text, args.secrets);
     if (secretTexts(args.secrets).some((secret) => PACKET_PATH.includes(secret) || text.includes(secret))) throw new Error("A secret remains in the neighbourhood packet or its path");
     writePacket(args.snapshotDir, args.impact, text);
     duration();
-    return { symbols: fit.symbols, packetPath: PACKET_PATH, partial: [timeReason, sizeReason(fit.symbols.length)].filter(Boolean).join(" ") || null, durationMs: elapsed };
+    return { symbols: fit.symbols, packetPath: PACKET_PATH, partial: [timeReason, sizeReason(fit.symbols.length)].filter(Boolean).join(" ") || null, durationMs: elapsed, contracts: found };
   } catch (error) {
     try { duration(); } catch { /* Keep the last duration if the clock failed. */ }
     return { symbols: [], packetPath: null, partial: redactSecrets(`Could not build code around the change: ${display(error instanceof Error ? error.message : String(error))}`, args.secrets), durationMs: elapsed };
@@ -364,15 +431,94 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
 
 // The "## Code around the change" block for a brief: the entries whose
 // symbols were changed in `forFiles` (every changed file when left out), at
-// most NEIGHBOURHOOD_BLOCK_BYTES, and the packet's path for the rest. Empty
-// string when the packet has nothing.
-export function renderNeighbourhoodBlock(packet: Neighbourhood, forFiles?: readonly string[]): string {
+// most `maxBytes`, and the packet's path for the rest. Empty string when the
+// packet has nothing.
+export function renderNeighbourhoodBlock(packet: Neighbourhood, forFiles?: readonly string[], maxBytes = NEIGHBOURHOOD_BLOCK_BYTES): string {
   const files = forFiles ? new Set(forFiles) : undefined;
   const symbols = packet.symbols.filter((s) => !files || s.changedIn.some((file) => files.has(file)));
   if (symbols.length === 0) return "";
-  return capped(symbols, NEIGHBOURHOOD_BLOCK_BYTES, (kept) => {
+  return capped(symbols, maxBytes, (kept) => {
     const notes = packet.partial ? [packet.partial] : [];
     if (kept < symbols.length) notes.push(packet.packetPath ? `Read ${escapeMarkdown(display(packet.packetPath))} for the remaining ${symbols.length - kept} symbols.` : `${symbols.length - kept} symbols left out; no packet was written.`);
     return notes;
   }, files).text;
+}
+
+// The "## Callers of the changed declarations" block for the interfaces
+// finder: each declaration changed in `forFiles`, its first lines and its
+// callers in other files, at most `maxBytes`. Whatever a cap or the budget
+// cut is said, with the count of what remains. Empty string when no changed
+// declaration has a caller in another file.
+export function renderContractsBlock(packet: Neighbourhood, forFiles: readonly string[], maxBytes = CONTRACTS_BLOCK_BYTES): string {
+  const files = new Set(forFiles);
+  const contracts = (packet.contracts ?? []).filter((c) => c.declaredIn.some((file) => files.has(file)));
+  if (contracts.length === 0) return "";
+  const out = [CONTRACTS_HEADER];
+  const leftOutNote = (n: number) => `${n} more changed ${n === 1 ? "declaration was" : "declarations were"} left out at this brief's size budget: search for ${n === 1 ? "its" : "their"} callers with your tools.`;
+  // The longest note is reserved, so it always fits.
+  let bytes = Buffer.byteLength(CONTRACTS_HEADER) + Buffer.byteLength(leftOutNote(contracts.length)) + 4;
+  let left = 0;
+  for (const c of contracts) {
+    const where = c.declared
+      ? `declared at ${escapeMarkdown(display(c.declared.path))}:${c.declared.line}\n\n${fenced(c.declared.context)}`
+      : `declared on a removed line of ${c.declaredIn.map((file) => escapeMarkdown(display(file))).join(", ")}`;
+    const head = `### ${escapeMarkdown(display(c.name))}, ${where}`;
+    const callers = c.callers.map((site) => `${site.from === "graph" ? "caller" : "use"} at ${escapeMarkdown(display(site.path))}:${site.line} (${fromLabel(site.from)})\n\n${fenced(site.context)}`);
+    const count = (shown: number, why: string | null) => `The name appears at ${c.sites} ${c.sites === 1 ? "site" : "sites"} in ${c.files} other ${c.files === 1 ? "file" : "files"}.${shown < c.sites ? ` ${shown} shown; ${c.sites - shown} cut ${why}: search for the rest with your tools.` : ""}`;
+    // The longest count line is reserved before any caller is kept.
+    const reserve = Buffer.byteLength(count(0, "at this brief's size budget")) + 2;
+    let size = Buffer.byteLength(head) + 2 + reserve;
+    if (bytes + size > maxBytes) { left++; continue; }
+    const kept: string[] = [];
+    for (const caller of callers) {
+      const extra = Buffer.byteLength(caller) + 2;
+      if (bytes + size + extra > maxBytes) break;
+      size += extra;
+      kept.push(caller);
+    }
+    const why = kept.length < callers.length ? "at this brief's size budget" : `at the cap of ${CONTRACT_CALLERS} per declaration`;
+    out.push(head, count(kept.length, why), ...kept);
+    bytes += size;
+  }
+  if (left > 0) out.push(leftOutNote(left));
+  return out.join("\n\n") + "\n";
+}
+
+export const CITED_BLOCK_BYTES = 12 * 1024;
+// Lines shown above and below a line a candidate cites in another file.
+const CITED_CONTEXT = 6;
+
+// The "## Cited code in other files" block for a verifier: the lines around
+// each line a finder candidate cites outside `batch.file`, read from the
+// snapshot, at most `maxBytes`. A removed line, or a path the snapshot does
+// not hold as a text file inside it (outside the folder, under .git, a
+// link, missing), is never read: it is named as not shown.
+export function renderCitedBlock(snapshotDir: string, batch: { file: string; candidates: VerifyCandidate[] }, secrets: string[], maxBytes = CITED_BLOCK_BYTES): string {
+  const cited = new Map<string, { id: string; path: string; line: number }>();
+  for (const c of batch.candidates) {
+    if (c.kind !== "finder") continue;
+    for (const e of c.candidate.evidence) if (!e.removed && e.file_path !== batch.file && !cited.has(`${e.file_path}\0${e.line_number}`)) cited.set(`${e.file_path}\0${e.line_number}`, { id: c.id, path: e.file_path, line: e.line_number });
+  }
+  if (cited.size === 0) return "";
+  const header = `## Cited code in other files\n\nThe lines the candidates cite outside ${escapeMarkdown(display(batch.file))}, as the snapshot holds them. Read them before you confirm or refute: a caller, a guard or a check there can prove or disprove the claim.`;
+  const out = [header];
+  const notShown: string[] = [];
+  // Room for the note, which names at most five ranges of 200 characters.
+  let bytes = Buffer.byteLength(header) + 1536;
+  for (const { id, path, line } of cited.values()) {
+    const from = Math.max(1, line - CITED_CONTEXT);
+    const text = readLines(snapshotDir, path, from, line + CITED_CONTEXT, 64 * 1024);
+    const label = `${escapeMarkdown(display(path))}:${line}`;
+    if (text === null || text === "") { notShown.push(`${label} (not a text file in the snapshot)`); continue; }
+    const rows = text.replace(/\n$/, "").split("\n").map((row, i) => {
+      const clean = redactSecrets(row, secrets);
+      return `${from + i}\t${clean.length > 240 ? `${clean.slice(0, 240)} [cut]` : clean}`;
+    }).join("\n");
+    const entry = `### ${id} cites ${label}\n\n${fenced(rows)}`;
+    if (bytes + Buffer.byteLength(entry) + 2 > maxBytes) { notShown.push(`${label} (over this brief's size budget; read it with your tools)`); continue; }
+    bytes += Buffer.byteLength(entry) + 2;
+    out.push(entry);
+  }
+  if (notShown.length > 0) out.push(`Not shown: ${notShown.slice(0, 5).map((label) => label.length > 200 ? `${label.slice(0, 200)} [cut]` : label).join("; ")}${notShown.length > 5 ? `; and ${notShown.length - 5} more` : ""}.`);
+  return redactSecrets(out.join("\n\n") + "\n", secrets);
 }

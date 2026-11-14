@@ -279,6 +279,7 @@ function findingCard(f: ReportFinding, n: number | string, section: "observation
   if (f.consequence) rows.push(`<dt>Why it matters</dt><dd>${paragraphs(f.consequence)}</dd>`);
   if (f.fix) rows.push(`<dt>Fix</dt><dd>${paragraphs(f.fix)}</dd>`);
   for (const note of f.notes ?? []) rows.push(`<dt>Note</dt><dd><p>${text(note)}</p></dd>`);
+  if (f.evidence?.length) rows.push(`<dt>Evidence in other files</dt><dd><p>${text(f.evidence.map((e) => `${e.file_path}:${e.line_number}`).join(", "))}</p></dd>`);
   const suggested = f.suggested_change ? `<details class="suggested"><summary>Suggested change</summary><pre>${block(f.suggested_change)}</pre></details>` : "";
   const conf = typeof f.confidence === "number" ? `<span class="finding-confidence">confidence ${num(f.confidence)}</span>` : "";
   const candidate = f.candidate ? `<span class="finding-candidate">raises ${text(f.candidate)}</span>` : "";
