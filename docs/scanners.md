@@ -219,7 +219,7 @@ Several scanners read settings or an ignore list from the repository, as OpenQod
 | zizmor | `.github/zizmor.yml`, `.github/zizmor.yaml`, `zizmor.yml`, `zizmor.yaml` | the repository root only |
 | squawk | `.squawk.toml` | the repository root only |
 | trivy | `.trivyignore` | the repository root only |
-| ruff | `ruff.toml`, `.ruff.toml`; `pyproject.toml` when the change alters its `[tool.ruff]` table, or the `requires-python` beside that table, which ruff reads as its target version | any folder |
+| ruff | `ruff.toml`, `.ruff.toml`; `pyproject.toml` when the change alters its `[tool.ruff]` table or its `requires-python`, which ruff reads as its target version | any folder |
 | shellcheck | `.shellcheckrc`, `shellcheckrc` | any folder |
 | osv-scanner | `osv-scanner.toml` | any folder |
 | SQLFluff | `.sqlfluff`, `.sqlfluffignore`; `setup.cfg`, `tox.ini` and `pep8.ini` when the change alters their `[sqlfluff]` and `[sqlfluff:...]` sections, with their `[DEFAULT]` keys; `pyproject.toml` when the change alters its `[tool.sqlfluff]` table | any folder |
