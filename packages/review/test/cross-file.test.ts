@@ -23,6 +23,8 @@
 //  7. Two changed files each declare a function of the same name: their
 //     callers are pooled under one declaration, so the second declaration is
 //     never shown and its caller falls past the first one's cap.
+//  8. The confirmed finding keeps a line in another file that its candidate
+//     cited but the verifier did not rely on.
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -74,7 +76,8 @@ function repo(callers = 0): Repo {
 }
 
 type Citation = { file_path: string; line_number: number; quote: string };
-type Raised = { pass: "local" | "contracts"; line: number; title: string; evidence: Citation[] };
+// `relied`: the lines in other files the verifier says its verdict rests on.
+type Raised = { pass: "local" | "contracts"; line: number; title: string; evidence: Citation[]; relied?: { file_path: string; line_number: number }[] };
 
 const CROSS: Raised = {
   pass: "contracts", line: 3, title: "Caller reads a field of a missing user",
@@ -82,6 +85,7 @@ const CROSS: Raised = {
     { file_path: "src/users.ts", line_number: 3, quote: "export function findUser(id: string): User | undefined {" },
     { file_path: "src/greet.ts", line_number: 5, quote: "return `Hello ${user.name}`;" },
   ],
+  relied: [{ file_path: "src/greet.ts", line_number: 5 }],
 };
 const LOCAL: Raised = {
   pass: "local", line: 4, title: "Lookup no longer throws",
@@ -89,7 +93,8 @@ const LOCAL: Raised = {
 };
 
 // The model provider: each finder pass raises the candidates given for it,
-// and the verifier confirms every finder candidate. It keeps every brief.
+// and the verifier confirms every finder candidate, relying on the lines in
+// `relied`. It keeps every brief.
 function provider(raised: Raised[]): ModelReviewer & { finds: Map<string, string>; contracts: string[]; verifies: string[] } {
   const finds = new Map<string, string>();
   const contracts: string[] = [];
@@ -115,7 +120,7 @@ function provider(raised: Raised[]): ModelReviewer & { finds: Map<string, string
         const ids = [...brief.matchAll(/^### (k\d+) \(finder\)\n[\s\S]*?^- Location: src\/users\.ts:(\d+)$[\s\S]*?^- Title: (.*)$/gm)];
         answer = {
           version: "verify-1", change_id: changeId,
-          verdicts: ids.map((m) => ({ id: m[1], verdict: "confirmed", reason: `src/users.ts:${m[2]} returns the lookup result unchecked.`, duplicate_of: null, severity: "major", category: "bug", confidence: 0.9, file_path: "src/users.ts", line_number: Number(m[2]), title: m[3], problem: "The lookup can return no user.", consequence: "The greeting then fails at run time.", fix: "Check the result before reading its name.", suggested_change: null, tier: "finding" })),
+          verdicts: ids.map((m) => ({ id: m[1], verdict: "confirmed", reason: `src/users.ts:${m[2]} returns the lookup result unchecked.`, duplicate_of: null, severity: "major", category: "bug", confidence: 0.9, file_path: "src/users.ts", line_number: Number(m[2]), title: m[3], problem: "The lookup can return no user.", consequence: "The greeting then fails at run time.", fix: "Check the result before reading its name.", suggested_change: null, tier: "finding", relied_on: raised.find((r) => r.title === m[3])?.relied ?? null })),
         };
       }
       return { message: { text: JSON.stringify(answer), toolCalls: [] }, usage: { model: "fixture-model", inputTokens: 100, outputTokens: 50, costUsd: 0.001 } };
@@ -210,6 +215,19 @@ describe("cross-file evidence in the staged review", () => {
     expect(Buffer.byteLength(contracts)).toBeLessThanOrEqual(CONTRACTS_BLOCK_BYTES);
     expect(Buffer.byteLength(contracts) + Buffer.byteLength(block(brief, "## Code around the change"))).toBeLessThanOrEqual(NEIGHBOURHOOD_BLOCK_BYTES + 4);
     expect(Buffer.byteLength(brief)).toBeLessThan(MAX_BRIEF_BYTES);
+  }, 180_000);
+
+  it("8. keeps on the finding only the cited lines in other files the verifier relied on", async () => {
+    const both: Raised = { ...CROSS, evidence: [...CROSS.evidence, { file_path: "src/greet.ts", line_number: 4, quote: "const user = findUser(id);" }] };
+    const { result, model } = await review([both]);
+    expect(result.status, result.reason).toMatch(/^complete/);
+    expect(model.verifies.join("\n")).toContain("- `relied_on`: for a confirmed finder candidate, the lines its evidence cites in other files");
+    expect(result.findings.find((f) => f.title === CROSS.title)!.evidence).toEqual([{ file: "src/greet.ts", line: 5 }]);
+
+    const none = await review([{ ...both, relied: [] }]);
+    const finding = none.result.findings.find((f) => f.title === CROSS.title)!;
+    expect(finding).toBeDefined();
+    expect("evidence" in finding).toBe(false);
   }, 180_000);
 
   it("7. shows each of two changed declarations of one name with its own callers", async () => {

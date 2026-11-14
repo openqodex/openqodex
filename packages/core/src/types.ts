@@ -732,6 +732,9 @@ export type VerifyVerdict = {
   suggested_change?: string | null;
   tier: "finding" | "observation";
   rule?: RuleCitation | null;
+  // For a confirmed finder candidate: the lines its evidence cites in other
+  // files that the verdict rests on. Only these stay on the finding.
+  relied_on?: { file_path: string; line_number: number }[] | null;
 };
 
 export type VerifyAnswer = { version: "verify-1"; change_id: string; verdicts: VerifyVerdict[] };
