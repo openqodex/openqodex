@@ -67,6 +67,7 @@ openqodex review <branch | #number | pull request link> [--base <ref>] [--review
   Candidates without matching evidence are dropped.
   For each changed file, a fresh verifier checks the finder and scanner candidates on that file.
   Only confirmed defects become findings or possible issues.
+  So does a confirmed break of a written rule in a chosen convention file, with the rule cited; see [Convention files](config.md#convention-files).
   Style, naming, docs and test items remain observations.
   Observations never count toward the verdict.
   Half the time left after the scan is kept for the verifiers.
@@ -78,6 +79,7 @@ openqodex review <branch | #number | pull request link> [--base <ref>] [--review
   `brief.md` stays the single-pass brief of the change.
   Unverified and unresolved candidates stay in `low_confidence` with a reason.
   Candidates without matching evidence also stay there.
+  So does a rule finding whose quote or heading is not in the file it cites.
   Observations below the confidence floor stay there with the reason `observation under the floor`.
   `review.stages: false` selects the legacy single pass.
   `--agent` and `--all` always run one pass.

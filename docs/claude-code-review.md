@@ -16,6 +16,7 @@ Two finder processes read each [unit](#rows-parts-and-units) of the change, with
 A unit is a few small files, one part of a big file, or one structural summary.
 A fresh verifier process checks every candidate the finders raise.
 Only confirmed defects become findings.
+So does a confirmed break of a written rule in a chosen convention file, with the rule cited.
 Style, naming, docs and test items appear as observations.
 Observations do not affect the verdict.
 Every scanner finding is checked too.

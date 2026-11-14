@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import type { Candidate, ImpactEdge, ImpactSummary, Report, ReportFinding } from "../types.js";
 import type { Display, DisplayFile, DisplayHunk } from "./display.js";
-import { coverageLine, lowConfidenceReason, observationsOmittedLine, orderObservations, orderPossible, verdictLine } from "./common.js";
+import { coverageLine, lowConfidenceReason, observationsOmittedLine, orderObservations, orderPossible, ruleLabel, verdictLine } from "./common.js";
 import { REPORT_CSS } from "./html-style.js";
 import { fileCoverageLines, modelReviewerLine, product } from "./review.js";
 
@@ -278,6 +278,7 @@ function findingCard(f: ReportFinding, n: number | string, section: "observation
   if (problem) rows.push(`<dt>Problem</dt><dd>${paragraphs(problem)}</dd>`);
   if (f.consequence) rows.push(`<dt>Why it matters</dt><dd>${paragraphs(f.consequence)}</dd>`);
   if (f.fix) rows.push(`<dt>Fix</dt><dd>${paragraphs(f.fix)}</dd>`);
+  if (f.rule) rows.push(`<dt>Rule</dt><dd><p>${text(ruleLabel(f.rule))}</p></dd>`);
   for (const note of f.notes ?? []) rows.push(`<dt>Note</dt><dd><p>${text(note)}</p></dd>`);
   const suggested = f.suggested_change ? `<details class="suggested"><summary>Suggested change</summary><pre>${block(f.suggested_change)}</pre></details>` : "";
   const conf = typeof f.confidence === "number" ? `<span class="finding-confidence">confidence ${num(f.confidence)}</span>` : "";

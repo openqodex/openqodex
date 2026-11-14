@@ -11,7 +11,7 @@
 //          of every response.
 // Nothing a reviewer says about itself is proof: what was read, what was
 // shown and what was used come from the brain's own records.
-import type { Category, Config, ContextItem, Coverage, Disagreement, ModelCompletionRecord, RunManifest, RunTimings, ScanResult, Severity } from "@openqodex/core";
+import type { Category, Config, ContextItem, Coverage, Disagreement, ModelCompletionRecord, RuleCitation, RunManifest, RunTimings, ScanResult, Severity } from "@openqodex/core";
 import type { ReviewerDriver, Turn } from "./agents/driver.js";
 import type { CorrectionRound } from "./conversation.js";
 import type { ReviewScope } from "./incremental.js";
@@ -218,6 +218,8 @@ export type ResultFinding = {
   foundBy: string[];
   source: string | null;
   candidate: string | null;
+  // A finding that breaks a written rule of a supplied instruction file.
+  rule?: RuleCitation;
 };
 
 // What the reviewer did with one scanner candidate: raised it in a finding,

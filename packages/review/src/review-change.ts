@@ -657,7 +657,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       clock.enter("reviewer");
       say(`Reviewer: ${agent ? `${agent.driver.name} ${agent.version}` : `model ${model!.reviewer.model}`}; staged review, ${unitCount} units, ${unitCount * 2} finder sessions, then verifiers; this takes several minutes`);
       const stagedRun = await runStagedReview({
-        snapshotDir: prep.snapshot.tree, change, citationChange: full, scan, config, manifest, secrets: p.secrets, deadline, now: deps.now, traced, model: model !== null, timedOut: inputs.timedOut, confidenceFloor: inputs.confidenceFloor, say, stopped: () => stopped,
+        snapshotDir: prep.snapshot.tree, change, citationChange: full, scan, config, manifest, secrets: p.secrets, deadline, now: deps.now, traced, model: model !== null, timedOut: inputs.timedOut, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files, say, stopped: () => stopped,
         inventory, units, findBrief,
         onUnits: (units) => deps.onEvent({ type: "staged-units", units }),
         verifyBrief: (batch) => buildVerifyBrief({ ...briefArgs, neighbourhoodBlock: neighbourhoodBlock([batch.file]) }, batch),
@@ -705,7 +705,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
             started: (s) => { session = register(s); say(`Second reviewer: model ${deps.model!.second!.model} started`); },
             converse: (s) => converse({ session: s, snapshotDir: prep.snapshot.tree, brief: brief.text, deadline, traced: true, say, now: deps.now,
               check: (submission, trace, delivered) => {
-                const checked = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, confidenceFloor: inputs.confidenceFloor });
+                const checked = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files });
                 return { report: checked.ok ? checked.report : null, errors: checked.ok ? [] : checked.errors, unread: singlePassModelCoverage({ change, briefSent: true, diffFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread, required: checked.required, disposed: checked.disposed };
               },
               deliver: (unread, earlier) => deliverRanges({ snapshotDir: prep.snapshot.tree, unread, earlier, secrets: p.secrets, change }),
@@ -756,7 +756,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     // The checks every answer passes, and the changed ranges a correction
     // round carries: the same for the primary and the second reviewer.
     const check: Parameters<typeof converse>[0]["check"] = (submission, trace, delivered) => {
-      const r = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, wholeRepo: prep.whole ? { lines: prep.whole.lines } : undefined, confidenceFloor: inputs.confidenceFloor });
+      const r = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, wholeRepo: prep.whole ? { lines: prep.whole.lines } : undefined, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files });
       // A model reviewer's reads count once a request carrying them was sent.
       const unread = prep.whole
         ? []
@@ -998,6 +998,7 @@ function resultFindings(findings: Report["findings"], foundBy: string[][]): Resu
     foundBy: foundBy[i] ?? [],
     source: f.source,
     candidate: f.candidate,
+    ...(f.rule ? { rule: f.rule } : {}),
   }));
 }
 
