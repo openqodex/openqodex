@@ -105,9 +105,13 @@ function contextAt(lines: string[], index: number, secrets: string[], before = 2
   }).join("\n");
 }
 
+// A declaration's identity: the file that declares it and its name.
+const declarationKey = (path: string, name: string) => `${path}\0${name}`;
+
 // Only the edge into the touched symbol proves a caller of that symbol.
 // A second hop calls the first caller, not necessarily the changed name.
-function graphSites(impact: ImpactSummary | null, names: Map<string, Collected>): GraphSites {
+// `declarations` gets the same sites keyed by the target's declarationKey.
+function graphSites(impact: ImpactSummary | null, names: Map<string, Collected>, declarations: GraphSites): GraphSites {
   const out: GraphSites = new Map();
   if (!impact) return out;
   const symbols = new Map(impact.symbols.map((s) => [s.id, s]));
@@ -124,6 +128,11 @@ function graphSites(impact: ImpactSummary | null, names: Map<string, Collected>)
       let at = lines.get(site.line);
       if (!at) lines.set(site.line, (at = new Set()));
       at.add(target.name);
+      let byLine = declarations.get(site.file);
+      if (!byLine) declarations.set(site.file, (byLine = new Map()));
+      let keys = byLine.get(site.line);
+      if (!keys) byLine.set(site.line, (keys = new Set()));
+      keys.add(declarationKey(target.file, target.name));
     }
   }
   return out;
@@ -270,13 +279,18 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     };
     // The declarations the change adds, alters or removes, at most
     // CONTRACT_SYMBOLS, with where each is declared (none for a removed one).
-    type Seed = { name: string; declaredIn: Set<string>; at: { path: string; line: number; end: number } | null; declared: ContractSite | null; graph: ContractSite[]; text: ContractSite[]; sites: number; files: number; last: string | null };
+    // Two changed files that declare the same name are two declarations,
+    // each with its own callers.
+    type Seed = { key: string; name: string; declaredIn: Set<string>; at: { path: string; line: number; end: number } | null; declared: ContractSite | null; graph: ContractSite[]; text: ContractSite[]; sites: number; files: number; last: string | null };
     const contracts = new Map<string, Seed>();
+    const contractsByName = new Map<string, Seed[]>();
     const seed = (name: string, path: string, at: { line: number; end: number } | null): void => {
-      let c = contracts.get(name);
+      const key = declarationKey(path, name);
+      let c = contracts.get(key);
       if (!c) {
         if (contracts.size >= CONTRACT_SYMBOLS) return;
-        contracts.set(name, (c = { name, declaredIn: new Set(), at: null, declared: null, graph: [], text: [], sites: 0, files: 0, last: null }));
+        contracts.set(key, (c = { key, name, declaredIn: new Set(), at: null, declared: null, graph: [], text: [], sites: 0, files: 0, last: null }));
+        contractsByName.set(name, [...(contractsByName.get(name) ?? []), c]);
       }
       c.declaredIn.add(path);
       if (at && !c.at) c.at = { path, ...at };
@@ -333,7 +347,8 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
         if (timedOut) break;
       }
     }
-    const graph = graphSites(args.impact, names);
+    const graphDeclarations: GraphSites = new Map();
+    const graph = graphSites(args.impact, names, graphDeclarations);
     const maxFiles = args.maxFilesPerSymbol ?? NEIGHBOURHOOD_MAX_FILES_PER_SYMBOL;
     for (const path of paths) {
       if (expired()) break;
@@ -343,6 +358,7 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
       const seen = new Set<string>();
       const changed = args.change.coverage.get(path);
       const graphLines = graph.get(path);
+      const declarationLines = graphDeclarations.get(path);
       for (const c of contracts.values()) {
         if (c.at?.path !== path || c.declared || c.at.line > lines.length) continue;
         c.declared = { path, line: c.at.line, from: args.impact?.symbols.some((s) => s.file === path && s.name === c.name) ? "graph" : "text", context: contextAt(lines, c.at.line - 1, args.secrets, 0, Math.max(0, Math.min(CONTRACT_DECLARATION_LINES, c.at.end - c.at.line))) };
@@ -350,10 +366,9 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
       for (let i = 0; i < lines.length; i++) {
         if (i % 256 === 0 && expired()) break;
         const matches = new Set<string>();
-        let callers: Set<string> | undefined;
+        let callers: Set<Seed> | undefined;
         for (const [name] of lines[i].matchAll(IDENTIFIER)) {
-          const contract = contracts.get(name);
-          if (contract && !contract.declaredIn.has(path)) (callers ??= new Set()).add(name);
+          for (const c of contractsByName.get(name) ?? []) if (!c.declaredIn.has(path)) (callers ??= new Set()).add(c);
           const symbol = names.get(name);
           if (!symbol || symbol.files > maxFiles) continue;
           if (!seen.has(name)) {
@@ -367,9 +382,13 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
           matches.add(name);
         }
         // Every caller in another file is counted; the first few are kept.
-        for (const name of callers ?? []) {
-          const c = contracts.get(name)!;
-          const from = graphLines?.get(i + 1)?.has(name) ? "graph" : "text";
+        // A name match is not counted for a declaration when the graph ties
+        // the line to another declaration of the name, or the line's file
+        // declares one.
+        const certain = declarationLines?.get(i + 1);
+        for (const c of callers ?? []) {
+          const from = certain?.has(c.key) ? "graph" : "text";
+          if (from === "text" && contractsByName.get(c.name)!.some((other) => certain?.has(other.key) || other.declaredIn.has(path))) continue;
           c.sites++;
           if (c.last !== path) { c.last = path; c.files++; }
           if (c[from].length < CONTRACT_CALLERS) c[from].push({ path, line: i + 1, from, context: contextAt(lines, i, args.secrets, CONTRACT_CONTEXT, CONTRACT_CONTEXT) });

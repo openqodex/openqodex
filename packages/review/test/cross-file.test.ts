@@ -20,6 +20,9 @@
 //  6. A declaration with hundreds of callers floods the brief: every caller
 //     is shown, the brief grows past the neighbourhood's byte budget, or the
 //     cut is silent.
+//  7. Two changed files each declare a function of the same name: their
+//     callers are pooled under one declaration, so the second declaration is
+//     never shown and its caller falls past the first one's cap.
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -45,22 +48,29 @@ const HEAD_USERS = "export type User = { id: string; name: string };\nconst user
 // The unchanged caller: line 5 reads a field of the result.
 const GREET = 'import { findUser } from "./users";\n\nexport function greet(id: string): string {\n  const user = findUser(id);\n  return `Hello ${user.name}`;\n}\n';
 
+type Repo = { dir: string; base: string; head: string };
+
+// A base commit of `base` and a head commit that writes `head` over it.
+function commits(base: Record<string, string>, head: Record<string, string>): Repo {
+  const dir = tempDir("oq-xf-repo-");
+  git(dir, "init", "-q", "-b", "main");
+  for (const [path, text] of Object.entries(base)) write(dir, path, text);
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "Base");
+  const sha = git(dir, "rev-parse", "HEAD");
+  for (const [path, text] of Object.entries(head)) write(dir, path, text);
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "Change");
+  return { dir, base: sha, head: git(dir, "rev-parse", "HEAD") };
+}
+
 // A base commit with findUser and its caller in another file, and a head
 // commit that changes findUser's contract. `callers`: that many more files
 // that call findUser, unchanged.
-function repo(callers = 0): { dir: string; base: string; head: string } {
-  const dir = tempDir("oq-xf-repo-");
-  git(dir, "init", "-q", "-b", "main");
-  write(dir, "src/users.ts", BASE_USERS);
-  write(dir, "src/greet.ts", GREET);
-  for (let i = 0; i < callers; i++) write(dir, `src/callers/c${i}.ts`, `import { findUser } from "../users";\n\nexport const name${i} = () => findUser("u${i}");\n`);
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "Base");
-  const base = git(dir, "rev-parse", "HEAD");
-  write(dir, "src/users.ts", HEAD_USERS);
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "Change");
-  return { dir, base, head: git(dir, "rev-parse", "HEAD") };
+function repo(callers = 0): Repo {
+  const base: Record<string, string> = { "src/users.ts": BASE_USERS, "src/greet.ts": GREET };
+  for (let i = 0; i < callers; i++) base[`src/callers/c${i}.ts`] = `import { findUser } from "../users";\n\nexport const name${i} = () => findUser("u${i}");\n`;
+  return commits(base, { "src/users.ts": HEAD_USERS });
 }
 
 type Citation = { file_path: string; line_number: number; quote: string };
@@ -80,11 +90,12 @@ const LOCAL: Raised = {
 
 // The model provider: each finder pass raises the candidates given for it,
 // and the verifier confirms every finder candidate. It keeps every brief.
-function provider(raised: Raised[]): ModelReviewer & { finds: Map<string, string>; verifies: string[] } {
+function provider(raised: Raised[]): ModelReviewer & { finds: Map<string, string>; contracts: string[]; verifies: string[] } {
   const finds = new Map<string, string>();
+  const contracts: string[] = [];
   const verifies: string[] = [];
   return {
-    kind: "model", model: "fixture-model", maxOutputTokens: 4096, finds, verifies,
+    kind: "model", model: "fixture-model", maxOutputTokens: 4096, finds, contracts, verifies,
     async complete(request: ModelRequest) {
       const brief = request.messages.find((m) => m.role === "user")?.text ?? "";
       const changeId = /`change_id`: `([0-9a-f]{12})`/.exec(brief)?.[1] ?? "missing";
@@ -92,6 +103,7 @@ function provider(raised: Raised[]): ModelReviewer & { finds: Map<string, string
       if (brief.startsWith("# OpenQodex review brief: find pass")) {
         const pass = /^Pass: (local|contracts)$/m.exec(brief)![1]! as Raised["pass"];
         finds.set(pass, brief);
+        if (pass === "contracts") contracts.push(brief);
         const hunks = [...brief.matchAll(/^### (h\d+) /gm)].map((m) => m[1]!);
         answer = {
           version: "find-1", change_id: changeId, unit: /^Unit: (u\d+)$/m.exec(brief)![1], examined: hunks,
@@ -111,8 +123,7 @@ function provider(raised: Raised[]): ModelReviewer & { finds: Map<string, string
   };
 }
 
-async function review(raised: Raised[], callers = 0): Promise<{ result: ReviewResult; model: ReturnType<typeof provider> }> {
-  const r = repo(callers);
+async function review(raised: Raised[], callers = 0, r: Repo = repo(callers)): Promise<{ result: ReviewResult; model: ReturnType<typeof provider> }> {
   const model = provider(raised);
   const result = await reviewChange({ clonePath: r.dir, mergeBaseSha: r.base, headSha: r.head, config: { ...DEFAULT_CONFIG, stages: true } }, model, {
     profile: "server", workDir: tempDir("oq-xf-work-"), installRoot: tempDir("oq-xf-install-"), tools: { web: false, shell: false }, scanners: "preinstalled",
@@ -199,5 +210,29 @@ describe("cross-file evidence in the staged review", () => {
     expect(Buffer.byteLength(contracts)).toBeLessThanOrEqual(CONTRACTS_BLOCK_BYTES);
     expect(Buffer.byteLength(contracts) + Buffer.byteLength(block(brief, "## Code around the change"))).toBeLessThanOrEqual(NEIGHBOURHOOD_BLOCK_BYTES + 4);
     expect(Buffer.byteLength(brief)).toBeLessThan(MAX_BRIEF_BYTES);
+  }, 180_000);
+
+  it("7. shows each of two changed declarations of one name with its own callers", async () => {
+    const parse = (returns: string, body: string) => `export function parse(text: string): ${returns} {\n  return ${body};\n}\n`;
+    const base: Record<string, string> = { "src/a.ts": parse("number", "Number(text)"), "src/b.ts": parse("string[]", 'text.split(",")') };
+    // Nine callers of a.ts's parse fill its cap before z.ts, the one caller of b.ts's.
+    for (let i = 0; i < 9; i++) base[`src/a-callers/c${i}.ts`] = `import { parse } from "../a";\n\nexport const n${i} = () => parse("${i}");\n`;
+    base["src/z.ts"] = 'import { parse } from "./b";\n\nexport const parts = () => parse("x,y");\n';
+    const r = commits(base, { "src/a.ts": parse("number | null", "text ? Number(text) : null"), "src/b.ts": parse("string[] | null", 'text ? text.split(",") : null') });
+    const { result, model } = await review([], 0, r);
+    expect(result.status, result.reason).toMatch(/^complete/);
+    const entries = model.contracts.flatMap((brief) => block(brief, "## Callers of the changed declarations").split(/\n(?=### )/).slice(1));
+    const declaredIn = (path: string) => entries.filter((e) => e.startsWith(`### parse, declared at ${path}:1`));
+    expect(declaredIn("src/a.ts")).toHaveLength(1);
+    expect(declaredIn("src/b.ts")).toHaveLength(1);
+    const [a] = declaredIn("src/a.ts");
+    const [b] = declaredIn("src/b.ts");
+    expect(a).toContain("1\texport function parse(text: string): number | null {");
+    expect(a).toMatch(/caller at src\/a-callers\/c0\.ts:3 \(from the code graph\)/);
+    expect(b).toContain("1\texport function parse(text: string): string[] | null {");
+    expect(b).toMatch(/caller at src\/z\.ts:3 \(from the code graph\)/);
+    // The graph ties each call to its own declaration; an import line stays an unverified name match for both.
+    expect(a).not.toMatch(/at src\/z\.ts:3 /);
+    expect(b).not.toMatch(/at src\/a-callers\/c\d\.ts:3 /);
   }, 180_000);
 });
