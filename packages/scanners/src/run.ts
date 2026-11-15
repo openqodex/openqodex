@@ -693,8 +693,11 @@ function ranOutcome(
   };
 }
 
+// At most 300 characters. A longer reason keeps its start, which names the
+// tool and its exit code, and its end, where a tool prints the cause.
 function oneLine(text: string): string {
-  return text.replace(/\s+/g, " ").trim().slice(0, 300);
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length <= 300 ? line : `${line.slice(0, 100)} ... ${line.slice(-195)}`;
 }
 
 // The scanner stage in one line: how many scanners ran, how many had
