@@ -327,6 +327,26 @@ describe("never narrower than the scanner", () => {
     ]);
   });
 
+  it("ruff: the 0.17 comments ignore, disable and file-ignore with a code list", () => {
+    const text = src(
+      "import os  # ruff: ignore[F401]",
+      "# ruff: disable[F401]",
+      "# ruff: file-ignore[F401]",
+      "import sys  # ruff: disable[F401]",
+      "import re  # ruff: file-ignore[F401]",
+      "x = 1  # ruff:ignore[F401]",
+      "y = 2  # an ordinary comment",
+      "# ruff: enable[F401]",
+      "z = '# ruff: ignore[F401]'",
+    );
+    expect(findMarkers(text, ["ruff"]).map((m) => [m.line, m.name])).toEqual([
+      [1, "# ruff: ignore"],
+      [2, "# ruff: disable"],
+      [3, "# ruff: file-ignore"],
+      [6, "# ruff: ignore"],
+    ]);
+  });
+
   it("bandit and ruff: a comment inside a Python 3.12 f-string field, never a # in a format spec (10)", () => {
     const text = src(
       'x = f"{', "    a  # nosec", '}" + "y"  # nosec',
