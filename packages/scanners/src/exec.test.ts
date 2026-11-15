@@ -150,11 +150,13 @@ describe("stderrTail", () => {
     const end = " Cause: Failed to read <file>";
     const path = "/private/var/folders/" + "x".repeat(300 - end.length) + "/missing.toml";
     const out = tail(`extends ${path}${end}`);
-    expect(out).toBe(end.trim());
+    expect(out).toBe(`...${end}`);
   });
   it("keeps the first word when the cut falls on a space", () => {
-    const words = "a ".repeat(400) + "end";
-    expect(tail(words).startsWith("a ")).toBe(true);
-    expect(tail(words).endsWith("end")).toBe(true);
+    const words = "a ".repeat(400) + "endx";
+    expect(tail(words)).toBe(words.slice(-300));
+  });
+  it("never returns an empty reason for a tail with no space", () => {
+    expect(tail("x".repeat(400))).toBe("...");
   });
 });
