@@ -109,7 +109,7 @@ OpenQodex itself collects no usage data. The built-in scanners, as OpenQodex run
 | Claude Code (claude-graph-on) | claude-opus-5-5 | Planted bugs, dev split, scoring rules 7 | 129/153 (84.3%) | 142/146 (97.3%) to 146/146 (100.0%) | 6/6 (100.0%) | $0.0870 |
 | Codex (codex-graph-on) | gpt-6.1-sol | Planted bugs, dev split, scoring rules 7 | 115/153 (75.2%) | 125/146 (85.6%) to 146/146 (100.0%) | 6/6 (100.0%) | not measured |
 | Scanner only (scan) | no model | Planted bugs, dev split, scoring rules 1 | 32/51 (62.7%) | 35/45 (77.8%) to 40/45 (88.9%) | 1/2 (50.0%) | not measured |
-| Scanner only (scan) | no model | Planted bugs, dev split, scoring rules 2 | 32/51 (62.7%) | 35/40 (87.5%) to 40/40 (100.0%) | 2/2 (100.0%) | not measured |
+| Scanner only (scan) | no model | Planted bugs, dev split, scoring rules 2 | 32/51 (62.7%) | 35/41 (85.4%) to 41/41 (100.0%) | 2/2 (100.0%) | not measured |
 
 AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.
 
