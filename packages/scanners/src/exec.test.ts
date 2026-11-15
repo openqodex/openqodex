@@ -23,7 +23,7 @@
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ARG_BUDGET_BYTES, execTool, runInChunks, scannerEnv } from "./exec.js";
+import { ARG_BUDGET_BYTES, execTool, runInChunks, scannerEnv, stderrTail } from "./exec.js";
 
 const NODE = process.execPath;
 const opts = (over: Partial<{ timeoutMs: number; maxBytes: number; env: Record<string, string> }> = {}) => ({
@@ -139,4 +139,22 @@ it("keeps completed chunks when a tree chunk times out", async () => {
     return ["advisory"];
   }, partial)).rejects.toThrow("tree timed out");
   expect(partial).toEqual(["advisory"]);
+});
+
+describe("stderrTail", () => {
+  const tail = (stderr: string) => stderrTail({ stdout: "", stderr, exitCode: 2, failure: null });
+  it("keeps short stderr whole", () => {
+    expect(tail("  ruff failed: bad config \n")).toBe("ruff failed: bad config");
+  });
+  it("drops the part word a 300-character cut lands in", () => {
+    const end = " Cause: Failed to read <file>";
+    const path = "/private/var/folders/" + "x".repeat(300 - end.length) + "/missing.toml";
+    const out = tail(`extends ${path}${end}`);
+    expect(out).toBe(end.trim());
+  });
+  it("keeps the first word when the cut falls on a space", () => {
+    const words = "a ".repeat(400) + "end";
+    expect(tail(words).startsWith("a ")).toBe(true);
+    expect(tail(words).endsWith("end")).toBe(true);
+  });
 });
