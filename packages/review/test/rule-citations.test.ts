@@ -257,3 +257,10 @@ it("does not take the first word of a heading as the heading", async () => {
   const r = await runStagedReview(f.args);
   expect(r.report.findings).toEqual([expect.objectContaining({ notes: ["Rule citation dropped: its rule heading is not in AGENTS.md"] })]);
 });
+
+it("does not take a rule id as the heading of a longer id after a dot", async () => {
+  const text = "# Team rules\n\n## R-7.1: Caching\n\n- Cache every read of the settings table.\n";
+  const f = setup(verdicts((v) => { v.rule = { file: "AGENTS.md", heading: "R-7", quote: "Cache every read of" }; }), [{ path: "AGENTS.md", text, source: SOURCE }]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings).toEqual([expect.objectContaining({ notes: ["Rule citation dropped: its rule heading is not in AGENTS.md"] })]);
+});

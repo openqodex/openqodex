@@ -68,7 +68,7 @@ export function mergeFindings(primary: { name: string; findings: ReportFinding[]
       // finding higher.
       if (severityRank(f.severity) > severityRank(same.finding.severity)) {
         const { evidence, rule } = same.finding;
-        same.finding = { ...f, ...(!f.evidence && evidence ? { evidence } : {}), ...(!f.rule && rule ? { rule } : {}) };
+        same.finding = { ...f, ...(!f.evidence && evidence ? { evidence } : {}), ...(!f.rule && rule ? { rule, notes: f.notes.filter((n) => !n.startsWith("Rule citation dropped: ")) } : {}) };
       }
     }
   }

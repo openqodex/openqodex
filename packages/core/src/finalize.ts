@@ -464,7 +464,7 @@ function ruleSections(text: string, heading: string): string[] {
   marks.forEach((mark, i) => {
     if (!mark) return;
     const rest = mark.title.slice(want.length);
-    const named = want !== "" && mark.title.startsWith(want) && (mark.level < 7 ? rest === "" || /^\s*[:.\-\u2013]/.test(rest) : !WORD_CHAR.test(rest.slice(0, 1)));
+    const named = want !== "" && mark.title.startsWith(want) && (mark.level < 7 ? rest === "" || /^\s*(?::|[.\-\u2013](?![\p{L}\p{N}]))/u.test(rest) : !WORD_CHAR.test(rest.slice(0, 1)));
     if (!named) return;
     let end = i + 1;
     while (end < lines.length) {
