@@ -1,5 +1,19 @@
 # openqodex
 
+## 0.19.0
+
+### Minor Changes
+
+- [#350](https://github.com/openqodex/openqodex/pull/350) [`01fd0e5`](https://github.com/openqodex/openqodex/commit/01fd0e5198678679dd8afd5a616381b81d30e83e) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - A staged review now uses evidence from a second file. The finder that checks interfaces gets, for each declaration the change adds, alters or removes, its callers in other files: the code graph's callers first, then matches by name, at most 8 per declaration, and the brief says how many were cut. The verifier gets the lines a candidate cites in other files, so it can read a caller or a guard there before it confirms or refutes. A finding whose evidence rests on another file keeps those files and lines: `evidence` in `report.json` and in the library's result, and "Evidence in other files" in the report. Findings whose evidence is all in their own file are unchanged.
+
+- [#350](https://github.com/openqodex/openqodex/pull/350) [`b9f280f`](https://github.com/openqodex/openqodex/commit/b9f280fad0c36f6a47f2d0f0aab776d0a0e968b1) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The bundled ruff Python linter moves to 0.17.3, so repositories whose ruff config names newer rules such as `UP046` are linted instead of failing the scanner. This ruff reads `requires-python` from a `pyproject.toml` with no `[tool.ruff]` table as its target version, so a change to it there now raises the ruff settings note. ruff's default rule set grew from 59 rules to 407, so a repository with no ruff `select` now gets more findings, including the security rules S102, S110 and S112, which OpenQodex ranks as high severity. To keep the old set, add `select = ["E4", "E7", "E9", "F"]` to the repository's ruff config.
+
+- [#350](https://github.com/openqodex/openqodex/pull/350) [`deaa808`](https://github.com/openqodex/openqodex/commit/deaa808c144b744694cf5378fd7c431092efadfe) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - A change that breaks a written rule in a convention file you chose in `review.instructions_files`, such as "every tenant-scoped query goes through the permission gate", is now a finding instead of an observation. The finding cites the rule (`Rule: AGENTS.md > Data access: "..."` in the report, and `rule` in `report.json` and the library's findings), and a citation whose quoted words are not in that file is dropped from its finding, with a note that says why. The finding stays. Style, naming, docs and test coverage items stay observations.
+
+### Patch Changes
+
+- [#347](https://github.com/openqodex/openqodex/pull/347) [`dcbac90`](https://github.com/openqodex/openqodex/commit/dcbac9081ce7ca1c90dbdde4d516d7a7f62a1d38) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The push check inside Claude Code and Codex now recognises the push lines agents usually type, such as `cd /path/to/worktree && git push -u origin my-branch 2>&1 | tail -5`, and judges them in the folder the `cd` names, instead of saying it could not tell what the push sends (issue 346).
+
 ## 0.18.0
 
 ### Minor Changes
