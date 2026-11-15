@@ -13,6 +13,14 @@
 // candidate leaves the verdict because the rule quote attached to it is
 // wrong; a rule written as a multi-line blockquote, or under a heading
 // underlined with = or -, is dropped as if it were invented.
+// Added after the code review of pull request 350: a finding whose rule
+// citation does not hold leaves the verdict, when only the citation should
+// go; a heading cited in another case, with a trailing colon, with straight
+// quotes for curly ones, or as the rule id that starts it, is not found; a
+// quote with curly quotes, emphasis or backticks the file does not have, or
+// a file cited as "./AGENTS.md", is dropped as if it were invented; a quote
+// of one or two words, or one that starts or ends inside a word of the
+// file, is taken as a rule.
 import { afterAll, expect, it } from "vitest";
 import { buildVerifyBrief, completionRecord, readCoverage, renderJson, renderReview } from "@openqodex/core";
 import type { FindAnswer, InstructionFile, VerifyAnswer, VerifyBatch, VerifyVerdict } from "@openqodex/core";
@@ -86,17 +94,20 @@ it.each([
 });
 
 it.each([
-  ["an invented quote", { ...RULE, quote: "Every query is cached for an hour" }, "dropped: its rule quote is not in AGENTS.md"],
-  ["a heading the file does not have", { ...RULE, heading: "Caching" }, "dropped: its rule heading is not in AGENTS.md"],
-  ["a file the review did not supply", { ...RULE, file: "CONTRIBUTING.md" }, "dropped: its rule cites CONTRIBUTING.md, which is not an instruction file of this review"],
-])("drops a rule finding with %s and records why", async (_label, rule, reason) => {
+  ["an invented quote", { ...RULE, quote: "Every query is cached for an hour" }, "Rule citation dropped: its rule quote is not in AGENTS.md"],
+  ["a heading the file does not have", { ...RULE, heading: "Caching" }, "Rule citation dropped: its rule heading is not in AGENTS.md"],
+  ["a file the review did not supply", { ...RULE, file: "CONTRIBUTING.md" }, "Rule citation dropped: its rule cites CONTRIBUTING.md, which is not an instruction file of this review"],
+  ["a quote of two words", { ...RULE, quote: "Every tenant-scoped" }, "Rule citation dropped: its rule quote is too short to identify a rule"],
+  ["a quote that starts inside a word of the file", { ...RULE, quote: "ery tenant-scoped query goes through" }, "Rule citation dropped: its rule quote is not in AGENTS.md"],
+  ["a quote that ends inside a word of the file", { ...RULE, quote: "tenant-scoped query goes through the permiss" }, "Rule citation dropped: its rule quote is not in AGENTS.md"],
+])("keeps a rule finding with %s, without the citation, and notes why", async (_label, rule, reason) => {
   const f = setup(verdicts((v) => { v.rule = rule; }));
   const r = await runStagedReview(f.args);
   expect(r.missing).toEqual([]);
-  expect(r.report.findings).toEqual([]);
-  expect(r.report.possible).toEqual([]);
+  expect(r.report.findings).toEqual([expect.objectContaining({ title: "Unsafe operation", file_path: "a.txt", notes: [reason] })]);
+  expect(r.report.findings[0]).not.toHaveProperty("rule");
   expect(r.report.observations).toEqual([]);
-  expect(r.report.low_confidence).toEqual([expect.objectContaining({ title: "Unsafe operation", file_path: "a.txt", reason })]);
+  expect(r.report.low_confidence).toEqual([]);
 });
 
 // Two sections: a quote from one must not be reported as a rule of the other.
@@ -117,12 +128,12 @@ it.each([
   expect(r.report.findings).toEqual([expect.objectContaining({ rule: expect.objectContaining({ heading: rule.heading }) })]);
 });
 
-it("drops a rule whose quote sits only under another heading than the one cited, and records why", async () => {
+it("drops the citation of a rule whose quote sits only under another heading than the one cited, and notes why", async () => {
   const f = setup(verdicts((v) => { v.rule = { file: "AGENTS.md", heading: "Production access", quote: EXCEPTION }; }), [SECTIONS]);
   const r = await runStagedReview(f.args);
-  expect(r.report.findings).toEqual([]);
-  expect(r.report.possible).toEqual([]);
-  expect(r.report.low_confidence).toEqual([expect.objectContaining({ title: "Unsafe operation", reason: "dropped: its rule quote is not under its heading in AGENTS.md" })]);
+  expect(r.report.findings).toEqual([expect.objectContaining({ title: "Unsafe operation", notes: ["Rule citation dropped: its rule quote is not under its heading in AGENTS.md"] })]);
+  expect(r.report.findings[0]).not.toHaveProperty("rule");
+  expect(r.report.low_confidence).toEqual([]);
 });
 
 it("keeps a docs or style item with no rule an observation", async () => {
@@ -172,15 +183,17 @@ it("asks the verifier for the citation and for a stated exception to be checked 
   expect(none.briefs[0]).toContain("Set `tier` to `observation` for style, naming, docs, clarity, conventions and test coverage items. Set it to `finding` for defects.");
 });
 
-it("keeps a confirmed scanner candidate whose rule quote is wrong, without the citation, and still drops the finder's", async () => {
+it("keeps a confirmed scanner candidate whose rule quote is wrong, and the finder's, both without the citation", async () => {
   const f = setup(verdicts((v) => { v.rule = { ...RULE, quote: "Every query is cached for an hour" }; }));
   f.scan.candidates.push(scanner("a.txt"));
   const r = await runStagedReview(f.args);
   expect(r.missing).toEqual([]);
   expect(r.disposed).toBe(1);
-  expect(r.report.findings).toEqual([expect.objectContaining({ candidate: "c1" })]);
-  expect(r.report.findings[0]).not.toHaveProperty("rule");
-  expect(r.report.low_confidence).toEqual([expect.objectContaining({ title: "Unsafe operation", reason: "dropped: its rule quote is not in AGENTS.md" })]);
+  const note = "Rule citation dropped: its rule quote is not in AGENTS.md";
+  expect(r.report.findings).toEqual(expect.arrayContaining([expect.objectContaining({ candidate: "c1", notes: [note] }), expect.objectContaining({ title: "Unsafe operation", candidate: null, notes: [note] })]));
+  expect(r.report.findings).toHaveLength(2);
+  for (const x of r.report.findings) expect(x).not.toHaveProperty("rule");
+  expect(r.report.low_confidence).toEqual([]);
 });
 
 // The same rule under a blockquote, and under headings underlined with = and -.
@@ -200,9 +213,41 @@ it.each([
   expect(r.report.findings).toEqual([expect.objectContaining({ rule: expect.objectContaining({ heading: rule.heading }) })]);
 });
 
-it("drops a rule from an underlined section cited under the next underlined heading", async () => {
+it("drops the citation of a rule from an underlined section cited under the next underlined heading", async () => {
   const f = setup(verdicts((v) => { v.rule = { ...RULE, heading: "Logging" }; }), [FORMS]);
   const r = await runStagedReview(f.args);
-  expect(r.report.findings).toEqual([]);
-  expect(r.report.low_confidence).toEqual([expect.objectContaining({ reason: "dropped: its rule quote is not under its heading in AGENTS.md" })]);
+  expect(r.report.findings).toEqual([expect.objectContaining({ notes: ["Rule citation dropped: its rule quote is not under its heading in AGENTS.md"] })]);
+  expect(r.report.findings[0]).not.toHaveProperty("rule");
+  expect(r.report.low_confidence).toEqual([]);
+});
+
+// Curly quotes, emphasis and a rule id in the file, cited in the forms a
+// model copies them in.
+const WRITTEN: InstructionFile = {
+  path: "AGENTS.md",
+  text: "# Team rules\n\n## Data access:\n\n- Every tenant\u2019s query goes through the **permission gate**, except in `tests`.\n\n## R-7: No raw SQL\n\n- Build every query with the \u201cquery builder\u201d.\n",
+  source: SOURCE,
+};
+
+it.each([
+  ["a heading in another case", { file: "AGENTS.md", heading: "data ACCESS", quote: "query goes through the permission gate" }],
+  ["a heading without the file's trailing colon", { file: "AGENTS.md", heading: "Data access", quote: "query goes through the permission gate" }],
+  ["a heading with a trailing colon", { file: "AGENTS.md", heading: "R-7: No raw SQL:", quote: "Build every query with" }],
+  ["a heading given as the rule id that starts it", { file: "AGENTS.md", heading: "R-7", quote: "Build every query with" }],
+  ["a quote with a straight apostrophe for the file's curly one", { file: "AGENTS.md", heading: "Data access", quote: "Every tenant's query goes through" }],
+  ["a quote with straight quotes for the file's curly ones", { file: "AGENTS.md", heading: "R-7", quote: 'with the "query builder"' }],
+  ["a quote without the file's emphasis and backticks", { file: "AGENTS.md", heading: "Data access", quote: "the permission gate, except in tests" }],
+  ["a quote with emphasis the file does not have", { file: "AGENTS.md", heading: "Data access", quote: "goes through the *permission* gate" }],
+  ["a file cited as ./AGENTS.md", { file: "./AGENTS.md", heading: "Data access", quote: "query goes through the permission gate" }],
+])("keeps the citation of %s", async (_label, rule) => {
+  const f = setup(verdicts((v) => { v.rule = rule; }), [WRITTEN]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.low_confidence).toEqual([]);
+  expect(r.report.findings).toEqual([expect.objectContaining({ notes: [], rule: expect.objectContaining({ file: "AGENTS.md", heading: rule.heading, source: SOURCE }) })]);
+});
+
+it("does not take a rule id heading as a prefix of a longer id", async () => {
+  const f = setup(verdicts((v) => { v.rule = { file: "AGENTS.md", heading: "R-", quote: "Build every query with" }; }), [WRITTEN]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings).toEqual([expect.objectContaining({ notes: ["Rule citation dropped: its rule heading is not in AGENTS.md"] })]);
 });

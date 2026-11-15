@@ -86,7 +86,6 @@ openqodex review <branch | #number | pull request link> [--base <ref>] [--review
   `brief.md` stays the single-pass brief of the change.
   Unverified and unresolved candidates stay in `low_confidence` with a reason.
   Candidates without matching evidence also stay there.
-  So does a rule finding whose quote or heading is not in the file it cites, unless it raises a scanner candidate: that finding stays, without the citation.
   Observations below the confidence floor stay there with the reason `observation under the floor`.
   `review.stages: false` selects the legacy single pass.
   `--agent` and `--all` always run one pass.

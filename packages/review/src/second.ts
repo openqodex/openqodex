@@ -63,9 +63,13 @@ export function mergeFindings(primary: { name: string; findings: ReportFinding[]
     if (!same) merged.set(findingKey(f), { finding: f, foundBy: [second.name] });
     else {
       same.foundBy.push(second.name);
-      // The staged primary's evidence in other files stays when the second
-      // reviewer's single pass, which has none, rates the finding higher.
-      if (severityRank(f.severity) > severityRank(same.finding.severity)) same.finding = f.evidence || !same.finding.evidence ? f : { ...f, evidence: same.finding.evidence };
+      // The staged primary's evidence in other files and its rule citation
+      // stay when the second reviewer's version, which lacks them, rates the
+      // finding higher.
+      if (severityRank(f.severity) > severityRank(same.finding.severity)) {
+        const { evidence, rule } = same.finding;
+        same.finding = { ...f, ...(!f.evidence && evidence ? { evidence } : {}), ...(!f.rule && rule ? { rule } : {}) };
+      }
     }
   }
   const all = [...merged.values()];

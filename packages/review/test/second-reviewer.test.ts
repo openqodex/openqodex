@@ -29,6 +29,9 @@
 // Added after the code review of cross-file evidence:
 //  9. The second reviewer rates a shared finding higher, and the merged
 //     finding loses the evidence in other files the staged primary kept.
+// Added after the code review of pull request 350:
+// 10. The second reviewer rates a shared finding higher, and the merged
+//     finding loses the rule citation the primary's finding carried.
 import { DEFAULT_CONFIG } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { reviewChange } from "../src/review-change.js";
@@ -215,5 +218,13 @@ it("9. keeps the primary's evidence in other files when the second reviewer rate
   const evidence = [{ file_path: "src/caller.ts", line_number: 5 }];
   const merged = mergeFindings({ name: "primary", findings: [{ ...finding, evidence }] }, { name: "second", findings: [{ ...finding, severity: "major" }] });
   expect(merged.findings).toEqual([expect.objectContaining({ severity: "major", evidence })]);
+  expect(merged.foundBy).toEqual([["primary", "second"]]);
+});
+
+it("10. keeps the primary's rule citation when the second reviewer rates the finding higher", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 2, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const rule = { file: "AGENTS.md", heading: "Math", quote: "Every subtraction checks for underflow", source: "b".repeat(40) };
+  const merged = mergeFindings({ name: "primary", findings: [{ ...finding, rule }] }, { name: "second", findings: [{ ...finding, severity: "major" }] });
+  expect(merged.findings).toEqual([expect.objectContaining({ severity: "major", rule })]);
   expect(merged.foundBy).toEqual([["primary", "second"]]);
 });

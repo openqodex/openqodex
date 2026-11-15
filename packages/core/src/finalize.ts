@@ -401,33 +401,51 @@ const findingV2Schema = z.object({
 });
 
 // Why a finding's rule citation does not hold against the instruction files
-// the review supplied, or null when it does: the file must be one of them,
-// its quote must be in that file's text and, when a heading is given, in
-// that heading's section. Whitespace is normalised, and "> " quote marks
-// are taken off the lines of the quote and of the file, so a rule copied
-// across a line break, or from a blockquote, still matches.
+// the review supplied, or null when it does: the file must be one of them
+// (a leading "./" aside), its quote must be at least three words, in that
+// file's text as whole words and, when a heading is given, in that
+// heading's section. Whitespace is normalised, curly quotes are made
+// straight, emphasis and backticks are taken out, and "> " quote marks are
+// taken off the lines of the quote and of the file, so a rule copied across
+// a line break, from a blockquote or without its markdown still matches.
 const spaced = (text: string) => text.replace(/\s+/g, " ").trim();
 const unquoted = (quote: string) => quote.replace(/^[ \t]*>[ \t]?/gm, "");
+const straight = (text: string) => text.replace(/[\u2018\u2019\u201a\u201b]/g, "'").replace(/[\u201c\u201d\u201e\u201f]/g, '"');
+const ruleText = (text: string) => spaced(straight(unquoted(text)).replace(/[*_`]/g, ""));
+const rulePath = (file: string) => file.replace(/^\.\//, "");
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+// Whether `quote` is in `text` neither starting nor ending inside a word.
+function hasWords(text: string, quote: string): boolean {
+  for (let at = text.indexOf(quote); at !== -1; at = text.indexOf(quote, at + 1)) {
+    const opens = !(WORD_CHAR.test(text[at - 1] ?? "") && WORD_CHAR.test(quote[0]!));
+    const closes = !(WORD_CHAR.test(text[at + quote.length] ?? "") && WORD_CHAR.test(quote[quote.length - 1]!));
+    if (opens && closes) return true;
+  }
+  return false;
+}
 function ruleProblem(rule: { file: string; heading?: string | null; quote: string }, files: readonly InstructionFile[]): string | null {
-  const file = files.find((f) => f.path === rule.file);
+  const file = files.find((f) => f.path === rulePath(rule.file));
   if (!file) return `its rule cites ${rule.file}, which is not an instruction file of this review`;
-  const text = spaced(unquoted(file.text));
-  const quote = spaced(unquoted(rule.quote));
-  if (quote === "" || !text.includes(quote)) return `its rule quote is not in ${rule.file}`;
+  const quote = ruleText(rule.quote);
+  if (quote.split(" ").filter(Boolean).length < 3) return "its rule quote is too short to identify a rule";
+  if (!hasWords(ruleText(file.text), quote)) return `its rule quote is not in ${rule.file}`;
   if (!rule.heading) return null;
   const sections = ruleSections(file.text, rule.heading);
   if (sections.length === 0) return `its rule heading is not in ${rule.file}`;
-  if (!sections.some((section) => spaced(unquoted(section)).includes(quote))) return `its rule quote is not under its heading in ${rule.file}`;
+  if (!sections.some((section) => hasWords(ruleText(section), quote))) return `its rule quote is not under its heading in ${rule.file}`;
   return null;
 }
 
 // The text of each section `heading` names. A markdown heading (`#` to
 // `######`, or a line underlined with `=` or `-`, levels 1 and 2) whose text
-// is the heading runs to the next heading of the same or a higher level. A
+// is the heading, or starts with it as a rule id such as "R-7" starts
+// "R-7: No raw SQL", runs to the next heading of the same or a higher level. A
 // rule label, a list item or a bold line whose text starts with the heading, runs to the next label at its indent or less, or
-// the next heading. Lines inside code fences are never headings or labels.
+// the next heading. Titles are compared in any case, without a trailing
+// colon, and with curly quotes made straight. Lines inside code fences are
+// never headings or labels.
 function ruleSections(text: string, heading: string): string[] {
-  const plain = (title: string) => spaced(title.replace(/[*_`]/g, ""));
+  const plain = (title: string) => spaced(straight(title).replace(/[*_`]/g, "")).replace(/\s*:$/, "").toLowerCase();
   const want = plain(heading.replace(/^#+\s*/, ""));
   const lines = text.split(/\r?\n/);
   let fence: string | null = null;
@@ -445,7 +463,7 @@ function ruleSections(text: string, heading: string): string[] {
   const sections: string[] = [];
   marks.forEach((mark, i) => {
     if (!mark) return;
-    const named = mark.level < 7 ? mark.title === want : mark.title.startsWith(want) && !/^[\p{L}\p{N}]/u.test(mark.title.slice(want.length));
+    const named = mark.title.startsWith(want) && !WORD_CHAR.test(mark.title.slice(want.length, want.length + 1));
     if (!named) return;
     let end = i + 1;
     while (end < lines.length) {
@@ -640,15 +658,12 @@ export function checkSubmission(args: {
     }
     let rule: RuleCitation | null = null;
     const problem = f.rule ? ruleProblem(f.rule, args.instructionFiles ?? []) : null;
-    // A finding that raises a scanner candidate stands on the scanner's
-    // evidence: a citation that does not hold is dropped, never the finding.
-    if (problem !== null && !f.candidate) {
-      lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor, reason: `dropped: ${problem}` });
-      continue;
-    }
+    // A finding stands on its own evidence: a citation that does not hold is
+    // dropped, never the finding, and a note on the finding says why.
     if (f.rule && problem === null) {
-      const source = (args.instructionFiles ?? []).find((file) => file.path === f.rule!.file)?.source;
-      rule = { file: f.rule.file, heading: f.rule.heading ?? null, quote: unquoted(f.rule.quote).trim(), ...(source ? { source } : {}) };
+      const path = rulePath(f.rule.file);
+      const source = (args.instructionFiles ?? []).find((file) => file.path === path)?.source;
+      rule = { file: path, heading: f.rule.heading ?? null, quote: unquoted(f.rule.quote).trim(), ...(source ? { source } : {}) };
     }
     (f.confidence < floor ? possible : findings).push({
       origin: "agent",
@@ -663,7 +678,7 @@ export function checkSubmission(args: {
       suggested_change: f.suggested_change ?? null,
       source,
       candidate: f.candidate ?? null,
-      notes: fixedNotes(byId.get(f.candidate ?? "")),
+      notes: [...fixedNotes(byId.get(f.candidate ?? "")), ...(problem !== null ? [`Rule citation dropped: ${problem}`] : [])],
       problem: f.problem,
       consequence: f.consequence,
       fix: f.fix,
