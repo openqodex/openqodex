@@ -438,8 +438,8 @@ function ruleProblem(rule: { file: string; heading?: string | null; quote: strin
 
 // The text of each section `heading` names. A markdown heading (`#` to
 // `######`, or a line underlined with `=` or `-`, levels 1 and 2) whose text
-// is the heading, or starts with it as a rule id such as "R-7" starts
-// "R-7: No raw SQL", runs to the next heading of the same or a higher level. A
+// is the heading, or starts with it as a rule id followed by a colon, dot or
+// dash, as "R-7" starts "R-7: No raw SQL", runs to the next heading of the same or a higher level. A
 // rule label, a list item or a bold line whose text starts with the heading, runs to the next label at its indent or less, or
 // the next heading. Titles are compared in any case, without a trailing
 // colon, and with curly quotes made straight. Lines inside code fences are
@@ -463,7 +463,8 @@ function ruleSections(text: string, heading: string): string[] {
   const sections: string[] = [];
   marks.forEach((mark, i) => {
     if (!mark) return;
-    const named = mark.title.startsWith(want) && !WORD_CHAR.test(mark.title.slice(want.length, want.length + 1));
+    const rest = mark.title.slice(want.length);
+    const named = want !== "" && mark.title.startsWith(want) && (mark.level < 7 ? rest === "" || /^\s*[:.\-\u2013]/.test(rest) : !WORD_CHAR.test(rest.slice(0, 1)));
     if (!named) return;
     let end = i + 1;
     while (end < lines.length) {

@@ -251,3 +251,9 @@ it("does not take a rule id heading as a prefix of a longer id", async () => {
   const r = await runStagedReview(f.args);
   expect(r.report.findings).toEqual([expect.objectContaining({ notes: ["Rule citation dropped: its rule heading is not in AGENTS.md"] })]);
 });
+
+it("does not take the first word of a heading as the heading", async () => {
+  const f = setup(verdicts((v) => { v.rule = { file: "AGENTS.md", heading: "Data", quote: "query goes through the permission gate" }; }), [WRITTEN]);
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings).toEqual([expect.objectContaining({ notes: ["Rule citation dropped: its rule heading is not in AGENTS.md"] })]);
+});
