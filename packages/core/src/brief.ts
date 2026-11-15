@@ -324,7 +324,7 @@ const RULE_WORK = [
   "When the file states an exception that covers this code, such as \"except in tests\", check it before you confirm. A covered case is refuted with a reason starting `repo instructions:`.",
 ];
 
-export const RULE_FIELD = "- `rule`: only for a broken written rule of a convention file above, else omit it or set null. `file`: the path after `From:`. `heading`: the heading or rule label the rule sits under, without `#` marks, or null. `quote`: the rule's exact words, copied from the file without the `> ` marks. A finding whose quote is not in that file, or not under the heading it names, is dropped.";
+export const RULE_FIELD = "- `rule`: only for a broken written rule of a convention file above, else omit it or set null. `file`: the path after `From:`. `heading`: the heading or rule label the rule sits under, without `#` marks, or null. `quote`: the rule's exact words, at least three of them, copied from the file without the `> ` marks. A quote that is not in that file, or not under the heading it names, loses its citation, and the finding keeps a note saying why.";
 
 export function conventionsBlock(files: readonly InstructionFile[], stage?: "find" | "verify"): string {
   if (files.length === 0) return "";
