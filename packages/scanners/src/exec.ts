@@ -141,9 +141,11 @@ export function describeFailure(name: string, result: ExecResult, timeoutMs: num
   }
 }
 
-// The end of stderr, for an error line.
+// The end of stderr, for an error line. Kept long: the runner hides the
+// checkout path and then cuts the reason, so a cut here first could leave
+// part of a path, such as "e/var/..." from "/private/var/...", unhidden.
 export function stderrTail(result: ExecResult): string {
-  return result.stderr.trim().slice(-300);
+  return result.stderr.trim().slice(-4000);
 }
 
 // Bytes of file arguments one scanner process may get: well under the limit
