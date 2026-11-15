@@ -524,7 +524,7 @@ describe("toRunDirRelative", () => {
 });
 
 // ruff reads [tool.ruff] of pyproject.toml, and [project] requires-python
-// beside it as its target version; SQLFluff reads [tool.sqlfluff] there and
+// as its target version, with or without that table; SQLFluff reads [tool.sqlfluff] there and
 // its [sqlfluff] sections of setup.cfg, tox.ini and pep8.ini. Those files
 // belong to other tools too, so one counts as a settings file only when the
 // change alters what the scanner reads from it, by meaning: TOML as a TOML
@@ -556,6 +556,13 @@ describe("a settings file other tools share counts when what the scanner reads f
     expect(await notes("setup.cfg", base, `${base}exclude_rules CV05\n`, [3])).toEqual(["sqlfluff:settings-file"]);
     expect(await notes("tox.ini", base, null, [])).toEqual(["sqlfluff:settings-file"]);
     expect(await notes("pyproject.toml", `${PROJECT}\n[tool.ruff]\nline-length = 100\n`, `${PROJECT}\n[tool.ruff\nline-length = 100\n`, [4])).toEqual(["sqlfluff:settings-file", "ruff:settings-file"]);
+  });
+
+  // ruff 0.10 and later read requires-python of a pyproject.toml that has no
+  // [tool.ruff] table, so a change to it can silence or raise ruff findings.
+  it("raises the ruff note when requires-python changes in a pyproject.toml with no [tool.ruff] table, and none for its name", async () => {
+    expect(await notes("pyproject.toml", `${PROJECT}requires-python = ">=3.12"\n`, `${PROJECT}requires-python = ">=3.8"\n`, [3])).toEqual(["ruff:settings-file"]);
+    expect(await notes("pyproject.toml", PROJECT, '[project]\nname = "service"\n', [2])).toEqual([]);
   });
 });
 

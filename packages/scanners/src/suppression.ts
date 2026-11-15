@@ -62,12 +62,18 @@ export const SUPPRESSION_MARKERS: Partial<Record<BuiltinScanner, Entry>> = {
   // on their own line exempt the file (crates/ruff_linter/src/noqa.rs). The
   // isort action comments switch off the import-sorting rule: a comment
   // holding `isort: skip` or `isort:skip`, and `# isort: off` with or
-  // without `ruff:` (crates/ruff_linter/src/directives.rs).
+  // without `ruff:` (crates/ruff_linter/src/directives.rs). ruff 0.17 also
+  // obeys `# ruff: ignore[CODES]` (the end of a line or a line of its own),
+  // and `# ruff: disable[CODES]` and `# ruff: file-ignore[CODES]` only on a
+  // line of their own (measured with 0.17.5; each needs a bracketed code
+  // list and a comment that starts at the `#`).
   ruff: {
     family: "python",
     markers: [
       { name: "# noqa", pattern: /(?<at>#\s*noqa)/dgi },
       { name: "# {kw}: noqa", pattern: /^(?<at>#\s*(?<kw>flake8|ruff)\s*:\s*[nN][oO][qQ][aA])/dg, ownLine: true },
+      { name: "# ruff: {kw}", pattern: /^(?<at>#\s*ruff\s*:\s*(?<kw>ignore))\s*\[/dg },
+      { name: "# ruff: {kw}", pattern: /^(?<at>#\s*ruff\s*:\s*(?<kw>disable|file-ignore))\s*\[/dg, ownLine: true },
       { name: "# isort: {kw}", pattern: /(?<at>isort: ?(?<kw>skip_file|skip))/dg },
       { name: "# isort: off", pattern: /^(?<at>#\s*(?:ruff:\s*)?isort:\s*off)\s*$/dg },
     ],

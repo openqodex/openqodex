@@ -1,5 +1,5 @@
 import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, hunkFragmentLabel, matchesGlob, oldPathOf, redactByFingerprint, redactSecrets, VERIFY_BATCH_SIZE, verifyPartDistance, hunksBlock, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank, stagedDiffCache } from "@openqodex/core";
-import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, HunkRef, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
+import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, HunkRef, InstructionFile, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
 import { MAX_CORRECTIONS, converse, deliverRanges } from "./conversation.js";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Conversation, CorrectionRound, Speaker } from "./conversation.js";
@@ -40,6 +40,8 @@ export type StagedArgs = {
   // of TIMED_OUT, and the first missing line when any stage ran out of time.
   timedOut?: string;
   confidenceFloor?: number;
+  // The instruction files the briefs quoted: a finding's rule must quote one.
+  instructionFiles?: readonly InstructionFile[];
   say: (line: string) => void;
   onRound?: (round: CorrectionRound) => void;
   onStarted?: (role: ReviewerRole, pid: number | null) => void;
@@ -375,7 +377,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     verified.sort((a, b) => a.number - b.number);
     const sourceOf = (c: VerifyCandidate) => c.kind === "scanner" ? c.candidate.token : c.candidate.lens ? `lens:${c.candidate.lens}` : null;
     const findingOf = (v: VerifyVerdict, c: VerifyCandidate): FindingV2 => {
-      return { severity: v.severity, category: v.category, confidence: v.confidence, file_path: v.file_path, line_number: v.line_number, ...(v.line_end !== undefined ? { line_end: v.line_end } : {}), title: v.title, problem: v.problem, consequence: v.consequence, fix: v.fix, suggested_change: v.suggested_change ?? null, source: sourceOf(c), candidate: c.kind === "scanner" ? c.id : null };
+      return { severity: v.severity, category: v.category, confidence: v.confidence, file_path: v.file_path, line_number: v.line_number, ...(v.line_end !== undefined ? { line_end: v.line_end } : {}), title: v.title, problem: v.problem, consequence: v.consequence, fix: v.fix, suggested_change: v.suggested_change ?? null, source: sourceOf(c), candidate: c.kind === "scanner" ? c.id : null, ...(v.rule ? { rule: v.rule } : {}) };
     };
     const analysis = findings.flatMap((f) => f.answer.analysis).map((a) => a.changed.trim().replace(/\s+/g, " ")).find(Boolean)?.split(/(?<=[.!?])\s+/)[0];
     const summary = `Reviewed ${findings.length === 0 ? "no completed finder units" : `units ${[...new Set(findings.map((f) => f.answer.unit))].join(", ")}`}.${analysis ? ` ${analysis}` : ""}`;
@@ -400,8 +402,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         }
       }
       const filteredScan = { ...scan, candidates: scan.candidates.filter((c) => !unverified.has(c.id)) };
-      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor });
-      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor }) : null;
+      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles });
+      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles }) : null;
       return { submission, findingOwners, droppedOwners, items, checked, visible };
     };
     let built = assemble();
@@ -458,6 +460,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     // Survivors that are only observations while a kept duplicate is shown as a finding.
     const supersededKeys = new Set<string>();
     const byId = new Map(built.items.map((item) => [item.c.id, item]));
+    // The shown item each folded duplicate was folded into.
+    const foldedInto = new Map<string, typeof built.items[number]>();
     for (const item of built.items) {
       const key = keyOf(item);
       // Along a chain of duplicates, the first link that is shown folds this item.
@@ -473,7 +477,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         const shown = target.v.tier === "finding" ? shownKeys.has(targetKey) : item.v.tier === "observation" && shownObservationKeys.has(targetKey);
         if (targetKey !== key && shown) { folded = true; break; }
       }
-      if (folded) duplicateKeys.add(key);
+      if (folded) { duplicateKeys.add(key); foldedInto.set(key, target); }
       else if (target !== item) {
         const targetKey = keyOf(target);
         if (targetKey !== key && item.v.tier === "finding" && target.v.tier === "observation" && shownKeys.has(key) && observationKeys.has(targetKey)) supersededKeys.add(targetKey);
@@ -566,6 +570,23 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       const entry = lowConfidenceOf(item.finding);
       if (entry) removeLow(entry);
     }
+    // A confirmed finder candidate keeps the lines in other files its
+    // evidence cites and its verdict names in `relied_on`. A finding whose
+    // evidence is all in its own file, or on removed lines, is left as it was.
+    // A folded duplicate's lines go to the shown item it was folded into.
+    const crossFile = new Map<string, NonNullable<ReportFinding["evidence"]>>();
+    for (const item of built.items) {
+      if (item.c.kind !== "finder") continue;
+      const owner = foldedInto.get(keyOf(item)) ?? item;
+      const kept = crossFile.get(keyOf(owner)) ?? [];
+      const relied = item.v.relied_on ?? [];
+      for (const e of item.c.candidate.evidence) if (!e.removed && e.file_path !== owner.finding.file_path && relied.some((r) => r.file_path === e.file_path && r.line_number === e.line_number) && !kept.some((k) => k.file_path === e.file_path && k.line_number === e.line_number)) kept.push({ file_path: e.file_path, line_number: e.line_number });
+      if (kept.length) crossFile.set(keyOf(owner), kept);
+    }
+    const withEvidence = (f: ReportFinding): ReportFinding => { const evidence = crossFile.get(findingKey(f)); return evidence ? { ...f, evidence } : f; };
+    report.findings = report.findings.map(withEvidence);
+    report.possible = report.possible.map(withEvidence);
+    report.observations = report.observations?.map(withEvidence);
     report.not_reviewed = requiredCandidates(scan, config).filter((c) => unverified.has(c.id));
     for (const c of allCandidates) {
       const verdict = verified.flatMap((o) => o.answer.verdicts).find((v) => v.id === c.id);

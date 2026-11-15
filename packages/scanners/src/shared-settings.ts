@@ -55,19 +55,20 @@ function toolTable(doc: Table, name: string): unknown {
   return tool[name];
 }
 
-// ruff 0.8.4 reads a pyproject.toml only when it has a [tool.ruff] table,
-// and then takes its target version from [project] requires-python unless
-// the table sets one (checked against the binary: lowering requires-python
-// beside a [tool.ruff] table that selects UP silenced UP006; beside a
-// ruff.toml it changed nothing).
+// ruff reads a pyproject.toml's [tool.ruff] table, and takes its target
+// version from [project] requires-python unless a config sets one. Since
+// ruff 0.10 it reads requires-python from a pyproject.toml with no
+// [tool.ruff] table too (checked against ruff 0.17.3: lowering it beside a
+// ruff.toml that selects UP silenced UP006, and with no ruff config at all
+// it raised a syntax error for a `match` statement; ruff 0.8.4 did neither).
 export const ruffPyproject: SettingsReader = (text) => {
   const doc = toml(text);
   if (doc === null) return null;
   const ruff = toolTable(doc, "ruff");
-  if (ruff === undefined) return "";
   const project = doc.project;
   const requiresPython = isTable(project) ? project["requires-python"] : project === undefined ? undefined : { notATable: project };
-  return canonical({ ruff, requiresPython: requiresPython ?? null });
+  if (ruff === undefined && requiresPython === undefined) return "";
+  return canonical({ ruff: ruff ?? null, requiresPython: requiresPython ?? null });
 };
 
 // SQLFluff reads `tool.sqlfluff` of a pyproject.toml and nothing else of it.

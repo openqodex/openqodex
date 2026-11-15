@@ -141,9 +141,14 @@ export function describeFailure(name: string, result: ExecResult, timeoutMs: num
   }
 }
 
-// The end of stderr, for an error line.
+// The end of stderr, for an error line. A cut that lands inside a word
+// puts "..." in place of that part word, so no piece of a path such as "e/var/..." from
+// "/private/var/..." is left that the runner cannot recognise and hide.
 export function stderrTail(result: ExecResult): string {
-  return result.stderr.trim().slice(-300);
+  const text = result.stderr.trim();
+  if (text.length <= 300) return text;
+  const tail = text.slice(-300);
+  return /\s/.test(text[text.length - 301]!) ? tail : `...${tail.replace(/^\S*/, "")}`;
 }
 
 // Bytes of file arguments one scanner process may get: well under the limit

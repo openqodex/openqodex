@@ -141,6 +141,7 @@ const TYPES = [
   "Recipe",
   "Report",
   "ReportFinding",
+  "RuleCitation",
   "ResolveTool",
   "ReviewerRecord",
   "RunScannersResult",

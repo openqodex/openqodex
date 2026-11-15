@@ -586,7 +586,15 @@ export type FindingV2 = {
   suggested_change?: string | null;
   source: string | null;
   candidate?: string | null;
+  rule?: RuleCitation | null;
 };
+
+// A written rule of a supplied instruction file that a finding says the
+// change breaks: the file's path, the heading or rule id it sits under
+// (null when the file has none), and the rule's exact words. Finalize drops
+// a finding whose quote or heading is not in that file, and sets `source`
+// to where the file was read from (a commit, or "work tree").
+export type RuleCitation = { file: string; heading: string | null; quote: string; source?: string };
 
 export type DroppedV2 = { candidate: string; reason: string; file_path: string; line_number: number };
 
@@ -723,6 +731,10 @@ export type VerifyVerdict = {
   fix: string;
   suggested_change?: string | null;
   tier: "finding" | "observation";
+  rule?: RuleCitation | null;
+  // For a confirmed finder candidate: the lines its evidence cites in other
+  // files that the verdict rests on. Only these stay on the finding.
+  relied_on?: { file_path: string; line_number: number }[] | null;
 };
 
 export type VerifyAnswer = { version: "verify-1"; change_id: string; verdicts: VerifyVerdict[] };
@@ -872,6 +884,13 @@ export type ReportFinding = {
   fix?: string;
   // A model review only: the reviewers that raised it, the primary first.
   found_by?: string[];
+  // A staged review only: the lines in other files the finding's evidence
+  // rests on (a caller, a guard, a validator), as the finder cited them and
+  // the checks found them in the snapshot. Absent when all of it is in the
+  // finding's own file.
+  evidence?: { file_path: string; line_number: number }[];
+  // A finding that breaks a written rule of a supplied instruction file.
+  rule?: RuleCitation;
 };
 
 // "incomplete": a review `review` ran whose completion record is incomplete.
