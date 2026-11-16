@@ -150,6 +150,7 @@ export type {
   Report,
   RunTimings,
   ReportFinding,
+  RuleCitation,
   Verdict,
   CompletionRecord,
   ModelCompletionRecord,

@@ -1,5 +1,19 @@
 # openqodex
 
+## 0.18.0
+
+### Minor Changes
+
+- [#344](https://github.com/openqodex/openqodex/pull/344) [`c94d30a`](https://github.com/openqodex/openqodex/commit/c94d30ae6d0fc5d4b15aa013be0bc015380da8fb) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - `openqodex init --agent goose` now sets up Goose: it adds a review line to Goose's hints file and an openqodex skill in Goose's own folders, and `init` finds Goose by its config folder (`~/.config/goose`, or under `XDG_CONFIG_HOME` when that is set).
+
+### Patch Changes
+
+- [#344](https://github.com/openqodex/openqodex/pull/344) [`3120f9e`](https://github.com/openqodex/openqodex/commit/3120f9efdbf66e0d75ea02cd7459b1871d0e941e) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The git pre-push hook no longer lets a push through when the push breaks the config, for example by making `.openqodex` a symbolic link, in a repository whose committed config sets `block_on_severity`: it stops the push and says what is wrong with the config.
+
+- [#344](https://github.com/openqodex/openqodex/pull/344) [`267e8ae`](https://github.com/openqodex/openqodex/commit/267e8aec14437ac305551ade98e6143a55e2d5fc) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - When you upgrade or move Ruby, brakeman and rubocop are installed again with the Ruby you have now, instead of failing to start on every review until you delete their folder by hand.
+
+- [#344](https://github.com/openqodex/openqodex/pull/344) [`2b98431`](https://github.com/openqodex/openqodex/commit/2b98431755bcd94ece5eaaa9ed55ad9c68142bf8) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - A push that changes only files under `.openqodex/`, such as the config, now goes through in a repository that sets `block_on_severity`: the review has nothing to review there, so the push hooks no longer ask for one.
+
 ## 0.17.0
 
 ### Minor Changes

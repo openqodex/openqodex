@@ -526,13 +526,13 @@ describe("20. the global section and what init says it wrote", () => {
 
 describe("19. init with no agent found", () => {
   // Agent detection also sees a real system Cursor installation.
-  it.skipIf(existsSync("/Applications/Cursor.app"))("in a terminal, offers the four agents and installs into the one chosen", () => {
+  it.skipIf(existsSync("/Applications/Cursor.app"))("in a terminal, offers the five agents and installs into the one chosen", () => {
     const s = sandbox();
     // Space ticks the first agent, Claude Code; clack redraws that line only.
     const r = inTerminal(s, ["init"], [["Space: select", " "], ["◼ Claude Code", "\r"], ["Write these files?", "\r"]]);
     expect(r.stdout).toContain("No coding agent found on this machine");
     expect(r.status, r.stdout).toBe(0);
-    for (const name of ["Claude Code", "Cursor", "Codex CLI", "Cline"]) expect(r.stdout).toContain(name);
+    for (const name of ["Claude Code", "Cursor", "Codex CLI", "Cline", "Goose"]) expect(r.stdout).toContain(name);
     // No other question than the chooser and the one confirmation.
     expect(promptsAsked(r.stdout).filter((p) => p !== "Write these files?" && !p.startsWith("No coding agent found"))).toEqual([]);
     expect(existsSync(join(s.home, ".claude/skills/openqodex/SKILL.md"))).toBe(true);
@@ -544,7 +544,7 @@ describe("19. init with no agent found", () => {
     const before = snapshot(s);
     const r = cli(s, ["init", "--yes"]);
     expect(r.status).toBe(2);
-    for (const agent of ["claude-code", "cursor", "codex", "cline", "all"]) expect(r.stderr).toContain(`--agent ${agent}`);
+    for (const agent of ["claude-code", "cursor", "codex", "cline", "goose", "all"]) expect(r.stderr).toContain(`--agent ${agent}`);
     expect(snapshot(s)).toEqual(before);
   });
 });

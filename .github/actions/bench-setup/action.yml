@@ -32,11 +32,18 @@ runs:
         cache: false
     - shell: bash
       run: pnpm install --frozen-lockfile
-    # The Ruby scanners are installed against this Ruby, so its version is in the key.
+    # The Ruby gems' launchers (brakeman, rubocop) start the Ruby that
+    # installed them by its full path, so a cached folder works only with
+    # that Ruby. The Ruby that setup-ruby resolved (its patch version and
+    # path) goes into the cache key, so a new patch release cannot restore
+    # launchers naming a Ruby that is gone.
+    - id: ruby
+      shell: bash
+      run: echo "key=$(ruby -e 'print "#{RUBY_VERSION}#{Gem.ruby}".tr("^A-Za-z0-9.", "-")' 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ env.OPENQODEX_HOME }}
-        key: bench-scanners-${{ runner.os }}-${{ runner.arch }}-ruby3.3-go1.26-${{ hashFiles('packages/scanners/toolchain.json', 'packages/scanners/locks/**') }}
+        key: bench-scanners-${{ runner.os }}-${{ runner.arch }}-ruby${{ steps.ruby.outputs.key }}-go1.26-${{ hashFiles('packages/scanners/toolchain.json', 'packages/scanners/locks/**') }}
     - name: Build the CLI and record its commit
       shell: bash
       run: node benchmark/build-cli.mjs

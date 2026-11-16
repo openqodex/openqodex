@@ -62,11 +62,19 @@ openqodex review <branch | #number | pull request link> [--base <ref>] [--review
   One checks correctness and safety.
   The other checks interfaces and conventions.
   Each finder gets the unit's changed ranges, nearby code and matching patterns.
+  The interfaces finder also gets the callers of each changed declaration in other files.
+  The code graph's callers come first, then matches by name.
+  At most 8 callers per declaration are shown, and the brief says how many were cut.
   Finders name candidate defects with the lines that show them.
   A script checks every quoted line against the snapshot.
   Candidates without matching evidence are dropped.
   For each changed file, a fresh verifier checks the finder and scanner candidates on that file.
+  The verifier also gets the lines a candidate cites in other files, read from the snapshot.
+  A candidate whose evidence cites a path outside the snapshot is dropped.
+  A finding whose evidence rests on another file names those files and lines.
+  `report.json` holds them under the finding's `evidence`, and the report shows them as "Evidence in other files".
   Only confirmed defects become findings or possible issues.
+  So does a confirmed break of a written rule in a chosen convention file, with the rule cited; see [Convention files](config.md#convention-files).
   Style, naming, docs and test items remain observations.
   Observations never count toward the verdict.
   Half the time left after the scan is kept for the verifiers.
@@ -193,7 +201,7 @@ openqodex init [--agent <name>]... [--project] [--hook <pre-push|none>] [--no-re
 
 Installs OpenQodex into your coding agents, then reviews. After the install, it checks every reviewer at once (is Claude Code or Codex installed and logged in) and prints the one a review would start, or each one's reason and fix and the `review --agent` command for the agent you are in. Then, inside a repository and when a reviewer can start: when there is a change, it runs `review` and prints its receipt; when there is none, it asks what to review (the whole repository, a pull request, a branch, or not now). With `--yes` or without a terminal it prints the three commands instead of asking. It then prints one line, `First review: finished`, `incomplete`, `skipped` (with the reason) or `unavailable`. This review waits up to two minutes for a scanner its change needs that is still downloading (`init` starts those downloads just before), names any still downloading after that, and never changes the exit code of `init`, which is about the install.
 
-- `--agent <name>`: `claude-code`, `cursor`, `codex`, `cline` or `all`. Repeat it for several. Without it, `init` uses every agent it finds. When it finds none, it asks which ones in a terminal; without a terminal, or with `--yes`, it exits 2 with this list.
+- `--agent <name>`: `claude-code`, `cursor`, `codex`, `cline`, `goose` or `all`. Repeat it for several. Without it, `init` uses every agent it finds. When it finds none, it asks which ones in a terminal; without a terminal, or with `--yes`, it exits 2 with this list.
 - `--project`: write the files into the repository for a team to commit. The default writes them in your home folder.
 - `--hook <pre-push|none>`: the git pre-push hook is in the plan by default; `--hook none` leaves it out and `--hook pre-push` puts it back. The choice is recorded per repository, and a later `init` without the flag keeps it.
 - `--no-repo`: leave the team review section out of the repository's `CLAUDE.md` and `AGENTS.md`. Without it, `init` without `--project` puts the section in the plan, unless this repository chose `--no-repo` before; the choice is recorded per repository. A file the repository's git ignore rules hide is left alone, with one line saying why, since it could not be committed.

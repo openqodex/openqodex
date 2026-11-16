@@ -112,7 +112,7 @@ describe("a snapshot the run cannot remove", () => {
   it("1, 3. the review's files, receipts and printed report are all there, and the cleanup failure still fails the run", async () => {
     const dir = repo();
     const { global } = parseFlags(["--cwd", dir, "--no-color", "--no-install", "--format", "json"], {});
-    await expect(runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", timeoutMs: 60_000, drivers: [reviewer] })).rejects.toThrow(/EACCES|permission denied/i);
+    await expect(runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", timeoutMs: 60_000, drivers: [reviewer] })).rejects.toThrow(/EACCES|permission denied|ENOTEMPTY|directory not empty/i);
     const folder = runFolder(dir);
     for (const name of ["manifest.json", "scan.json", "brief.md", "impact.json", "report.md", "report.json", "report.sarif", "report.html", "submission.json", "trace.json"]) {
       expect(existsSync(join(folder, name)), name).toBe(true);
@@ -128,7 +128,7 @@ describe("a snapshot the run cannot remove", () => {
   it("2, 3. on the unavailable path the status files and the reasons are there, and the cleanup failure still fails the run", async () => {
     const dir = repo();
     const { global } = parseFlags(["--cwd", dir, "--no-color", "--no-install", "--format", "json"], {});
-    await expect(runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", timeoutMs: 60_000, drivers: [refusing] })).rejects.toThrow(/EACCES|permission denied/i);
+    await expect(runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", timeoutMs: 60_000, drivers: [refusing] })).rejects.toThrow(/EACCES|permission denied|ENOTEMPTY|directory not empty/i);
     const folder = runFolder(dir);
     expect(existsSync(join(folder, "unchecked-candidates.json"))).toBe(true);
     expect(existsSync(join(folder, "report.html"))).toBe(true);

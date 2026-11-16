@@ -16,6 +16,7 @@ Two finder processes read each [unit](#rows-parts-and-units) of the change, with
 A unit is a few small files, one part of a big file, or one structural summary.
 A fresh verifier process checks every candidate the finders raise.
 Only confirmed defects become findings.
+So does a confirmed break of a written rule in a chosen convention file, with the rule cited.
 Style, naming, docs and test items appear as observations.
 Observations do not affect the verdict.
 Every scanner finding is checked too.
@@ -153,7 +154,7 @@ npx openqodex init
 
 Or ask Claude Code to run `npx -y openqodex@<version> init --yes --agent claude-code` (the README gives the current version): the same install, with no question.
 
-`init` finds Claude Code, Cursor, Codex CLI and Cline on your machine. It prints every file it will write and asks once. In the default user scope, it writes these for Claude Code:
+`init` finds Claude Code, Cursor, Codex CLI, Cline and Goose on your machine. It prints every file it will write and asks once. In the default user scope, it writes these for Claude Code:
 
 - the skill, in `~/.claude/skills/openqodex/SKILL.md`.
 - the push gate hook, merged into `~/.claude/settings.json`.
@@ -211,7 +212,7 @@ When Codex is installed and logged in too, a review you run from Claude Code sti
 
 ## The push gate
 
-`init` adds one `PreToolUse` hook to Claude Code. It matches the `Bash` tool and runs only for `git push` commands. The hook looks for the record `review` wrote for your current work. It does not know what a push sends: for a plain `git push` it asks whether your current work has a passing review, and for any other push command it says it cannot tell. The git pre-push hook below checks the exact commits a push sends. It never scans, never starts a review, and never approves a push for you.
+`init` adds one `PreToolUse` hook to Claude Code. It matches the `Bash` tool and runs only for `git push` commands. The hook looks for the record `review` wrote for your current work. It does not know what a push sends: for a plain `git push` (also after one leading `cd <folder> &&`, with the folder as a full path or one starting with `./` or `../`, judged in that folder, and with its output trimmed, as in `2>&1 | tail -5`) it asks whether your current work has a passing review, and for any other push command it says it cannot tell. The git pre-push hook below checks the exact commits a push sends. It never scans, never starts a review, and never approves a push for you.
 
 By default the gate only warns:
 
