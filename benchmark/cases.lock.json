@@ -114,6 +114,12 @@
       "hash": "e47d5270cbdc7dfc951b3ff518d02aa0316ec06f8b0f43536181c0ad8ce09541",
       "frozenAt": "2026-10-11",
       "history": "edited after runs before 2026-10-10",
+      "retired": true
+    },
+    "suppression-comments-v2": {
+      "hash": "185b99907352d5b4618177a6f3d918babd5e18e31a6e40f13eff9cce55a6b7e6",
+      "frozenAt": "2026-11-17",
+      "history": null,
       "retired": false
     },
     "terraform-open-ingress": {
