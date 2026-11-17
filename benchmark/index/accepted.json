@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "runId": "2026-11-15-c28f9ad-planted-scan-ci",
-  "commit": "c28f9ad514fcc85f421ba8ba235250502b22161f",
-  "scoreHash": "73d5dd594c1a3c68d75bb72c01225d2d40bdcb8f6871141a909827473c62c800",
-  "acceptedAt": "2026-11-15T08:52:43.243Z",
+  "runId": "2026-11-17-f024e7b-planted-scan-ci",
+  "commit": "f024e7bf4bcee81622e1ad9b1b161577d7cf4061",
+  "scoreHash": "5797c101e80de02178aa092f94e7df7cd5247483fbd76ca505572a13127af4a7",
+  "acceptedAt": "2026-11-17T02:13:27.062Z",
   "acceptedBy": "Sid",
   "groups": {
     "aacr|dev|edf0f4863eb81a3004d9319cb4fa8cea7085466c5774b6ad51567aff642585f4|review|laptop|claude|claude-opus-5-5|claude-graph-on|11|dev-laptop": {
@@ -109,10 +109,10 @@
       "acceptedBy": "Sid (recorded by the session on 2026-10-11 under the benchmark program he approved)"
     },
     "planted|dev|none|scan|laptop|none|none|scan|2": {
-      "runId": "2026-11-15-c28f9ad-planted-scan-ci",
-      "commit": "c28f9ad514fcc85f421ba8ba235250502b22161f",
-      "scoreHash": "73d5dd594c1a3c68d75bb72c01225d2d40bdcb8f6871141a909827473c62c800",
-      "acceptedAt": "2026-11-15T08:52:43.243Z",
+      "runId": "2026-11-17-f024e7b-planted-scan-ci",
+      "commit": "f024e7bf4bcee81622e1ad9b1b161577d7cf4061",
+      "scoreHash": "5797c101e80de02178aa092f94e7df7cd5247483fbd76ca505572a13127af4a7",
+      "acceptedAt": "2026-11-17T02:13:27.062Z",
       "acceptedBy": "Sid"
     }
   }
