@@ -388,7 +388,9 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   // the facts do not prove which runs last: the name written twice, an
   // object that names it twice or holds a spread, a member written beside
   // an object that names it, or written before `module.exports` is replaced.
-  const cjsEntry = (file: string, name: string): { value: Expr; line: number; column: number } | "competing" | null => {
+  // "replaced" when `exports.n` is written after `module.exports` is replaced:
+  // that write changes the old object, which nothing requires.
+  const cjsEntry = (file: string, name: string): { value: Expr; line: number; column: number } | "competing" | "replaced" | null => {
     const f = fx(file);
     if (f.cjsTwice.has(name)) return "competing";
     const own = f.cjs.get(name);
@@ -397,6 +399,10 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     if (f.cjsTwice.has("default")) return "competing";
     const members = whole.value.t === "object" ? whole.value.props.filter((p) => p.key === name) : [];
     const hidden = whole.value.t === "object" && (whole.value.more ?? 0) > 0;
+    // `exports.n = x` written after `module.exports` is replaced changes the old object only, unless the new value is `exports` itself.
+    const aliased = whole.value.t === "ref" && whole.value.path.length === 1 && whole.value.path[0] === "exports";
+    const stale = own?.bare === true && !aliased && !(own.line < whole.line || (own.line === whole.line && own.column < whole.column));
+    if (stale) return "replaced";
     if (own) return members.length > 0 || hidden || own.line < whole.line || (own.line === whole.line && own.column < whole.column) ? "competing" : own;
     if (members.length > 1 || (members.length === 1 && hidden)) return "competing";
     const member = members[0];
@@ -415,6 +421,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     if (val) return { val, settled: true, note: "" };
     const entry = cjsEntry(file, name);
     if (entry === "competing") return unsettled(`${file} writes its export ${name === "default" ? "module.exports" : name} more than once, so which value it holds is not known`);
+    if (entry === "replaced") return unsettled(`${file} writes exports.${name} after it replaces module.exports, so the module does not export ${name}`);
     if (entry && notRouter(file, entry.value)) return { val: null, settled: true, note: "" };
     return unsettled(entry ? `${file} exports ${show(entry.value)}, which the plugin cannot read as a router` : `${file} has no export the plugin can read under that name`);
   };
@@ -460,7 +467,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   const exportedValue = (file: string, name: string, depth: number): Val | Param | null => {
     if (depth > MAX_MOUNT_DEPTH) return null;
     const cjs = cjsEntry(file, name);
-    if (cjs === "competing") return null;
+    if (cjs === "competing" || cjs === "replaced") return null;
     const lf = index.languageFacts(file);
     let local: string | null = null;
     if (name === "default") local = lf?.defaultExport ?? null;

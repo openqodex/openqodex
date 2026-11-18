@@ -113,7 +113,11 @@ function printText(a: Shaped, op: Operation): void {
   });
   for (const c of a.context?.snippets ?? []) {
     line(`lines around ${c.file}:${c.line}${c.from === null ? ": not readable" : c.changedSince ? ", as this build read them; the file changed since" : ""}`);
-    c.lines.forEach((l, k) => line(`  ${c.start + k}| ${l}`));
+    // The source line keeps its own indent; the rest of it goes through display().
+    c.lines.forEach((l, k) => {
+      const lead = /^[ \t]*/.exec(l)?.[0] ?? "";
+      out(`  ${c.start + k}| ${lead.replace(/\t/g, "    ")}${display(l.slice(lead.length))}`);
+    });
   }
   if (a.counts.certain !== null) line(`counts: ${a.counts.certain} certain, ${a.counts.likely} likely, ${a.counts.possible} possible`);
   const tr = a.truncated;

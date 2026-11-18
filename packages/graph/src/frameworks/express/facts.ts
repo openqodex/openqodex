@@ -37,7 +37,7 @@ export type ExpressFact =
   // `decl`: how the name got the value (a declaration, or an assignment).
   | (FrameworkFactBase & { kind: "value"; name: string; value: Expr; scope: number; top: boolean; exported: boolean; decl: "const" | "let" | "var" | "assign" })
   // `module.exports = x` (name "default") or `module.exports.n = x`, `exports.n = x`.
-  | (FrameworkFactBase & { kind: "cjs-export"; name: string; value: Expr })
+  | (FrameworkFactBase & { kind: "cjs-export"; name: string; value: Expr; bare?: true })
   // A parameter of a function with a type written as a name: `(app: Express)`.
   | (FrameworkFactBase & { kind: "param"; name: string; type: string[]; scope: number })
   // A top-level function and how many parameters it takes.
@@ -271,7 +271,7 @@ export function reader(root: Node): FactReader<ExpressFact> {
           return;
         }
         if (path[0] === "exports" && path.length === 2) {
-          out.push({ kind: "cjs-export", ...pos(node), name: path[1] as string, value: readExpr(right) });
+          out.push({ kind: "cjs-export", ...pos(node), name: path[1] as string, value: readExpr(right), bare: true });
           return;
         }
         if (path.length === 1) {
