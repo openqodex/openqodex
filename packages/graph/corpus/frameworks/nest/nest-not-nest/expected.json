@@ -1,0 +1,9 @@
+{
+  "guards": "produces no Nest route, application or edge from decorators of the repository's own or of another library, though the project declares @nestjs/common and @nestjs/core and every name looks like Nest's",
+  "frameworks": {
+    "plugin": "nest",
+    "apps": 0,
+    "none": ["registration", "handles", "mounts", "applies_middleware", "role"],
+    "noRegistrationsIn": ["src/local.controller.ts", "src/other.controller.ts", "src/named.ts"]
+  }
+}
