@@ -73,6 +73,28 @@ const files: Record<string, string> = {
     'site.route("/alias", aliased);',
     "export default site;",
   ].join("\n"),
+  // Wrappers that add middleware to the router they are given: untyped in a
+  // file that imports nothing of Hono, and typed as Hono. The plugin does
+  // not bind a use on a parameter, so each is an unknown on the middleware
+  // chains it may change. The application's own use applies (the control).
+  "src/guard.ts": ['import { auth } from "./mw";', "export function guard(r: any) {", "  r.use(auth);", "  return r;", "}"].join("\n"),
+  "src/guard2.ts": ['import type { Hono } from "hono";', 'import { auth } from "./mw";', "export function guardTyped(r: Hono) {", "  r.use(auth);", "  return r;", "}"].join("\n"),
+  "src/guarded.ts": [
+    'import { Hono } from "hono";',
+    'import { log } from "./mw";',
+    'import { health } from "./handlers";',
+    'import { guard } from "./guard";',
+    'import { guardTyped } from "./guard2";',
+    "const g = new Hono();",
+    "g.use(log);",
+    "const inner = new Hono();",
+    'inner.get("/in", health);',
+    "const typed = new Hono();",
+    'typed.get("/ty", health);',
+    'g.route("/g", guard(inner));',
+    'g.route("/t", guardTyped(typed));',
+    "export default g;",
+  ].join("\n"),
 };
 
 let root: string;
@@ -150,5 +172,16 @@ describe("the Hono plugin on what a review found", () => {
     // The aliased router is read through the module's export table: `aliased` is `inner`.
     expect(listed("src/alias.ts")).toEqual([`GET /alias/al ${SITE}`]);
     expect(gaps("src/clauses.ts")).toEqual([]);
+  });
+
+  it("names a use on a router parameter as an unknown on the middleware chains, while the application's own use applies", () => {
+    const G = "fw:hono:app:src/guarded.ts:6";
+    const routes = regs("src/guarded.ts");
+    expect(routes.map((r) => `${r.pattern} ${r.app}`).sort()).toEqual([`/g/in ${G}`, `/t/ty ${G}`]);
+    for (const r of routes) expect(chain(r)).toEqual(["log"]);
+    for (const [file, line] of [["src/guard.ts", 3], ["src/guard2.ts", 4]] as const) {
+      expect(gaps(file).filter((u) => u.site?.line === line && u.affects.includes("applies_middleware") && /use/.test(u.note))).toHaveLength(1);
+    }
+    expect(gaps("src/guarded.ts")).toEqual([]);
   });
 });
