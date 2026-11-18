@@ -34,6 +34,24 @@ function clone(): string {
   return dir;
 }
 
+// The truth script stops on a route shape it does not model, so its list is never quietly short.
+describe("the Nest truth script", () => {
+  const sample = (decorator: string) => {
+    const dir = tempDir("oq-e2e-nest-truth-");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/main.ts"), 'import { NestFactory } from "@nestjs/core";\nimport { AppModule } from "./app.module";\n\nasync function bootstrap() {\n  const app = await NestFactory.create(AppModule);\n  await app.listen(3000);\n}\nvoid bootstrap();\n');
+    writeFileSync(join(dir, "src/app.module.ts"), 'import { Module } from "@nestjs/common";\nimport { CatsController } from "./cats.controller";\n\n@Module({ controllers: [CatsController] })\nexport class AppModule {}\n');
+    writeFileSync(join(dir, "src/cats.controller.ts"), `import { Controller, Get, RequestMapping, RequestMethod } from "@nestjs/common";\n\n@Controller("cats")\nexport class CatsController {\n  @Get()\n  list(): void {}\n\n  ${decorator}\n  feed(): void {}\n}\n`);
+    return dir;
+  };
+
+  it("stops with an error on a @RequestMapping route instead of leaving it out", () => {
+    expect(() => truth(sample('@RequestMapping({ path: "feed", method: RequestMethod.PUT })'))).toThrow(/RequestMapping/);
+    // The negative control: the same controller with a modelled decorator reads both routes.
+    expect((truth(sample('@Get("feed")')) as Route[]).map((r) => `${r.method} ${r.path} ${r.handler}`)).toEqual(["GET /cats src/cats.controller.ts#CatsController.list", "GET /cats/feed src/cats.controller.ts#CatsController.feed"]);
+  });
+});
+
 describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")("graph routes on the Nest sample applications", () => {
   it(`nestjs/nest ${NEST.sha.slice(0, 12)} sample/: every served route, its full path, its controller method and its application, and nothing else served`, () => {
     // The sample folder as a repository of its own: each sample is a project with its own manifest.

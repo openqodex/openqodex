@@ -222,6 +222,8 @@ export function readFacts(root: Node): NestFact[] {
   const constants = new Map<string, { value: Node; exported: boolean }>();
   // Names read as constants, with the form they are read in.
   const reads = new Map<string, "path" | "routes">();
+  // Names an export clause with no source exports under their own name.
+  const clauseExports = new Set<string>();
   let shadowSteps = 0;
 
   for (const st of root.namedChildren) {
@@ -258,6 +260,18 @@ export function readFacts(root: Node): NestFact[] {
       continue;
     }
     const exported = st.type === "export_statement";
+    if (exported && !st.childForFieldName("source") && !st.children.some((c) => c.type === "type")) {
+      // `export { A }`: A is exported under its own name. An aliased name
+      // (`export { A as B }`) is not marked, so a lookup by the exported
+      // name never reads another constant of the file that has that name.
+      const clause = st.namedChildren.find((c) => c.type === "export_clause");
+      for (const s of clause?.namedChildren ?? []) {
+        if (s.type !== "export_specifier" || s.children.some((c) => c.type === "type")) continue;
+        const name = s.childForFieldName("name");
+        const alias = s.childForFieldName("alias");
+        if (name?.type === "identifier" && (!alias || alias.text === name.text)) clauseExports.add(name.text);
+      }
+    }
     const decl = exported ? st.childForFieldName("declaration") : st;
     if (!decl || decl.type !== "lexical_declaration" || decl.child(0)?.type !== "const") continue;
     for (const d of decl.namedChildren) {
@@ -266,6 +280,10 @@ export function readFacts(root: Node): NestFact[] {
       const value = d.childForFieldName("value");
       if (name?.type === "identifier" && value && !constants.has(name.text)) constants.set(name.text, { value, exported });
     }
+  }
+  for (const name of clauseExports) {
+    const c = constants.get(name);
+    if (c) c.exported = true;
   }
 
   // What `name` reads at `n` when a function around it, or a block inside
@@ -594,18 +612,31 @@ export function readFacts(root: Node): NestFact[] {
   }
 
   // ---------- the constants the facts read ----------
-  for (const [name, c] of constants) {
-    const form = reads.get(name);
-    if (form) {
-      out.push({ kind: "value", name, ...pos(c.value), value: readArg(c.value, form === "routes" ? ROUTES : PATH, 0, null), exported: c.exported });
-      continue;
+  // Reading a constant may name another (`const P = BASE`), declared before
+  // or after it, so the pass repeats until no constant read is left; each
+  // pass adds at least one, so it ends within the count of constants.
+  const emitted = new Set<string>();
+  for (let first = true, added = true; added; first = false) {
+    added = false;
+    for (const [name, c] of constants) {
+      if (emitted.has(name)) continue;
+      const form = reads.get(name);
+      if (form) {
+        emitted.add(name);
+        added = true;
+        out.push({ kind: "value", name, ...pos(c.value), value: readArg(c.value, form === "routes" ? ROUTES : PATH, 0, null), exported: c.exported });
+        continue;
+      }
+      // An exported string constant another file may read as a path: kept
+      // only when it is short and has a path's shape (letters, digits and
+      // `/ : _ - . *`), as the kept-string rule keeps it.
+      if (!first || !c.exported) continue;
+      const s = stringOf(c.value);
+      if (s !== null && s.length > 0 && s.length <= MAX_EXPORTED_CONSTANT && pathShaped(s) && keptText(s) === s) {
+        emitted.add(name);
+        out.push({ kind: "value", name, ...pos(c.value), value: { t: "str", v: s, ...pos(c.value) }, exported: true });
+      }
     }
-    // An exported string constant another file may read as a path: kept
-    // only when it is short and has a path's shape (letters, digits and
-    // `/ : _ - . *`), as the kept-string rule keeps it.
-    if (!c.exported) continue;
-    const s = stringOf(c.value);
-    if (s !== null && s.length > 0 && s.length <= MAX_EXPORTED_CONSTANT && pathShaped(s) && keptText(s) === s) out.push({ kind: "value", name, ...pos(c.value), value: { t: "str", v: s, ...pos(c.value) }, exported: true });
   }
   if (broken) out.push({ kind: "syntax-error", ...broken });
   return out;

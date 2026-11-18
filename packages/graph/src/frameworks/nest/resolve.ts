@@ -331,6 +331,18 @@ function run(index: PluginIndex<NestFact>): Analysis {
   // exported constant of the file an import names. `undefined` for the
   // name `undefined`; null when it is computed or not read.
   const UNDEF = Symbol("undefined");
+  // The file and name one import of the file binds `name` to. The graph
+  // binds a constant exported through `export { NAME }` to nothing (it is
+  // no definition), so its import is followed here; that file's facts mark
+  // such a constant exported only when the clause keeps its name.
+  const importedFrom = (file: string, name: string): { file: string; name: string } | null => {
+    const imps = (index.languageFacts(file)?.imports ?? []).filter((i) => !i.scoped && !i.reexport && !i.typeOnly && i.names.some((n) => n.local === name));
+    const imp = imps.length === 1 ? imps[0] : undefined;
+    const imported = imp?.names.find((n) => n.local === name)?.imported;
+    if (!imp || !imported) return null;
+    const m = index.module(file, imp.spec);
+    return m.kind === "module" ? { file: m.file, name: imported } : null;
+  };
   const constantIn = (file: string, name: string, depth = 0): string | null => {
     const v = fx(file).values.get(name);
     if (v) return v.value.t === "str" ? v.value.v : v.value.t === "ref" && v.value.path.length === 1 && depth < 4 ? constantIn(file, v.value.path[0] as string, depth + 1) : null;
@@ -341,7 +353,7 @@ function run(index: PluginIndex<NestFact>): Analysis {
     else if (found.kind === "symbol" && found.ids.length === 1) {
       const node = index.node(found.ids[0] as string);
       if (node) target = { file: node.file, name: node.name };
-    }
+    } else if (found.kind === "none") target = importedFrom(file, name);
     if (!target || target.file === file) return null;
     const there = fx(target.file).values.get(target.name);
     return there?.exported && there.value.t === "str" ? there.value.v : null;
@@ -934,8 +946,9 @@ function run(index: PluginIndex<NestFact>): Analysis {
             continue;
           }
           if (spent.middleware >= MAX_MIDDLEWARE_EDGES) {
+            // Every edge past the cap is counted, so the unknown's count is exact.
             left.middleware++;
-            break;
+            continue;
           }
           spent.middleware++;
           const mev: FrameworkEvidence = { kind: "route-decorator", tier: "certain", site: m.site, via: null, premises: [id], rule: rule("nest-middleware"), note: null };
