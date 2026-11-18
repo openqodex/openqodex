@@ -45,7 +45,10 @@ import type { TreeVisitor } from "./walk.js";
 // 29: a class field typed by a function type is a member a call names, a
 // generic alias's own members mark its type parameters, and a destructuring
 // default under an annotation takes the member's type.
-export const EXTRACTOR_VERSION = 29;
+// 31: Pick and Omit keep only the members they keep (TypeRef.only, omit), a
+// built-in generic the file declares or imports is the file's own type, and
+// an annotation's types are read at most MAX_TYPE_DEPTH deep.
+export const EXTRACTOR_VERSION = 31;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -822,8 +825,23 @@ function jsTypeNames(node: Node | null): TypeRef[] {
   return out;
 }
 
+// How deep one annotation's types nest as read: object types in object
+// types, type arguments, unions. A type nested deeper is not read (null, so
+// a member typed by it is "?"): a file of thousands of nested object types
+// never exhausts the stack.
+let typeNesting = 0;
+
 function jsTypeRef(annotation: Node | null): TypeRef | null {
-  if (!annotation) return null;
+  if (!annotation || typeNesting >= MAX_TYPE_DEPTH) return null;
+  typeNesting++;
+  try {
+    return readJsTypeRef(annotation);
+  } finally {
+    typeNesting--;
+  }
+}
+
+function readJsTypeRef(annotation: Node): TypeRef | null {
   let t: Node | null = annotation.type === "type_annotation" ? annotation.firstNamedChild : annotation;
   if (t?.type === "union_type") {
     // `Repo | undefined` is a Repo wherever a method is called on it.
@@ -843,7 +861,11 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
   }
   let args: TypeRef[] | undefined;
   if (t?.type === "generic_type") {
-    const head = t.childForFieldName("name")?.text;
+    // The language's own generic type, read through below, only when the
+    // file gives its name no other meaning; else the name is a type of the
+    // repository, read as any other.
+    const named = t.childForFieldName("name")?.text;
+    const head = named !== undefined && BUILTIN_GENERICS.has(named) && !fileDeclares(t, named) ? named : undefined;
     const arg = t.childForFieldName("type_arguments")?.firstNamedChild ?? null;
     // Promise<T> is a T once awaited; Array<T> and its kin hold T.
     if (head === "Promise") {
@@ -856,6 +878,16 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
     }
     // These keep each member of T they keep, with its type.
     if (head !== undefined && MEMBER_KEEPING.has(head)) return jsTypeRef(arg);
+    // Pick<T, K> and Omit<T, K>: T's members, only those K names or those it
+    // does not. An intersection of T alone carries the keys. A Pick whose
+    // keys are not all written out (`keyof X | "a"`) keeps those that are
+    // and may keep any other; such an Omit, or a Pick naming none, is not read.
+    if (head === "Pick" || head === "Omit") {
+      const inner = jsTypeRef(arg);
+      const k = jsKeyNames(t.childForFieldName("type_arguments")?.namedChildren.filter((c) => c.type !== "comment")[1] ?? null);
+      if (!inner || !k || (head === "Omit" && !k.all) || k.keys.length === 0) return null;
+      return typeRef({ name: "&", qualifier: null, ...pos(t), parts: [inner], ...(head === "Pick" ? { only: k.keys, ...(k.all ? {} : { open: true }) } : { omit: k.keys }) });
+    }
     // A Map keeps its value type for `values()`, unless that is a collection itself.
     const name = t.childForFieldName("name");
     if ((head === "Map" || head === "ReadonlyMap") && name) {
@@ -897,7 +929,51 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
 }
 
 // Generic types whose members are T's own members with T's types.
-const MEMBER_KEEPING = new Set(["Readonly", "Partial", "Required", "Pick", "Omit", "NonNullable"]);
+const MEMBER_KEEPING = new Set(["Readonly", "Partial", "Required", "NonNullable"]);
+// Every generic type of the language jsTypeRef reads through.
+const BUILTIN_GENERICS = new Set(["Promise", "Array", "ReadonlyArray", "Set", "ReadonlySet", "Map", "ReadonlyMap", "Pick", "Omit", ...MEMBER_KEEPING]);
+
+// The nodes that give a name a meaning in a TypeScript or JavaScript file:
+// declarations, and imports by any form.
+const DECLARING = ["class_declaration", "abstract_class_declaration", "class", "interface_declaration", "type_alias_declaration", "enum_declaration", "function_declaration", "generator_function_declaration", "internal_module", "module", "variable_declarator", "type_parameter", "import_specifier", "namespace_import", "import_clause", "import_require_clause", "import_alias"];
+const IMPORTING = new Set(["import_specifier", "namespace_import", "import_clause", "import_require_clause", "import_alias"]);
+const declaredIn = new WeakMap<object, Set<string>>();
+
+// Whether the file of `node` declares or imports `name` in any scope. A name
+// reaches a TypeScript file only that way or as a global, and a global of a
+// built-in's name is a duplicate the checker rejects.
+function fileDeclares(node: Node, name: string): boolean {
+  let names = declaredIn.get(node.tree);
+  if (!names) {
+    names = new Set();
+    for (const d of node.tree.rootNode.descendantsOfType(DECLARING)) {
+      for (const field of ["name", "alias"]) {
+        const n = d.childForFieldName(field);
+        if (n) names.add(n.text);
+      }
+      if (IMPORTING.has(d.type)) for (const c of d.namedChildren) if (c.type === "identifier") names.add(c.text);
+    }
+    declaredIn.set(node.tree, names);
+  }
+  return names.has(name);
+}
+
+// The member names a key type writes out (`"a"`, `"a" | "b"`), and whether
+// it is only those: any other part (`keyof X`, `K`) may name any member.
+function jsKeyNames(node: Node | null): { keys: string[]; all: boolean } | null {
+  if (!node) return null;
+  const keys: string[] = [];
+  const cuts = typeCuts;
+  let all = true;
+  typeNodes(node, (n) => {
+    if (n.type === "union_type" || n.type === "parenthesized_type") return false;
+    const s = n.type === "literal_type" ? n.firstNamedChild : null;
+    if (s?.type === "string" && !s.text.includes("\\")) keys.push(s.text.slice(1, -1));
+    else all = false;
+    return true;
+  });
+  return { keys, all: all && typeCuts === cuts };
+}
 
 // The members of an object type written in place, by name: a property its
 // declared type ("?" when the type cannot be read), a method or a property

@@ -65,6 +65,12 @@ export type TypeRef = {
   fields?: Record<string, TypeRef>;
   path?: string[];
   parts?: TypeRef[];
+  // On an intersection of one side: `Pick<T, K>` keeps only the members
+  // `only` names, `Omit<T, K>` every member but those `omit` names. `open`:
+  // K also names keys not written out (`keyof X | "a"`), which may be kept.
+  only?: string[];
+  omit?: string[];
+  open?: boolean;
   // On a function's result: read from what its body returns, not declared.
   inferred?: boolean;
   // With `result`: the call names this file's definition at that index, a
