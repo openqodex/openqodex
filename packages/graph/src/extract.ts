@@ -42,7 +42,10 @@ import type { TreeVisitor } from "./walk.js";
 // function give no receiver type, and each parameter declared as a function
 // type keeps that function's parameter types (DefFact.callbacks), which an
 // untyped parameter of a callback passed there takes (TypeRef.callback).
-export const EXTRACTOR_VERSION = 28;
+// 29: a class field typed by a function type is a member a call names, a
+// generic alias's own members mark its type parameters, and a destructuring
+// default under an annotation takes the member's type.
+export const EXTRACTOR_VERSION = 29;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -901,7 +904,7 @@ const MEMBER_KEEPING = new Set(["Readonly", "Partial", "Required", "Pick", "Omit
 // typed by a function "{}". Null when a member cannot be named (an index
 // signature, a call signature, a computed or quoted name) or there is none:
 // which members it has is then not known.
-function jsObjectTypeFields(node: Node): Record<string, TypeRef> | null {
+function jsObjectTypeFields(node: Node, params?: Map<string, TypeRef | null>): Record<string, TypeRef> | null {
   const fields: Record<string, TypeRef> = {};
   let any = false;
   for (const m of node.namedChildren) {
@@ -911,7 +914,7 @@ function jsObjectTypeFields(node: Node): Record<string, TypeRef> | null {
     const annotation = m.type === "property_signature" ? m.childForFieldName("type") : null;
     const marker = (n: Node, as: string): TypeRef => typeRef({ name: as, qualifier: null, ...pos(n) });
     if (m.type === "method_signature" || annotation?.firstNamedChild?.type === "function_type") fields[name.text] = marker(m, "{}");
-    else fields[name.text] = jsTypeRef(annotation) ?? marker(m, "?");
+    else fields[name.text] = (params ? jsMemberType(annotation, params) : jsTypeRef(annotation)) ?? marker(m, "?");
     any = true;
   }
   return any ? fields : null;
@@ -1038,7 +1041,7 @@ function jsSignature(ctx: Ctx, fn: Node, def: number, locals: Map<string, TypeRe
       for (const name of bound) locals?.set(name, null);
       // `({ sessions }: Deps)`: each name has the type of its member.
       const from = pattern?.type === "object_pattern" ? declared(jsTypeRef(typeNode)) : null;
-      if (from && pattern) for (const [name, type] of jsPatternTypes(pattern, from)) locals?.set(name, type);
+      if (from && pattern) for (const [name, type] of jsPatternTypes(pattern, from, true)) locals?.set(name, type);
       names.push(bound.length === 1 && (p.type === "assignment_pattern" || pattern?.type === "assignment_pattern") ? (bound[0] as string) : "");
     }
     for (const t of jsTypeNames(typeNode)) ctx.addTypeUse(t, user);
@@ -1436,21 +1439,25 @@ function jsFieldOf(from: TypeRef, key: string): TypeRef | null {
 }
 
 // The names an object pattern binds with the type of their member of
-// `from`: `{ a }`, `{ a: b }`, `{ a: { c } }`. A default (`{ a = x }`) may
-// give another type and a rest holds what is left: neither is typed.
-function jsPatternTypes(pattern: Node, from: TypeRef, out: [string, TypeRef][] = []): [string, TypeRef][] {
+// `from`: `{ a }`, `{ a: b }`, `{ a: { c } }`. A rest holds what is left and
+// is not typed. A default (`{ a = x }`) is typed only when the pattern's
+// declaration is annotated: the checker then types the name by the member
+// (the default must fit it); unannotated, the default's own type joins in.
+function jsPatternTypes(pattern: Node, from: TypeRef, annotated: boolean, out: [string, TypeRef][] = []): [string, TypeRef][] {
   for (const p of pattern.namedChildren) {
-    if (p.type === "shorthand_property_identifier_pattern") {
-      const type = jsFieldOf(from, p.text);
-      if (type) out.push([p.text, type]);
+    const bare = p.type === "object_assignment_pattern" && annotated ? p.childForFieldName("left") : p;
+    if (bare?.type === "shorthand_property_identifier_pattern") {
+      const type = jsFieldOf(from, bare.text);
+      if (type) out.push([bare.text, type]);
     } else if (p.type === "pair_pattern") {
       const key = p.childForFieldName("key");
-      const value = p.childForFieldName("value");
+      let value = p.childForFieldName("value");
+      if (value?.type === "assignment_pattern" && annotated) value = value.childForFieldName("left");
       if (key?.type !== "property_identifier" || !value) continue;
       const type = jsFieldOf(from, key.text);
       if (!type) continue;
       if (value.type === "identifier") out.push([value.text, type]);
-      else if (value.type === "object_pattern") jsPatternTypes(value, type, out);
+      else if (value.type === "object_pattern") jsPatternTypes(value, type, annotated, out);
     }
   }
   return out;
@@ -1727,6 +1734,17 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           const def = ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, static: isStatic(node) });
           return ctx.push({ def, cls: null, locals: null });
         }
+        // A field typed by a function type, written in place or named
+        // (`#resolve: ResolveToken`), as an interface property is: a member a
+        // call names, returning what that type returns.
+        const fnType = annotation?.type === "type_annotation" ? annotation.firstNamedChild : annotation;
+        if (fnType?.type === "function_type") {
+          const result = jsTypeRef(fnType.childForFieldName("return_type"));
+          const def = ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, static: isStatic(node), ...(result ? { results: [result] } : {}) });
+          jsSignature(ctx, fnType, def, null);
+        } else if (type && type.kind !== "param" && !type.elem && !type.promise && !type.parts && type.name !== "{}" && type.name !== "?" && (fnType?.type === "type_identifier" || fnType?.type === "nested_type_identifier" || fnType?.type === "generic_type")) {
+          ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, static: isStatic(node), signature: type });
+        }
         // Any other initializer runs on the instance, unless the field is static.
         const outer = ctx.instanceInit;
         ctx.instanceInit = isStatic(node) ? -1 : cls.def;
@@ -1748,8 +1766,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           // scope and hides a definition of the same name outside it.
           for (const n of patternNames(name)) ctx.setLocal(n, null, block);
           // `const { session } = params`: each name has the type of its member.
-          const from = name.type === "object_pattern" ? (declared(jsTypeRef(node.childForFieldName("type"))) ?? jsValueType(ctx, value)) : null;
-          if (from) for (const [n, type] of jsPatternTypes(name, from)) ctx.setLocal(n, type, block);
+          const annotation = name.type === "object_pattern" ? declared(jsTypeRef(node.childForFieldName("type"))) : null;
+          const from = name.type === "object_pattern" ? (annotation ?? jsValueType(ctx, value)) : null;
+          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, type, block);
           return;
         }
         const isFn = value && ["arrow_function", "function_expression", "function", "generator_function"].includes(value.type);
@@ -1859,7 +1878,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const typeParams = node.type === "type_alias_declaration" ? jsTypeParams(node) : null;
         enteringTypeParams = typeParams;
         const value = node.type === "type_alias_declaration" ? node.childForFieldName("value") : null;
-        const alias = value ? jsTypeRef(value) : null;
+        let alias = value ? jsTypeRef(value) : null;
+        // `type Box<T> = { value: T }`: a member typed by the alias's own
+        // parameter is marked, to take the argument a use of the alias gives.
+        const own = value?.type === "object_type" && typeParams && alias?.fields ? jsObjectTypeFields(value, typeParams) : null;
+        if (alias && own) alias = { ...alias, fields: own };
         // A function type (`type ResolveFn = (t: string) => Store`): what a call of a value of it returns.
         const result = value?.type === "function_type" ? declared(jsTypeRef(value.childForFieldName("return_type"))) : null;
         enteringTypeParams = null;

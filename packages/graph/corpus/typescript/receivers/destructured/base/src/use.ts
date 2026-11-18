@@ -1,4 +1,4 @@
-import { Sessions } from "./sessions";
+import { Other, Sessions } from "./sessions";
 
 export interface Deps {
   sessions: Sessions;
@@ -27,4 +27,11 @@ export async function chained(deps: Deps) {
   const { sessions } = deps;
   const session = await sessions.open();
   return session.stream();
+}
+
+declare function fallback(): Other;
+
+export function localDefault(deps: Deps) {
+  const { sessions = fallback() } = deps;
+  return sessions.close();
 }

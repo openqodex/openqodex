@@ -4,15 +4,19 @@
 // 2. A member of a type alias of an object type, or of an object type
 //    written in place; a method called on the object type itself stays a gap.
 // 3. A name bound by destructuring (`const { a } = typed`, nested, renamed,
-//    and a destructured parameter).
+//    and a destructured parameter); with a default value only when the
+//    pattern's declaration is annotated, as the checker reads it.
 // 4. A receiver written `x!`, `x?.`, `(x as T)`, typed `Readonly<T>`,
 //    `Partial<T>`, `Required<T>` or `A & B` (bound only when exactly one
 //    side declares the member).
-// 5. A member typed by the interface's type parameter (`Box<T>.value`).
+// 5. A member typed by the type parameter of an interface or of an alias
+//    of an object type (`Box<T>.value`, `type ABox<T> = { value: T }`).
 // 6. A function with no declared result: its one provable result, an object
 //    literal it returns, `async` and `await`, a result that is another call's.
 // 7. The floor examples of a caller list: a same-name gap whose receiver may
 //    be the class comes first.
+// 8. A class field typed by a function type, named or written in place
+//    (`#resolve: ResolveToken`): a member a call on `this` binds to.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -103,6 +107,10 @@ const files: Record<string, string> = {
     "  return turn.stream(); // d5b",
     "}",
     "export function d6(d: Deps) { const { sessions, ...rest } = d; return rest.sessions.close(); } // d6",
+    "declare function fallback(): any;",
+    "export function d7(d: Deps) { const { sessions = fallback() } = d; return sessions.close(); } // d7",
+    "export function d8(d: Deps) { const { sessions: s = new Sessions() }: Deps = d; return s.close(); } // d8",
+    "export function d9({ inner: { sessions = new Sessions() } }: { inner: Deps }) { return sessions.close(); } // d9",
     "",
   ].join("\n"),
   "wrappers.ts": [
@@ -126,6 +134,13 @@ const files: Record<string, string> = {
     "export interface Box<T> { value: T; label: string }",
     "export function g1(b: Box<Sessions>) { return b.value.close(); } // g1",
     "export function g2(b: Box<any>) { return b.value.close(); } // g2",
+    "import { Other } from './lib';",
+    "type ABox<T> = { value: T; label: string };",
+    "type Pair<A, B> = { first: A; second: B };",
+    "export function g3(b: ABox<Sessions>) { return b.value.close(); } // g3",
+    "export function g4(b: ABox<any>) { return b.value.close(); } // g4",
+    "export function g5(p: Pair<Other, Sessions>) { return p.second.close(); } // g5",
+    "export function g6(p: Pair<Sessions, Other>) { return p.second.close(); } // g6",
     "",
   ].join("\n"),
   "infer.ts": [
@@ -172,6 +187,28 @@ const files: Record<string, string> = {
     "export function r14() { return spread({}).store.close(); } // r14",
     "",
   ].join("\n"),
+  "fields.ts": [
+    "import { Sessions } from './lib';",
+    "type ResolveToken = () => Promise<string>;",
+    "type MakeSessions = () => Sessions;",
+    "type Make = MakeSessions;",
+    "export class Store {",
+    "  readonly #resolve: ResolveToken;",
+    "  private readonly make: MakeSessions;",
+    "  private readonly again: Make;",
+    "  private readonly inline: (id: string) => Sessions;",
+    "  private readonly plain: Sessions;",
+    "  constructor(r: ResolveToken, m: MakeSessions) { this.#resolve = r; this.make = m; this.again = m; this.inline = () => new Sessions(); this.plain = new Sessions(); }",
+    "  async run() {",
+    "    await this.#resolve(); // f1",
+    "    this.make().close(); // f2",
+    "    this.again().close(); // f3",
+    "    this.plain.close(); // f4",
+    "    return this.inline('a').close(); // f5",
+    "  }",
+    "}",
+    "",
+  ].join("\n"),
 };
 
 const SITES = (path: string, ...markers: string[]) => markers.map((m) => at(files, path, `// ${m}`));
@@ -205,11 +242,12 @@ describe("receiver types", () => {
     expect(close.some((s) => s.startsWith(`alias.ts:${a4} `))).toBe(false);
   });
 
-  it("types names bound by destructuring: parameters, renames, nested patterns; a default or a rest stays a gap (3)", async () => {
+  it("types names bound by destructuring: parameters, renames, nested patterns, a default under an annotation; a rest or an unannotated default stays a gap (3)", async () => {
     await get();
     const close = into(g, lib("close", "Sessions"));
-    for (const s of SITES("destructure.ts", "d1", "d2", "d3")) expect(close).toContain(`${s} certain`);
-    for (const s of SITES("destructure.ts", "d4", "d6")) expect(close.some((c) => c.startsWith(`${s} `))).toBe(false);
+    for (const s of SITES("destructure.ts", "d1", "d2", "d3", "d4", "d8", "d9")) expect(close).toContain(`${s} certain`);
+    // Unannotated, a default's own type joins the member's: not proved.
+    for (const s of SITES("destructure.ts", "d6", "d7")) expect(close.some((c) => c.startsWith(`${s} `))).toBe(false);
     const [d5a, d5b] = SITES("destructure.ts", "d5a", "d5b");
     expect(into(g, lib("createTurn", "SessionHandle"))).toContain(`${d5a} certain`);
     expect(into(g, lib("stream", "TurnHandle"))).toContain(`${d5b} certain`);
@@ -237,6 +275,27 @@ describe("receiver types", () => {
     expect(close).toContain(`${g1} certain`);
     expect(close.some((c) => c.startsWith(`${g2} `))).toBe(false);
     expect(g.unknowns.some((u) => u.file === "generic.ts" && `generic.ts:${u.line}` === g2 && u.name === "close")).toBe(true);
+    // An alias of an object type with type parameters: the argument at the member's index.
+    const [g3, g4, g5, g6] = SITES("generic.ts", "g3", "g4", "g5", "g6");
+    expect(close).toContain(`${g3} certain`);
+    expect(close).toContain(`${g5} certain`);
+    expect(into(g, lib("close", "Other"))).toContain(`${g6} certain`);
+    for (const s of [g4, g6]) expect(close.some((c) => c.startsWith(`${s} `))).toBe(false);
+    expect(into(g, lib("close", "Other")).some((c) => c.startsWith(`${g5} `))).toBe(false);
+  });
+
+  it("binds a call of a class field typed by a function type, named, aliased or written in place, and what it returns (8)", async () => {
+    await get();
+    const field = (name: string) => symbol(g, "fields.ts", name, "Store");
+    const [f1, f2, f3, f4, f5] = SITES("fields.ts", "f1", "f2", "f3", "f4", "f5");
+    expect(into(g, field("#resolve"))).toContain(`${f1} certain`);
+    expect(into(g, field("make"))).toContain(`${f2} certain`);
+    expect(into(g, field("again"))).toContain(`${f3} certain`);
+    expect(into(g, field("inline"))).toContain(`${f5} certain`);
+    const close = into(g, lib("close", "Sessions"));
+    for (const s of [f2, f3, f4, f5]) expect(close).toContain(`${s} certain`);
+    // A field typed by a class is read as a field: no call names it.
+    expect(into(g, field("plain"))).toEqual([]);
   });
 
   it("infers a result no annotation declares, only where it is proved (6)", async () => {
@@ -265,7 +324,9 @@ describe("receiver types", () => {
     await get();
     for (const name of ["create", "close", "resolve", "stream", "createTurn"]) {
       const certain = into(g, lib(name, "Other")).filter((s) => s.endsWith(" certain"));
-      expect(certain.filter((s) => !s.startsWith("wrappers.ts:"))).toEqual([]);
+      // wrappers.ts and g6 type a value by Other on purpose.
+      const [g6] = SITES("generic.ts", "g6");
+      expect(certain.filter((s) => !s.startsWith("wrappers.ts:") && !s.startsWith(`${g6} `))).toEqual([]);
     }
   });
 });

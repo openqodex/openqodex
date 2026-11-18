@@ -1,5 +1,5 @@
 {
-  "guards": "types a name bound by destructuring a typed parameter or local, renamed or nested, and leaves one with a default value unknown",
+  "guards": "types a name bound by destructuring a typed parameter or local, renamed, nested, or with a default under an annotation, and leaves an unannotated default unknown",
   "callers": [
     {
       "to": "src/sessions.ts#Sessions.close",
@@ -16,6 +16,12 @@
     {
       "to": "src/sessions.ts#Sessions.close",
       "site": "src/use.ts:19",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:23",
       "tier": "certain",
       "kind": "calls"
     },
@@ -46,12 +52,20 @@
     {
       "to": "src/sessions.ts#Other.stream",
       "site": "src/use.ts:29"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:36"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:36"
     }
   ],
   "unknowns": [
     {
       "file": "src/use.ts",
-      "line": 23,
+      "line": 36,
       "cause": "no-receiver-type"
     }
   ]

@@ -61,7 +61,9 @@ export const DISPATCH_CAP = 32;
 // (TypeRef.item). 20: a file's project is the nearest root of its own
 // language family (projectFolder). 21: a callback's parameter typed by the
 // function type the called definition declares (TypeRef.callback).
-export const RESOLVER_VERSION = 21;
+// 22: a member of a generic alias of an object type takes the argument
+// its use gives.
+export const RESOLVER_VERSION = 22;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -2284,7 +2286,9 @@ export function createWorld(input: ResolveInput): World {
   // evidence of the steps that reached it: an object type written in place,
   // an intersection or a member path have no class key of their own, so a
   // member of one is read from the type itself.
-  type Struct = { file: string; family: Family; t: TypeRef; ev: Ev | null; inherited?: boolean };
+  // `bound`: the type arguments, and the file they were written in, of the
+  // use of an alias with type parameters that `t` is the object type of.
+  type Struct = { file: string; family: Family; t: TypeRef; ev: Ev | null; inherited?: boolean; bound?: { file: string; args: TypeRef[] } };
   const evOf = (a: Ev | null, b: Ev | null): Ev | null => (a === null ? b : b === null ? a : chain(a, b));
   const inPlace = (t: TypeRef): boolean => t.name === "{}" && t.qualifier === null && t.result === undefined && !t.path;
   const structural = (t: TypeRef): boolean => t.path !== undefined || t.parts !== undefined || inPlace(t);
@@ -2389,7 +2393,8 @@ export function createWorld(input: ResolveInput): World {
       const k = typeKey(s.file, s.family, t, depth + 1);
       const alias = k !== null && k !== "ext" ? aliasOf(k.key) : null;
       if (!alias || k === null || k === "ext") return s;
-      s = { ...alias, ev: evOf(s.ev, k.ev) };
+      const generic = t.args && Object.values(alias.t.fields ?? {}).some((f) => f.kind === "param");
+      s = { ...alias, ev: evOf(s.ev, k.ev), ...(generic && t.args ? { bound: { file: s.file, args: t.args } } : {}) };
     }
     return null;
   }, null);
@@ -2411,7 +2416,7 @@ export function createWorld(input: ResolveInput): World {
     if (inPlace(n.t)) {
       if (!n.t.fields) return "unknown";
       const f = n.t.fields[name];
-      return f ? { ...n, t: f } : null;
+      return f ? (memberOf(n, f) ?? "unknown") : null;
     }
     const k = typeKey(n.file, n.family, n.t, depth + 1);
     if (k === null || k === "ext") return "unknown";
@@ -2423,6 +2428,14 @@ export function createWorld(input: ResolveInput): World {
     if (m) return "method";
     return outsideBase(k.key) || (classes.get(k.key)?.dynamic.length ?? 0) > 0 ? "unknown" : null;
   }, "unknown");
+  // A member of an object type written in place: its type, or for one typed
+  // by the alias's parameter, the argument the alias's use gives (null
+  // without one).
+  const memberOf = (n: Struct, f: TypeRef): Struct | null => {
+    if (f.kind !== "param") return { ...n, t: f, bound: undefined };
+    const arg = f.param === undefined ? undefined : n.bound?.args[f.param];
+    return arg && n.bound ? { file: n.bound.file, family: n.family, t: arg, ev: n.ev } : null;
+  };
   // The type of member `name` of a value of type `s`.
   const stepStruct = guarded((s: Struct, name: string, depth: number = 0): Struct | "ext" | null => {
     if (depth > MAX_TYPE_DEPTH) return null;
@@ -2438,7 +2451,7 @@ export function createWorld(input: ResolveInput): World {
     }
     if (inPlace(t)) {
       const f = t.fields?.[name];
-      return f ? { ...n, t: f } : null;
+      return f ? memberOf(n, f) : null;
     }
     const k = typeKey(n.file, n.family, t, depth + 1);
     if (k === null || k === "ext") return k;
