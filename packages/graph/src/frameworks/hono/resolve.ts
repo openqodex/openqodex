@@ -596,6 +596,15 @@ function run(index: PluginIndex<HonoFact>): Analysis {
         push(events, r.inst.key, { type, file, site, scope: f.scope, f, bases: r.inst.bases });
         continue;
       }
+      // A use on a parameter (typed or not), or on the router a call is proved
+      // to return: which router it changes is decided where the value comes
+      // from, which the plugin does not follow from here. The middleware is
+      // applied to no route, and the chains it may change are unknown.
+      if (type === "use" && (r.k === "param" || (r.k === "gap" && r.viaCall === true && value(w, f.recv, true, null).k === "inst"))) {
+        const on = r.k === "param" ? `the parameter ${r.name}` : `the router ${showH(f.recv)} returns`;
+        addUnknown({ plugin: PLUGIN, site, scope: { file }, affects: ["applies_middleware"], cause: r.k === "param" ? "dynamic" : "unsupported-rule", name: showH(f.recv), note: `use is called on ${on}, which the plugin does not follow to a router, so the middleware it adds is applied to no route; the middleware chains of the routes it may cover are not known whole`, count: null, exact: false });
+        continue;
+      }
       if (r.k === "param" && r.type !== null) {
         if (type === "route" || type === "openapi") paramRoutes.push({ name: r.name, type: r.type, ev: { type, file, site, scope: f.scope, f, bases: [] } });
         continue;
