@@ -95,6 +95,21 @@ const files: Record<string, string> = {
     'g.route("/t", guardTyped(typed));',
     "export default g;",
   ].join("\n"),
+  // A wrapper that registers a route on the router it is given, untyped:
+  // the route is an unknown at its line. A Map's get and a one-argument get
+  // on an untyped parameter are no routes and stay quiet (the controls).
+  "src/add.ts": [
+    'import { health } from "./handlers";',
+    "export function add(r) {",
+    '  r.get("/x", health);',
+    "  return r;",
+    "}",
+    "export function read(m: Map<string, string>, c) {",
+    '  m.get("k");',
+    '  return c.get("user");',
+    "}",
+  ].join("\n"),
+  "src/added.ts": ['import { Hono } from "hono";', 'import { health } from "./handlers";', 'import { add } from "./add";', "const a = new Hono();", 'a.get("/own", health);', "const inner = new Hono();", 'a.route("/add", add(inner));', "export default a;"].join("\n"),
 };
 
 let root: string;
@@ -183,5 +198,13 @@ describe("the Hono plugin on what a review found", () => {
       expect(gaps(file).filter((u) => u.site?.line === line && u.affects.includes("applies_middleware") && /use/.test(u.note))).toHaveLength(1);
     }
     expect(gaps("src/guarded.ts")).toEqual([]);
+  });
+
+  it("names a route on an untyped router parameter as an unknown, while a route on a router it follows is listed", () => {
+    expect(listed("src/added.ts")).toEqual(["GET /own fw:hono:app:src/added.ts:4"]);
+    expect(regs("src/add.ts")).toEqual([]);
+    expect(gaps("src/add.ts").filter((u) => u.site?.line === 3 && u.affects.includes("handles"))).toHaveLength(1);
+    expect(gaps("src/add.ts").filter((u) => u.site?.line !== 3)).toEqual([]);
+    expect(gaps("src/added.ts")).toEqual([]);
   });
 });
