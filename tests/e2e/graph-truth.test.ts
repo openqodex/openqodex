@@ -49,13 +49,13 @@ const REPO = {
 // (a) Owner's threshold: certain edges into a target the checker does not name.
 const MAX_WRONG_CERTAIN = 0;
 // (c) Production truth sites found certain or likely, of all production
-// truth sites: 3617 on 0a67e51f (tf-graph before any fix), 3942 once the
-// TypeScript receiver types landed.
-const BASELINE_PROD_RECALL = { found: 3942, of: 4021 };
+// truth sites: 3617 on 0a67e51f (tf-graph before any fix), 3948 once the
+// TypeScript receiver, callback and `this` types landed.
+const BASELINE_PROD_RECALL = { found: 3948, of: 4021 };
 // (c) Possible edges at production truth sites into a target the checker
-// does not name: 548 on 0a67e51f, 917 since. All 917 are dispatch to a
+// does not name: 548 on 0a67e51f, 922 since. All 922 are dispatch to a
 // class or object that declares the interface (dispatch-implements).
-const MAX_PROD_BURDEN = 917;
+const MAX_PROD_BURDEN = 922;
 // (b) Owner's held-out sites: each must resolve, by the checker, to the named
 // declaration, and the graph must find it certain or likely.
 const HELD_OUT = [
