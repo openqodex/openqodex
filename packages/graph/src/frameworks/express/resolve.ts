@@ -411,12 +411,27 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     if (!imp) return unsettled("the module the require names is computed or not a plain string");
     const named = imp.names.find((n) => n.local === decl.name);
     if (named && member !== undefined) return unsettled(`${decl.name}.${member} reads a member of a destructured name`);
-    if (!take("lookups")) return unsettled(`the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`);
-    const mod = index.module(file, imp.spec);
-    if (mod.kind === "external") return { val: null, settled: true, note: "" };
-    if (mod.kind !== "module") return unsettled(`no file in the repository is named by require(${JSON.stringify(imp.spec)})`);
-    return exportOf(mod.file, named ? named.imported : (member ?? "default"), depth + 1);
+    return requiredExport(file, imp.spec, named ? named.imported : (member ?? "default"), depth);
   };
+  const requiredExport = (file: string, spec: string, name: string, depth: number): Got => {
+    if (!take("lookups")) return unsettled(`the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`);
+    const mod = index.module(file, spec);
+    if (mod.kind === "external") return { val: null, settled: true, note: "" };
+    if (mod.kind !== "module") return unsettled(`no file in the repository is named by require(${JSON.stringify(spec)})`);
+    return exportOf(mod.file, name, depth + 1);
+  };
+  // A require written where its value is used: `app.use("/x", require("./x"))`, or `require("./x").router`.
+  const inlineRequire = (file: string, a: Expr, scope: number, depth: number): Got | null => {
+    const member = a.t === "member" ? a.prop : undefined;
+    const call = a.t === "member" ? a.obj : a;
+    if (call.t !== "call" || !isRequire(call, file, scope)) return null;
+    const spec = call.args[0];
+    if (call.args.length !== 1 || spec?.t !== "str") return unsettled("the module name is computed or not a plain string");
+    return requiredExport(file, spec.v, member ?? "default", depth);
+  };
+  // What an argument of `use` holds: a name, or a require written in place.
+  const argValue = (file: string, a: Expr, scope: number, line: number): Val | Param | null =>
+    a.t === "ref" ? valueIn(file, a.path, scope, line) : (inlineRequire(file, a, scope, 0)?.val ?? null);
   // Why a name a mount reads is not followed through a require; null when it is no require or is no router.
   const requireGap = (file: string, path: readonly string[], scope: number): string | null => {
     const name = path[0] as string;
@@ -660,8 +675,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     for (const e of list) {
       if (e.type !== "use") continue;
       for (const a of e.args) {
-        if (a.t !== "ref") continue;
-        const v = valueIn(e.file, a.path, e.scope, e.site.line);
+        const v = argValue(e.file, a, e.scope, e.site.line);
         if (v && v.kind === "router" && v.id !== id) mountedBy.set(v.id, (mountedBy.get(v.id) ?? 0) + 1);
       }
     }
@@ -691,7 +705,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
         if (e.more > 0) cutGap(e.file, e.site, e.more, "the routers and middleware");
         for (const a of e.args) {
           if (halted()) return;
-          const target = a.t === "ref" ? valueIn(e.file, a.path, e.scope, e.site.line) : null;
+          const target = argValue(e.file, a, e.scope, e.site.line);
           if (target && target.kind === "router") {
             // A mount that loops back to a router on the way here ends the loop.
             if (stack.includes(target.id)) continue;
@@ -711,7 +725,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
             continue;
           }
           // A router brought in by a require the plugin cannot follow is not listed under this mount.
-          const lost = target ? null : a.t === "ref" ? requireGap(e.file, a.path, e.scope) : isRequire(a, e.file, e.scope) ? "the module name is written in the call, where the plugin does not read it" : null;
+          const inline = target || a.t === "ref" ? null : inlineRequire(e.file, a, e.scope, 0);
+          const lost = target ? null : a.t === "ref" ? requireGap(e.file, a.path, e.scope) : inline && !inline.settled ? inline.note : null;
           if (lost !== null) addUnknown({ plugin: PLUGIN, site: e.site, scope: scopeOf(app, e.file), affects: ["mounts", "handles"], cause: "dynamic", name: show(a), note: `${show(a)} comes from a CommonJS require the plugin cannot follow (${lost}), so it may be a router whose routes are not listed under this mount`, count: null, exact: false });
           if (mw.length >= MAX_MIDDLEWARE_CHAIN) {
             middlewareOmitted++;

@@ -48,6 +48,9 @@ const files: Record<string, string> = {
   // a require written inside the mount, a name assigned twice
   "inline/users.js": router("module.exports = r;"),
   "inline/app.js": app([], ["app.use('/users', require('./users'));"]),
+  "inlinedyn/app.js": app(["const name = process.env.ROUTES;"], ["app.use('/users', require(name));", "app.use('/more', require('./nowhere'));"]),
+  "inlinefn/helper.js": "module.exports = function helper(req, res, next) { next(); };",
+  "inlinefn/app.js": app([], ["app.use('/h', require('./helper'));"]),
   "twice/app.js": app(["let r = require('./a');", "r = require('./b');"], ["app.use('/users', r);"]),
 };
 
@@ -80,6 +83,7 @@ describe("the Express plugin on a router required with CommonJS", () => {
     ["module.exports = { users: router }, destructured", "object"],
     ["module.exports = { users } of a local, destructured", "shorthand"],
     ["module.exports.users = router, read as m.users", "member2"],
+    ["module.exports = router, required inside the use call", "inline"],
   ];
   for (const [name, dir] of cases) {
     it(`composes the mount prefix and marks the route mounted: ${name}`, () => {
@@ -110,11 +114,15 @@ describe("the Express plugin on a router required with CommonJS", () => {
 
   it.each([
     ["a router re-exported with module.exports = require(...)", "chain/app.js", [4]],
-    ["a require written inside the mount call", "inline/app.js", [3]],
     ["a name assigned more than once", "twice/app.js", [5]],
   ])("says the mount is not followed for %s", (_name, file, lines) => {
     const at = gaps(file).filter((u) => u.affects.includes("mounts"));
     expect(at.map((u) => u.site?.line)).toEqual(lines);
     expect(regs(file.replace("app.js", "users.js")).every((r) => r.mounted === false)).toBe(true);
+  });
+
+  it("says a require inside the mount call is not followed when its module is computed or missing, and none for a function", () => {
+    expect(gaps("inlinedyn/app.js").filter((u) => u.affects.includes("mounts")).map((u) => u.site?.line)).toEqual([4, 5]);
+    expect(gaps("inlinefn/app.js").filter((u) => u.affects.includes("mounts"))).toEqual([]);
   });
 });

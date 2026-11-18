@@ -409,7 +409,10 @@ function keepRead(facts: ExpressFact[]): ExpressFact[] {
       case "call": {
         const fn = names(e.fn);
         const route = (e.fn.t === "member" && e.fn.prop === "route") || (e.fn.t === "ref" && e.fn.path[e.fn.path.length - 1] === "route");
-        return { ...e, fn, args: e.args.map((a, i) => (route && i === 0 ? path(a) : names(a))) };
+        // The module a `require` names is kept, by the rule that keeps a path piece, unless the rule would change it.
+        const required = e.fn.t === "ref" && e.fn.path.length === 1 && e.fn.path[0] === "require";
+        const spec = (a: Expr): Expr => (a.t === "str" && eitherSegmentText(a.v) === a.v ? a : unread(a));
+        return { ...e, fn, args: e.args.map((a, i) => (route && i === 0 ? path(a) : required && i === 0 ? spec(a) : names(a))) };
       }
       case "member":
         return { ...e, obj: names(e.obj) };
