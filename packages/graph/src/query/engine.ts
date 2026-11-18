@@ -19,6 +19,7 @@
 import { floorReasons, toImpactUnknown } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
+import { CALLER_KINDS } from "../types.js";
 import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Extra, Job, Listing, Request, Session } from "./answer.js";
@@ -201,11 +202,17 @@ function explainJob(s: Session, req: Request): Job | Answer {
   };
 }
 
-// Callers and callees to a depth, with the floor of each.
-function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
+// Callers and callees to a depth, with the floor of each. Callees walk
+// the relations `edges` names when it is given, so `defines` (a function
+// to a definition in its body) is walked only when asked.
+const CALLEE_EDGES = new Set<string>([...CALLER_KINDS, "defines"]);
+function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answer {
   const g = s.graph;
   const kind = req.kind as "callers" | "callees";
   const depth = Math.min(Math.max(1, req.depth ?? 1), 3);
+  const edges = kind === "callees" && req.edges && req.edges.length > 0 ? req.edges : null;
+  const unknownEdge = edges?.find((k) => !CALLEE_EDGES.has(k));
+  if (unknownEdge) return fail(s, kind, "bad-request", `callees walks ${[...CALLEE_EDGES].join(", ")}; not ${unknownEdge}`);
   const point = new Point(g, req.target);
   let n: GraphNode | null = null;
   let w: Walk | null = null;
@@ -216,7 +223,7 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
       const o = point.outcome(s, kind);
       if (isAnswer(o)) return o;
       n = o;
-      w = new Walk(g, n.id, kind === "callers" ? "in" : "out", depth, tiers);
+      w = new Walk(g, n.id, kind === "callers" ? "in" : "out", depth, tiers, edges ? new Set(edges) : null);
     }
     const walk = w as Walk;
     const target = candidate(g, n, 1);

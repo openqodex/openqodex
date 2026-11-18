@@ -18,8 +18,8 @@ import type { Family, Graph, GraphEdge, GraphNode, GraphSite, UnknownSite } from
 import { candidate, counts, empty, fail, isAnswer, listing, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Extra, Job, Request, Session } from "./answer.js";
 import { edgeId } from "./ids.js";
-import { byItem, Cycles, importCount, importEdges, importsFrom, Pass, PathSearch, RANK, sortWithin, spent, toItem, Walk } from "./traverse.js";
-import type { Budget, Item } from "./traverse.js";
+import { byItem, Cycles, definesEdge, holderOf, importCount, importEdges, importsFrom, Pass, PathSearch, RANK, sortWithin, spent, toItem, Walk } from "./traverse.js";
+import type { Budget, HopEdge, Item } from "./traverse.js";
 
 // The relations the resolver of this build produces. A later phase that
 // adds a relation adds it here; a relation found on an edge of the graph
@@ -424,7 +424,48 @@ export function path(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | 
 // public name comes from the graph with every place that used it, never
 // from the summary, which keeps the first 200 for the brief; the cuts the
 // walk made in what it lists are said as the floor's reasons.
+//
+// A touched definition held in a function's body (a handler a factory
+// registers, a closure it returns) runs only through the function that
+// holds it, so each holder up the nesting is a `held-by` item, its defines
+// hops from the touched symbol out, and each caller path of a holder, from
+// the same walk seeded at the holder, is a `held-by-caller` item (or
+// `held-by-possible-caller`) after those hops. They are kept apart from the
+// callers and out of the counts, since no hop says the holder calls the
+// change; the review's walk never lists them.
 const LISTED_CUTS = new Set(["hub", "second-hop", "walk-limit", "export-walk"]);
+function heldBy(g: Graph, sum: ReturnType<typeof detectImpact>, hop: (e: HopEdge, depth: number) => Item): { items: unknown[]; reasons: string[] } {
+  const items: unknown[] = [];
+  const reasons: string[] = [];
+  const seeds = new Set([...sum.touched, ...sum.removed]);
+  const walks = new Map<string, ReturnType<typeof detectImpact>>();
+  const walkOf = (holder: GraphNode) => {
+    let w = walks.get(holder.id);
+    if (!w) {
+      w = detectImpact(g, { files: [{ path: holder.file, status: "modified", oldPath: null, binary: false }], coverage: new Map([[holder.file, new LineSet().add(holder.startLine)]]) });
+      walks.set(holder.id, w);
+      for (const x of w.unknown.seeds) if (x.seed === holder.id) for (const r of x.reasons) reasons.push(`callers of ${holder.name}, which holds the changed code: ${r}`);
+      for (const c of w.cuts) if (LISTED_CUTS.has(c.by)) reasons.push(`callers of ${holder.name}, which holds the changed code: ${c.note}`);
+    }
+    return w;
+  };
+  for (const seed of sum.touched) {
+    const chain: HopEdge[] = [];
+    let at = g.nodes.get(seed);
+    for (let holder = at ? holderOf(g, at.id) : null; at && holder; at = holder, holder = holderOf(g, holder.id)) {
+      chain.push(definesEdge(holder, at));
+      const hops = chain.map((e, i) => hop(e, i + 1));
+      items.push({ type: "held-by", seed, hops });
+      // A holder the change touched has its callers listed as callers already.
+      if (seeds.has(holder.id)) continue;
+      const w = walkOf(holder);
+      for (const [type, paths] of [["held-by-caller", w.callers], ["held-by-possible-caller", w.possible ?? []]] as const) {
+        for (const p of paths) if (p.seed === holder.id) items.push({ type, seed, hops: [...hops, ...p.edges.map((e, i) => hop(e, chain.length + i + 1))] });
+      }
+    }
+  }
+  return { items, reasons: [...new Set(reasons)] };
+}
 export function impact(s: Session, req: Request, extra: Extra): Job | Answer {
   const g = s.graph;
   const bySymbol = req.target !== undefined && (req.target.id !== undefined || req.target.name !== undefined || req.target.file !== undefined);
@@ -444,12 +485,14 @@ export function impact(s: Session, req: Request, extra: Extra): Job | Answer {
     if (spent(budget)) return stoppedAt(base, [], [], null);
     const sum = detectImpact(g, change as NonNullable<typeof change>);
     const hop = (e: { from: string; to: string; kind: string; sites: GraphSite[] }, depth: number): Item => toItem(g, e, e.sites[0] as GraphSite, depth);
+    const held = heldBy(g, sum, hop);
     const all: unknown[] = [
       ...sum.callers.map((p) => ({ type: "caller", seed: p.seed, hops: p.edges.map((e, i) => hop(e, i + 1)) })),
       ...(sum.possible ?? []).map((p) => ({ type: "possible-caller", seed: p.seed, hops: p.edges.map((e, i) => hop(e, i + 1)) })),
       // Every use of each touched and removed symbol, from the graph: the
       // summary keeps the first 200 of each kind for the brief.
       ...[...sum.touched, ...sum.removed].flatMap((seed) => (g.refsIn.get(seed) ?? []).filter((e) => e.from !== seed).map((e) => ({ type: "reference", seed, hops: [hop(e, 1)] }))),
+      ...held.items,
       ...sum.callees.map((p) => ({ type: "callee", seed: p.seed, hops: p.edges.map((e, i) => hop(e, i + 1)) })),
       ...sum.importers.map((e) => ({ type: "importer", hops: [hop(e, 1)] })),
       ...g.exportChanges.map((e) => ({ type: "export", ...e })),
@@ -462,8 +505,8 @@ export function impact(s: Session, req: Request, extra: Extra): Job | Answer {
         target: target ?? sum.symbols.filter((x) => sum.touched.includes(x.id) || sum.removed.includes(x.id)).map((x) => ({ id: x.id, name: x.name, kind: x.kind, file: x.file, line: x.startLine, project: g.projectOf(x.file), score: 1 })),
         counts: counts(lastSites.map((site) => ({ site }))),
         unknown: {
-          floor: sum.unknown.floor || cutNotes.length > 0,
-          reasons: [...new Set([...sum.unknown.seeds.flatMap((x) => x.reasons), ...cutNotes, ...(sum.status === "partial" ? sum.reasons : [])])],
+          floor: sum.unknown.floor || cutNotes.length > 0 || held.reasons.length > 0,
+          reasons: [...new Set([...sum.unknown.seeds.flatMap((x) => x.reasons), ...cutNotes, ...held.reasons, ...(sum.status === "partial" ? sum.reasons : [])])],
           causes: sum.unknown.causes,
           examples: sum.unknown.near.slice(0, 5),
         },
