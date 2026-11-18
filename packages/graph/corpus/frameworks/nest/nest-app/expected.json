@@ -1,0 +1,34 @@
+{
+  "guards": "lists every Nest route with its full path under the global prefix and its controller method, reads path constants of the same file and of an imported file, and makes no route of a decorator of the repository's own or of a computed path",
+  "frameworks": {
+    "plugin": "nest",
+    "apps": 1,
+    "registrations": [
+      { "site": "src/health.controller.ts:5", "methods": ["GET"], "pattern": "/api/health", "handler": "src/health.controller.ts#HealthController.check", "status": "bound", "mounted": true },
+      { "site": "src/users/users.controller.ts:11", "methods": ["GET"], "pattern": "/api/users", "handler": "src/users/users.controller.ts#UsersController.list", "status": "bound", "mounted": true },
+      { "site": "src/users/users.controller.ts:16", "methods": ["GET"], "pattern": "/api/users/me", "handler": "src/users/users.controller.ts#UsersController.me", "status": "bound" },
+      { "site": "src/users/users.controller.ts:21", "methods": ["GET"], "pattern": "/api/users/:id", "handler": "src/users/users.controller.ts#UsersController.getUser", "status": "bound", "mounted": true },
+      { "site": "src/users/users.controller.ts:26", "methods": ["POST"], "pattern": "/api/users", "handler": "src/users/users.controller.ts#UsersController.create", "status": "bound" },
+      { "site": "src/users/users.controller.ts:31", "methods": ["DELETE"], "pattern": "/api/users/:id", "handler": "src/users/users.controller.ts#UsersController.remove", "status": "bound" }
+    ],
+    "edges": [
+      { "kind": "mounts", "from": "fw:nest:app:src/main.ts:5", "to": "src/users/users.controller.ts#UsersController", "tier": "certain" },
+      { "kind": "mounts", "from": "fw:nest:app:src/main.ts:5", "to": "src/health.controller.ts#HealthController", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:src/users/users.controller.ts:21", "to": "src/auth.guard.ts#AuthGuard", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:src/users/users.controller.ts:31", "to": "src/auth.guard.ts#AuthGuard", "tier": "certain" }
+    ],
+    "roles": [
+      { "target": "src/users/users.controller.ts#UsersController.getUser", "role": "route_handler", "detail": "nest" },
+      { "target": "src/health.controller.ts#HealthController.check", "role": "route_handler", "detail": "nest" },
+      { "target": "src/auth.guard.ts#AuthGuard", "role": "middleware", "detail": "nest-guard" }
+    ],
+    "unknowns": [{ "file": "src/users/users.controller.ts", "line": 36, "cause": "dynamic" }],
+    "notRegistrations": ["src/users/users.controller.ts:36"],
+    "noRegistrationsIn": ["src/cache.ts"],
+    "notRoles": [
+      { "target": "src/cache.ts#Cache.read", "role": "route_handler" },
+      { "target": "src/users/users.controller.ts#UsersController.extra", "role": "route_handler" }
+    ],
+    "notEdges": [{ "kind": "applies_middleware", "from": "registration:src/health.controller.ts:5" }]
+  }
+}
