@@ -212,19 +212,7 @@ function run(index: PluginIndex<HonoFact>): Analysis {
     return index.lookup(file, path);
   };
 
-  // The npm project of a file: the package.json folder nearest above it.
-  // Hono is an npm dependency, so it is declared there, even where another
-  // language's source root lies deeper (a Python script under src/).
-  const npmProjects = new Map<string, string>();
-  const npmProject = (file: string): string => {
-    let dir = npmProjects.get(file);
-    if (dir === undefined) {
-      dir = "";
-      for (const p of index.model().node) if ((p.dir === "" || file.startsWith(`${p.dir}/`)) && p.dir.length > dir.length) dir = p.dir;
-      npmProjects.set(file, dir);
-    }
-    return dir;
-  };
+  const npmProject = (file: string): string => index.projectOf(file);
   const enabled = new Map<string, boolean>();
   const isEnabled = (file: string): boolean => {
     const project = npmProject(file);
