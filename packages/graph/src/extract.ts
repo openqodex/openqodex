@@ -38,10 +38,14 @@ import type { TreeVisitor } from "./walk.js";
 // 27: calls in an instance field initializer run on the instance, a const
 // function inside an anonymous callback or a module block is a definition,
 // and callback parameters and loop variables take a declared element type.
-// 28: a class field typed by a function type is a member a call names, a
+// 28: `this` and `super` outside an arrow, a method or a class field's
+// function give no receiver type, and each parameter declared as a function
+// type keeps that function's parameter types (DefFact.callbacks), which an
+// untyped parameter of a callback passed there takes (TypeRef.callback).
+// 29: a class field typed by a function type is a member a call names, a
 // generic alias's own members mark its type parameters, and a destructuring
 // default under an annotation takes the member's type.
-export const EXTRACTOR_VERSION = 28;
+export const EXTRACTOR_VERSION = 29;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -60,6 +64,10 @@ type Frame = {
   typeParams?: Map<string, TypeRef | null>; // Type parameters and their bounds.
   objectAt?: number; // a module made from an object literal: the literal's start
   fnAt?: number; // a const bound to a function: the function's start, whose frame is this definition's
+  // `this` here is the enclosing class's instance or the class: false in a
+  // function that is no arrow and no method, where `this` is whatever the
+  // caller binds. Unset: as around it, and true in a class frame.
+  thisKnown?: boolean;
   // Parameters and locals given another value lose their original callable value.
   reassigned?: Set<string>;
   // A Java type's frame: the names of its fields, read before its methods,
@@ -116,6 +124,7 @@ function typeRef(t: TypeRef): TypeRef {
 function sameType(a: TypeRef | undefined, b: TypeRef | undefined): boolean {
   if (!a || !b) return a === b;
   return a.name === b.name && a.qualifier === b.qualifier && !a.elem === !b.elem && !a.item === !b.item && a.result === b.result
+    && a.callback?.arg === b.callback?.arg && a.callback?.param === b.callback?.param
     && !a.promise === !b.promise && !a.awaited === !b.awaited
     && a.kind === b.kind && a.param === b.param && (a.args?.length ?? 0) === (b.args?.length ?? 0)
     && (a.args ?? []).every((arg, i) => sameType(arg, b.args?.[i]))
@@ -296,6 +305,7 @@ class Ctx {
     s.depth = parent.depth + 1;
     s.caller = frame.def >= 0 ? frame.def : parent.caller;
     s.clsScope = frame.cls !== null ? s : parent.clsScope;
+    s.thisKnown = frame.thisKnown ?? (frame.cls !== null || parent.thisKnown !== false);
     s.inFunction = parent.inFunction || !(frame.block === true || (frame.cls !== null && frame.locals === null));
     s.decl = frame.locals ? s : parent.decl;
     s.fnDecl = frame.locals && !frame.block ? s : parent.fnDecl;
@@ -697,6 +707,7 @@ class Ctx {
       if (bound) s.bound = bound;
     };
     for (const d of this.defs) {
+      d.callbacks?.forEach((c) => c.params.forEach(bindType));
       d.bases.forEach(bindType);
       Object.values(d.fields).forEach(bindType);
       d.results?.forEach(bindType);
@@ -938,6 +949,8 @@ function jsReceiver(ctx: Ctx, object: Node): Receiver {
     base = jsUnwrap(base.childForFieldName("object"));
   }
   if (!base) return { kind: "other" };
+  // `this` or `super` in a function that is no arrow and no method: not proved the class's.
+  if ((base.type === "this" || base.type === "super") && ctx.top.thisKnown === false && ctx.cls()) return { kind: "other" };
   if (base.type === "this") return { kind: "self", path };
   if (base.type === "super") return path.length === 0 ? { kind: "super" } : { kind: "other" };
   // `(x as T).m()`: the cast declares the type, as an annotation would.
@@ -1020,6 +1033,8 @@ function jsSignature(ctx: Ctx, fn: Node, def: number, locals: Map<string, TypeRe
     const typeNode = p.childForFieldName("type");
     if (pattern?.type === "identifier") {
       locals?.set(pattern.text, declared(jsTypeRef(typeNode)));
+      const params = def >= 0 ? jsCallbackParams(typeNode, fn) : null;
+      if (params) ((ctx.defs[def] as DefFact).callbacks ??= []).push({ arg: names.length, params });
       names.push(pattern.text);
     } else {
       const bound = patternNames(pattern ?? p);
@@ -1035,15 +1050,39 @@ function jsSignature(ctx: Ctx, fn: Node, def: number, locals: Map<string, TypeRe
   if (def >= 0 && names.some((n) => n !== "")) (ctx.defs[def] as DefFact).params = names;
 }
 
-// The name of a function's first parameter when it is a plain name with no
-// type written on it, else null.
-function jsUntypedFirstParam(fn: Node): string | null {
+// A parameter declared as a function type (`fn: (s: Span) => T`): the
+// declared type of each parameter of that function, null where none is
+// written or a type parameter is named; null when it declares none.
+function jsCallbackParams(typeNode: Node | null, fn: Node): (TypeRef | null)[] | null {
+  let t = typeNode?.type === "type_annotation" ? typeNode.firstNamedChild : typeNode;
+  while (t?.type === "parenthesized_type") t = t.firstNamedChild;
+  if (t?.type !== "function_type" || t.childForFieldName("type_parameters")) return null;
+  const own = new Set(fn.childForFieldName("type_parameters")?.namedChildren.map((p) => p.childForFieldName("name")?.text) ?? []);
+  const out: (TypeRef | null)[] = [];
+  for (const p of t.childForFieldName("parameters")?.namedChildren ?? []) {
+    if (p.type === "comment") continue;
+    const pattern = p.childForFieldName("pattern");
+    if (pattern?.type === "this") continue;
+    const type = p.childForFieldName("type");
+    const generic = type?.descendantsOfType("type_identifier").some((n) => own.has(n.text) || typeParam(n.text) !== undefined);
+    out.push(p.type === "required_parameter" && pattern?.type === "identifier" && !generic ? jsTypeRef(type) : null);
+  }
+  return out.some((x) => x !== null) ? out : null;
+}
+
+// The names of a function's parameters, by position: a plain name with no
+// type or default written on it, else null.
+function jsUntypedParams(fn: Node): (string | null)[] {
   const single = fn.childForFieldName("parameter"); // x => ...
-  if (single) return single.type === "identifier" ? single.text : null;
-  const p = fn.childForFieldName("parameters")?.namedChildren.find((c) => c.type !== "comment");
-  if (p?.type === "identifier") return p.text;
-  const pattern = p?.type === "required_parameter" ? p.childForFieldName("pattern") : null;
-  return pattern?.type === "identifier" && !p?.childForFieldName("type") && !p?.childForFieldName("value") ? pattern.text : null;
+  if (single) return [single.type === "identifier" ? single.text : null];
+  const out: (string | null)[] = [];
+  for (const p of fn.childForFieldName("parameters")?.namedChildren ?? []) {
+    if (p.type === "comment") continue;
+    const pattern = p.type === "required_parameter" ? p.childForFieldName("pattern") : null;
+    if (pattern?.type === "this") continue;
+    out.push(p.type === "identifier" ? p.text : pattern?.type === "identifier" && !p.childForFieldName("type") && !p.childForFieldName("value") ? pattern.text : null);
+  }
+  return out;
 }
 
 // A name or a member path that may stand for a function of the
@@ -1295,7 +1334,7 @@ function callType(ctx: Ctx, value: Node | null, depth = 0): TypeRef | null {
     if (object.type === "call_expression" || object.type === "await_expression") return methodResultType(prop, callType(ctx, object, depth + 1));
     if (object.type === "new_expression") return methodResultType(prop, newType(object));
     const cls = ctx.cls();
-    if (!cls || ctx.defs[ctx.caller()]?.static) return null;
+    if (!cls || ctx.defs[ctx.caller()]?.static || ctx.top.thisKnown === false) return null;
     if (object.type === "this" && cls.cls) {
       return ctx.defs[cls.def]?.topLevel ? methodResultType(prop, typeRef({ name: cls.cls, qualifier: null, ...pos(object) })) : null;
     }
@@ -1330,6 +1369,21 @@ function callbackElement(ctx: Ctx, fn: Node): TypeRef | null {
   return elem ? { ...elem, declared: false } : null;
 }
 
+// A function passed as an argument of a call, with its position; null when
+// a spread argument comes before it (its position is not known).
+function callbackArg(fn: Node): { call: Node; arg: number } | null {
+  const args = fn.parent;
+  const call = args?.parent;
+  if (args?.type !== "arguments" || call?.type !== "call_expression") return null;
+  let arg = 0;
+  for (const a of args.namedChildren) {
+    if (a.startIndex === fn.startIndex) return { call, arg };
+    if (a.type === "spread_element") return null;
+    if (a.type !== "comment") arg++;
+  }
+  return null;
+}
+
 // The declared type of a collection a loop or a callback reads: a local, a
 // field of `this`, the values of a Map (`m.values()`), or what a call returns.
 function collectionType(ctx: Ctx, node: Node | null): TypeRef | null {
@@ -1340,7 +1394,7 @@ function collectionType(ctx: Ctx, node: Node | null): TypeRef | null {
   if (n.type === "member_expression" && n.childForFieldName("object")?.type === "this") {
     const cls = ctx.cls();
     const field = n.childForFieldName("property");
-    if (!cls?.cls || !field || ctx.defs[ctx.caller()]?.static) return null;
+    if (!cls?.cls || !field || ctx.defs[ctx.caller()]?.static || ctx.top.thisKnown === false) return null;
     return ctx.defs[cls.def]?.fields[field.text] ?? null;
   }
   const fn = n.type === "call_expression" ? n.childForFieldName("function") : null;
@@ -1450,12 +1504,25 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     enteringTypeParams = typeParams;
     jsSignature(ctx, node, def, locals);
     enteringTypeParams = null;
-    const first = jsUntypedFirstParam(node);
-    if (first !== null && locals.get(first) === null) {
+    const untyped = jsUntypedParams(node);
+    const first = untyped[0];
+    if (first && locals.get(first) === null) {
       const elem = callbackElement(ctx, node);
       if (elem) locals.set(first, elem);
     }
-    const leave = ctx.push({ def, cls: null, locals, ...(typeParams ? { typeParams } : {}) });
+    // A callback passed to a call: each untyped parameter as the called
+    // function declares it, read once the call is bound.
+    const at = callbackArg(node);
+    const called = at ? callType(ctx, at.call) : null;
+    if (at && called?.result !== undefined && !called.callback) {
+      untyped.forEach((name, param) => {
+        if (name && locals.get(name) === null) locals.set(name, { ...called, callback: { arg: at.arg, param } });
+      });
+    }
+    // Only an arrow keeps the `this` around it; a method's own is its class's,
+    // and so is that of a function a class field holds.
+    const ownThis = (def >= 0 && ctx.defs[def]?.kind === "method") || node.parent?.type === "public_field_definition" || node.parent?.type === "field_definition";
+    const leave = ctx.push({ def, cls: null, locals, ...(typeParams ? { typeParams } : {}), ...(node.type === "arrow_function" ? {} : { thisKnown: ownThis }) });
     if (def >= 0 && !(ctx.defs[def] as DefFact).results) {
       const generator = node.type.startsWith("generator") || node.children.some((c) => c.type === "*");
       returned.set(def, { types: [], bad: generator, async: node.children.some((c) => c.type === "async") });
@@ -1463,14 +1530,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     // An arrow whose body is an expression returns it.
     const body = node.type === "arrow_function" ? node.childForFieldName("body") : null;
     if (body && body.type !== "statement_block") jsReturned(body);
-    // In a field initializer only an arrow keeps the instance as `this`.
-    const outer = ctx.instanceInit;
-    if (outer < 0 || node.type === "arrow_function") return leave;
-    ctx.instanceInit = -1;
-    return () => {
-      ctx.instanceInit = outer;
-      leave();
-    };
+    return leave;
   };
   // What each function without a declared result returns, read return by
   // return: the type of each, the locals it rests on, and whether one could
@@ -1932,7 +1992,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const target = left?.type === "member_expression" || left?.type === "subscript_expression" ? left.childForFieldName("object") : null;
         if (target?.type === "identifier") ctx.tableUse(target.text);
         const cls = ctx.cls();
-        if (type && cls && left?.type === "member_expression" && left.childForFieldName("object")?.type === "this") {
+        if (type && cls && ctx.top.thisKnown !== false && left?.type === "member_expression" && left.childForFieldName("object")?.type === "this") {
           const prop = left.childForFieldName("property");
           if (prop) (ctx.defs[cls.def] as DefFact).fields[prop.text] = type;
         }

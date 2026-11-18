@@ -47,6 +47,10 @@ export type TypeRef = {
   // must be declared as an array or a set (`for (const s of all())`).
   item?: boolean;
   values?: TypeRef; // Map<K, V> and ReadonlyMap: V, read only through `values()`
+  // With `result`: not what the call returns but the declared type of
+  // parameter `param` of the function the call takes as argument `arg`
+  // (`span("x", (s) => ...)` with `span(name, fn: (s: Span) => T)`).
+  callback?: { arg: number; param: number };
   declared?: boolean;
   bound?: BoundImport;
   rel?: "implements" | "include" | "prepend" | "extend";
@@ -86,6 +90,10 @@ export type DefFact = {
   dynamicBases?: { line: number; column: number; head?: TypeRef; rel?: "include" | "extend" | "prepend" }[];
   fields: Record<string, TypeRef>; // classes and structs: field name to its declared or constructed type
   results?: (TypeRef | null)[]; // functions and methods: the declared result types
+  // Each parameter declared as a function type: its position and the
+  // declared type of each of that function's parameters (null: none, or a
+  // type parameter, which the call may fill with any type).
+  callbacks?: { arg: number; params: (TypeRef | null)[] }[];
   static?: boolean; // methods called on the class itself: JS `static`, Ruby `def self.x`
   // A hash of the definition without its name, comments and whitespace
   // (top-level definitions and members of top-level classes only).
