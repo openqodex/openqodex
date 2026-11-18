@@ -10,9 +10,15 @@
 //     build looking current, so the count never changes.
 //  5. The count leaks into the answers' reasons (a floor on every answer)
 //     or into the review packet's build block.
+//  6. A link, or a path git or the caller lists that is gone from disk, is
+//     counted as a file: only regular files are.
+import { rmSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, openStore } from "../src/index.js";
 import { workTreeDigest } from "../src/build.js";
+import { listInventory } from "../src/capture/inventory.js";
+import { RepoReader } from "../src/safe-fs.js";
 import { query } from "../src/query/engine.js";
 import type { Session } from "../src/query/answer.js";
 import { commitAll, makeHome, makeRepo, writeFiles } from "./helpers.js";
@@ -124,5 +130,17 @@ describe("source files the graph cannot read", () => {
     // The same capture again is the kept build, and keeps its count.
     const third = await buildGraph({ repoRoot: root, store: st, mode: "retained" });
     expect(third.status.unreadLanguages).toEqual([{ language: "rust", files: 2 }]);
+  });
+
+  it("counts only regular files: never a link, nor a listed path that is gone (6)", async () => {
+    const root = makeRepo({ ...TS, "src/lib.rs": RUST["src/lib.rs"], "src/gone.rs": "pub fn gone() {}\n" });
+    commitAll(root);
+    rmSync(join(root, "src/gone.rs"));
+    symlinkSync("lib.rs", join(root, "src/link.rs"));
+    symlinkSync("missing.rs", join(root, "src/dangling.rs"));
+    const g = await buildGraph({ repoRoot: root, store: null });
+    expect(g.status.unreadLanguages).toEqual([{ language: "rust", files: 1 }]);
+    const files = ["src/lib.rs", "src/gone.rs", "src/link.rs", "src/dangling.rs", "src/never.rs"].map((path) => ({ path, blob: "0".repeat(40) }));
+    expect(listInventory(root, new RepoReader(root), { files, maxFileBytes: 1_000_000 }).unread).toEqual({ rust: 1 });
   });
 });

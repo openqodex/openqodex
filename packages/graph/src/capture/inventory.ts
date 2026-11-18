@@ -132,31 +132,32 @@ export async function takeInventory(root: string, reader: RepoReader, opts: { ma
   }
   const all = [...new Set([...indexed.keys(), ...split(others.stdout)])].filter((p) => opts.only === undefined || opts.only.has(p));
   const out: Inventory = { all, entries: [], tooBig: [], unreadable: [], readFromDisk: 0, unread: {} };
+  // A clean tracked file is one git has just matched to its index entry,
+  // and git never looks past a link on a path, so its spelled path holds
+  // no link. Any other file (changed, untracked) is looked at by identity:
+  // a folder that became a link (git then lists its files as changed) is
+  // never looked through, and what lies outside decides nothing.
+  const look = (path: string, clean: boolean): { isFile(): boolean; isSymbolicLink(): boolean; size: number | bigint } | null => {
+    if (clean) {
+      try {
+        return lstatSync(join(root, path));
+      } catch {
+        return null; // gone since git listed it
+      }
+    }
+    const looked = reader.entry(path);
+    return looked.ok ? looked.stat : null;
+  };
   for (const path of all) {
     const lang = langOf(path);
     const entry = indexed.get(path);
     // A link (120000) or a submodule (160000) is not a file of this repository.
     if (entry && entry.mode !== "100644" && entry.mode !== "100755") continue;
     if (lang === null) {
-      countUnread(out.unread, path);
+      if (unreadLanguageOf(path) !== null && look(path, entry !== undefined && !dirty.has(path))?.isFile()) countUnread(out.unread, path);
       continue;
     }
-    // A clean tracked file is one git has just matched to its index entry,
-    // and git never looks past a link on a path, so its spelled path holds
-    // no link. Any other file (changed, untracked) is looked at by identity:
-    // a folder that became a link (git then lists its files as changed) is
-    // never looked through, and what lies outside decides nothing.
-    let st: { isFile(): boolean; isSymbolicLink(): boolean; size: number | bigint } | null;
-    if (entry && !dirty.has(path)) {
-      try {
-        st = lstatSync(join(root, path));
-      } catch {
-        st = null; // gone since git listed it
-      }
-    } else {
-      const looked = reader.entry(path);
-      st = looked.ok ? looked.stat : null;
-    }
+    const st = look(path, entry !== undefined && !dirty.has(path));
     if (st === null) {
       out.unreadable.push(path);
       continue;
@@ -204,7 +205,9 @@ export function listInventory(root: string, reader: RepoReader, opts: { files: r
   for (const path of all) {
     const lang = langOf(path);
     if (lang === null) {
-      countUnread(out.unread, path);
+      if (unreadLanguageOf(path) === null) continue;
+      const looked = reader.entry(path);
+      if (looked.ok && looked.stat.isFile()) countUnread(out.unread, path);
       continue;
     }
     const looked = reader.entry(path);

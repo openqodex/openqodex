@@ -62,8 +62,9 @@ export const DISPATCH_CAP = 32;
 // language family (projectFolder). 21: a callback's parameter typed by the
 // function type the called definition declares (TypeRef.callback).
 // 22: a member of a generic alias of an object type takes the argument
-// its use gives.
-export const RESOLVER_VERSION = 22;
+// its use gives. 24: a member a Pick or an Omit leaves out is no member of
+// the type.
+export const RESOLVER_VERSION = 24;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -1519,7 +1520,8 @@ export function createWorld(input: ResolveInput): World {
     let found: ResultTarget;
     let receiver: TypeHit = null;
     if (t.on) {
-      const on = typeKey(file, family, t.on, depth + 1, false, nesting);
+      // A receiver typed by an intersection (`Pick<T, K>` is one): the side that declares the method.
+      const on = (family === "js" ? intersectionCall({ file, family, t: t.on, ev: null }, t.name) : null) ?? typeKey(file, family, t.on, depth + 1, false, nesting);
       // An external receiver has no readable method declaration.
       if (on === null || on === "ext") return null;
       receiver = on;
@@ -2398,6 +2400,12 @@ export function createWorld(input: ResolveInput): World {
     }
     return null;
   }, null);
+  // Whether a `Pick` or an `Omit` keeps member `name`: "no" when the type
+  // has no such member, "unknown" when keys it does not write out may name it.
+  const kept = (t: TypeRef, name: string): "yes" | "no" | "unknown" => {
+    if (t.only) return t.only.includes(name) ? "yes" : t.open ? "unknown" : "no";
+    return t.omit?.includes(name) ? "no" : "yes";
+  };
   // Whether one side of an intersection declares `name`: as a field (its
   // type), as a method, not at all, or "unknown" when that cannot be told.
   const declares = guarded((side: Struct, name: string, depth: number): Struct | "method" | null | "unknown" => {
@@ -2405,6 +2413,8 @@ export function createWorld(input: ResolveInput): World {
     const n = normalize(side, depth);
     if (n === null || n === "ext") return "unknown";
     if (n.t.parts) {
+      const k = kept(n.t, name);
+      if (k !== "yes") return k === "no" ? null : "unknown";
       let one: Struct | "method" | null = null;
       for (const p of n.t.parts) {
         const d = declares({ ...n, t: p }, name, depth + 1);
@@ -2473,16 +2483,31 @@ export function createWorld(input: ResolveInput): World {
     const k = typeKey(n.file, n.family, n.t, depth + 1);
     return k === null || k === "ext" || n.ev === null ? k : { ...k, ev: chain(n.ev, k.ev) };
   }, null);
-  // A method called on an intersection: the one side that declares it.
+  // Why a method called on an intersection is not bound.
+  const intersectionNote = (t: TypeRef): string =>
+    t.parts?.length === 1 ? "a Pick or an Omit that does not show it keeps this member" : "an intersection whose sides do not show which one alone declares the method";
+  // A method called on an intersection: the one side that declares it. A
+  // `Pick` or an `Omit` is an intersection of one side: that side, for a
+  // member it keeps (a property typed by a function too).
   const intersectionCall = guarded((s: Struct, name: string): TypeHit => {
     const n = normalize(s, 0);
-    if (n === null || n === "ext" || !n.t.parts) return null;
+    if (n === null || n === "ext" || !n.t.parts || kept(n.t, name) !== "yes") return null;
+    // A side that is an intersection itself is read for the member, never as a class.
+    const sideHit = (side: Struct): TypeHit => {
+      const inner = normalize(side, 1);
+      return inner !== null && inner !== "ext" && inner.t.parts ? intersectionCall(inner, name) : toHit(side, 1);
+    };
+    if (n.t.parts.length === 1) return sideHit({ ...n, t: n.t.parts[0] as TypeRef });
     let one: TypeHit = null;
+    let declared = false;
     for (const p of n.t.parts) {
       const side = { ...n, t: p };
       const d = declares(side, name, 1);
-      if (d === "unknown" || (d !== null && one !== null) || (d !== null && d !== "method")) return null;
-      if (d === "method") one = toHit(side, 1);
+      if (d === "unknown" || (d !== null && declared) || (d !== null && d !== "method")) return null;
+      if (d === "method") {
+        declared = true;
+        one = sideHit(side);
+      }
     }
     return one;
   }, null);
@@ -2826,7 +2851,21 @@ export function createWorld(input: ResolveInput): World {
         const side: Side = call.static && r.path.length === 0 ? "s" : "i";
         const own = enclosingClass(file, family, caller);
         if (!own) return { unknown: "no-receiver-type", shape: "self", note: "this or self outside a method of a class" };
-        const key = followPath({ key: own, ev: { kind: "receiver-self", tier: "certain", via: null, note: null, rule: "receiver-self" } }, r.path);
+        const selfEv: Ev = { kind: "receiver-self", tier: "certain", via: null, note: null, rule: "receiver-self" };
+        // A TypeScript member path that comes to `A & B` (`Pick<T, K>` is
+        // one): the one side that declares the method.
+        if (family === "js" && r.path.length > 0) {
+          let f = fieldRef(own, r.path[0] as string);
+          for (const p of r.path.slice(1)) f = f === null || f === "ext" ? f : stepStruct(f, p);
+          const n = f === null || f === "ext" ? f : normalize({ ...f, ev: evOf(selfEv, f.ev) }, 0);
+          if (n !== null && n !== "ext" && n.t.parts) {
+            const one = intersectionCall(n, call.name);
+            if (one === "ext") return { ext: true };
+            if (one === null) return { unknown: "no-receiver-type", shape: "self", note: intersectionNote(n.t) };
+            return withDispatch(onClass(one.key, call.name, "i", { ...one.ev, kind: "receiver-field", rule: "receiver-type" }), { key: one.key, side: "i" });
+          }
+        }
+        const key = followPath({ key: own, ev: selfEv }, r.path);
         if (key === "ext") return { ext: true };
         if (key === null) return { unknown: "no-receiver-type", shape: "self", note: "a field whose type no rule knows" };
         const ev: Ev = { ...key.ev, kind: r.path.length > 0 ? "receiver-field" : "receiver-self" };
@@ -2866,6 +2905,18 @@ export function createWorld(input: ResolveInput): World {
           const n = normalize({ file, family, t: { ...r.type, path: r.path }, ev: null }, 0);
           return n !== null && n !== "ext" && (n.t.elem === true || (n.t.qualifier === null && BUILTIN_TYPES.js.has(n.t.name) && resolveLocal(n.file, n.t.name) === null));
         };
+        // `A & B`, here or at the end of the path (`Pick<T, K>` is one): the
+        // one side that declares the method.
+        if (family === "js" && r.type.result === undefined) {
+          const n = normalize({ file, family, t: r.path.length > 0 ? { ...r.type, path: r.path } : r.type, ev: null }, 0);
+          if (n !== null && n !== "ext" && n.t.parts) {
+            const one = intersectionCall(n, call.name);
+            if (one === "ext") return { ext: true };
+            if (one === null) return { unknown: "no-receiver-type", shape: "typed", note: intersectionNote(n.t) };
+            const kind = one.ev.kind === "receiver-inferred" ? one.ev.kind : receiverKind(r.type, r.path);
+            return withDispatch(onClass(one.key, call.name, "i", { ...one.ev, kind, rule: "receiver-type" }), { key: one.key, side: "i" });
+          }
+        }
         if (untypedType(file, family, r.type, 0)) {
           // A path through a member the object type declares has that member's type.
           const members = r.type.fields !== undefined || !(r.type.qualifier === null && JS_UNTYPED.has(r.type.name));
@@ -2878,17 +2929,6 @@ export function createWorld(input: ResolveInput): World {
           const spelled = r.type.name === "{}" ? "by an object type written in place" : `${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}`;
           return { unknown: "untyped-receiver", shape: "typed", note: `a value typed ${spelled} may be anything with a method of this name` };
         }
-        // `A & B`: the one side that declares the method.
-        if (family === "js" && r.path.length === 0 && r.type.result === undefined) {
-          const n = normalize({ file, family, t: r.type, ev: null }, 0);
-          if (n !== null && n !== "ext" && n.t.parts) {
-            const one = intersectionCall(n, call.name);
-            if (one === "ext") return { ext: true };
-            if (one === null) return { unknown: "no-receiver-type", shape: "typed", note: "an intersection whose sides do not show which one alone declares the method" };
-            const kind = one.ev.kind === "receiver-inferred" ? one.ev.kind : receiverKind(r.type, r.path);
-            return withDispatch(onClass(one.key, call.name, "i", { ...one.ev, kind, rule: "receiver-type" }), { key: one.key, side: "i" });
-          }
-        }
         const t = typeKey(file, family, r.type);
         if (t === "ext") return { ext: true };
         // A collection itself (an array, a list, a slice) or a value of a
@@ -2897,6 +2937,8 @@ export function createWorld(input: ResolveInput): World {
         if (t === null && r.path.length === 0 && (r.type.elem || (!r.type.qualifier && BUILTIN_TYPES[family].has(r.type.name) && resolveLocal(file, r.type.name) === null))) return { ext: true };
         // What the class table cannot follow is read structurally.
         const typed = t === null || (r.path.length > 0 && followPath(t, r.path) === null) ? structurally() : null;
+        // A path through an intersection (`Pick<T, K>` is one) to a built-in type: the language's own method.
+        if (t === null && typed === null && r.type.parts && builtinEnd()) return { ext: true };
         if (t === null && typed === null) {
           const named = `${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}`;
           // `result`: the value is what calling `named` returns, not a type of that name.
