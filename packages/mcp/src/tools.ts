@@ -89,13 +89,13 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "graph_routes",
     op: "routes",
-    description: `Which routes map to this handler, or every route (filtered by \`text\`), from the framework layer. Says \`unsupported\` when no framework plugin found an application in the repository. ${DATA}`,
+    description: `Which routes map to this handler, or every route (filtered by \`text\`), from the framework layer. Says \`unsupported\` when no route reader found an application in the repository, and names a server framework the manifests declare that this build does not read. ${DATA}`,
     properties: { ...SYMBOL, text: str("A part of a route pattern, or a route name.") },
   },
   {
     name: "graph_tests",
     op: "tests",
-    description: `Which tests call, request or name this symbol. Where no framework plugin found an application, calls from files named like tests come back as leads, never counted; no answer here is coverage. ${DATA}`,
+    description: `Which tests call, request or name this symbol. Calls from files named like tests that no framework link holds come back as leads, never counted; no answer here is coverage. ${DATA}`,
     properties: { ...SYMBOL, tiers: TIERS },
   },
   {

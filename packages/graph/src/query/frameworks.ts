@@ -2,20 +2,28 @@
 // 3.2.3, phase 4). The layer's output is read here and nowhere else in the
 // query, by its documented shape (frameworks/plugin.ts: registrations as
 // entities, `handles` and `tests` edges, each with its evidence, and the
-// plugins' unknowns), from `graph.frameworks`. Every build runs the
-// framework plugins; a build where none of them found an application in
-// the repository has no layer to read, and answers `routes` with a
-// capability boundary.
+// plugins' unknowns), from `graph.frameworks`.
 //
-// Without a layer, `tests` still answers with what the graph can prove
-// without a test runner: calls into the symbol from files named like
-// tests. Those are leads, never counted and never called tests or coverage,
-// and the answer is a floor: a test that requests a route or renders a
-// component reaches the symbol without a call.
+// Each question decides for itself whether the build read what it asks
+// about, from the plugins whose rules emit what it reads (a route
+// registration, a test link), never from whether some other plugin found
+// something. `routes` where no route reader found an application is a
+// capability boundary that names the server frameworks the manifests
+// declare and this build does not read; where some routes were read and
+// such a framework is declared too, the list is a floor that names it.
+//
+// `tests` lists the framework's test links and, beside them, what the
+// graph can prove without a test runner: calls into the symbol from files
+// named like tests that no link already holds. Those are leads, never
+// counted and never called tests or coverage, and where no link reaches
+// the symbol the answer is a floor: a test that requests a route or
+// renders a component reaches the symbol without a call.
 //
 // Each is a job (answer.ts): the layer's edges, registrations and gaps are
 // read one at a time with the question's budget checked at each, and a
 // stopped job goes on where it stopped.
+import { normalisePy } from "../discovery/manifests.js";
+import { PLUGINS } from "../frameworks/registry.js";
 import { isTestPath } from "../impact.js";
 import type { Tier } from "../model/records.js";
 import type { Graph, GraphNode, GraphSite } from "../types.js";
@@ -42,7 +50,7 @@ type FwRegistration = {
 };
 type FwEdge = { from: string; to: string; kind: string; plugin: string; app: string | null; evidence: FwEvidence; category?: string };
 type FwUnknown = { plugin: string; site: FwSite | null; affects: string[]; cause: string; name: string | null; note: string; count: number | null; exact: boolean };
-type FwRun = { id: string; status: string; reason: string | null };
+type FwRun = { id: string; status: string; reason: string | null; apps?: number };
 type FwLayer = { registrations: FwRegistration[]; edges: FwEdge[]; unknowns: FwUnknown[]; runs: FwRun[] };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
@@ -54,24 +62,100 @@ function runsOf(g: Graph): FwRun[] {
   return f.plugins.filter((p): p is FwRun => isObj(p) && typeof p.id === "string" && typeof p.status === "string" && (p.reason === null || typeof p.reason === "string"));
 }
 
-// Why a build has no framework layer to read, for a capability boundary.
-export function noLayerReason(g: Graph): string {
-  const ids = runsOf(g).map((r) => r.id);
-  return ids.length > 0 ? `no framework plugin of this build (${ids.join(", ")}) found an application in this repository` : "this build has no framework layer";
-}
-
-// The framework layer of a build, when it has one in the documented shape
-// and a plugin found something to read: a build where every plugin found
-// no application has none.
+// The framework layer of a build, when it has one in the documented shape.
 export function frameworkLayer(g: Graph): FwLayer | null {
   const f = (g as unknown as { frameworks?: unknown }).frameworks;
   if (!isObj(f) || !Array.isArray(f.entities) || !Array.isArray(f.edges) || !Array.isArray(f.unknowns)) return null;
   const runs = runsOf(g);
-  if (runs.length > 0 && runs.every((r) => r.status === "not-detected")) return null;
   const registrations = f.entities.filter((e): e is FwRegistration => isObj(e) && e.kind === "registration" && isObj(e.site) && isObj(e.handler) && Array.isArray(e.methods));
   const edges = f.edges.filter((e): e is FwEdge => isObj(e) && typeof e.from === "string" && typeof e.to === "string" && typeof e.kind === "string" && isObj(e.evidence) && isObj(e.evidence.site));
   const unknowns = f.unknowns.filter((u): u is FwUnknown => isObj(u) && Array.isArray(u.affects) && typeof u.cause === "string");
   return { registrations, edges, unknowns, runs };
+}
+
+// The plugins of this build whose rules emit `kind` (a route
+// registration, a test link), by id: the readers a question rests on, read
+// from each plugin's own capabilities, so a reader added to the registry
+// answers with no change here.
+const emitting = new Map<string, Set<string>>();
+function readersOf(kind: string): Set<string> {
+  let ids = emitting.get(kind);
+  if (!ids) {
+    ids = new Set(PLUGINS.filter((p) => p.capabilities().rules.some((r) => (r.emits as string[]).includes(kind))).map((p) => p.id));
+    emitting.set(kind, ids);
+  }
+  return ids;
+}
+
+// Whether a reader of `kind` read this repository: it found an application
+// or made such output, or it failed or was stopped, so its part is a gap
+// of the answer and not a question this build cannot answer.
+function readBy(layer: FwLayer | null, kind: string): boolean {
+  if (!layer) return false;
+  const ids = readersOf(kind);
+  const made = (id: string) => (kind === "registration" ? layer.registrations.some((r) => r.plugin === id) : layer.edges.some((e) => e.kind === kind && e.plugin === id));
+  return layer.runs.some((r) => ids.has(r.id) && (r.status === "failed" || r.status === "stopped" || (r.status === "ok" && ((r.apps ?? 0) > 0 || made(r.id)))));
+}
+
+// Why no reader of `kind` answers, for a capability boundary or a floor.
+function notRead(layer: FwLayer | null, kind: string, what: string): string {
+  if (!layer) return "this build has no framework layer";
+  const ids = [...readersOf(kind)];
+  return ids.length > 0 ? `no ${what} of this build (${ids.join(", ")}) found an application in this repository` : `this build has no ${what}`;
+}
+
+// Server frameworks a manifest can declare, by the packages that name
+// them. One is unread while no route reader lists any of its packages
+// among the dependencies that enable it (frameworks/plugin.ts,
+// PluginInputs), so a reader added for it takes it off this list.
+const SERVER_FRAMEWORKS: { name: string; ecosystem: "npm" | "python" | "go"; packages: string[] }[] = [
+  { name: "Hono", ecosystem: "npm", packages: ["hono", "@hono/zod-openapi"] },
+  { name: "NestJS", ecosystem: "npm", packages: ["@nestjs/core"] },
+  { name: "Fastify", ecosystem: "npm", packages: ["fastify"] },
+  { name: "Koa", ecosystem: "npm", packages: ["koa"] },
+  { name: "Flask", ecosystem: "python", packages: ["flask"] },
+  { name: "Gin", ecosystem: "go", packages: ["github.com/gin-gonic/gin"] },
+  { name: "Echo", ecosystem: "go", packages: ["github.com/labstack/echo"] },
+  { name: "chi", ecosystem: "go", packages: ["github.com/go-chi/chi"] },
+  { name: "Fiber", ecosystem: "go", packages: ["github.com/gofiber/fiber"] },
+];
+
+// The server frameworks this repository's manifests declare and no route
+// reader of this build reads, each with the package that declares it.
+function unreadServers(g: Graph): string[] {
+  const readers = readersOf("registration");
+  const read = new Set(PLUGINS.filter((p) => readers.has(p.id)).flatMap((p) => [...(p.inputs.dependencies.npm ?? []), ...(p.inputs.dependencies.python ?? []).map(normalisePy), ...(p.inputs.dependencies.go ?? [])]));
+  const m = g.model;
+  const declared = (ecosystem: string, name: string) => {
+    if (ecosystem === "python") return m.pyDeclared.has(normalisePy(name));
+    if (ecosystem === "go") return m.goRequires.some((r) => r === name || r.startsWith(`${name}/`));
+    return m.node.some((p) => p.pkg.deps.has(name));
+  };
+  const out: string[] = [];
+  for (const f of SERVER_FRAMEWORKS) {
+    if (f.packages.some((n) => read.has(f.ecosystem === "python" ? normalisePy(n) : n))) continue;
+    const hit = f.packages.find((n) => declared(f.ecosystem, n));
+    if (hit) out.push(`${f.name} (${hit})`);
+  }
+  return out;
+}
+
+const declaresUnread = (servers: string[]) => `this repository declares ${servers.join(", ")}, which this build does not read`;
+
+// Why `routes` is a capability boundary in this build, or null when a
+// route reader read the repository.
+export function routesUnsupported(g: Graph): string | null {
+  const layer = frameworkLayer(g);
+  if (readBy(layer, "registration")) return null;
+  const servers = unreadServers(g);
+  return `${notRead(layer, "registration", "route reader")}${servers.length > 0 ? `; ${declaresUnread(servers)}` : ""}`;
+}
+
+// Why `tests` has only leads in this build, or null when a test reader
+// read the repository.
+export function testsUnread(g: Graph): string | null {
+  const layer = frameworkLayer(g);
+  return readBy(layer, "tests") ? null : notRead(layer, "tests", "test reader");
 }
 
 function fwSite(e: FwEvidence): GraphSite {
@@ -84,12 +168,14 @@ class Gaps {
   private readonly hit: FwUnknown[] = [];
   private readonly missing: string[];
   readonly pass: Pass<FwUnknown>;
-  constructor(layer: FwLayer, affects: string) {
+  // `readers`: the plugins whose output the relation is; a plugin that
+  // emits none of it hides nothing of it when it fails.
+  constructor(layer: FwLayer, affects: string, readers: ReadonlySet<string>) {
     // A gap that names no relation may hide any of them.
     this.pass = new Pass(layer.unknowns, (u) => {
       if (u.affects.length === 0 || u.affects.includes(affects)) this.hit.push(u);
     });
-    this.missing = layer.runs.filter((r) => r.status === "failed" || r.status === "stopped").map((r) => `${r.id}: ${r.reason ?? r.status}, so nothing of it is listed`);
+    this.missing = layer.runs.filter((r) => readers.has(r.id) && (r.status === "failed" || r.status === "stopped")).map((r) => `${r.id}: ${r.reason ?? r.status}, so nothing of it is listed`);
   }
   // After the pass is whole: the answer's unknown block with the gaps.
   unknown(base: Answer): Answer["unknown"] {
@@ -124,7 +210,11 @@ const namesPoint = (t: Request["target"]) => Boolean(t && (t.id || t.name || (t.
 export function routes(s: Session, req: Request): Job | Answer {
   const g = s.graph;
   const layer = frameworkLayer(g);
-  if (!layer) return fail(s, "routes", "unsupported", `${noLayerReason(g)}, so the graph knows no routes; \`callers\` and \`importers\` still answer for the handler code`);
+  const why = routesUnsupported(g);
+  if (!layer || why !== null) return fail(s, "routes", "unsupported", `${why ?? notRead(layer, "registration", "route reader")}, so the graph knows no routes; \`callers\` and \`importers\` still answer for the handler code`);
+  // Routes of a server framework this build does not read are missing from
+  // the list: it is a floor that names them.
+  const servers = unreadServers(g);
   const point = namesPoint(req.target) ? new Point(g, req.target) : null;
   const text = point ? undefined : req.text;
   let n: GraphNode | null = null;
@@ -136,7 +226,7 @@ export function routes(s: Session, req: Request): Job | Answer {
   const items: Route[] = [];
   let regs: Pass<FwRegistration> | null = null;
   let sorted = false;
-  const gaps = new Gaps(layer, "handles");
+  const gaps = new Gaps(layer, "handles", readersOf("registration"));
   return (budget) => {
     const base = empty(s, "routes");
     if (point && !n) {
@@ -165,15 +255,21 @@ export function routes(s: Session, req: Request): Job | Answer {
       sorted = true;
     }
     if (!gaps.pass.run(budget)) return stoppedAt({ ...base, target }, items, [], gaps.pass.left);
-    return listing({ ...base, target, unknown: gaps.unknown(base) }, items);
+    const unknown = gaps.unknown(base);
+    if (servers.length > 0) {
+      unknown.floor = true;
+      unknown.reasons = [`${declaresUnread(servers)}, so its routes are not listed`, ...unknown.reasons];
+      unknown.causes = { ...unknown.causes, "unsupported-rule": null };
+    }
+    return listing({ ...base, target, unknown }, items);
   };
 }
 
 type TestLink = { from: string; to: string; kind: "tests"; category: string | null; depth: number; site: GraphSite; premises: string[]; edge: string; fromName: string | null; toName: string | null };
 
-// The leads-only floor of `tests` when the build has no framework layer.
-const LEAD_REASONS = (g: Graph) => [
-  `${noLayerReason(g)}, so files are taken for tests by their names only: these are leads, not test links`,
+// The floor of `tests` for a symbol no framework test link reaches.
+const LEAD_REASONS = (g: Graph, name: string) => [
+  `${testsUnread(g) ?? `no framework test link reaches \`${name}\``}, so files are taken for tests of \`${name}\` by their names only: these are leads, not test links`,
   "a test that requests a route, renders a component or reaches the code through a value calls nothing here",
 ];
 
@@ -182,15 +278,16 @@ export function tests(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
   const layer = frameworkLayer(g);
   const point = new Point(g, req.target);
   let n: GraphNode | null = null;
-  // With a layer: the routes the point handles, then the test edges into
-  // the point or into one of them, sorted.
+  // The layer's links: the routes the point handles, then the test edges
+  // into the point or into one of them, sorted.
   const handled = new Set<string>();
   let handles: Pass<FwEdge> | null = null;
   const links: TestLink[] = [];
   let tested: Pass<FwEdge> | null = null;
   let sorted = false;
-  const gaps = layer ? new Gaps(layer, "tests") : null;
-  // Without one: callers two hops out, from files named like tests.
+  const gaps = layer ? new Gaps(layer, "tests", readersOf("tests")) : null;
+  // Beside them, whatever any plugin found: callers two hops out, from
+  // files named like tests, that no link already holds.
   let walk: Walk | null = null;
   const seen = new Set<string>();
   const leads: Candidate[] = [];
@@ -220,19 +317,27 @@ export function tests(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
         sorted = true;
       }
       if (!gaps.pass.run(budget)) return stoppedAt({ ...base, target }, links, [], gaps.pass.left);
-      return listing({ ...base, target, counts: counts(links), unknown: gaps.unknown(base) }, links);
     }
-    const floor = { ...base.unknown, floor: true, reasons: [...LEAD_REASONS(g), ...base.unknown.reasons], causes: { "unsupported-rule": null } };
+    const unknown = gaps ? gaps.unknown(base) : { ...base.unknown };
+    if (links.length === 0) Object.assign(unknown, { floor: true, reasons: [...LEAD_REASONS(g, at.name), ...unknown.reasons], causes: { ...unknown.causes, "unsupported-rule": null } });
+    // With links the leads ride beside them, and the links are the page.
+    const into = links.length > 0 ? "items" : "leads";
+    const page = links.length > 0 ? links : leads;
+    const answer = (): Answer => ({ ...base, target, ...(links.length > 0 ? { counts: counts(links), leads } : {}), unknown });
+    const linked = new Set(links.map((l) => l.from));
     walk ??= new Walk(g, at.id, "in", 2, tiers);
-    if (!walk.run(budget)) return stoppedAt({ ...base, target, unknown: floor }, [], walk.pending(), walk.pending().length, "leads");
+    if (!walk.run(budget)) return stoppedAt(answer(), page, walk.pending(), walk.pending().length, into);
     picked ??= new Pass(walk.items, (i) => {
       if (!isTestPath(i.site.file) || seen.has(i.from)) return;
       seen.add(i.from);
+      if (linked.has(i.from)) return;
       const from = g.nodes.get(i.from);
       const score = i.depth === 1 ? 1 : 0.5;
       leads.push(from ? candidate(g, from, score) : { id: i.from, name: i.from, kind: "file", file: i.site.file, line: i.site.line, project: g.projectOf(i.site.file), score });
     });
-    if (!picked.run(budget)) return stoppedAt({ ...base, target, unknown: floor }, leads, [], picked.left, "leads");
-    return listing({ ...base, target, unknown: floor }, leads, { into: "leads" });
+    if (!picked.run(budget)) return stoppedAt(answer(), page, [], picked.left, into);
+    // Calls from test files no link holds: the links are not every test.
+    if (links.length > 0 && leads.length > 0) Object.assign(unknown, { floor: true, reasons: [`${leads.length} files or functions named like tests call into \`${at.name}\` and no framework test link holds them: they are leads, not test links`, ...unknown.reasons] });
+    return listing(answer(), page, { into });
   };
 }

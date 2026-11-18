@@ -94,6 +94,11 @@ describe("openqodex graph", () => {
     expect((JSON.parse(routes.stdout) as Answer).error?.code).toBe("unsupported");
     // Every build resolves uses as a value or a type, so references answers.
     expect(cli(root, "graph", "references", "core").status).toBe(0);
+    // A React package reads components, never routes: the answer stays a boundary.
+    const ui = repo({ ...files, "package.json": '{ "name": "ui", "dependencies": { "react": "18.3.1" } }\n', "src/App.tsx": "export function App() {\n  return <div>hi</div>;\n}\n" });
+    const withReact = cli(ui, "graph", "routes", "--json");
+    expect(withReact.status).toBe(2);
+    expect((JSON.parse(withReact.stdout) as Answer).error?.code).toBe("unsupported");
   });
 
   it("exits 0 for an answer that is a floor, and 2 for a name the graph does not hold (4)", () => {
