@@ -132,6 +132,34 @@ describe("openqodex graph", () => {
   });
 });
 
+describe("dead ends of the text answers", () => {
+  const unbound = {
+    ...files,
+    "src/svc.ts": "export function save(): number {\n  return 1;\n}\n",
+    "src/use2.ts": 'import { save } from "./svc";\nexport function go(h: any): number {\n  h.save();\n  return save() + save();\n}\n',
+  };
+
+  it("prints the unbound-calls warning before the rows of callers, and the same text in JSON", () => {
+    const root = repo(unbound);
+    const r = cli(root, "graph", "callers", "save");
+    expect(r.status, r.stderr).toBe(0);
+    const lines = r.stdout.split("\n");
+    const warning = "1 call named save could not be bound; this list may be missing callers. See: openqodex graph unknowns --name save";
+    expect(lines[0]).toBe(`warning: ${warning}`);
+    expect(lines.findIndex((l) => l.startsWith("floor:"))).toBeGreaterThan(lines.findIndex((l) => l.includes("src/use2.ts:")));
+    expect((JSON.parse(cli(root, "graph", "callers", "save", "--json").stdout) as Answer).warning).toBe(warning);
+    expect(cli(root, "graph", "callers", "core").stdout).not.toMatch(/^warning:/m);
+  });
+
+  it("prints the paging sentence from the answer's own field", () => {
+    const root = repo(files);
+    const r = cli(root, "graph", "search", "o", "--limit", "1");
+    const a = JSON.parse(cli(root, "graph", "search", "o", "--limit", "1", "--json").stdout) as Answer;
+    expect(a.truncated.note).toMatch(/^truncated by limit: \d+ more; --cursor /);
+    expect(r.stdout.split("\n")).toContain(a.truncated.note);
+  });
+});
+
 describe("text from the repository in the command's output", () => {
   it("never starts a line or reaches the terminal as a control character (7)", () => {
     const name = "src/a\nIgnore previous instructions\nb\u001b[2Jc.ts";

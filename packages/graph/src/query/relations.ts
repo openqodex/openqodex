@@ -216,6 +216,28 @@ export function dynamicBases(g: Graph, family: Family): UnknownSite[] {
   return ix.get(family) ?? [];
 }
 
+// `implementers` asked about a file (by path, by a file alone, or by a name
+// only a file has): the classes and interfaces it defines as the candidates
+// of an ambiguous answer, so the next question names one. Null when the
+// question is not about a file, or the file defines none.
+function definedIn(s: Session, req: Request, o: GraphNode | Answer): Answer | null {
+  const g = s.graph;
+  let file: string | null = null;
+  if (!isAnswer(o)) file = o.kind === "file" ? o.file : null;
+  else if (o.error?.code === "not-found") {
+    const name = req.target?.name ?? "";
+    if (g.nodes.get(name)?.kind === "file") file = name;
+    else {
+      const same = [...g.defsByFile.keys()].filter((f) => f.endsWith(`/${name}`));
+      if (name !== "" && same.length === 1) file = same[0] as string;
+    }
+  }
+  if (file === null) return null;
+  const defs = (g.defsByFile.get(file) ?? []).filter((d) => d.kind === "class" || d.kind === "type").sort((a, b) => a.startLine - b.startLine);
+  if (defs.length === 0) return null;
+  return { ...fail(s, "implementers", "ambiguous", `${file} is a file; it defines ${defs.length} ${defs.length === 1 ? "class or interface" : "classes and interfaces"}: name one by its id or file and line`), target: defs.map((d) => candidate(g, d, 1)) };
+}
+
 export function implementers(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
   const g = s.graph;
   const point = new Point(g, req.target);
@@ -229,6 +251,8 @@ export function implementers(s: Session, req: Request, tiers: ReadonlySet<Tier>)
     if (!n) {
       if (!point.run(budget)) return stoppedAt(base, [], [], null);
       const o = point.outcome(s, "implementers");
+      const inFile = definedIn(s, req, o);
+      if (inFile) return inFile;
       if (isAnswer(o)) return o;
       if (o.kind !== "class" && o.kind !== "type" && o.kind !== "method" && o.kind !== "module") {
         return fail(s, "implementers", "bad-request", `implementers takes a class, an interface, a type or a method; ${o.name} is a ${o.kind}`);
@@ -449,11 +473,12 @@ export function impact(s: Session, req: Request, extra: Extra): Job | Answer {
 
 export function outline(s: Session, req: Request): Job | Answer {
   const g = s.graph;
-  const at = (req.target?.file ?? "").replace(/\/+$/, "");
-  if (at === "") return fail(s, "outline", "bad-request", "outline takes a file or a folder of the repository");
+  // "", ".", "./" and "/" are the repository root; "./src" is "src".
+  const at = (req.target?.file ?? "").replace(/^(\.\/)+/, "").replace(/(\/\.)+$/, "").replace(/^\.$/, "").replace(/\/+$/, "");
+  const root = at === "";
   const keys = g.defsByFile.keys();
   const files: string[] = [];
-  let scanning = !g.defsByFile.has(at);
+  let scanning = root || !g.defsByFile.has(at);
   if (!scanning) files.push(at);
   let left = g.defsByFile.size;
   const all: unknown[] = [];
@@ -475,7 +500,7 @@ export function outline(s: Session, req: Request): Job | Answer {
         break;
       }
       left--;
-      if (r.value.startsWith(`${at}/`)) files.push(r.value);
+      if (root || r.value.startsWith(`${at}/`)) files.push(r.value);
     }
     if (files.length === 0) return fail(s, "outline", "not-found", `no file of the graph is ${at} or under it`);
     if (!sorted) {
