@@ -52,13 +52,18 @@
 //     nothing, or finds it and calls the hop a call. Or the nesting reaches
 //     a function of the same name defined elsewhere, or stops one level
 //     down when a closure sits inside a closure.
+// 19. A change inside a handler a factory defines reaches nothing past the
+//     handler: `impact` lists no caller, so the factory and what calls it
+//     are missing from the blast radius. Or they come back as callers of
+//     the handler, which never runs from there. Or `callees` of the factory
+//     walks into the handler when nobody asked, or calls the hop a call.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, relative } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getChange } from "@openqodex/core";
+import { LineSet, getChange } from "@openqodex/core";
 import type { Change } from "@openqodex/core";
 import { buildGraph, detectImpact } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -627,5 +632,90 @@ describe("a path through the definitions a function holds (18)", () => {
     expect(callsOnly.items).toEqual([]);
     const callers = q({ kind: "callers", target: { name: "Sessions.create" } });
     expect((callers.items as Item[]).map((i) => i.fromName).sort()).toEqual(["createHandler", "createHandler", "inner"]);
+  });
+});
+
+describe("impact of a change inside a definition a function holds (19)", () => {
+  let s: Session;
+  const files: Record<string, string> = {
+    "src/service.ts": ["export function saveSession(name: string): string {", "  return name;", "}", ""].join("\n"),
+    "src/factory.ts": [
+      'import { saveSession } from "./service";',
+      "type Router = { openapi(route: string, h: (c: string) => string): void };",
+      "export function createSessionsRouter(router: Router): void {",
+      "  const createSessionHandler = (c: string): string => {",
+      "    return saveSession(c);",
+      "  };",
+      '  router.openapi("/sessions", createSessionHandler);',
+      "}",
+      "export function topLevel(c: string): string {",
+      "  return saveSession(c);",
+      "}",
+      "",
+    ].join("\n"),
+    "src/main.ts": [
+      'import { createSessionsRouter, topLevel } from "./factory";',
+      "export function main(): string {",
+      "  createSessionsRouter({ openapi: () => undefined });",
+      '  return topLevel("x");',
+      "}",
+      "export function boot(): string {",
+      "  return main();",
+      "}",
+      "",
+    ].join("\n"),
+  };
+  beforeAll(async () => {
+    const repo = makeRepo(files);
+    const graph = await buildGraph({ repoRoot: repo, store: null });
+    s = { graph, generation: "held-build", treeSha: null, builtAt: null, laterEditsKnown: false };
+  });
+  type Row = { type: string; seed: string; hops: Item[] };
+  const q = (req: Omit<Request, "apiVersion">, extra: Parameters<typeof query>[2] = {}) => query(s, { apiVersion: 1, ...req } as Request, extra);
+  const rows = (a: Answer, type: string) => (a.items as Row[]).filter((r) => r.type === type).map((r) => r.hops.map((h) => `${h.fromName} ${h.kind} ${h.toName} at ${where(h)}`).join(" < "));
+  const insideHandler = { files: [{ path: "src/factory.ts", status: "modified" as const, oldPath: null, binary: false }], coverage: new Map([["src/factory.ts", new LineSet().add(5)]]) };
+
+  it("lists the factory that holds the changed handler and the callers of the factory, apart from direct callers", () => {
+    const a = q({ kind: "impact", limit: 500 }, { change: insideHandler });
+    expect(a.error).toBeNull();
+    // The handler is never called by name, so it has no direct caller.
+    expect(rows(a, "caller")).toEqual([]);
+    expect(rows(a, "held-by")).toEqual(["createSessionsRouter defines createSessionHandler at src/factory.ts:4"]);
+    expect(rows(a, "held-by-caller")).toEqual([
+      "createSessionsRouter defines createSessionHandler at src/factory.ts:4 < main calls createSessionsRouter at src/main.ts:3",
+      "createSessionsRouter defines createSessionHandler at src/factory.ts:4 < main calls createSessionsRouter at src/main.ts:3 < boot calls main at src/main.ts:7",
+    ]);
+    const held = (a.items as Row[]).filter((r) => r.type.startsWith("held-by"));
+    for (const r of held) expect(r.seed).toContain("#createSessionsRouter.createSessionHandler@");
+    for (const r of held) for (const h of r.hops) expect(q({ kind: "explain", target: { id: h.edge } }).error).toBeNull();
+    // The same answer for the handler named as a target.
+    const one = q({ kind: "impact", target: { file: "src/factory.ts", line: 5 }, limit: 500 });
+    expect(rows(one, "held-by-caller")).toEqual(rows(a, "held-by-caller"));
+  });
+
+  it("gives a top-level function no held-by group, and its callers as before", () => {
+    const a = q({ kind: "impact", target: { name: "topLevel" }, limit: 500 });
+    expect(a.error).toBeNull();
+    expect((a.items as Row[]).filter((r) => r.type.startsWith("held-by"))).toEqual([]);
+    expect(rows(a, "caller")).toEqual(["main calls topLevel at src/main.ts:4", "main calls topLevel at src/main.ts:4 < boot calls main at src/main.ts:7"]);
+  });
+
+  it("leaves the review's own walk as it was", () => {
+    const sum = detectImpact(s.graph, insideHandler);
+    expect(sum.callers).toEqual([]);
+    expect(Object.keys(sum)).not.toContain("heldBy");
+  });
+
+  it("walks callees into the definitions a function holds only when defines is asked", () => {
+    const plain = q({ kind: "callees", target: { name: "createSessionsRouter" }, depth: 2 });
+    expect((plain.items as Item[]).filter((i) => i.kind === "defines")).toEqual([]);
+    expect((plain.items as Item[]).map((i) => i.toName)).not.toContain("saveSession");
+    const held = q({ kind: "callees", target: { name: "createSessionsRouter" }, depth: 2, edges: ["calls", "defines"] });
+    expect(held.error).toBeNull();
+    expect((held.items as Item[]).map((i) => `${i.fromName} ${i.kind} ${i.toName} at ${where(i)}`)).toEqual([
+      "createSessionsRouter defines createSessionHandler at src/factory.ts:4",
+      "createSessionHandler calls saveSession at src/factory.ts:5",
+    ]);
+    expect(q({ kind: "callees", target: { name: "createSessionsRouter" }, edges: ["imports"] }).error?.code).toBe("bad-request");
   });
 });

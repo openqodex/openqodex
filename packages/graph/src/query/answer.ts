@@ -47,7 +47,7 @@ export type Request = {
   to?: Target; // path: the other end
   text?: string; // search
   tiers?: Tier[];
-  edges?: string[]; // path: the relations to walk; default calls and inherits
+  edges?: string[]; // path and callees: the relations to walk; path default calls, inherits and defines, callees default the calls profile
   depth?: number;
   level?: "files" | "projects"; // cycles
   limit?: number;

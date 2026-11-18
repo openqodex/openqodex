@@ -23,6 +23,7 @@ export const USAGE = [
   "  status | capabilities",
   "  search <text>",
   "  symbol | callers | callees <name | file:line> [--file <path>] [--depth 1..3] [--tier certain,likely]",
+  "  callees <name | file:line> --edges calls,defines   also into the definitions it holds",
   "  implementers <class | interface | Class.method> [--depth 1..8]",
   "  references <name | file:line>     uses as a value or a type",
   "  routes [<handler>] [--text <path part>]",
@@ -66,7 +67,7 @@ function intFlag(values: Map<string, string>, name: string): number | undefined 
   return Number(v);
 }
 
-const VERB: Record<string, string> = { calls: "calls", inherits: "inherits", imports: "imports", overrides: "overrides", implements: "implements" };
+const VERB: Record<string, string> = { calls: "calls", inherits: "inherits", imports: "imports", overrides: "overrides", implements: "implements", defines: "defines" };
 
 function siteLine(i: Item): string {
   return `${i.site.file}:${i.site.line}`;
@@ -74,7 +75,8 @@ function siteLine(i: Item): string {
 
 function itemLine(i: Item, op: Operation): string {
   const tail = `, ${i.site.tier}${i.depth > 1 && op !== "path" ? `, ${i.depth} hops` : ""}${i.site.note ? `: ${i.site.note}` : ""} [${i.edge}]`;
-  if (op === "callees") return `${siteLine(i)} calls ${i.toName ?? i.to}${tail}`;
+  // A defines hop is a definition held in the body, never a call.
+  if (op === "callees") return `${siteLine(i)} ${i.kind === "defines" ? `${i.fromName ?? i.from} defines` : "calls"} ${i.toName ?? i.to}${tail}`;
   if (op === "path" || op === "implementers" || op === "references") return `${siteLine(i)} ${i.fromName ?? i.from} ${VERB[i.kind] ?? i.kind} ${i.toName ?? i.to}${tail}`;
   if (i.kind === "imports") return `${siteLine(i)} imports it${tail}`;
   return `${siteLine(i)} in ${i.fromName ?? i.from}${tail}`;

@@ -137,6 +137,35 @@ describe("openqodex graph", () => {
   });
 });
 
+describe("a handler a factory defines", () => {
+  const held = {
+    "src/service.ts": "export function saveSession(name: string): string {\n  return name;\n}\n",
+    "src/factory.ts": 'import { saveSession } from "./service";\ntype Router = { openapi(route: string, h: (c: string) => string): void };\nexport function createSessionsRouter(router: Router): void {\n  const createSessionHandler = (c: string): string => {\n    return saveSession(c);\n  };\n  router.openapi("/sessions", createSessionHandler);\n}\n',
+    "src/main.ts": 'import { createSessionsRouter } from "./factory";\nexport function main(): void {\n  createSessionsRouter({ openapi: () => undefined });\n}\n',
+  };
+
+  it("prints a defines hop of callees as defines, never calls, and only when asked", () => {
+    const root = repo(held);
+    const plain = cli(root, "graph", "callees", "createSessionsRouter", "--depth", "2");
+    expect(plain.status, plain.stderr).toBe(0);
+    expect(plain.stdout).not.toMatch(/defines|createSessionHandler/);
+    const r = cli(root, "graph", "callees", "createSessionsRouter", "--depth", "2", "--edges", "calls,defines");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/^src\/factory\.ts:4 createSessionsRouter defines createSessionHandler, certain/m);
+    expect(r.stdout).not.toMatch(/calls createSessionHandler/);
+    expect(r.stdout).toMatch(/^src\/factory\.ts:5 calls saveSession, certain, 2 hops/m);
+  });
+
+  it("prints the factory that holds a changed handler and its callers apart from the callers", () => {
+    const root = repo(held);
+    const i = cli(root, "graph", "impact", "src/factory.ts:5");
+    expect(i.status, i.stderr).toBe(0);
+    expect(i.stdout).not.toMatch(/^caller:/m);
+    expect(i.stdout).toMatch(/^held-by: src\/factory\.ts:4 createSessionsRouter defines createSessionHandler \(certain\)$/m);
+    expect(i.stdout).toMatch(/^held-by-caller: src\/factory\.ts:4 createSessionsRouter defines createSessionHandler \(certain\) < src\/main\.ts:3 main calls createSessionsRouter \(certain\)$/m);
+  });
+});
+
 describe("dead ends of the text answers", () => {
   const unbound = {
     ...files,

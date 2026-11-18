@@ -77,7 +77,17 @@ export const TOOLS: ToolSpec[] = [
     description: `Who calls this function, method or class, with each call site's evidence; use before changing a signature or removing code. An ambiguous name returns candidates. ${DATA}`,
     properties: { ...SYMBOL, depth: int("Hops back; default 1.", 1, 3), tiers: TIERS },
   },
-  { name: "graph_callees", op: "callees", description: `What this function or method calls, with each call site's evidence, and the calls in it the graph could not bind. ${DATA}`, properties: { ...SYMBOL, depth: int("Hops out; default 1.", 1, 3), tiers: TIERS } },
+  {
+    name: "graph_callees",
+    op: "callees",
+    description: `What this function or method calls, with each call site's evidence, and the calls in it the graph could not bind. ${DATA}`,
+    properties: {
+      ...SYMBOL,
+      depth: int("Hops out; default 1.", 1, 3),
+      tiers: TIERS,
+      edges: { type: "array", items: { type: "string", enum: ["calls", "inherits", "implements", "dispatches_to", "may_invoke", "defines"] }, description: "Default every call relation. Name defines too to walk into the definitions it holds, such as a handler it registers." },
+    },
+  },
   { name: "graph_importers", op: "importers", description: `Which files import this file (a Go file: its package). ${DATA}`, properties: { file: { type: "string" } }, required: ["file"] },
   {
     name: "graph_implementers",
@@ -114,7 +124,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "graph_impact",
     op: "impact",
-    description: `What a change reaches, by the walk the review uses: callers one and two hops out, callees, importers of the changed files, changed public names. With a symbol: as if its first line changed. With no symbol: the uncommitted and unpushed change against its base, built for this question. ${DATA}`,
+    description: `What a change reaches, by the walk the review uses: callers one and two hops out, callees, importers of the changed files, changed public names. Apart, as held-by items: the functions that hold changed code in their body, such as a factory that registers a changed handler, and their callers. With a symbol: as if its first line changed. With no symbol: the uncommitted and unpushed change against its base, built for this question. ${DATA}`,
     properties: { ...SYMBOL, base: str("With no symbol: the base to compare with; default the upstream or the default base.") },
   },
   { name: "graph_outline", op: "outline", description: `What a file or folder defines: each symbol with its kind, lines and call counts. ${DATA}`, properties: { path: str("A file or folder.") }, required: ["path"] },
@@ -185,6 +195,8 @@ export function requestOf(t: ToolSpec, a: Args): Request {
       return { ...base, target: { id: s(a.edge) } };
     case "path":
       return { ...base, target: parseTarget(s(a.from)), to: parseTarget(s(a.to)), ...(Array.isArray(a.edges) ? { edges: a.edges as string[] } : {}) };
+    case "callees":
+      return { ...base, target: symbolTarget(a), ...(Array.isArray(a.edges) ? { edges: a.edges as string[] } : {}) };
     case "routes":
       return { ...base, target: symbolTarget(a), ...(s(a.text) ? { text: s(a.text) } : {}) };
     case "status":
