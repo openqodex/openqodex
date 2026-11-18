@@ -534,18 +534,24 @@ function run(index: PluginIndex<NestFact>): Analysis {
       if (d === MAX_BASE_DEPTH) gap(baseSite, "fan-out-capped", ["handles"], name, `the plugin follows at most ${MAX_BASE_DEPTH} base classes; routes further up are not listed`);
     }
     void depth;
-    // Guards and interceptors: the class's own, else those it inherits (Reflect metadata reads up the prototype chain).
+    // Guards and interceptors: those of every class up the base chain,
+    // the furthest base's first and the class's own last. Nest's
+    // extendArrayMetadata starts each class's list from the one it
+    // inherits (Reflect metadata reads up the prototype chain) and adds
+    // its own after it.
     const classMw = (kind: "UseGuards" | "UseInterceptors"): Mw[] => {
+      const lists: Mw[][] = [];
+      const seen = new Set<Cls>();
       let c: Cls | null = cls;
-      for (let d = 0; c && d <= MAX_BASE_DEPTH; d++) {
-        const mine = middlewareOf(c.file, c.fact.decorators, kind);
-        if (mine.length > 0) return mine;
+      for (let d = 0; c && !seen.has(c) && d <= MAX_BASE_DEPTH; d++) {
+        seen.add(c);
+        lists.unshift(middlewareOf(c.file, c.fact.decorators, kind));
         const base: Arg | null = c.fact.base;
-        if (!base || base.t !== "ref") return [];
+        if (!base || base.t !== "ref") break;
         const ref = classRef(c.file, base.path);
         c = ref.kind === "cls" ? ref.cls : null;
       }
-      return [];
+      return lists.flat();
     };
     const out: Controller = { cls, site, paths, version, routes, guards: classMw("UseGuards"), interceptors: classMw("UseInterceptors") };
     controllers.set(cls.key, out);

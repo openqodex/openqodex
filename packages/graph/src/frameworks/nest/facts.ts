@@ -512,6 +512,8 @@ export function readFacts(root: Node): NestFact[] {
         pending.push(m);
         continue;
       }
+      // A comment between a decorator and its method keeps the decorator.
+      if (m.type === "comment") continue;
       const decos = m.type === "method_definition" ? [...pending, ...m.namedChildren.filter((x) => x.type === "decorator")] : [];
       pending = [];
       if (m.type !== "method_definition" && m.type !== "public_field_definition" && m.type !== "field_definition" && m.type !== "method_signature" && m.type !== "abstract_method_signature") continue;
@@ -536,9 +538,12 @@ export function readFacts(root: Node): NestFact[] {
       }
       members.push({ name, ...pos(key ?? m), static: isStatic, decorators: read });
     }
-    if (decorators.length === 0 && members.length === 0 && cut === 0) return;
     const heritage = c.namedChildren.find((x) => x.type === "class_heritage");
     const ext = heritage?.namedChildren.find((x) => x.type === "extends_clause") ?? (heritage && heritage.child(0)?.type === "extends" ? heritage : null);
+    // A class that extends another is kept even with no decorators: a
+    // controller's base chain runs through it to the routes, guards and
+    // interceptors further up.
+    if (decorators.length === 0 && members.length === 0 && cut === 0 && !ext) return;
     const baseNode = ext ? (ext.childForFieldName("value") ?? ext.namedChildren.find((x) => x.type !== "type_arguments") ?? null) : null;
     out.push({ kind: "class", name: nameNode?.text ?? null, ...pos(nameNode ?? c), top, decorators, members, cut, base: baseNode ? readArg(baseNode, NONE, 0, local) : null, names, namesCut, dynamic });
   };
