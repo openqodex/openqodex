@@ -47,6 +47,11 @@
 //     `implementers` of a method lists no implementation of an interface
 //     member, `explain` cannot read their edges back, and `impact` drops
 //     the possible callers and the uses the review's brief shows.
+// 18. A factory defines a handler and hands it to a router as a value, never
+//     calling it: `path` from the factory to what the handler calls finds
+//     nothing, or finds it and calls the hop a call. Or the nesting reaches
+//     a function of the same name defined elsewhere, or stops one level
+//     down when a closure sits inside a closure.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -540,5 +545,87 @@ describe("a base written as an expression in Python and Ruby (15)", () => {
     });
     const u = ask1(t, { kind: "unknowns", target: { file: "lib/row.rb" } });
     expect((u.items as { cause: string; line: number | null }[]).filter((x) => x.cause === "dynamic-base").map((x) => x.line)).toEqual([1, 2]);
+  });
+});
+
+describe("a path through the definitions a function holds (18)", () => {
+  let s: Session;
+  const files: Record<string, string> = {
+    "src/deps.ts": [
+      "export class Sessions {",
+      "  create(name: string): string {",
+      "    return name;",
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+    "src/router.ts": [
+      'import { Sessions } from "./deps";',
+      "type Router = { openapi(route: string, h: (c: string) => string): void };",
+      "export function createRouter(router: Router, sessions: Sessions): void {",
+      "  const createHandler = (c: string): string => {",
+      "    return sessions.create(c);",
+      "  };",
+      '  router.openapi("/sessions", createHandler);',
+      "}",
+      "export function unrelated(sessions: Sessions): (c: string) => string {",
+      "  const createHandler = (c: string): string => sessions.create(c);",
+      "  return createHandler;",
+      "}",
+      "export function makeApp(sessions: Sessions): () => () => string {",
+      "  function outer(): () => string {",
+      '    const inner = (): string => sessions.create("x");',
+      "    return inner;",
+      "  }",
+      "  return outer;",
+      "}",
+      "export function plain(): number {",
+      "  return 1;",
+      "}",
+      "",
+    ].join("\n"),
+  };
+  beforeAll(async () => {
+    const repo = makeRepo(files);
+    const graph = await buildGraph({ repoRoot: repo, store: null });
+    s = { graph, generation: "nested-build", treeSha: null, builtAt: null, laterEditsKnown: false };
+  });
+  const q = (req: Omit<Request, "apiVersion">) => query(s, { apiVersion: 1, ...req } as Request);
+  const hops = (a: Answer) => (a.items as Item[]).map((i) => [i.kind, i.fromName, i.toName, where(i), i.site.tier]);
+
+  it("reaches what a registered handler calls through a defines hop, never a direct call", () => {
+    const a = q({ kind: "path", target: { name: "createRouter" }, to: { name: "Sessions.create" } });
+    expect(a.error).toBeNull();
+    expect(hops(a)).toEqual([
+      ["defines", "createRouter", "createHandler", "src/router.ts:4", "certain"],
+      ["calls", "createHandler", "create", "src/router.ts:5", "certain"],
+    ]);
+    // The defines hop names the handler of createRouter, not the one of the same name in unrelated.
+    expect((a.items as Item[])[0]?.to).toContain("#createRouter.createHandler@");
+    for (const i of a.items as Item[]) expect(q({ kind: "explain", target: { id: i.edge } }).error).toBeNull();
+  });
+
+  it("follows a closure inside a closure, one defines hop a level", () => {
+    const a = q({ kind: "path", target: { name: "makeApp" }, to: { name: "Sessions.create" } });
+    expect(hops(a)).toEqual([
+      ["defines", "makeApp", "outer", "src/router.ts:14", "certain"],
+      ["defines", "outer", "inner", "src/router.ts:15", "certain"],
+      ["calls", "inner", "create", "src/router.ts:15", "certain"],
+    ]);
+  });
+
+  it("never reaches a handler of the same name that another function defines", () => {
+    const other = q({ kind: "path", target: { name: "createRouter" }, to: { name: "unrelated.createHandler" } });
+    expect(other.error).toBeNull();
+    expect(other.items).toEqual([]);
+    const none = q({ kind: "path", target: { name: "plain" }, to: { name: "Sessions.create" } });
+    expect(none.items).toEqual([]);
+  });
+
+  it("walks defines hops only when they are asked for, and leaves callers as they were", () => {
+    const callsOnly = q({ kind: "path", target: { name: "createRouter" }, to: { name: "Sessions.create" }, edges: ["calls"] });
+    expect(callsOnly.items).toEqual([]);
+    const callers = q({ kind: "callers", target: { name: "Sessions.create" } });
+    expect((callers.items as Item[]).map((i) => i.fromName).sort()).toEqual(["createHandler", "createHandler", "inner"]);
   });
 });

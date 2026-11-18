@@ -144,11 +144,62 @@ export function importCount(g: Graph): number {
   return n;
 }
 
+// An edge a walk reads: one of the graph's, or a hop the query derives.
+export type HopEdge = { from: string; to: string; kind: string; sites: GraphSite[] };
+
+// The definitions a function or a method holds in its body (closures,
+// nested function declarations, handlers written inline) and, for each,
+// the function that holds it. The parse proves the nesting: a nested
+// definition's id names its enclosing definition's qualified name, and
+// that definition's lines hold it. A `defines` hop says the definition is
+// there, never that the function calls it or when it runs.
+type Nesting = { held: Map<string, GraphNode[]>; holder: Map<string, GraphNode> };
+const nestings = new WeakMap<Graph, Nesting>();
+function nesting(g: Graph): Nesting {
+  let n = nestings.get(g);
+  if (!n) {
+    n = { held: new Map(), holder: new Map() };
+    for (const defs of g.defsByFile.values()) {
+      const byName = new Map<string, GraphNode[]>();
+      for (const d of defs) if (d.kind === "function" || d.kind === "method") (byName.get(qualified(d)) ?? byName.set(qualified(d), []).get(qualified(d)))?.push(d);
+      for (const d of defs) {
+        const q = qualified(d);
+        const dot = q.lastIndexOf(".");
+        if (dot === -1) continue;
+        let best: GraphNode | null = null;
+        for (const p of byName.get(q.slice(0, dot)) ?? []) {
+          if (p.id === d.id || p.startLine > d.startLine || p.endLine < d.endLine) continue;
+          if (!best || p.endLine - p.startLine < best.endLine - best.startLine) best = p;
+        }
+        if (!best) continue;
+        n.holder.set(d.id, best);
+        (n.held.get(best.id) ?? n.held.set(best.id, []).get(best.id))?.push(d);
+      }
+    }
+    nestings.set(g, n);
+  }
+  return n;
+}
+
+// The function that holds a nested definition, or null.
+export function holderOf(g: Graph, id: string): GraphNode | null {
+  return nesting(g).holder.get(id) ?? null;
+}
+
+// A defines hop as an edge with one site: where the nested definition is.
+// The parse names exactly one enclosing definition, so it is certain.
+export function definesEdge(holder: GraphNode, d: GraphNode): HopEdge {
+  const column = Number(d.id.slice(d.id.lastIndexOf(":") + 1)) || 0;
+  const site: GraphSite = { file: d.file, line: d.startLine, column, tier: "certain", evidence: "same-scope", via: null, note: null, rule: "query-defines" };
+  return { from: holder.id, to: d.id, kind: "defines", sites: [site] };
+}
+
 // The indexes of this file, built once per graph before any question.
 export function prepareTraversal(g: Graph): void {
   importsFrom(g, "");
   importCount(g);
   goFilesOf(g, "go:");
+  nesting(g);
 }
 
 // Go imports name a package folder (`go:<dir>`): the files of that folder.
@@ -173,10 +224,20 @@ function goFilesOf(g: Graph, target: string): string[] {
 // `out` hold: the calls profile (calls, inheritance, implements, dispatch
 // and possible invocations). The uses that are not calls (overrides, uses
 // as a value or a type) are read only when a kind asks for them.
-function* neighbours(g: Graph, at: string, dir: "in" | "out", kinds: ReadonlySet<string> | null): Generator<{ edge: GraphEdge; other: string }> {
+function* neighbours(g: Graph, at: string, dir: "in" | "out", kinds: ReadonlySet<string> | null): Generator<{ edge: HopEdge; other: string }> {
   const want = (k: string) => kinds === null || kinds.has(k);
   for (const e of (dir === "in" ? g.in.get(at) : g.out.get(at)) ?? []) if (want(e.kind)) yield { edge: e, other: dir === "in" ? e.from : e.to };
   if (kinds !== null) for (const e of (dir === "in" ? g.refsIn.get(at) : g.refsOut.get(at)) ?? []) if (kinds.has(e.kind)) yield { edge: e, other: dir === "in" ? e.from : e.to };
+  if (kinds !== null && kinds.has("defines")) {
+    if (dir === "out") {
+      const holder = g.nodes.get(at);
+      if (holder) for (const d of nesting(g).held.get(at) ?? []) yield { edge: definesEdge(holder, d), other: d.id };
+    } else {
+      const holder = holderOf(g, at);
+      const d = g.nodes.get(at);
+      if (holder && d) yield { edge: definesEdge(holder, d), other: holder.id };
+    }
+  }
   if (kinds !== null && kinds.has("imports")) {
     if (dir === "out") {
       for (const e of importsFrom(g, at)) {
@@ -197,7 +258,7 @@ function* neighbours(g: Graph, at: string, dir: "in" | "out", kinds: ReadonlySet
 // site of each edge (an edge with no site gives one step with none). A
 // point with thousands of edges, or an edge with thousands of sites, is
 // read with the budget checked at each step, and goes on where it stopped.
-export type PointStep = { edge: GraphEdge; other: string; site: GraphSite | null; last: boolean };
+export type PointStep = { edge: HopEdge; other: string; site: GraphSite | null; last: boolean };
 export function* pointSites(g: Graph, at: string, dir: "in" | "out", kinds: ReadonlySet<string> | null): Generator<PointStep> {
   for (const { edge, other } of neighbours(g, at, dir, kinds)) {
     const n = edge.sites.length;
@@ -368,7 +429,7 @@ export class PathSearch {
   hops: Item[] | null = null;
   beyond = false;
   readonly visited: Set<string>;
-  private readonly parent = new Map<string, { from: string; edge: GraphEdge; site: GraphSite }>();
+  private readonly parent = new Map<string, { from: string; edge: HopEdge; site: GraphSite }>();
   private frontier: string[];
   private next: string[] = [];
   private d = 1;
@@ -441,7 +502,7 @@ export class PathSearch {
           const hops: Item[] = [];
           let cur = this.b;
           while (cur !== this.a) {
-            const p = this.parent.get(cur) as { from: string; edge: GraphEdge; site: GraphSite };
+            const p = this.parent.get(cur) as { from: string; edge: HopEdge; site: GraphSite };
             hops.unshift({ ...toItem(this.g, { from: p.from, to: cur, kind: p.edge.kind }, p.site, 0), edge: edgeId(p.edge, p.site) });
             cur = p.from;
           }

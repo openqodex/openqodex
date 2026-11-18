@@ -105,7 +105,7 @@ export const TOOLS: ToolSpec[] = [
     properties: {
       from: str("A name or `file:line`."),
       to: str("A name or `file:line`."),
-      edges: { type: "array", items: { type: "string", enum: ["calls", "inherits", "imports"] }, description: "Default calls and inherits." },
+      edges: { type: "array", items: { type: "string", enum: ["calls", "inherits", "defines", "imports"] }, description: "Default calls, inherits and defines (a function to a definition in its body, such as a handler it registers)." },
       depth: int("Default 8.", 1, 8),
       tiers: TIERS,
     },

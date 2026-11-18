@@ -27,7 +27,9 @@ import type { Budget, Item } from "./traverse.js";
 // base types (implements, dispatches_to, overrides) and uses of a symbol
 // as a value or a type (may_invoke, uses_value, uses_type) on every build,
 // so a repository with none of them answers an empty list, not a boundary.
-export const RESOLVED_RELATIONS = ["calls", "inherits", "implements", "dispatches_to", "may_invoke", "overrides", "uses_value", "uses_type", "imports"] as const;
+// `defines` (a function to a definition in its body) is read from the
+// symbols at query time on every build.
+export const RESOLVED_RELATIONS = ["calls", "inherits", "implements", "dispatches_to", "may_invoke", "overrides", "uses_value", "uses_type", "imports", "defines"] as const;
 const REFERENCE_KINDS = ["uses_value", "uses_type", "reads", "writes", "may_invoke", "decorates"];
 const KNOWN_KINDS = new Set<string>([...RESOLVED_RELATIONS, ...REFERENCE_KINDS]);
 
@@ -346,7 +348,9 @@ export const PATH_DEPTH = 8;
 export function path(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answer {
   const g = s.graph;
   if (!req.to) return fail(s, "path", "bad-request", "path needs a second point: `to`");
-  const kinds = req.edges && req.edges.length > 0 ? req.edges : ["calls", "inherits"];
+  // By default a path also goes into the definitions a function holds
+  // (a handler it registers, a closure it returns), each a `defines` hop.
+  const kinds = req.edges && req.edges.length > 0 ? req.edges : ["calls", "inherits", "defines"];
   const unknownKind = kinds.find((k) => !KNOWN_KINDS.has(k));
   if (unknownKind) return fail(s, "path", "bad-request", `no relation named ${unknownKind}`);
   const rel = relationsOf(g);
