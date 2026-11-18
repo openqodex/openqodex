@@ -1,0 +1,19 @@
+{
+  "guards": "composes the mount prefix of a router brought in with CommonJS require, named or written inside the use call, and marks its routes mounted",
+  "frameworks": {
+    "plugin": "express",
+    "apps": 1,
+    "registrations": [
+      { "site": "src/users.js:4", "methods": ["GET"], "pattern": "/users/:id", "handler": "src/users.js#getUser", "status": "bound", "mounted": true },
+      { "site": "src/items.js:4", "methods": ["GET"], "pattern": "/items/:id", "handler": "src/items.js#getItem", "status": "bound", "mounted": true }
+    ],
+    "edges": [
+      { "kind": "mounts", "from": "fw:express:app:src/app.js:3", "to": "fw:express:router:src/users.js:2", "tier": "certain" },
+      { "kind": "mounts", "from": "fw:express:app:src/app.js:3", "to": "fw:express:router:src/items.js:2", "tier": "certain" }
+    ],
+    "notUnknowns": [
+      { "file": "src/app.js", "line": 4, "cause": "dynamic" },
+      { "file": "src/app.js", "line": 5, "cause": "dynamic" }
+    ]
+  }
+}

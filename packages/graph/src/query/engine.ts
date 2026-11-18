@@ -22,9 +22,9 @@ import type { Tier } from "../model/records.js";
 import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Extra, Job, Listing, Request, Session } from "./answer.js";
-import { frameworkLayer, noLayerReason, routes, tests } from "./frameworks.js";
+import { frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
 import { edgeId, readEdgeId } from "./ids.js";
-import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, readCursor } from "./page.js";
+import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, pagingNote, readCursor } from "./page.js";
 import { Overrides, dynamicBases, implementers, importCycles, impact, methodsNamed, outline, packages, path, references, relationsOf } from "./relations.js";
 import { budgetOf, prepareTraversal, sortWithin, spent, Walk } from "./traverse.js";
 import type { Budget } from "./traverse.js";
@@ -40,16 +40,19 @@ const LANGUAGES = ["typescript", "tsx", "javascript", "python", "go", "ruby", "j
 // What this build can answer, and what it cannot yet.
 function capabilities(s: Session): Record<string, unknown> {
   const rel = relationsOf(s.graph);
-  const layer = frameworkLayer(s.graph);
   const unsupported: Record<string, string> = {};
+  // Routes and tests each by the plugins that read them (query/frameworks.ts).
+  const routesWhy = routesUnsupported(s.graph);
+  const testsWhy = testsUnread(s.graph);
   if (![...rel].some((k) => ["uses_value", "uses_type", "reads", "writes", "may_invoke", "decorates"].includes(k))) unsupported.references = "uses of a symbol as a value or a type are not resolved";
-  if (!layer) unsupported.routes = `${noLayerReason(s.graph)}: routes and handlers are not read`;
+  if (routesWhy !== null) unsupported.routes = `${routesWhy}: routes and handlers are not read`;
   if (!rel.has("dispatches_to")) unsupported["implementers of a method"] = "calls through interfaces and base types are not resolved; overrides are found by name from the inheritance";
-  if (!layer) unsupported.tests = `${noLayerReason(s.graph)}: files named like tests are leads only`;
+  if (testsWhy !== null) unsupported.tests = `${testsWhy}: files named like tests are leads only`;
   return {
     apiVersion: API_VERSION,
     modelVersion: MODEL_VERSION,
     languages: LANGUAGES,
+    ...(s.graph.status.unreadLanguages ? { unreadLanguages: s.graph.status.unreadLanguages } : {}),
     operations: OPERATIONS,
     relations: [...rel].sort(),
     certainEvidence: [...CERTAIN_KINDS],
@@ -116,7 +119,10 @@ function searchJob(s: Session, req: Request): Job | Answer {
     }
     if (!sortWithin(scored, (a, b) => b.score - a.score || a.file.localeCompare(b.file) || a.line - b.line || a.id.localeCompare(b.id), budget)) return stoppedAt(base, [], [], null, "leads");
     // Search results are leads: never counted as callers or anything else.
-    return listing(base, scored, { into: "leads" });
+    // One definition with exactly the name searched is also named as the
+    // target; a prefix match, a file path hit or two exact names never is.
+    const exact = scored.filter((c) => c.score === 1);
+    return listing(exact.length === 1 ? { ...base, target: exact[0] as Candidate } : base, scored, { into: "leads" });
   };
 }
 
@@ -137,7 +143,12 @@ function unknownsJob(s: Session, req: Request): Job {
     const causes: Record<string, number | null> = {};
     for (const u of hits) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
     if (notRead.length > 0) causes["file-not-parsed"] = notRead.length;
-    return listing({ ...base, unknown: { ...base.unknown, causes } }, [...notRead, ...hits.map(toImpactUnknown)]);
+    // A call through a value in another file of the package could reach this
+    // file, so those rows are listed (scope project); say how many.
+    const reasons = [...base.unknown.reasons];
+    const others = project === null ? 0 : hits.filter((u) => u.file !== t.file).length;
+    if (others > 0) reasons.push(`${others} of these ${notRead.length + hits.length} rows come from other files of the same package: a call through a value there could reach this file, so they are listed (scope project)`);
+    return listing({ ...base, unknown: { ...base.unknown, causes, reasons } }, [...notRead, ...hits.map(toImpactUnknown)]);
   };
 }
 
@@ -209,6 +220,9 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
     }
     const partial = g.status.status === "partial";
     const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples } };
+    // The same count the floor reason gives, said before the rows.
+    const unbound = kind === "callers" ? (g.unknownNames.get(n.name) ?? 0) : 0;
+    if (unbound > 0) answer.warning = `${unbound} ${unbound === 1 ? "call" : "calls"} named ${n.name} could not be bound; this list may be missing callers. See: openqodex graph unknowns --name ${n.name}`;
     return listing(answer, walk.items, { beyond: walk.beyond ? { frontier: walk.past } : null });
   };
 }
@@ -303,6 +317,7 @@ function settle(s: Session, req: Request, job: Job, out: Listing | Answer, offse
   if (out.stopped) {
     const id = keepJob(s.graph, job);
     const a = out.answer;
+    const cursor = cursorFor(s.generation, req, offset, id);
     return {
       ...a,
       [out.into]: out.all.slice(offset, offset + limitOf(req)),
@@ -312,7 +327,8 @@ function settle(s: Session, req: Request, job: Job, out: Listing | Answer, offse
         by: "budget",
         omitted: null,
         omittedExact: false,
-        cursor: cursorFor(s.generation, req, offset, id),
+        cursor,
+        note: pagingNote("budget", null, cursor),
         frontier: out.stopped.frontier.slice(0, 50),
         ...(out.stopped.frontierTotal !== null ? { frontierTotal: out.stopped.frontierTotal } : {}),
       },

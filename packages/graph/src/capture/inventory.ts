@@ -30,6 +30,25 @@ const EXT_LANG: Record<string, Lang> = {
   ".java": "java",
 };
 
+// Source files in a language the graph does not parse, by extension. They
+// are counted by language so a repository of them does not look empty. Never
+// assets or config: no .json, .md, .css or images.
+const UNREAD_EXT: Record<string, string> = {
+  ".rs": "rust",
+  ".c": "c",
+  ".h": "c",
+  ".cc": "c++",
+  ".cpp": "c++",
+  ".cxx": "c++",
+  ".hpp": "c++",
+  ".cs": "c#",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".swift": "swift",
+  ".php": "php",
+  ".scala": "scala",
+};
+
 // Folders that hold generated, vendored or installed code, never the repo's
 // own, and the tool's own folders.
 export const SKIP_DIRS = new Set([
@@ -50,6 +69,12 @@ export const SKIP_DIRS = new Set([
   ".openqodex-review",
 ]);
 
+// The language name of a source file the graph does not parse, or null.
+export function unreadLanguageOf(path: string): string | null {
+  if (path.split("/").some((part) => SKIP_DIRS.has(part) || part === "target")) return null;
+  return UNREAD_EXT[extname(path).toLowerCase()] ?? null;
+}
+
 export function langOf(path: string): Lang | null {
   if (path.endsWith(".d.ts") || path.endsWith(".d.mts") || path.endsWith(".d.cts") || /\.min\.[cm]?js$/.test(path)) return null;
   if (path.split("/").some((part) => SKIP_DIRS.has(part))) return null;
@@ -69,7 +94,20 @@ export type Inventory = {
   tooBig: string[]; // eligible files over the size cap
   unreadable: string[]; // eligible files that vanished or are not regular files
   readFromDisk: number; // files read here to hash them
+  unread: Record<string, number>; // regular files of known languages the graph does not parse, by language
 };
+
+function countUnread(into: Record<string, number>, path: string): void {
+  const language = unreadLanguageOf(path);
+  if (language !== null) into[language] = (into[language] ?? 0) + 1;
+}
+
+// The counts as the status lists them: by language name, in name order.
+export function unreadList(unread: Record<string, number>): { language: string; files: number }[] {
+  return Object.keys(unread)
+    .sort()
+    .map((language) => ({ language, files: unread[language] as number }));
+}
 
 const split = (out: Buffer) => out.toString("utf8").split("\0").filter(Boolean);
 
@@ -93,13 +131,16 @@ export async function takeInventory(root: string, reader: RepoReader, opts: { ma
     if (!indexed.has(path) && mode && id) indexed.set(path, { mode, id });
   }
   const all = [...new Set([...indexed.keys(), ...split(others.stdout)])].filter((p) => opts.only === undefined || opts.only.has(p));
-  const out: Inventory = { all, entries: [], tooBig: [], unreadable: [], readFromDisk: 0 };
+  const out: Inventory = { all, entries: [], tooBig: [], unreadable: [], readFromDisk: 0, unread: {} };
   for (const path of all) {
     const lang = langOf(path);
-    if (lang === null) continue;
     const entry = indexed.get(path);
     // A link (120000) or a submodule (160000) is not a file of this repository.
     if (entry && entry.mode !== "100644" && entry.mode !== "100755") continue;
+    if (lang === null) {
+      countUnread(out.unread, path);
+      continue;
+    }
     // A clean tracked file is one git has just matched to its index entry,
     // and git never looks past a link on a path, so its spelled path holds
     // no link. Any other file (changed, untracked) is looked at by identity:
@@ -159,10 +200,13 @@ export function listInventory(root: string, reader: RepoReader, opts: { files: r
   const listed = new Map<string, string>();
   for (const f of opts.files) if (!listed.has(f.path)) listed.set(f.path, f.blob);
   const all = [...listed.keys()].filter((p) => opts.only === undefined || opts.only.has(p));
-  const out: Inventory = { all, entries: [], tooBig: [], unreadable: [], readFromDisk: 0 };
+  const out: Inventory = { all, entries: [], tooBig: [], unreadable: [], readFromDisk: 0, unread: {} };
   for (const path of all) {
     const lang = langOf(path);
-    if (lang === null) continue;
+    if (lang === null) {
+      countUnread(out.unread, path);
+      continue;
+    }
     const looked = reader.entry(path);
     if (!looked.ok) {
       out.unreadable.push(path);

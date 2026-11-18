@@ -240,10 +240,24 @@ export function reader(root: Node): FactReader<ExpressFact> {
         patternNames(name, declared);
         declare(scope, declared);
         const id = name?.type === "identifier" ? identifierName(name.text) : null;
-        if (id === null || !value || node.hasError) return;
+        const required = name?.type === "object_pattern" && value?.type === "call_expression" && value.childForFieldName("function")?.text === "require";
+        if ((id === null && !required) || !value || node.hasError) return;
         const holder = up(1);
         const decl = holder?.type === "variable_declaration" ? "var" : holder?.childForFieldName("kind")?.text === "let" ? "let" : "const";
-        out.push({ kind: "value", ...pos(node), name: id, value: readExpr(value), scope, top: scope === 0 && upType(2) !== "for_statement", exported: exported(upType), decl });
+        const top = scope === 0 && upType(2) !== "for_statement";
+        if (id === null) {
+          // `const { a, b: c } = require("./m")`: each name holds a member of what the call returns (which one is read from the import).
+          const call = readExpr(value);
+          for (const p of name?.namedChildren ?? []) {
+            const key = p.type === "pair_pattern" ? p.childForFieldName("key") : p; // only to tell a plain pattern from a computed one
+            const local = p.type === "pair_pattern" ? p.childForFieldName("value") : p;
+            if (!key || !local || (p.type !== "pair_pattern" && p.type !== "shorthand_property_identifier_pattern") || local.type !== (p.type === "pair_pattern" ? "identifier" : "shorthand_property_identifier_pattern")) continue;
+            const localName = identifierName(local.text);
+            if (localName !== null) out.push({ kind: "value", ...pos(node), name: localName, value: { t: "member", obj: call, prop: "", ...pos(node) }, scope, top, exported: exported(upType), decl });
+          }
+          return;
+        }
+        out.push({ kind: "value", ...pos(node), name: id, value: readExpr(value), scope, top, exported: exported(upType), decl });
         return;
       }
       case "assignment_expression": {
@@ -395,7 +409,10 @@ function keepRead(facts: ExpressFact[]): ExpressFact[] {
       case "call": {
         const fn = names(e.fn);
         const route = (e.fn.t === "member" && e.fn.prop === "route") || (e.fn.t === "ref" && e.fn.path[e.fn.path.length - 1] === "route");
-        return { ...e, fn, args: e.args.map((a, i) => (route && i === 0 ? path(a) : names(a))) };
+        // The module a `require` names is kept, by the rule that keeps a path piece, unless the rule would change it.
+        const required = e.fn.t === "ref" && e.fn.path.length === 1 && e.fn.path[0] === "require";
+        const spec = (a: Expr): Expr => (a.t === "str" && eitherSegmentText(a.v) === a.v ? a : unread(a));
+        return { ...e, fn, args: e.args.map((a, i) => (route && i === 0 ? path(a) : required && i === 0 ? spec(a) : names(a))) };
       }
       case "member":
         return { ...e, obj: names(e.obj) };
@@ -417,7 +434,8 @@ function keepRead(facts: ExpressFact[]): ExpressFact[] {
       case "value":
         return f.value.t === "str" ? f : { ...f, value: names(f.value) };
       case "cjs-export":
-        return { ...f, value: names(f.value) };
+        // An object keeps the names it exports (`module.exports = { users }`), by the rule that keeps a path piece.
+        return { ...f, value: f.value.t === "object" ? { ...f.value, props: f.value.props.map((p) => ({ key: eitherSegmentText(p.key) === p.key ? p.key : "", value: names(p.value) })) } : names(f.value) };
       case "test-block":
         return { ...f, name: null };
       default:
