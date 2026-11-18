@@ -14,12 +14,12 @@
 //
 // The thresholds below are set by the owner, not by this test's author:
 // (a) no certain edge into a wrong target, anywhere in the measured files;
-// (b) the held-out sites must be found (expected to fail today, so each is
-//     an `it.fails`: fixing it turns the test red until the marker goes);
-// (c) production recall of certain plus likely edges, and the candidate
-//     burden, are today's baseline: recall may not drop below it; burden
-//     is printed against it (a call newly bound through an interface adds
-//     possible edges by design, so a rise is not a failure).
+// (b) the held-out sites must be found;
+// (c) production recall of certain plus likely edges may not drop below
+//     its baseline, and the candidate burden may not rise above its
+//     ceiling. A call newly bound through an interface adds possible edges
+//     to the classes that declare it, by design: a change that binds more
+//     such calls raises the ceiling on purpose, never silently.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -48,12 +48,14 @@ const REPO = {
 
 // (a) Owner's threshold: certain edges into a target the checker does not name.
 const MAX_WRONG_CERTAIN = 0;
-// (c) Owner's baseline, recorded on 0a67e51f (tf-graph before any fix):
-// production truth sites found certain or likely, of all production truth sites.
-const BASELINE_PROD_RECALL = { found: 3617, of: 4021 };
-// (c) Owner's baseline: possible edges at production truth sites into a
-// target the checker does not name.
-const BASELINE_PROD_BURDEN = 548;
+// (c) Production truth sites found certain or likely, of all production
+// truth sites: 3617 on 0a67e51f (tf-graph before any fix), 3942 once the
+// TypeScript receiver types landed.
+const BASELINE_PROD_RECALL = { found: 3942, of: 4021 };
+// (c) Possible edges at production truth sites into a target the checker
+// does not name: 548 on 0a67e51f, 917 since. All 917 are dispatch to a
+// class or object that declares the interface (dispatch-implements).
+const MAX_PROD_BURDEN = 917;
 // (b) Owner's held-out sites: each must resolve, by the checker, to the named
 // declaration, and the graph must find it certain or likely.
 const HELD_OUT = [
@@ -160,9 +162,14 @@ describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")(`callers against the 
     const prod = scored.filter((r) => !r.test);
     const found = prod.filter((r) => r.outcome === "certain-correct" || r.outcome === "likely-correct").length;
     const burden = prod.reduce((s, r) => s + r.burden, 0);
-    process.stderr.write(`production recall ${found}/${prod.length} (baseline ${BASELINE_PROD_RECALL.found}/${BASELINE_PROD_RECALL.of}); burden ${burden} (baseline ${BASELINE_PROD_BURDEN})\n`);
+    process.stderr.write(`production recall ${found}/${prod.length} (baseline ${BASELINE_PROD_RECALL.found}/${BASELINE_PROD_RECALL.of}); burden ${burden} (ceiling ${MAX_PROD_BURDEN})\n`);
     expect(prod.length).toBeGreaterThan(0);
     expect(found / prod.length).toBeGreaterThanOrEqual(BASELINE_PROD_RECALL.found / BASELINE_PROD_RECALL.of);
+  });
+
+  it("adds no possible edge at production sites beyond the ceiling (owner's threshold c)", () => {
+    const burden = scored.filter((r) => !r.test).reduce((s, r) => s + r.burden, 0);
+    expect(burden).toBeLessThanOrEqual(MAX_PROD_BURDEN);
   });
 
   it("resolves every held-out site, by the checker, to its named declaration", () => {
@@ -173,8 +180,8 @@ describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")(`callers against the 
   });
 
   for (const h of HELD_OUT) {
-    // Owner's threshold b: expected to fail until the graph reads this receiver.
-    it.fails(`finds ${h.site} calling ${h.target} certain or likely${h.implementer ? `, and reaches ${h.implementer}` : ""} (owner's threshold b)`, () => {
+    // Owner's threshold b.
+    it(`finds ${h.site} calling ${h.target} certain or likely${h.implementer ? `, and reaches ${h.implementer}` : ""} (owner's threshold b)`, () => {
       const here = sitesAt(h.site, h.name);
       expect(here.map((r) => r.outcome)).toContainEqual(expect.stringMatching(/^(certain|likely)-correct$/));
       if (h.implementer) {
