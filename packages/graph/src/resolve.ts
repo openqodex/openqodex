@@ -53,7 +53,11 @@ export const DISPATCH_CAP = 32;
 // 15: qualified names before external star imports, star imports of a
 // class, the java.lang classes. 16: source sets by source root first, no
 // import from the default package.
-export const RESOLVER_VERSION = 17;
+// 18: TypeScript member types read structurally (interface properties, object
+// types written in place and aliased, intersections, destructured names,
+// type arguments), results inferred from a function's body, the receiver
+// as written on a gap.
+export const RESOLVER_VERSION = 18;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -98,8 +102,10 @@ const BUILTINS: Record<Family, ReadonlySet<string>> = {
 // Built-in types whose methods are the language's: a call on a value of
 // one is external, never a gap of the repository.
 const BUILTIN_TYPES: Record<Family, ReadonlySet<string>> = {
+  // Partial, Required, Readonly, Pick and Omit are not here: a value of one
+  // has the members of a type of the repository.
   js: new Set(
-    "string number boolean bigint symbol never void undefined null String Number Boolean BigInt Symbol Object Array ReadonlyArray Map ReadonlyMap Set ReadonlySet WeakMap WeakSet Promise PromiseLike Date RegExp Error TypeError RangeError Function Record Partial Required Readonly Pick Omit Iterable IterableIterator AsyncIterable AsyncIterableIterator Iterator Generator AsyncGenerator ArrayBuffer SharedArrayBuffer DataView Uint8Array Int8Array Uint16Array Int16Array Uint32Array Int32Array Float32Array Float64Array BigInt64Array BigUint64Array Buffer URL URLSearchParams AbortController AbortSignal TextEncoder TextDecoder".split(" "),
+    "string number boolean bigint symbol never void undefined null String Number Boolean BigInt Symbol Object Array ReadonlyArray Map ReadonlyMap Set ReadonlySet WeakMap WeakSet Promise PromiseLike Date RegExp Error TypeError RangeError Function Record Iterable IterableIterator AsyncIterable AsyncIterableIterator Iterator Generator AsyncGenerator ArrayBuffer SharedArrayBuffer DataView Uint8Array Int8Array Uint16Array Int16Array Uint32Array Int32Array Float32Array Float64Array BigInt64Array BigUint64Array Buffer URL URLSearchParams AbortController AbortSignal TextEncoder TextDecoder".split(" "),
   ),
   python: new Set("str int float bool bytes bytearray list dict set frozenset tuple complex List Dict Set FrozenSet Tuple Sequence Mapping MutableMapping MutableSequence Iterable Iterator".split(" ")),
   go: new Set("string int int8 int16 int32 int64 uint uint8 uint16 uint32 uint64 uintptr float32 float64 complex64 complex128 byte rune bool error".split(" ")),
@@ -143,7 +149,23 @@ type Unfollowed = { spec: string; cause: Cause; note: string };
 function chain(outer: Ev | null, inner: Ev): Ev {
   if (outer === null) return inner;
   const notes = [outer.note, inner.note].filter((n): n is string => n !== null && n !== "");
-  return { kind: outer.kind, tier: weakest(outer.tier, inner.tier), via: outer.via ?? inner.via, note: notes.length > 0 ? [...new Set(notes)].join(" ") : null, rule: outer.rule };
+  // A receiver typed through a result read from a function's body says so,
+  // whichever step it was.
+  const kind = inner.kind === "receiver-inferred" ? inner.kind : outer.kind;
+  return { kind, tier: weakest(outer.tier, inner.tier), via: outer.via ?? inner.via, note: notes.length > 0 ? [...new Set(notes)].join(" ") : null, rule: outer.rule };
+}
+
+// A result read from what a function's body returns. A method may be
+// overridden by one that returns another type, so its body proves less.
+function inferredEv(def: { kind: string; static?: boolean }): Ev {
+  const overridable = def.kind === "method" && def.static !== true;
+  return {
+    kind: "receiver-inferred",
+    tier: overridable ? "likely" : "certain",
+    via: null,
+    note: overridable ? "the type is what the method's body returns, and an override may return another" : null,
+    rule: "inferred-result",
+  };
 }
 
 // What a module specifier names.
@@ -1314,6 +1336,8 @@ export function createWorld(input: ResolveInput): World {
     return v;
   };
   const typeKey = (file: string, family: Family, t: TypeRef, depth = 0, asType = false, nesting: string | null = null): TypeHit => {
+    // A member path, an intersection or an object type written in place: read structurally.
+    if (family === "js" && (t.path || t.parts || t.fields) && !t.elem && depth <= MAX_TYPE_DEPTH) return asType ? null : toHit({ file, family, t, ev: null }, depth);
     if (t.elem || t.param !== undefined || depth > MAX_TYPE_DEPTH) return null;
     if (t.promise) return "ext";
     if (t.result !== undefined) return asType ? null : resultType(file, family, t, depth, nesting);
@@ -1326,6 +1350,13 @@ export function createWorld(input: ResolveInput): World {
     if (v?.v === "ext") return "ext";
     if (v?.v !== "sym" || v.ids.length !== 1) return null;
     const cls = classOfId.get(v.ids[0] as string);
+    // A TypeScript alias of a named type (`type AnyBox = Box<unknown>`, `type
+    // Client = Pick<Api, "list">`) is that type wherever a member is looked up.
+    const named = cls && family === "js" && !asType ? namedAlias(cls) : null;
+    if (named) {
+      const inner = typeKey(named.file, named.family, named.t, depth + 1);
+      return inner === null || inner === "ext" ? inner : { ...inner, ev: chain(v.ev, inner.ev) };
+    }
     if (cls) return { key: cls, ev: v.ev };
     if (asType) return null;
     const def = defById.get(v.ids[0] as string);
@@ -1409,6 +1440,38 @@ export function createWorld(input: ResolveInput): World {
     }
     return found;
   };
+  // The named type a TypeScript alias stands for, when it is one: not an
+  // object type, an intersection or an untyped one, which are read apart.
+  const namedAlias = (key: string): { file: string; family: Family; t: TypeRef } | null => {
+    const info = classes.get(key);
+    if (info?.family !== "js" || info.ids.length !== 1) return null;
+    const def = defById.get(info.ids[0] as string);
+    const t = def?.kind === "type" ? def.alias : undefined;
+    if (!def || !t || t.parts || t.fields || t.path || t.elem || t.name === "{}" || (t.qualifier === null && JS_UNTYPED.has(t.name))) return null;
+    return { file: def.file, family: def.family, t };
+  };
+  // What a call of a definition returns, and where that type was written:
+  // its own declared or inferred result, or for a property typed by a named
+  // function type, that type's.
+  const resultsOf = (def: Def): { file: string; family: Family; owner: string | null; results: (TypeRef | null)[] } | null => {
+    if (def.results) return { file: def.file, family: def.family, owner: def.owner, results: def.results };
+    if (!def.signature) return null;
+    let v = typeValue(def.file, def.signature);
+    for (let hops = 0; v?.v === "sym" && v.ids.length === 1 && hops < MAX_DEPTH; hops++) {
+      const target = defById.get(v.ids[0] as string);
+      if (target?.kind !== "type") return null;
+      if (target.results) return { file: target.file, family: target.family, owner: target.owner, results: target.results };
+      // `type A = B`: the function type B names.
+      if (!target.alias || target.alias.parts || target.alias.fields) return null;
+      v = typeValue(target.file, target.alias);
+    }
+    return null;
+  };
+  // A function declared inside a function, by its index in the file's definitions.
+  const localTarget = (file: string, index: number): ResultTarget => {
+    const id = defIdsOf(file)[index];
+    return id === undefined ? null : { ids: [id], ev: SAME_SCOPE };
+  };
   const namedResultTarget = (file: string, t: TypeRef): ResultTarget => {
     const v = typeValue(file, t);
     if (v?.v === "ext") return "ext";
@@ -1446,11 +1509,14 @@ export function createWorld(input: ResolveInput): World {
       receiver = on;
       const hit = methodOn(on.key, t.name, "i", 0);
       if (!hit || !("ids" in hit)) return null;
-      const ids = hit.ids.filter((id) => defById.get(id)?.results?.[t.result ?? 0]);
+      const ids = hit.ids.filter((id) => {
+        const def = defById.get(id);
+        return def ? resultsOf(def)?.results[t.result ?? 0] : undefined;
+      });
       if (ids.length === 0) return null;
       found = { ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
     } else {
-      found = resultTargets[family](file, t, nesting);
+      found = t.localDef !== undefined ? localTarget(file, t.localDef) : resultTargets[family](file, t, nesting);
       if (found === "ext") return "ext";
       // A constructor or a Go type conversion names its class directly.
       const key = found?.ids.length === 1 ? classOfId.get(found.ids[0] as string) : undefined;
@@ -1460,8 +1526,9 @@ export function createWorld(input: ResolveInput): World {
     let out: TypeHit = null;
     for (const id of found.ids) {
       const def = defById.get(id);
-      const result = def?.results?.[t.result ?? 0];
-      if (!def || !result) return null;
+      const from = def ? resultsOf(def) : null;
+      const result = from?.results[t.result ?? 0];
+      if (!def || !from || !result) return null;
       let inner: TypeHit;
       if (def.family === "java" && result.param !== undefined) {
         // Arguments belong to the receiver's file, which may differ from the method's file.
@@ -1470,17 +1537,27 @@ export function createWorld(input: ResolveInput): World {
         const arg = args?.types[result.param];
         if (!args || !arg || result.elem) return null;
         inner = typeKey(args.file, "java", arg, depth + 1, false, args.nesting);
+      } else if (result.result !== undefined) {
+        // A result read from a returned call is that call's result, never a
+        // name: awaited when the caller or the body awaits it.
+        inner = result.promise && !t.awaited
+          ? "ext"
+          : typeKey(from.file, from.family, { ...result, promise: undefined, inferred: undefined, ...(result.awaited || t.awaited ? { awaited: true } : {}) }, depth + 1, false, from.owner);
       } else {
         // Only an awaited call exposes the value inside a declared Promise.
         inner = result.promise && !t.awaited
           ? "ext"
-          : typeKey(def.file, def.family, { ...result, result: undefined, promise: undefined }, depth + 1, false, def.owner);
+          : typeKey(from.file, from.family, { ...result, result: undefined, promise: undefined }, depth + 1, false, from.owner);
       }
       if (inner === null) return null;
       if (out !== null && (inner === "ext" ? out !== "ext" : out === "ext" || out.key !== inner.key)) return null;
       // Candidates that disagree on type arguments keep the class and lose the arguments.
       const agreed: boolean = out === null || out === "ext" || inner === "ext" || sameTypeArguments(out.args, inner.args, depth + 1);
-      out = inner === "ext" ? inner : { key: inner.key, ev: chain(found.ev, inner.ev), ...(agreed && inner.args ? { args: inner.args } : {}) };
+      if (inner === "ext") out = inner;
+      else {
+        const ev = chain(found.ev, inner.ev);
+        out = { key: inner.key, ev: result.inferred ? chain(ev, inferredEv(def)) : ev, ...(agreed && inner.args ? { args: inner.args } : {}) };
+      }
     }
     return out;
   };
@@ -2182,6 +2259,201 @@ export function createWorld(input: ResolveInput): World {
     return k;
   };
 
+  // ---------- TypeScript member types, read structurally ----------
+  // A TypeScript type as written, in the file it was read in, with the
+  // evidence of the steps that reached it: an object type written in place,
+  // an intersection or a member path have no class key of their own, so a
+  // member of one is read from the type itself.
+  type Struct = { file: string; family: Family; t: TypeRef; ev: Ev | null; inherited?: boolean };
+  const evOf = (a: Ev | null, b: Ev | null): Ev | null => (a === null ? b : b === null ? a : chain(a, b));
+  const inPlace = (t: TypeRef): boolean => t.name === "{}" && t.qualifier === null && t.result === undefined && !t.path;
+  const structural = (t: TypeRef): boolean => t.path !== undefined || t.parts !== undefined || inPlace(t);
+  // One structural lookup, from its first call to its last, whatever path it
+  // takes through types, aliases, bases and results: one budget of steps and
+  // one set of the member lookups it is inside of. Types of an untrusted
+  // repository may refer to themselves in any way (`interface I extends A`
+  // with `type A = I`), so a lookup that meets one again, or uses up the
+  // budget, is not known: null, never a loop.
+  const STRUCT_STEPS = 1024;
+  let walk: { left: number; open: Set<string> } | null = null;
+  const guarded = <A extends unknown[], R>(f: (...args: A) => R, spent: R) => (...args: A): R => {
+    const outer = walk === null;
+    if (outer) walk = { left: STRUCT_STEPS, open: new Set() };
+    try {
+      return (walk as { left: number }).left-- > 0 ? f(...args) : spent;
+    } finally {
+      if (outer) walk = null;
+    }
+  };
+  // A type alias of the repository (`type X = Y`): what it stands for.
+  const aliasOf = (key: string): Struct | null => {
+    const info = classes.get(key);
+    if (info?.family !== "js" || info.ids.length !== 1) return null;
+    const def = defById.get(info.ids[0] as string);
+    return def?.kind === "type" && def.alias ? { file: def.file, family: def.family, t: def.alias, ev: null } : null;
+  };
+  // The declared type of member `name` of class `key`, as written: on the
+  // class, through the alias it is, or on a base.
+  const fieldRef = guarded((key: string, name: string, depth: number = 0): Struct | "ext" | null => {
+    const open = (walk as { open: Set<string> }).open;
+    const tag = `${key}\u0000${name}`;
+    if (depth > MAX_DEPTH || open.has(tag)) return null;
+    open.add(tag);
+    try {
+      return fieldRefIn(key, name, depth);
+    } finally {
+      open.delete(tag);
+    }
+  }, null);
+  const fieldRefIn = (key: string, name: string, depth: number): Struct | "ext" | null => {
+    const info = classes.get(key);
+    const t = info?.fields.get(name);
+    if (info && t) return { file: info.file, family: info.family, t, ev: null };
+    const alias = aliasOf(key);
+    if (alias) return stepStruct(alias, name, depth + 1);
+    const b = basesOf(key);
+    for (let i = 0; i < b.keys.length; i++) {
+      const hit = fieldRef(b.keys[i] as string, name, depth + 1);
+      if (hit === "ext") return hit;
+      if (hit) return { ...hit, ev: throughBase(b.evs[i] as Ev, hit.ev), inherited: true };
+    }
+    return null;
+  };
+  // The one function a call's result names, and that result's type, when
+  // it is read structurally (an object literal the body returns).
+  const resultOf = guarded((s: Struct, depth: number): Struct | "ext" | null => {
+    const t = s.t;
+    let found: { ids: string[]; ev: Ev } | "ext" | null;
+    if (t.on) {
+      const on = typeKey(s.file, s.family, t.on, depth + 1);
+      if (on === null || on === "ext") return on;
+      const hit = methodOn(on.key, t.name, "i", 0);
+      if (!hit || !("ids" in hit)) return null;
+      found = { ids: hit.ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
+    } else found = t.localDef !== undefined ? localTarget(s.file, t.localDef) : namedResultTarget(s.file, t);
+    if (found === null || found === "ext" || found.ids.length !== 1) return found === "ext" ? found : null;
+    const def = defById.get(found.ids[0] as string);
+    const from = def ? resultsOf(def) : null;
+    const result = from?.results[t.result ?? 0];
+    if (!def || !from || !result) return null;
+    if (result.promise && !t.awaited) return "ext";
+    const ev = result.inferred ? chain(found.ev, inferredEv(def)) : found.ev;
+    const read: TypeRef = { ...result, promise: undefined, inferred: undefined, ...(result.result !== undefined && (result.awaited || t.awaited) ? { awaited: true } : {}) };
+    return { file: from.file, family: from.family, t: read, ev: evOf(s.ev, ev) };
+  }, null);
+  // The type itself once its member path is walked, its result read and
+  // its alias followed; null or "ext" when a step is not known.
+  const normalize = guarded((start: Struct, depth: number): Struct | "ext" | null => {
+    let s = start;
+    for (let steps = 0; steps <= MAX_TYPE_DEPTH; steps++) {
+      const t = s.t;
+      if (t.path) {
+        let head: Struct | "ext" | null = { ...s, t: { ...t, path: undefined } };
+        for (const p of t.path) {
+          head = stepStruct(head, p, depth + 1);
+          if (head === null || head === "ext") return head;
+        }
+        s = head;
+        continue;
+      }
+      if (t.result !== undefined) {
+        const r = resultOf(s, depth + 1);
+        if (r === "ext") return r;
+        if (r && structural(r.t)) {
+          s = r;
+          continue;
+        }
+        return s;
+      }
+      if (t.parts || inPlace(t) || t.elem || t.promise) return s;
+      const k = typeKey(s.file, s.family, t, depth + 1);
+      const alias = k !== null && k !== "ext" ? aliasOf(k.key) : null;
+      if (!alias || k === null || k === "ext") return s;
+      s = { ...alias, ev: evOf(s.ev, k.ev) };
+    }
+    return null;
+  }, null);
+  // Whether one side of an intersection declares `name`: as a field (its
+  // type), as a method, not at all, or "unknown" when that cannot be told.
+  const declares = guarded((side: Struct, name: string, depth: number): Struct | "method" | null | "unknown" => {
+    if (depth > MAX_TYPE_DEPTH) return "unknown";
+    const n = normalize(side, depth);
+    if (n === null || n === "ext") return "unknown";
+    if (n.t.parts) {
+      let one: Struct | "method" | null = null;
+      for (const p of n.t.parts) {
+        const d = declares({ ...n, t: p }, name, depth + 1);
+        if (d === "unknown" || (d !== null && one !== null)) return "unknown";
+        if (d !== null) one = d;
+      }
+      return one;
+    }
+    if (inPlace(n.t)) {
+      if (!n.t.fields) return "unknown";
+      const f = n.t.fields[name];
+      return f ? { ...n, t: f } : null;
+    }
+    const k = typeKey(n.file, n.family, n.t, depth + 1);
+    if (k === null || k === "ext") return "unknown";
+    const f = fieldRef(k.key, name);
+    if (f === "ext") return "unknown";
+    if (f) return { ...f, ev: evOf(evOf(n.ev, k.ev), f.ev) };
+    const m = methodOn(k.key, name, "i", 0);
+    if (m && "gap" in m) return "unknown";
+    if (m) return "method";
+    return outsideBase(k.key) || (classes.get(k.key)?.dynamic.length ?? 0) > 0 ? "unknown" : null;
+  }, "unknown");
+  // The type of member `name` of a value of type `s`.
+  const stepStruct = guarded((s: Struct, name: string, depth: number = 0): Struct | "ext" | null => {
+    if (depth > MAX_TYPE_DEPTH) return null;
+    const n = normalize(s, depth);
+    if (n === null || n === "ext") return n;
+    const t = n.t;
+    if (t.promise) return "ext";
+    if (t.elem) return null;
+    if (t.parts) {
+      // Bound only when exactly one side declares the member, as a field.
+      const d = declares(n, name, depth + 1);
+      return d === "unknown" || d === "method" ? null : d;
+    }
+    if (inPlace(t)) {
+      const f = t.fields?.[name];
+      return f ? { ...n, t: f } : null;
+    }
+    const k = typeKey(n.file, n.family, t, depth + 1);
+    if (k === null || k === "ext") return k;
+    const f = fieldRef(k.key, name);
+    if (f === null || f === "ext") return f;
+    const ev = evOf(evOf(n.ev, k.ev), f.ev);
+    // A member typed by the type's own parameter takes the argument the value's type gives.
+    if (f.t.kind === "param" && f.t.param !== undefined && !f.inherited) {
+      const arg = t.args?.[f.t.param];
+      return arg ? { file: n.file, family: n.family, t: arg, ev } : null;
+    }
+    return { ...f, ev, inherited: undefined };
+  }, null);
+  // The class a structural type comes to, for a call on it.
+  const toHit = guarded((s: Struct, depth: number): TypeHit => {
+    const n = normalize(s, depth);
+    if (n === null || n === "ext") return n;
+    if (structural(n.t)) return null;
+    const k = typeKey(n.file, n.family, n.t, depth + 1);
+    return k === null || k === "ext" || n.ev === null ? k : { ...k, ev: chain(n.ev, k.ev) };
+  }, null);
+  // A method called on an intersection: the one side that declares it.
+  const intersectionCall = guarded((s: Struct, name: string): TypeHit => {
+    const n = normalize(s, 0);
+    if (n === null || n === "ext" || !n.t.parts) return null;
+    let one: TypeHit = null;
+    for (const p of n.t.parts) {
+      const side = { ...n, t: p };
+      const d = declares(side, name, 1);
+      if (d === "unknown" || (d !== null && one !== null) || (d !== null && d !== "method")) return null;
+      if (d === "method") one = toHit(side, 1);
+    }
+    return one;
+  }, null);
+
   const rbGlobal = (name: string): Outcome => {
     const ids = rbTop.get(name);
     const files = filesByName.get(`ruby:${name}`)?.size ?? 0;
@@ -2466,7 +2738,11 @@ export function createWorld(input: ResolveInput): World {
             const head = javaTypeValue(file, r.type.qualifier ? [...r.type.qualifier.split("."), r.type.name] : [r.type.name], nesting);
             if (head?.v === "gap") return { unknown: head.cause, shape: "typed", note: head.note, candidates: head.candidates };
           }
-          const note = r.type.result !== undefined ? `what ${named} returns is not known to the graph` : `the type ${named} is not found in the graph`;
+          const note = r.type.parts
+            ? "an intersection whose sides do not show which one alone declares the member"
+            : r.type.result !== undefined
+              ? `what ${named} returns is not known to the graph`
+              : `the type ${named} is not found in the graph`;
           return { unknown: "no-receiver-type", shape: "typed", note };
         }
         const key = followPath(t, r.path);
@@ -2541,9 +2817,42 @@ export function createWorld(input: ResolveInput): World {
         return onClass(base, call.name, call.static ? "s" : "i", superEv);
       }
       case "type": {
+        // A name bound by destructuring is a member path of its type: the
+        // call's own path goes on from there.
+        if (r.type.path) return resolveCall(file, family, { ...call, recv: { kind: "type", type: { ...r.type, path: undefined }, path: [...r.type.path, ...r.path] } }, caller, asValue);
+        // A TypeScript member path the class table cannot follow (an object
+        // type written in place or aliased, an intersection, a result read
+        // from a body): read structurally.
+        const structurally = (): TypeHit => (family === "js" ? toHit({ file, family, t: r.path.length > 0 ? { ...r.type, path: r.path } : r.type, ev: null }, 0) : null);
+        // A path whose last member is a collection or a built-in type
+        // (`input.names.map()` with `names: string[]`): the language's own method.
+        const builtinEnd = (): boolean => {
+          if (family !== "js" || r.path.length === 0) return false;
+          const n = normalize({ file, family, t: { ...r.type, path: r.path }, ev: null }, 0);
+          return n !== null && n !== "ext" && (n.t.elem === true || (n.t.qualifier === null && BUILTIN_TYPES.js.has(n.t.name) && resolveLocal(n.file, n.t.name) === null));
+        };
         if (untypedType(file, family, r.type, 0)) {
+          // A path through a member the object type declares has that member's type.
+          const members = r.type.fields !== undefined || !(r.type.qualifier === null && JS_UNTYPED.has(r.type.name));
+          const through = r.path.length > 0 && members ? structurally() : null;
+          if (through !== null && through !== "ext") {
+            const kind = through.ev.kind === "receiver-inferred" ? "receiver-inferred" : "receiver-field";
+            return withDispatch(onClass(through.key, call.name, "i", { ...through.ev, kind, rule: "receiver-type" }), { key: through.key, side: "i" });
+          }
+          if (through === null && builtinEnd()) return { ext: true };
           const spelled = r.type.name === "{}" ? "by an object type written in place" : `${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}`;
           return { unknown: "untyped-receiver", shape: "typed", note: `a value typed ${spelled} may be anything with a method of this name` };
+        }
+        // `A & B`: the one side that declares the method.
+        if (family === "js" && r.path.length === 0 && r.type.result === undefined) {
+          const n = normalize({ file, family, t: r.type, ev: null }, 0);
+          if (n !== null && n !== "ext" && n.t.parts) {
+            const one = intersectionCall(n, call.name);
+            if (one === "ext") return { ext: true };
+            if (one === null) return { unknown: "no-receiver-type", shape: "typed", note: "an intersection whose sides do not show which one alone declares the method" };
+            const kind = one.ev.kind === "receiver-inferred" ? one.ev.kind : receiverKind(r.type, r.path);
+            return withDispatch(onClass(one.key, call.name, "i", { ...one.ev, kind, rule: "receiver-type" }), { key: one.key, side: "i" });
+          }
         }
         const t = typeKey(file, family, r.type);
         if (t === "ext") return { ext: true };
@@ -2551,16 +2860,23 @@ export function createWorld(input: ResolveInput): World {
         // built-in type the file does not redefine: the method is the
         // language's own.
         if (t === null && r.path.length === 0 && (r.type.elem || (!r.type.qualifier && BUILTIN_TYPES[family].has(r.type.name) && resolveLocal(file, r.type.name) === null))) return { ext: true };
-        if (t === null) {
+        // What the class table cannot follow is read structurally.
+        const typed = t === null || (r.path.length > 0 && followPath(t, r.path) === null) ? structurally() : null;
+        if (t === null && typed === null) {
           const named = `${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}`;
           // `result`: the value is what calling `named` returns, not a type of that name.
-          const note = r.type.result !== undefined ? `what ${named} returns is not known to the graph` : `the type ${named} is not found in the graph`;
+          const note = r.type.parts
+            ? "an intersection whose sides do not show which one alone declares the member"
+            : r.type.result !== undefined
+              ? `what ${named} returns is not known to the graph`
+              : `the type ${named} is not found in the graph`;
           return { unknown: "no-receiver-type", shape: "typed", note };
         }
-        const key = followPath(t, r.path);
+        const key = typed ?? followPath(t, r.path);
         if (key === "ext") return { ext: true };
+        if (key === null && builtinEnd()) return { ext: true };
         if (key === null) return { unknown: "no-receiver-type", shape: "typed", note: "a field whose type no rule knows" };
-        const kind = receiverKind(r.type, r.path);
+        const kind = key.ev.kind === "receiver-inferred" ? "receiver-inferred" : receiverKind(r.type, r.path);
         const out = onClass(key.key, call.name, "i", { ...key.ev, kind, rule: "receiver-type" });
         // A value a constructor made here is of that class alone; one typed
         // by an annotation, a declared result or a field may be any class
@@ -2596,6 +2912,15 @@ export function createWorld(input: ResolveInput): World {
   const withDispatch = (out: Outcome, d: Dispatch | null): Outcome => {
     if (d !== null && typeof out === "object" && "ids" in out) out.dispatch = d;
     return out;
+  };
+
+  // A gap's receiver as written and the type it was read as (`sessions
+  // any`, `deps.store Deps`): what tells which class's callers it may hide.
+  const receiverHint = (call: CallFact): string | undefined => {
+    const r = call.recv;
+    const parts = call.hint ? [call.hint] : r.kind === "name" ? [[r.name, ...r.path].join(".")] : [];
+    if (r.kind === "type") parts.push(`${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}${r.type.result !== undefined ? "()" : ""}`);
+    return parts.length > 0 ? parts.join(" ") : undefined;
   };
 
   // `rule`: the rule that made the edge, when it is not the one that bound
@@ -2805,6 +3130,8 @@ export function createWorld(input: ResolveInput): World {
           const u: UnknownSite = { file: path, line: call.line, column: call.column, name: call.name, cause: out.unknown, shape: out.shape, caller: callerId, scope: out.scope ?? "file" };
           if (out.note) u.note = out.note;
           if (out.candidates) u.candidates = out.candidates;
+          const receiver = receiverHint(call);
+          if (receiver) u.receiver = receiver;
           // A table nothing else can change narrows the gap to its entries
           // (or a key it does not hold). One that may change elsewhere keeps
           // the gap's whole scope: a function put in it later may be called.

@@ -1,0 +1,35 @@
+{
+  "guards": "binds a call through a member of a parameter typed by an object type written in place to the member's declared interface method",
+  "callers": [
+    {
+      "to": "src/resolver.ts#Resolver.resolve",
+      "site": "src/run.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/run.ts",
+      "line": 4,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/run.ts",
+      "line": 4,
+      "cause": "untyped-receiver"
+    },
+    {
+      "file": "src/run.ts",
+      "line": 4,
+      "cause": "miss"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/run.ts",
+      "line": 4,
+      "cause": "unsupported-rule"
+    }
+  ]
+}

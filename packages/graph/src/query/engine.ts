@@ -79,6 +79,18 @@ function unknownsBy(g: Graph): UnknownIndex {
 export const unknownsInside = (g: Graph, id: string): UnknownSite[] => unknownsBy(g).byCaller.get(id) ?? [];
 const unknownsNamed = (g: Graph, name: string): UnknownSite[] => unknownsBy(g).byName.get(name) ?? [];
 
+// Same-name gaps with first the ones whose receiver may be the target's
+// class: a word of the receiver as written, or of its type, is the class
+// name, or ends with it (`sessions`, `userSessions` for Sessions; an
+// interface's name without its leading I). The rest keep their order.
+function mayBe(named: UnknownSite[], n: GraphNode): UnknownSite[] {
+  const owner = qualified(n).split(".").slice(-2, -1)[0];
+  if (!owner) return named;
+  const names = [owner, ...(/^I[A-Z]/.test(owner) ? [owner.slice(1)] : [])].map((o) => o.toLowerCase());
+  const hit = (u: UnknownSite) => (u.receiver ?? "").toLowerCase().split(/[^a-z0-9_$]+/).some((w) => w !== "" && names.some((o) => w.endsWith(o)));
+  return [...named.filter(hit), ...named.filter((u) => !hit(u))];
+}
+
 // The indexes questions read, built once per graph when a session opens it
 // (open.ts), so no question's budget pays for them.
 export function prepareIndexes(g: Graph): void {
@@ -207,7 +219,7 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
       reasons = floorReasons(g, { id: n.id, name: n.name, file: n.file }, new Set());
       const named = unknownsNamed(g, n.name);
       for (const u of named) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
-      examples = named.slice(0, 5).map(toImpactUnknown);
+      examples = mayBe(named, n).slice(0, 5).map(toImpactUnknown);
     } else {
       // What it calls is a floor when a call inside any point the walk
       // expanded could not be bound: at every hop, not only the first.

@@ -19,7 +19,7 @@ Everything the brief leaves out is in the review's packet (below).
 
 Every call site on a line carries the evidence that proved it and one of these levels:
 
-- certain: an import that names the symbol, a definition in the same scope or Go package, or a receiver whose type a constructor, an annotation, a declared result or `this`/`self` gives, and every step it rests on is proved the same way. A name match alone is never certain.
+- certain: an import that names the symbol, a definition in the same scope or Go package, or a receiver whose type a constructor, an annotation, a declared result, the one result a function's body provably returns, or `this`/`self` gives, and every step it rests on is proved the same way. A name match alone is never certain.
 - likely: a stated convention picked the one target. The line says which convention, for example a workspace package reached through its built `dist` entry with no tsconfig `paths`, project reference or source condition mapping it to source, or a Ruby constant found by the autoload convention.
 - possible: the call may reach this definition and nothing proves it does: a name that two `export *` statements bring from different modules (JavaScript exports neither; a bundler may pick one), a call through an interface or a base type that one of several implementations answers, or a function used as a value that a callee, an alias, a table or a returned value may call. Each candidate is listed with the note. A possible caller is never proof that the code runs, and never counted with the certain and likely ones.
 
@@ -56,7 +56,7 @@ A call no rule can bind is kept as an unknown with its cause, never dropped:
 
 - external: the name comes from a declared dependency or the standard library. Only these are external; an import of a module that is not in the repository and that no manifest declares is a miss.
 - no-receiver-type: a method called on a value whose type no rule knows, or a member that an interface or a type alias does not declare.
-- untyped-receiver: a method called on a value typed `any`, `unknown`, `object` or an object type written in place such as `{ save(): number }` (Python `object` or `Any`, Go `any`). It may reach any method of that name, so it is never counted as external.
+- untyped-receiver: a method called on a value typed `any`, `unknown`, `object` or an object type written in place such as `{ save(): number }` (Python `object` or `Any`, Go `any`). It may reach any method of that name, so it is never counted as external. A call through a member of an object type (`deps.sessions.create()` with `deps: { sessions: Sessions }`) is not: it binds through the member's declared type.
 - not-exported: a path of a workspace package that its `exports` map does not expose.
 - dynamic: a call through a parameter, a local value, a computed member such as `handlers[key]()`, or what another call returned. Such a call could reach any function of its project; on a literal table that nothing else can change it is narrowed to the table's entries.
 - miss: the evidence names a place where no such symbol exists now.
@@ -243,6 +243,19 @@ A function named where it is not called (an argument, the right side of an assig
 - a function returned by name and then called (`pick(k)()`).
 
 A wrapper that never calls its parameter, or returns something else, gives no possible caller to what it was given. A function passed to code outside the repository (`items.map(helper)`) is a use as a value and nothing more.
+
+TypeScript reads a receiver's type through these shapes, each at the tier its steps prove:
+
+- a member of an interface, of a type alias of an object type, or of an object type written in place (`deps.sessions.create()` with `sessions: Sessions`), through `extends`, optional and `readonly` members;
+- a name bound by destructuring a typed value or parameter (`const { sessions } = deps`, `({ sessions }: Deps)`), renamed or nested. A name with a default value (`{ sessions = other }`) or a rest stays a gap: it may hold another type;
+- `x!`, `x?.`, `(x)`, `x satisfies T` as `x`, and `x as T` as a `T`; `Readonly`, `Partial`, `Required`, `Pick`, `Omit` and `NonNullable` of `T` as `T`;
+- `A & B`: a member or a method binds only when exactly one side declares it, and stays a gap when both do or a side cannot be read;
+- a member typed by the interface's or class's own type parameter takes the argument the value's type gives (`Box<Sessions>` makes `value: T` a `Sessions`);
+- a type alias of a named type (`type AnyBox = Box<unknown>`, `type Client = Pick<Api, "list">`) is that type;
+- an interface property typed by a named type (`resolve: ResolveFn`) is a member a call can name, as one spelled with a function type is, and a call of it returns what the function type returns;
+- the result of a function with no declared result: its one return, or several that agree, of `new X()`, a typed local or parameter, another call's result or an object literal (taken apart after the call). `async` wraps it in a promise that only `await` opens. Returns that disagree or cannot be read, a local given another value, a return in a `finally` block and a function that returns its own call leave a gap. The evidence is `receiver-inferred`: certain for a function, likely for a method, since an override may return another type.
+
+A caller list's five unknown examples list first the same-name gaps whose receiver as written, or its type, names the class (`sessions` or `userSessions` for `Sessions`, `resolver` for `IResolver`); the count of same-name gaps stays every one in the repository.
 
 A class, interface or type named in an annotation, a cast (`as`, `satisfies`), `instanceof` or `isinstance` is a use as a type, and a method that overrides or implements a member of a base type is recorded as such: both are listed under a touched symbol, apart from its callers.
 

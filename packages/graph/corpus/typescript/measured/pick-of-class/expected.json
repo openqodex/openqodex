@@ -1,0 +1,23 @@
+{
+  "guards": "binds calls on values typed by Pick of a class, through a type alias and written in place, to the class's methods instead of calling them external",
+  "callers": [
+    {
+      "to": "src/api.ts#Api.list",
+      "site": "src/use.ts:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/api.ts#Api.drop",
+      "site": "src/use.ts:11",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/use.ts",
+      "line": 6
+    }
+  ]
+}

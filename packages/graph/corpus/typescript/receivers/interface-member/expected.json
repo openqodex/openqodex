@@ -1,0 +1,107 @@
+{
+  "guards": "binds a call through an interface property typed by a class, through extends, optional chaining, non-null, a generic interface, Readonly, Partial and a cast",
+  "callers": [
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:5",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:9",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:13",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:17",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:21",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:25",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:29",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:5"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:9"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:13"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:17"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:21"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:25"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:29"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/use.ts",
+      "line": 5
+    },
+    {
+      "file": "src/use.ts",
+      "line": 9
+    },
+    {
+      "file": "src/use.ts",
+      "line": 13
+    },
+    {
+      "file": "src/use.ts",
+      "line": 17
+    },
+    {
+      "file": "src/use.ts",
+      "line": 21
+    },
+    {
+      "file": "src/use.ts",
+      "line": 25
+    },
+    {
+      "file": "src/use.ts",
+      "line": 29
+    }
+  ]
+}

@@ -36,6 +36,7 @@ export type EvidenceKind =
   | "receiver-constructor" // a receiver a constructor call typed
   | "receiver-annotation" // a receiver a type annotation typed
   | "receiver-result" // a receiver a declared result type typed
+  | "receiver-inferred" // a receiver typed by what the called function's body provably returns
   | "receiver-field" // a receiver reached through a typed field
   | "receiver-self" // this, self or cls in a method of the class
   | "autoload" // a Ruby constant found by the autoload convention
@@ -62,6 +63,7 @@ export const CERTAIN_KINDS: ReadonlySet<EvidenceKind> = new Set<EvidenceKind>([
   "receiver-constructor",
   "receiver-annotation",
   "receiver-result",
+  "receiver-inferred",
   "receiver-field",
   "receiver-self",
 ]);

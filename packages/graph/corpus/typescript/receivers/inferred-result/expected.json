@@ -1,0 +1,122 @@
+{
+  "guards": "reads the result of a function with no declared result from what its body provably returns, likely for an overridable method, and never from returns that disagree, a reassigned local or a finally block",
+  "callers": [
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:19",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:24",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Session.stream",
+      "site": "src/use.ts:9",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Session.stream",
+      "site": "src/use.ts:20",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:40",
+      "tier": "likely",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/sessions.ts#Session.stream",
+      "site": "src/use.ts:14"
+    },
+    {
+      "to": "src/sessions.ts#Other.stream",
+      "site": "src/use.ts:9"
+    },
+    {
+      "to": "src/sessions.ts#Other.stream",
+      "site": "src/use.ts:14"
+    },
+    {
+      "to": "src/sessions.ts#Other.stream",
+      "site": "src/use.ts:20"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:28"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:32"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:36"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:4"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:19"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:24"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:28"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:32"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:36"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:40"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 28,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/use.ts",
+      "line": 32,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/use.ts",
+      "line": 36,
+      "cause": "no-receiver-type"
+    }
+  ],
+  "external": {
+    "min": 1,
+    "sites": [
+      "src/use.ts:14"
+    ]
+  }
+}
