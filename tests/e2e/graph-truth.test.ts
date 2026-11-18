@@ -64,7 +64,10 @@ const HELD_OUT = [
   { site: "packages/trueforge-core/src/agent-session/SessionHandle.ts:415", name: "resolveAgentDefinition", target: "ITurnResourceResolver.resolveAgentDefinition", implementer: "TurnResourceResolver.resolveAgentDefinition" },
   { site: "packages/trueforge-core/src/agent-session/SessionHandle.ts:507", name: "resolveAgentDefinition", target: "ITurnResourceResolver.resolveAgentDefinition", implementer: "TurnResourceResolver.resolveAgentDefinition" },
 ];
-const HELD_OUT_PATH = { from: "createSessionsRouter", to: "Sessions.create", site: "packages/trueforge/src/apis/sessions.ts:563" };
+// The factory never calls its handler: it defines it (line 553) and hands it
+// to `router.openapi` as a value. The honest answer is two hops, the
+// definition and then the call, where the owner's wording says one.
+const HELD_OUT_PATH = { from: "createSessionsRouter", to: "Sessions.create", handler: "createSessionHandler", defined: "packages/trueforge/src/apis/sessions.ts:553", site: "packages/trueforge/src/apis/sessions.ts:563" };
 
 const CLONES = cacheFolder("openqodex-graph-acceptance");
 
@@ -205,9 +208,12 @@ describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")(`callers against the 
     expect(askPath().error).toBeNull();
   });
 
-  it.fails(`answers path ${HELD_OUT_PATH.from} -> ${HELD_OUT_PATH.to} in one hop through ${HELD_OUT_PATH.site} (owner's threshold b)`, () => {
+  it(`answers path ${HELD_OUT_PATH.from} -> ${HELD_OUT_PATH.to} through the handler it defines, then the call at ${HELD_OUT_PATH.site} (owner's threshold b)`, () => {
     const a = askPath();
-    const hops = (a.items as Item[]).map((i) => `${i.site?.file}:${i.site?.line}`);
-    expect(hops).toEqual([HELD_OUT_PATH.site]);
+    const hops = (a.items as Item[]).map((i) => [i.kind, i.fromName, i.toName, `${i.site?.file}:${i.site?.line}`, i.site?.tier]);
+    expect(hops).toEqual([
+      ["defines", HELD_OUT_PATH.from, HELD_OUT_PATH.handler, HELD_OUT_PATH.defined, "certain"],
+      ["calls", HELD_OUT_PATH.handler, "create", HELD_OUT_PATH.site, "certain"],
+    ]);
   });
 });

@@ -27,7 +27,7 @@ export const USAGE = [
   "  references <name | file:line>     uses as a value or a type",
   "  routes [<handler>] [--text <path part>]",
   "  tests <name | file:line>",
-  "  path <from> <to> [--edges calls,inherits,imports] [--depth 1..8]",
+  "  path <from> <to> [--edges calls,inherits,defines,imports] [--depth 1..8]",
   "  impact [<name | file:line>]        with no symbol: what the change reaches",
   "  importers <file>",
   "  outline <file | folder>",

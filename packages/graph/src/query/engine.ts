@@ -26,7 +26,7 @@ import { frameworkLayer, routes, routesUnsupported, tests, testsUnread } from ".
 import { edgeId, readEdgeId } from "./ids.js";
 import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, pagingNote, readCursor } from "./page.js";
 import { Overrides, dynamicBases, implementers, importCycles, impact, methodsNamed, outline, packages, path, references, relationsOf } from "./relations.js";
-import { budgetOf, prepareTraversal, sortWithin, spent, Walk } from "./traverse.js";
+import { budgetOf, definesEdge, holderOf, prepareTraversal, sortWithin, spent, Walk } from "./traverse.js";
 import type { Budget } from "./traverse.js";
 
 export { OPERATIONS, parseTarget, resolveTarget } from "./answer.js";
@@ -180,6 +180,15 @@ function explainJob(s: Session, req: Request): Job | Answer {
   const layer = frameworkLayer(g);
   const fw = layer?.edges.find((x) => x.kind === kind && x.from === from && x.to === to && x.evidence.site.file === file && x.evidence.site.line === line && x.evidence.site.column === column);
   if (fw) return { ...base, items: [{ edge: id, from: fw.from, to: fw.to, kind: fw.kind, plugin: fw.plugin, app: fw.app, evidence: fw.evidence, why: fw.evidence.note ?? `${fw.evidence.kind} proves it` }] };
+  // A defines hop the query derived from the nesting: derived again.
+  if (kind === "defines") {
+    const holder = holderOf(g, to);
+    const d = g.nodes.get(to);
+    const hop = holder && d && holder.id === from ? definesEdge(holder, d) : null;
+    const at = hop?.sites[0];
+    if (!hop || !at || at.file !== file || at.line !== line || at.column !== column) return fail(s, "explain", "not-found", `no edge ${id} in this graph`);
+    return { ...base, items: [{ edge: id, from, to, kind, site: at, why: `${d?.name} is defined inside ${holder?.name}; the parse proves the nesting, not that ${holder?.name} calls it` }] };
+  }
   // An override the query derived from the inheritance: derived again.
   const m = kind === "overrides" ? g.nodes.get(to) : undefined;
   if (!m) return fail(s, "explain", "not-found", `no edge ${id} in this graph`);
