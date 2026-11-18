@@ -58,8 +58,9 @@ export const DISPATCH_CAP = 32;
 // type arguments), results inferred from a function's body, the receiver
 // as written on a gap.
 // 19: an element of a call's result declared as an array or a set
-// (TypeRef.item).
-export const RESOLVER_VERSION = 19;
+// (TypeRef.item). 20: a file's project is the nearest root of its own
+// language family (projectFolder).
+export const RESOLVER_VERSION = 20;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -3611,13 +3612,27 @@ function goGuess(spec: string): string {
   return last.replace(/^go-/, "").replace(/[.-].*$/, "");
 }
 
-// The project folder of a file: its nearest package.json, go.mod,
-// pyproject.toml, setup.cfg, Gemfile, pom.xml, build.gradle or
-// build.gradle.kts folder, else the repository root.
+// The project folder of a file: the nearest root of its own language family
+// (package.json for JavaScript and TypeScript, go.mod for Go, pyproject.toml,
+// setup.cfg or a src folder of packages for Python, pom.xml or build.gradle
+// for Java and Kotlin). A file whose family has no root above it, or whose
+// language has no family, takes the nearest root of any family, else the
+// repository root. A Python script under src/ is so never the project of the
+// TypeScript files beside it.
 export function projectFolder(model: ProjectModel, goModules: [string, string][], file: string): string {
-  let best = nodeProjectOf(model, file)?.dir ?? "";
-  for (const [, dir] of goModules) if ((dir === "" || file.startsWith(`${dir}/`)) && dir.length > best.length) best = dir;
-  for (const dir of model.pyRoots) if ((dir === "" || file.startsWith(`${dir}/`)) && dir.length > best.length) best = dir;
-  for (const dir of model.javaProjects) if ((dir === "" || file.startsWith(`${dir}/`)) && dir.length > best.length) best = dir;
+  const under = (dir: string): boolean => dir === "" || file.startsWith(`${dir}/`);
+  const nearest = (dirs: Iterable<string>): string | null => {
+    let best: string | null = null;
+    for (const dir of dirs) if (under(dir) && (best === null || dir.length > best.length)) best = dir;
+    return best;
+  };
+  const node = nodeProjectOf(model, file)?.dir ?? null;
+  const go = nearest(goModules.map(([, dir]) => dir));
+  const py = nearest(model.pyRoots);
+  const java = nearest(model.javaProjects);
+  const own = /\.[cm]?[jt]sx?$/.test(file) ? node : file.endsWith(".go") ? go : /\.pyi?$/.test(file) ? py : /\.(java|kt|kts)$/.test(file) ? java : null;
+  if (own !== null) return own;
+  let best = "";
+  for (const dir of [node, go, py, java]) if (dir !== null && dir.length > best.length) best = dir;
   return best;
 }
