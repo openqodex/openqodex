@@ -811,7 +811,11 @@ function run(index: PluginIndex<HonoFact>): Analysis {
           const hasPath = pathLike(w, f.args[0]);
           const own = hasPath ? evaluate(f.args[0] as Expr, constant(ev.file, ev.scope)) : null;
           if (hasPath && own === null) addUnknown({ plugin: PLUGIN, site: ev.site, scope: scopeOf(app, ev.file), affects: ["applies_middleware"], cause: "dynamic", name: showH(f.args[0] as HExpr), note: `the middleware path ${showH(f.args[0] as HExpr)} is computed at run time, so the routes it applies to are not known`, count: null, exact: false });
-          const known = at !== null && (!hasPath || own !== null);
+          // A first argument before others that is no function the plugin binds (`process.env.AUTH_PATH`, a parameter) may be a path.
+          const first = f.args[0] as HExpr;
+          const maybePath = !hasPath && f.args.length > 1 && (first.t === "member" || first.t === "other" || (first.t === "ref" && !["bound", "external"].includes(bindMw(w, first).status)));
+          if (maybePath) addUnknown({ plugin: PLUGIN, site: ev.site, scope: scopeOf(app, ev.file), affects: ["applies_middleware"], cause: "dynamic", name: showH(first), note: `the first argument ${showH(first)} of use may be a path computed at run time, so the routes this middleware applies to are not known`, count: null, exact: false });
+          const known = at !== null && (!hasPath || own !== null) && !maybePath;
           const pattern = !hasPath || own === "*" || own === "/*" ? (at === null || at === "/" || at === "" ? null : joinPath(at, "*")) : at === null || own === null ? null : joinPath(at, own);
           for (const a of hasPath ? f.args.slice(1) : f.args) {
             if (mw.length >= MAX_MIDDLEWARE_CHAIN) {

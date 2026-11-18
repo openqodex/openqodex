@@ -267,7 +267,7 @@ export function reader(root: Node): FactReader<ExpressFact> {
         const path = namePath(left);
         if (!path) return;
         if (path[0] === "module" && path[1] === "exports") {
-          out.push({ kind: "cjs-export", ...pos(node), name: path.length === 2 ? "default" : (path[2] as string), value: readExpr(right) });
+          out.push({ kind: "cjs-export", ...pos(node), name: path.length === 2 ? "default" : (path[2] as string), value: exportsValue(right) });
           return;
         }
         if (path[0] === "exports" && path.length === 2) {
@@ -334,6 +334,16 @@ export function reader(root: Node): FactReader<ExpressFact> {
 // header, a value, an object's key or an export, is kept as `other`, and a
 // test block keeps no title.
 const unread = (e: Expr): Expr => ({ t: "other", line: e.line, column: e.column });
+
+// The value given to `module.exports`. An object's spreads, computed keys
+// and methods are counted in its `more`: each may write a member the
+// object also names, so no member it names is taken as the last write.
+function exportsValue(right: Node): Expr {
+  const v = readExpr(right);
+  if (v.t !== "object" || right.type !== "object") return v;
+  const hidden = right.namedChildren.filter((c) => c.type === "spread_element" || c.type === "method_definition" || (c.type === "pair" && c.childForFieldName("key")?.type === "computed_property_name")).length;
+  return hidden > 0 ? { ...v, more: (v.more ?? 0) + hidden } : v;
+}
 // The calls whose first argument is a path or a prefix.
 const PATH_FIRST = new Set<string>([...HTTP_METHODS, "del", "use", "route"]);
 

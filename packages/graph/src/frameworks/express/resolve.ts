@@ -100,6 +100,7 @@ type FileIndex = {
   values: Map<string, Fact<"value">[]>;
   params: Map<string, Fact<"param">[]>;
   cjs: Map<string, Fact<"cjs-export">>;
+  cjsTwice: Set<string>; // export names written more than once
   functions: Map<string, Fact<"function">[]>;
   calls: Fact<"call">[];
   servers: Fact<"server">[];
@@ -184,7 +185,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   const fx = (file: string): FileIndex => {
     let f = fileIndexes.get(file);
     if (f) return f;
-    f = { values: new Map(), params: new Map(), cjs: new Map(), functions: new Map(), calls: [], servers: [], testBlocks: 0, tooLarge: null, syntaxError: null, scopes: new Map(), unread: false };
+    f = { values: new Map(), params: new Map(), cjs: new Map(), cjsTwice: new Set(), functions: new Map(), calls: [], servers: [], testBlocks: 0, tooLarge: null, syntaxError: null, scopes: new Map(), unread: false };
     fileIndexes.set(file, f);
     const list = index.factsOf(file);
     if (!take("facts", list.length)) {
@@ -200,7 +201,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
           push(f.params, fact.name, fact);
           break;
         case "cjs-export":
-          if (!f.cjs.has(fact.name)) f.cjs.set(fact.name, fact);
+          if (f.cjs.has(fact.name)) f.cjsTwice.add(fact.name);
+          else f.cjs.set(fact.name, fact);
           break;
         case "function":
           push(f.functions, fact.name, fact);
@@ -382,12 +384,23 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
 
   // What a file assigns to an export name: `exports.n = x`, `module.exports.n = x`,
   // or a member of `module.exports = { n }`; "default" is `module.exports` itself.
-  const cjsEntry = (file: string, name: string): { value: Expr; line: number; column: number } | null => {
-    const own = fx(file).cjs.get(name);
-    if (own) return own;
-    const whole = name === "default" ? undefined : fx(file).cjs.get("default");
-    const member = whole?.value.t === "object" ? whole.value.props.find((p) => p.key === name) : undefined;
-    return whole && member ? { value: member.value, line: whole.line, column: whole.column } : null;
+  // "competing" when more than one write may give the name its value and
+  // the facts do not prove which runs last: the name written twice, an
+  // object that names it twice or holds a spread, a member written beside
+  // an object that names it, or written before `module.exports` is replaced.
+  const cjsEntry = (file: string, name: string): { value: Expr; line: number; column: number } | "competing" | null => {
+    const f = fx(file);
+    if (f.cjsTwice.has(name)) return "competing";
+    const own = f.cjs.get(name);
+    const whole = name === "default" ? undefined : f.cjs.get("default");
+    if (!whole) return own ?? null;
+    if (f.cjsTwice.has("default")) return "competing";
+    const members = whole.value.t === "object" ? whole.value.props.filter((p) => p.key === name) : [];
+    const hidden = whole.value.t === "object" && (whole.value.more ?? 0) > 0;
+    if (own) return members.length > 0 || hidden || own.line < whole.line || (own.line === whole.line && own.column < whole.column) ? "competing" : own;
+    if (members.length > 1 || (members.length === 1 && hidden)) return "competing";
+    const member = members[0];
+    return member ? { value: member.value, line: whole.line, column: whole.column } : null;
   };
   // An export that is a function: middleware or a handler, never a router.
   const notRouter = (file: string, e: Expr): boolean => {
@@ -401,6 +414,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     const val = exportedValue(file, name, depth + 1);
     if (val) return { val, settled: true, note: "" };
     const entry = cjsEntry(file, name);
+    if (entry === "competing") return unsettled(`${file} writes its export ${name === "default" ? "module.exports" : name} more than once, so which value it holds is not known`);
     if (entry && notRouter(file, entry.value)) return { val: null, settled: true, note: "" };
     return unsettled(entry ? `${file} exports ${show(entry.value)}, which the plugin cannot read as a router` : `${file} has no export the plugin can read under that name`);
   };
@@ -445,13 +459,14 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
 
   const exportedValue = (file: string, name: string, depth: number): Val | Param | null => {
     if (depth > MAX_MOUNT_DEPTH) return null;
+    const cjs = cjsEntry(file, name);
+    if (cjs === "competing") return null;
     const lf = index.languageFacts(file);
     let local: string | null = null;
     if (name === "default") local = lf?.defaultExport ?? null;
     const direct = (fx(file).values.get(name) ?? []).find((v) => v.top && v.exported);
     if (direct) return valueIn(file, [direct.name], 0, direct.line, depth);
     local ??= lf?.exportsLocal.find((x) => x.exported === name)?.local ?? null;
-    const cjs = cjsEntry(file, name);
     if (!local && cjs) {
       if (cjs.value.t === "ref" && cjs.value.path.length === 1) local = cjs.value.path[0] as string;
       else return classify(file, { name, value: cjs.value, scope: 0, line: cjs.line, column: cjs.column });
