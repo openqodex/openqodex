@@ -563,6 +563,10 @@ function run(index: PluginIndex<HonoFact>): Analysis {
     else if (had.name === null && name !== null) had.name = name;
   };
   const paramRoutes: { name: string; type: string; ev: Base }[] = [];
+  // The routers mounted on a receiver the plugin does not follow: each is
+  // reachable, so it is no application, and its routes stay relative and
+  // not served.
+  const unfollowedMounts: { w: Where; e: HExpr }[] = [];
   const typeOf = (prop: string): Base["type"] | null => (METHOD_SET.has(prop) || prop === "on" ? "route" : prop === "use" ? "use" : prop === "openapi" ? "openapi" : prop === "route" ? "mount" : prop === "mount" ? "foreign" : null);
 
   const files = index.factFiles().filter(isEnabled);
@@ -617,7 +621,10 @@ function run(index: PluginIndex<HonoFact>): Analysis {
         addUnknown({ plugin: PLUGIN, site, scope: { file }, affects: ["handles", "mounts"], cause: "dynamic", name: showH(f.recv), note: `a route is registered on the parameter ${r.name}, which has no type the plugin reads, so which router it lands on, and under which prefix, is decided by the caller; it is not listed as a route`, count: null, exact: false });
         continue;
       }
-      if (r.k === "param" && r.type !== null) {
+      // A mount on a parameter typed as a Hono value falls through: the
+      // router is mounted, under a prefix the caller decides.
+      const typedMount = r.k === "param" && r.type !== null && type === "mount";
+      if (r.k === "param" && r.type !== null && !typedMount) {
         if (type === "route" || type === "openapi") paramRoutes.push({ name: r.name, type: r.type, ev: { type, file, site, scope: f.scope, f, bases: [] } });
         continue;
       }
@@ -625,11 +632,12 @@ function run(index: PluginIndex<HonoFact>): Analysis {
       const proved = type === "openapi" && f.args[0] ? routeDef(w, f.args[0]) : type === "mount" && f.args[1] ? value(w, f.args[1], true, null) : null;
       const isRoute = proved !== null && "method" in proved;
       const isRouter = proved !== null && "k" in proved && proved.k === "inst";
+      if (type === "mount" && f.args[1] && (isRouter || typedMount)) unfollowedMounts.push({ w, e: f.args[1] });
       // A route on the router a call returns: said only when the call is proved to return one.
       const onReturned = r.k === "gap" && r.viaCall === true && type !== "use" && value(w, f.recv, true, null).k === "inst";
-      if (isRoute || isRouter || onReturned) {
-        const why = r.k === "gap" ? r.note : `the plugin cannot follow ${showH(f.recv)} to a Hono value`;
-        addUnknown({ plugin: PLUGIN, site, scope: { file }, affects: ["handles", "mounts"], cause: "unsupported-rule", name: showH(f.recv), note: `${isRoute ? "an OpenAPI route is registered" : isRouter ? "a router is mounted" : "a route is registered"} on ${showH(f.recv)}, and ${why}; the routes it adds are not listed`, count: null, exact: false });
+      if (isRoute || isRouter || onReturned || typedMount) {
+        const why = r.k === "gap" ? r.note : r.k === "param" && r.type !== null ? `${r.name} is a parameter (${r.type}), so the caller decides which application it is and under which prefix` : `the plugin cannot follow ${showH(f.recv)} to a Hono value`;
+        addUnknown({ plugin: PLUGIN, site, scope: { file }, affects: ["handles", "mounts"], cause: typedMount ? "dynamic" : "unsupported-rule", name: showH(f.recv), note: isRouter || typedMount ? `a router is mounted on ${showH(f.recv)}, and ${why}; its routes are kept relative to the router and served under no known application` : `${isRoute ? "an OpenAPI route is registered" : "a route is registered"} on ${showH(f.recv)}, and ${why}; the routes it adds are not listed`, count: null, exact: false });
       }
     }
   }
@@ -666,6 +674,7 @@ function run(index: PluginIndex<HonoFact>): Analysis {
     const d = deref(w, e);
     if (d.k === "expr" && d.e.t === "call") for (const a of d.e.args) markAll(d.w, a, depth + 1);
   };
+  for (const m of unfollowedMounts) markAll(m.w, m.e, 0);
   for (const [key, list] of events) {
     for (const ev of list) {
       if (ev.type !== "mount" || !ev.f.args[1]) continue;

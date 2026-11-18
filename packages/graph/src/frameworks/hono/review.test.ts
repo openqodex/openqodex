@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../../index.js";
 import type { FrameworkUnknown, Graph, Registration } from "../../index.js";
+import { parserFor } from "../../parser.js";
+import { readFacts } from "./facts.js";
 
 const MW = "export async function auth(_c: unknown, next: () => Promise<void>) {\n  await next();\n}\nexport async function log(_c: unknown, next: () => Promise<void>) {\n  await next();\n}\nexport async function cors(_c: unknown, next: () => Promise<void>) {\n  await next();\n}\n";
 const files: Record<string, string> = {
@@ -110,6 +112,54 @@ const files: Record<string, string> = {
     "}",
   ].join("\n"),
   "src/added.ts": ['import { Hono } from "hono";', 'import { health } from "./handlers";', 'import { add } from "./add";', "const a = new Hono();", 'a.get("/own", health);', "const inner = new Hono();", 'a.route("/add", add(inner));', "export default a;"].join("\n"),
+  // A file that imports nothing of Hono: a route on a parameter typed with
+  // another name (an Express Router) is no Hono route and stays quiet; a
+  // route on an untyped parameter of the same file is an unknown (the control).
+  "src/express-like.ts": [
+    'import type { Router } from "express";',
+    'import { health } from "./handlers";',
+    "export function mountExpress(router: Router) {",
+    '  router.get("/ex", health);',
+    "}",
+    "export function untyped(r) {",
+    '  r.get("/un", health);',
+    "}",
+  ].join("\n"),
+  // A router mounted on a parameter typed Hono, on an untyped parameter, and
+  // on a value of a dependency: which prefix it is served under is decided
+  // where the receiver comes from, so it is no application of its own. A
+  // router mounted on an application the plugin follows is composed (the control).
+  "src/register.ts": [
+    'import { Hono } from "hono";',
+    'import { other } from "some-dependency";',
+    'import { health } from "./handlers";',
+    "export function registerTyped(app: Hono) {",
+    "  const typedSub = new Hono();",
+    '  typedSub.get("/ts", health);',
+    '  app.route("/typed", typedSub);',
+    "}",
+    "export function registerUntyped(app) {",
+    "  const untypedSub = new Hono();",
+    '  untypedSub.get("/us", health);',
+    '  app.route("/untyped", untypedSub);',
+    "}",
+    "const depSub = new Hono();",
+    'depSub.get("/ds", health);',
+    'other.route("/dep", depSub);',
+    "const host = new Hono();",
+    "const okSub = new Hono();",
+    'okSub.get("/ok", health);',
+    'host.route("/host", okSub);',
+    "export default host;",
+  ].join("\n"),
+  // Exported values in files that import nothing of Hono: a router a local
+  // factory makes, and a basePath of an imported application. Other files
+  // register routes on them.
+  "src/factory.ts": ['import { Hono } from "hono";', "export function createRouter() {", "  return new Hono();", "}"].join("\n"),
+  "src/made.ts": ['import { createRouter } from "./factory";', "export const made = createRouter();"].join("\n"),
+  "src/base.ts": ['import { Hono } from "hono";', "export const base = new Hono();", "export default base;"].join("\n"),
+  "src/v1.ts": ['import { base } from "./base";', 'export const v1 = base.basePath("/v1");'].join("\n"),
+  "src/on-exported.ts": ['import { made } from "./made";', 'import { v1 } from "./v1";', 'import { health } from "./handlers";', 'made.get("/m", health);', 'v1.get("/r", health);'].join("\n"),
 };
 
 let root: string;
@@ -206,5 +256,50 @@ describe("the Hono plugin on what a review found", () => {
     expect(gaps("src/add.ts").filter((u) => u.site?.line === 3 && u.affects.includes("handles"))).toHaveLength(1);
     expect(gaps("src/add.ts").filter((u) => u.site?.line !== 3)).toEqual([]);
     expect(gaps("src/added.ts")).toEqual([]);
+  });
+});
+
+describe("the Hono plugin on a second review's findings", () => {
+  const listed = (file: string) => regs(file).map((r) => `${r.methods.join(",")} ${r.pattern} ${r.app ?? "unmounted"}`).sort();
+
+  it("reads a parameter's type in a file that imports nothing of Hono, so a route on an Express router is no Hono unknown", () => {
+    expect(regs("src/express-like.ts")).toEqual([]);
+    expect(gaps("src/express-like.ts").filter((u) => u.site?.line === 4)).toEqual([]);
+    // The untyped parameter of the same file is still an unknown.
+    expect(gaps("src/express-like.ts").filter((u) => u.site?.line === 7 && u.affects.includes("handles"))).toHaveLength(1);
+  });
+
+  it("never lists a router mounted on a typed parameter, an untyped parameter or a dependency's value as an application of its own", () => {
+    expect(listed("src/register.ts")).toEqual(["GET /ds unmounted", "GET /host/ok fw:hono:app:src/register.ts:17", "GET /ts unmounted", "GET /us unmounted"]);
+    for (const line of [7, 12, 16]) expect(gaps("src/register.ts").filter((u) => u.site?.line === line && u.affects.includes("mounts"))).toHaveLength(1);
+    expect(gaps("src/register.ts").filter((u) => u.site?.line === 20)).toEqual([]);
+    const apps = (graph.frameworks?.apps ?? []).filter((a) => a.id.startsWith("fw:hono:app:src/register.ts"));
+    expect(apps.map((a) => a.id)).toEqual(["fw:hono:app:src/register.ts:17"]);
+  });
+
+  it("follows an exported value of a file that imports nothing of Hono, or says it cannot", () => {
+    // The basePath of an imported application: the route is served under it.
+    expect(listed("src/on-exported.ts").filter((r) => r.includes("/r"))).toEqual(["GET /v1/r fw:hono:app:src/base.ts:2"]);
+    // A router a factory returns, held in an exported constant: an unknown at the route, never silence.
+    expect(gaps("src/on-exported.ts").filter((u) => u.site?.line === 4 && u.affects.includes("handles"))).toHaveLength(1);
+    expect(gaps("src/on-exported.ts").filter((u) => u.site?.line === 5)).toEqual([]);
+  });
+
+  // A file that imports nothing of Hono keeps only what resolve may read, so
+  // ordinary files do not fill the plugin's fact budget.
+  const kept = async (text: string): Promise<string[]> => {
+    const tree = (await parserFor("typescript")).parse(text);
+    if (!tree) throw new Error("no tree");
+    try {
+      return readFacts(tree.rootNode).map((f) => (f.kind === "value" || f.kind === "param" ? `${f.kind} ${f.name}` : f.kind));
+    } finally {
+      tree.delete();
+    }
+  };
+  it("keeps no fact of an ordinary file, and only the read parameters and exported values of a file resolve may read", async () => {
+    expect(await kept(["export const total = 5;", "export const store = new Map();", 'export const label = "x";', "export function twice(n: number) {", "  return n * 2;", "}", "const local = makeThing();"].join("\n"))).toEqual([]);
+    expect(await kept(files["src/express-like.ts"] as string)).toContain("param router");
+    expect((await kept(files["src/express-like.ts"] as string)).filter((k) => k.startsWith("value"))).toEqual([]);
+    expect(await kept(files["src/made.ts"] as string)).toEqual(["value made"]);
   });
 });
