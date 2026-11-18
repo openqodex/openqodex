@@ -17,7 +17,7 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
   if (indexed) return { ...indexed, repoRoot: store.repoRoot, status: { ...indexed.status, generation: gen.manifest.id } };
   let inventory: { files: Record<string, { key: string; lang: string }> };
   let projects: { model: Record<string, unknown>; goModules: [string, string][] };
-  let coverage: { notRead: NotRead[]; budgetFiles: string[] };
+  let coverage: { notRead: NotRead[]; budgetFiles: string[]; unreadLanguages?: { language: string; files: number }[] };
   try {
     inventory = JSON.parse(gen.read("inventory.json") ?? "null") as typeof inventory;
     projects = JSON.parse(gen.read("projects.json") ?? "null") as typeof projects;
@@ -57,6 +57,7 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
     stages: m.stages,
     cuts: [],
     notRead,
+    ...(coverage.unreadLanguages ? { unreadLanguages: coverage.unreadLanguages } : {}),
   };
   const graph = assemble([...resolved.nodes.values()], resolved.edges, [...resolved.importers.values()].flat(), resolved.misses, resolved.unknowns, status, model, projects.goModules, {
     references: resolved.references,

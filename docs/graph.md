@@ -74,6 +74,8 @@ Every cut is recorded with what it left out: a symbol with more than 40 callers 
 
 Languages: TypeScript, TSX, JavaScript, Python, Go, Ruby and Java. Files under `node_modules`, `dist`, `build`, `out`, `vendor` and the like, declaration files and minified files are left out.
 
+Source files in a language the graph does not parse (Rust, C, C++, C#, Kotlin, Swift, PHP, Scala) are not in the graph, but `graph status` and `graph capabilities` count them by language in `unreadLanguages` (for example `{ "language": "rust", "files": 412 }`, printed as "412 Rust files not read: Rust is not supported by this build"). The count is information only: it adds no reason and no floor to an answer, and files under `target` and the folders above are not counted. Adding or removing such a file changes the build's identity, so the count is never stale. The field is absent in a build kept by an older version.
+
 A file is listed as not read, with the reason, when it is over `graph.max_file_bytes`, past the `graph.max_files` parse cap, past the time budget or the memory bound, or when its parse takes over two seconds (the parser is slow on some broken files). Every one of these holds for the changed files too: they are read first, so a cap reached late never loses them.
 
 ## Limits

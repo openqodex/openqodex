@@ -50,6 +50,7 @@ function capabilities(s: Session): Record<string, unknown> {
     apiVersion: API_VERSION,
     modelVersion: MODEL_VERSION,
     languages: LANGUAGES,
+    ...(s.graph.status.unreadLanguages ? { unreadLanguages: s.graph.status.unreadLanguages } : {}),
     operations: OPERATIONS,
     relations: [...rel].sort(),
     certainEvidence: [...CERTAIN_KINDS],

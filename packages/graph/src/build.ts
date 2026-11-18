@@ -21,7 +21,7 @@ import type { ImpactExportChange } from "@openqodex/core";
 import type { Parser } from "web-tree-sitter";
 import { captureSnapshot, captureWorkingTree } from "./capture/capture.js";
 import { showBlob } from "./capture/git.js";
-import { blobId, inventoryDigest, langOf, listInventory, takeInventory } from "./capture/inventory.js";
+import { blobId, inventoryDigest, langOf, listInventory, takeInventory, unreadList } from "./capture/inventory.js";
 import type { Inventory, InventoryEntry, ListedFile } from "./capture/inventory.js";
 import { exportChanges } from "./changes/exports.js";
 import type { ChangedFile } from "./changes/exports.js";
@@ -131,6 +131,7 @@ export function captureDigest(args: { inv: Inventory; only: string[] | null; max
     model: createHash("sha256").update(JSON.stringify(serializeModel(args.model))).digest("hex"),
     tooBig: [...inv.tooBig].sort(),
     unreadable: [...inv.unreadable].sort(),
+    unread: unreadList(inv.unread),
     frameworks: contextFingerprint(inv.all),
   });
 }
@@ -568,6 +569,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
         stages,
         cuts,
         notRead,
+        unreadLanguages: unreadList(inv.unread),
       },
     };
 
@@ -599,7 +601,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       const files: Record<string, string> = {
         "inventory.json": JSON.stringify({ files: Object.fromEntries([...keys].map(([p, k]) => [p, k])) }),
         "projects.json": JSON.stringify({ model: serializeModel(model), goModules }),
-        "coverage.json": JSON.stringify({ notRead, cuts, budgetFiles: resolved.budgetFiles }),
+        "coverage.json": JSON.stringify({ notRead, cuts, budgetFiles: resolved.budgetFiles, unreadLanguages: unreadList(inv.unread) }),
       };
       if (withIndex) Object.assign(files, writeIndex(graph));
       const published = await store.publish({
