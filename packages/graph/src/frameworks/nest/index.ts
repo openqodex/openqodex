@@ -11,7 +11,7 @@ import type { NestFact } from "./facts.js";
 import { isNestFact, readFacts, wants } from "./facts.js";
 import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 
-export const VERSION = 3;
+export const VERSION = 4;
 const SUPPORTED = "Nest 8 to 11";
 
 const app = "nest-app";

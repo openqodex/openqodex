@@ -28,6 +28,10 @@ export const MAX_NAMES = 1000;
 export const MAX_SHADOW_STEPS = 50_000;
 // The longest exported constant kept for a route path read in another file.
 export const MAX_EXPORTED_CONSTANT = 100;
+// Steps from a read to the constant it names through other constants
+// (`const P = BASE`: P is 0 steps, BASE 1); resolve follows as many, so a
+// constant further on is not kept and the path reads as computed.
+export const MAX_CONSTANT_STEPS = 4;
 
 // The decorators the plugin reads, by the name they are written with
 // (the imported name, or the last part of `ns.Get`).
@@ -220,8 +224,19 @@ export function readFacts(root: Node): NestFact[] {
   const commonAlias = new Map<string, string>();
   // Module-level constants: name to declarator, and whether exported.
   const constants = new Map<string, { value: Node; exported: boolean }>();
-  // Names read as constants, with the form they are read in.
+  // Names read as constants, with the form they are read in, the steps
+  // from the read that first named each, and the names left to read.
   const reads = new Map<string, "path" | "routes">();
+  const steps = new Map<string, number>();
+  const queue: string[] = [];
+  let step = 0; // the steps of a name read now
+  const noteRead = (name: string, form: "path" | "routes") => {
+    const prev = reads.get(name);
+    if (!prev || form === "routes") reads.set(name, form);
+    if (prev) return;
+    steps.set(name, step);
+    queue.push(name);
+  };
   // Names an export clause with no source exports under their own name.
   const clauseExports = new Set<string>();
   let shadowSteps = 0;
@@ -352,10 +367,8 @@ export function readFacts(root: Node): NestFact[] {
       if (ctx.refs && path.length === 1) {
         const name = path[0] as string;
         const b = local ? binding(local, name) : null;
-        if (b === null) {
-          const prev = reads.get(name);
-          if (!prev || ctx.refs === "routes") reads.set(name, ctx.refs);
-        } else {
+        if (b === null) noteRead(name, ctx.refs);
+        else {
           const text = b === "other" ? null : stringOf(b);
           return ctx.refs === "path" && text !== null ? { t: "str", v: segmentText(text), ...p } : { t: "other", ...p };
         }
@@ -397,10 +410,7 @@ export function readFacts(root: Node): NestFact[] {
           const sub = ctx.key ? ctx.key(c.text) : NONE;
           if (sub.refs && local && shadowed(local, c.text)) props.push({ key: c.text, value: { t: "other", ...pos(c) } });
           else {
-            if (sub.refs) {
-              const prev = reads.get(c.text);
-              if (!prev || sub.refs === "routes") reads.set(c.text, sub.refs);
-            }
+            if (sub.refs) noteRead(c.text, sub.refs);
             props.push({ key: c.text, value: { t: "ref", path: [c.text], ...pos(c) } });
           }
         } else more++;
@@ -612,31 +622,26 @@ export function readFacts(root: Node): NestFact[] {
   }
 
   // ---------- the constants the facts read ----------
-  // Reading a constant may name another (`const P = BASE`), declared before
-  // or after it, so the pass repeats until no constant read is left; each
-  // pass adds at least one, so it ends within the count of constants.
+  // Each name read is read once, in the order it was first named. Reading
+  // a constant may name another (`const P = BASE`), declared before or
+  // after it, which joins the queue one step further on.
   const emitted = new Set<string>();
-  for (let first = true, added = true; added; first = false) {
-    added = false;
-    for (const [name, c] of constants) {
-      if (emitted.has(name)) continue;
-      const form = reads.get(name);
-      if (form) {
-        emitted.add(name);
-        added = true;
-        out.push({ kind: "value", name, ...pos(c.value), value: readArg(c.value, form === "routes" ? ROUTES : PATH, 0, null), exported: c.exported });
-        continue;
-      }
-      // An exported string constant another file may read as a path: kept
-      // only when it is short and has a path's shape (letters, digits and
-      // `/ : _ - . *`), as the kept-string rule keeps it.
-      if (!first || !c.exported) continue;
-      const s = stringOf(c.value);
-      if (s !== null && s.length > 0 && s.length <= MAX_EXPORTED_CONSTANT && pathShaped(s) && keptText(s) === s) {
-        emitted.add(name);
-        out.push({ kind: "value", name, ...pos(c.value), value: { t: "str", v: s, ...pos(c.value) }, exported: true });
-      }
-    }
+  for (let i = 0; i < queue.length; i++) {
+    const name = queue[i] as string;
+    const c = constants.get(name);
+    const at = steps.get(name) ?? 0;
+    if (!c || at > MAX_CONSTANT_STEPS) continue;
+    emitted.add(name);
+    step = at + 1;
+    out.push({ kind: "value", name, ...pos(c.value), value: readArg(c.value, reads.get(name) === "routes" ? ROUTES : PATH, 0, null), exported: c.exported });
+  }
+  for (const [name, c] of constants) {
+    // An exported string constant another file may read as a path: kept
+    // only when it is short and has a path's shape (letters, digits and
+    // `/ : _ - . *`), as the kept-string rule keeps it.
+    if (emitted.has(name) || !c.exported) continue;
+    const s = stringOf(c.value);
+    if (s !== null && s.length > 0 && s.length <= MAX_EXPORTED_CONSTANT && pathShaped(s) && keptText(s) === s) out.push({ kind: "value", name, ...pos(c.value), value: { t: "str", v: s, ...pos(c.value) }, exported: true });
   }
   if (broken) out.push({ kind: "syntax-error", ...broken });
   return out;

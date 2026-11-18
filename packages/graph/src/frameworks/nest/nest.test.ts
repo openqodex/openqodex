@@ -345,7 +345,7 @@ describe("the Nest plugin on what the release review found", () => {
   const app = { "src/main.ts": BOOT("AppModule"), "src/app.module.ts": MODULE(["CatsController"], { CatsController: "./cats.controller" }) };
   const controller = (head: string, path: string) => `import { Controller, Get } from "@nestjs/common";\n${head}\n@Controller(${path})\nexport class CatsController {\n  @Get()\n  list(): string[] {\n    return [];\n  }\n}\n`;
 
-  it("reads a path constant that names a constant declared before it, through any number of steps (1)", async () => {
+  it("reads a path constant that names a constant declared before it, through more than one step (1)", async () => {
     const one = await build({ ...app, "src/cats.controller.ts": controller('const BASE = "cats";\nconst P = BASE;\n', "P") });
     expect(lines(one)).toEqual(["GET /cats CatsController.list"]);
     const three = await build({ ...app, "src/cats.controller.ts": controller('const A = "cats";\nconst B = A;\nconst C = B;\n', "C") });
@@ -360,6 +360,32 @@ describe("the Nest plugin on what the release review found", () => {
     const changing = await build({ ...app, "src/cats.controller.ts": controller('let BASE = "cats";\nconst P = BASE;\n', "P") });
     expect(lines(changing)).not.toContain("GET /cats CatsController.list");
     expect(regs(changing).every((r) => r.pattern === null)).toBe(true);
+  }, 120_000);
+
+  it("reads a chain of path constants up to the steps a lookup follows, and one past them as computed (1)", async () => {
+    // C0 is read by the decorator; the string sits 4 steps on (read) or 5 (computed).
+    const chain = (steps: number) => Array.from({ length: steps + 1 }, (_, i) => `const C${i} = ${i === steps ? '"cats"' : `C${i + 1}`};`).reverse().join("\n");
+    const four = await build({ ...app, "src/cats.controller.ts": controller(chain(4), "C0") });
+    expect(lines(four)).toEqual(["GET /cats CatsController.list"]);
+    const five = await build({ ...app, "src/cats.controller.ts": controller(chain(5), "C0") });
+    expect(regs(five).map((r) => r.pattern)).toEqual([null]);
+  }, 120_000);
+
+  it("reads a file of 20,000 constants chained against declaration order in time that grows with it, keeping only the steps a lookup follows (5)", async () => {
+    // k0 = "cats", k1 = k0, ...: the decorator reads the last, and each step names one declared before it.
+    const names = Array.from({ length: 20_000 }, (_, i) => `k${i.toString(36)}`);
+    const decls = names.map((n, i) => (i === 0 ? `${n}="cats"` : `${n}=${names[i - 1]}`)).join(",");
+    const source = `import { Controller } from "@nestjs/common";\nconst ${decls};\n@Controller(${names[names.length - 1]})\nexport class C {}\n`;
+    expect(Buffer.byteLength(source)).toBeLessThan(MAX_SOURCE_BYTES);
+    expect(await readerCpuMs("typescript", [source], readFacts)).toBeLessThan(500);
+    const parser = await parserFor("typescript");
+    const tree = parser.parse(source);
+    if (!tree) throw new Error("no tree");
+    try {
+      expect(readFacts(tree.rootNode).filter((f) => f.kind === "value").length).toBe(5);
+    } finally {
+      tree.delete();
+    }
   }, 120_000);
 
   it("reads a path constant exported through an export clause, and never an aliased one, which may name another constant (1)", async () => {

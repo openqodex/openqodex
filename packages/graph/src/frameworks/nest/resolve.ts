@@ -24,7 +24,7 @@
 import type { Detection, Entity, FrameworkEdge, FrameworkEvidence, FrameworkUnknown, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
 import { appId, entityId } from "../plugin.js";
 import type { Arg, Deco, Member, NestFact } from "./facts.js";
-import { ROUTE_DECORATORS } from "./facts.js";
+import { MAX_CONSTANT_STEPS, ROUTE_DECORATORS } from "./facts.js";
 import { isTestFile } from "../express/js.js";
 
 export const PLUGIN = "nest";
@@ -345,8 +345,8 @@ function run(index: PluginIndex<NestFact>): Analysis {
   };
   const constantIn = (file: string, name: string, depth = 0): string | null => {
     const v = fx(file).values.get(name);
-    if (v) return v.value.t === "str" ? v.value.v : v.value.t === "ref" && v.value.path.length === 1 && depth < 4 ? constantIn(file, v.value.path[0] as string, depth + 1) : null;
-    if (depth > 3) return null;
+    if (v) return v.value.t === "str" ? v.value.v : v.value.t === "ref" && v.value.path.length === 1 && depth < MAX_CONSTANT_STEPS ? constantIn(file, v.value.path[0] as string, depth + 1) : null;
+    if (depth >= MAX_CONSTANT_STEPS) return null;
     const found = lookup(file, [name]);
     let target: { file: string; name: string } | null = null;
     if (found.kind === "miss") target = { file: found.target, name: found.name };
