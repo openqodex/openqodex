@@ -93,8 +93,9 @@ describe("dead ends of the graph answers", () => {
     const files = [...new Set((root.items as { file: string }[]).map((i) => i.file))].sort();
     expect(files).toEqual(["other/z.ts", "svc/a.ts", "svc/b.ts", "svc/c.ts", "svc/types.ts"]);
     expect(all.error).toBeNull();
-    for (const file of ["", "./", "/"]) expect(query(s, { apiVersion: 1, kind: "outline", target: { file }, limit: 500 }).items).toEqual(root.items);
+    for (const file of ["", "./", "/", "././", ".//", "./."]) expect(query(s, { apiVersion: 1, kind: "outline", target: { file }, limit: 500 }).items).toEqual(root.items);
     expect(query(s, { apiVersion: 1, kind: "outline", target: { file: "./svc" }, limit: 500 }).items).toEqual(all.items);
+    for (const file of ["svc/./", "./svc/./", "svc/.", "svc//."]) expect(query(s, { apiVersion: 1, kind: "outline", target: { file }, limit: 500 }).items).toEqual(all.items);
   });
 
   it("6. a truncated answer carries the paging sentence the CLI prints", async () => {

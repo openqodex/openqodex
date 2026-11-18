@@ -14,7 +14,10 @@ import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 // 6: values and scopes kept only for a file whose values resolve can read.
 // 7: a value kept only when resolve can read its name.
 // 8: a router required with CommonJS keeps its mount, or the mount is an unknown.
-export const VERSION = 10;
+// 9: an export written more than once is an unknown on the mount.
+// 10: exports.n written after module.exports is replaced is an unknown on the mount.
+// 11: an arrow function export is no router; a member of a require bound to a name is followed; a static method beside an exported member does not compete with it.
+export const VERSION = 11;
 
 const app = "express-app";
 

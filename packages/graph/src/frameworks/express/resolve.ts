@@ -429,7 +429,11 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   const fromRequire = (file: string, decl: Fact<"value">, member: string | undefined, depth: number): Got | null => {
     if (!requireBound(file, decl)) return null;
     const imp = index.languageFacts(file)?.imports.find((i) => i.line === decl.line && i.column === decl.column && (i.namespace === decl.name || i.names.some((n) => n.local === decl.name)));
-    if (!imp) return unsettled("the module the require names is computed or not a plain string");
+    if (!imp) {
+      // `const r = require("./x").router`: a member of the call, as inlineRequire reads it in place.
+      if (decl.value.t === "member" && member === undefined) return inlineRequire(file, decl.value, decl.scope, depth) ?? unsettled("the module the require names is computed or not a plain string");
+      return unsettled("the module the require names is computed or not a plain string");
+    }
     const named = imp.names.find((n) => n.local === decl.name);
     if (named && member !== undefined) return unsettled(`${decl.name}.${member} reads a member of a destructured name`);
     return requiredExport(file, imp.spec, named ? named.imported : (member ?? "default"), depth);
