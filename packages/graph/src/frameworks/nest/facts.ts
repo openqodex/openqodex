@@ -10,7 +10,8 @@
 // decorators, so the plugin reads them from the tree itself.
 import type { Node } from "web-tree-sitter";
 import type { FrameworkFactBase } from "../plugin.js";
-import { keptText, routeSegmentText } from "../shared/kept.js";
+import { eitherSegmentText, keptText, routeSegmentText } from "../shared/kept.js";
+import { decodeEscape } from "../express/js.js";
 
 // The most bytes of one file the plugin reads; a larger file gets one
 // "too-large" fact and nothing else, and resolve says so with an unknown.
@@ -115,6 +116,9 @@ const pos = (n: Node) => ({ line: n.startPosition.row + 1, column: n.startPositi
 const WRAPPERS = new Set(["parenthesized_expression", "as_expression", "satisfies_expression", "non_null_expression", "type_assertion"]);
 const FUNCTIONS = new Set(["function_declaration", "function_expression", "function", "arrow_function", "method_definition", "generator_function_declaration", "generator_function"]);
 const CLASSES = new Set(["class_declaration", "abstract_class_declaration", "class"]);
+// The nodes whose parts may run once, many times or not at all.
+const CONDITIONAL = new Set(["if_statement", "else_clause", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_case", "switch_default", "ternary_expression"]);
+const LOGICAL = new Set(["&&", "||", "??"]);
 
 // A plain name path: `a`, `a.b.c`; null for anything else.
 export function namePath(n: Node | null): string[] | null {
@@ -137,15 +141,19 @@ export function namePath(n: Node | null): string[] | null {
   return null;
 }
 
-// The string a literal holds: a quoted string or a template with no
-// substitution; null for anything else.
+// The string a literal holds, its escapes decoded as JavaScript decodes
+// them: a quoted string or a template with no substitution; null for
+// anything else or an escape the language rejects.
 function stringOf(n: Node): string | null {
   if (n.type === "string") {
     let s = "";
     for (const c of n.namedChildren) {
       if (c.type === "string_fragment") s += c.text;
-      else if (c.type === "escape_sequence") s += unescape(c.text);
-      else return null;
+      else if (c.type === "escape_sequence") {
+        const d = decodeEscape(c.text);
+        if (d === null) return null;
+        s += d;
+      } else return null;
     }
     return s;
   }
@@ -153,23 +161,29 @@ function stringOf(n: Node): string | null {
     let s = "";
     for (const c of n.namedChildren) {
       if (c.type === "string_fragment") s += c.text;
-      else if (c.type === "escape_sequence") s += unescape(c.text);
-      else return null;
+      else if (c.type === "escape_sequence") {
+        const d = decodeEscape(c.text);
+        if (d === null) return null;
+        s += d;
+      } else return null;
     }
     return s;
   }
   return null;
 }
-function unescape(e: string): string {
-  const c = e[1];
-  if (c === "n") return "\n";
-  if (c === "t") return "\t";
-  if (c === "/" || c === "\\" || c === "'" || c === '"' || c === "`") return c;
-  return e;
+
+// A path piece as a fact keeps it, by the rule of shared/kept.ts. Nest
+// serves a "?" or a "#" as part of the route, never as a query, so a text
+// the rule would cut there (`/items?token=x`), or an absolute URL, is not
+// kept at all: no query value or credential is copied, and no route is
+// listed at a shortened path. A "?" the rule keeps (`:id?`) stays.
+function segmentText(s: string): string | null {
+  const t = routeSegmentText(s);
+  return t !== null && eitherSegmentText(s) === t ? t : null;
 }
 
 // Where a string is read, and the contexts of what it holds. `str`: a
-// string here is a path or a version (kept by routeSegmentText); null: not
+// string here is a path or a version (kept by segmentText); null: not
 // read, so not kept. `refs`: a lone name here is read as a constant of that
 // form ("path", or "routes" for a RouterModule table).
 type Ctx = { str: boolean; refs: "path" | "routes" | null; item?: Ctx; key?: (k: string) => Ctx; arg?: (fn: string[] | null, i: number) => Ctx; body?: Ctx };
@@ -310,7 +324,7 @@ export function readFacts(root: Node): NestFact[] {
     const p = pos(at);
     if (depth > MAX_DEPTH) return { t: "other", ...p };
     const s = stringOf(at);
-    if (s !== null) return { t: "str", v: ctx.str ? routeSegmentText(s) : null, ...p };
+    if (s !== null) return { t: "str", v: ctx.str ? segmentText(s) : null, ...p };
     if (at.type === "true" || at.type === "false") return { t: "bool", v: at.type === "true", ...p };
     const path = namePath(at);
     if (path) {
@@ -325,7 +339,7 @@ export function readFacts(root: Node): NestFact[] {
           if (!prev || ctx.refs === "routes") reads.set(name, ctx.refs);
         } else {
           const text = b === "other" ? null : stringOf(b);
-          return ctx.refs === "path" && text !== null ? { t: "str", v: routeSegmentText(text), ...p } : { t: "other", ...p };
+          return ctx.refs === "path" && text !== null ? { t: "str", v: segmentText(text), ...p } : { t: "other", ...p };
         }
       }
       return { t: "ref", path, ...p };
@@ -501,13 +515,17 @@ export function readFacts(root: Node): NestFact[] {
     out.push({ kind: "class", name: nameNode?.text ?? null, ...pos(nameNode ?? c), top, decorators, members, cut, base: baseNode ? readArg(baseNode, NONE, 0, local) : null, names, namesCut, dynamic });
   };
 
-  // The line of the function around a node (0 at module level), and the start of the block it is a statement of.
+  // The line of the function around a node (0 at module level), and the
+  // start of the block it is a statement of. A node a condition or a loop
+  // holds without a block of its own (`if (x) app.setGlobalPrefix("api");`,
+  // `x && app.setGlobalPrefix("api")`) is in the block of that condition,
+  // so it never reads as a statement of the block around it.
   const scopeOf = (n: Node): number => {
     for (let at = n.parent; at; at = at.parent) if (FUNCTIONS.has(at.type)) return at.startPosition.row + 1;
     return 0;
   };
   const blockOf = (n: Node): number => {
-    for (let at = n.parent; at; at = at.parent) if (at.type === "statement_block" || at.type === "program") return at.startIndex;
+    for (let at = n.parent; at; at = at.parent) if (at.type === "statement_block" || at.type === "program" || CONDITIONAL.has(at.type) || (at.type === "binary_expression" && LOGICAL.has(at.childForFieldName("operator")?.type ?? ""))) return at.startIndex;
     return 0;
   };
 
@@ -521,7 +539,8 @@ export function readFacts(root: Node): NestFact[] {
     const recvNode = fnNode.childForFieldName("object");
     const recv = namePath(recvNode);
     const args = call.childForFieldName("arguments")?.namedChildren.filter((c) => c.type !== "comment") ?? [];
-    if (prop === "create" && recv && ((recv.length === 1 && coreNames.has(recv[0] as string)) || (recv.length === 2 && coreSpaces.has(recv[0] as string) && recv[1] === "NestFactory"))) {
+    // The import is read only where no function around the call binds its name.
+    if (prop === "create" && recv && ((recv.length === 1 && coreNames.has(recv[0] as string)) || (recv.length === 2 && coreSpaces.has(recv[0] as string) && recv[1] === "NestFactory")) && !shadowed(call, recv[0] as string)) {
       // The name the application is bound to: `const app = await NestFactory.create(M)`, `app = ...`.
       let up: Node | null = call.parent;
       while (up && (up.type === "await_expression" || WRAPPERS.has(up.type))) up = up.parent;

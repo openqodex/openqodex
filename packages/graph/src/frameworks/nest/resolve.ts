@@ -689,7 +689,11 @@ function run(index: PluginIndex<NestFact>): Analysis {
     // Nest's flattenRoutePaths, which writes each child's joined path into it.
     const flatten = (items: Node[]) => {
       for (const item of items) {
-        if ("cls" in item) continue;
+        // A top-level entry past the cap, or one not read, may give any module a path.
+        if ("cls" in item) {
+          if (item.cls === "unread") out.whole = false;
+          continue;
+        }
         if (item.module === "unread") out.whole = false;
         else if (item.module && item.path !== undefined && item.path !== "") out.paths.push({ key: item.module.key, path: item.path });
         if (item.children === "unread") out.whole = false;

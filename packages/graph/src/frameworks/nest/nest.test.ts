@@ -265,6 +265,82 @@ describe("the Nest plugin's rules, one repository each", () => {
   });
 });
 
+describe("the Nest plugin on what a review found", () => {
+  const ctl = 'import { Controller, Get } from "@nestjs/common";\n\n@Controller("cats")\nexport class CatsController {\n  @Get()\n  list(): string[] {\n    return [];\n  }\n}\n';
+  const cats = { "src/app.module.ts": MODULE(["CatsController"], { CatsController: "./cats.controller" }), "src/cats.controller.ts": ctl };
+
+  it("never applies a prefix set under a condition written without braces, or behind && (1)", async () => {
+    const bare = await build({ "src/main.ts": BOOT("AppModule", '  if (process.env.API) app.setGlobalPrefix("api");\n'), ...cats });
+    expect(lines(bare)).toEqual(["GET (/{computed}/cats) CatsController.list"]);
+    const loop = await build({ "src/main.ts": BOOT("AppModule", '  for (const p of ["api"]) app.setGlobalPrefix(p);\n'), ...cats });
+    expect(lines(loop)).toEqual(["GET (/{computed}/cats) CatsController.list"]);
+    const and = await build({ "src/main.ts": BOOT("AppModule", '  process.env.API && app.setGlobalPrefix("api");\n'), ...cats });
+    expect(lines(and)).toEqual(["GET (/{computed}/cats) CatsController.list"]);
+  }, 120_000);
+
+  it("marks the RouterModule table incomplete when its entries pass the cap at a top-level entry (1)", async () => {
+    const z = Array.from({ length: 63 }, () => "ZModule").join(", ");
+    const filler = Array.from({ length: 4 }, (_, i) => `{ path: "z${i}", module: ZModule, children: [${z}] }`).join(", ");
+    const g = await build({
+      "src/main.ts": BOOT("AppModule"),
+      "src/z.module.ts": 'import { Module } from "@nestjs/common";\n\n@Module({})\nexport class ZModule {}\n',
+      "src/users.module.ts": 'import { Controller, Get, Module } from "@nestjs/common";\n\n@Controller("users")\nexport class UsersController {\n  @Get()\n  list(): string[] {\n    return [];\n  }\n}\n\n@Module({ controllers: [UsersController] })\nexport class UsersModule {}\n',
+      "src/app.module.ts": `import { Module } from "@nestjs/common";\nimport { RouterModule } from "@nestjs/core";\nimport { UsersModule } from "./users.module";\nimport { ZModule } from "./z.module";\n\n@Module({ imports: [UsersModule, ZModule, RouterModule.register([${filler}, { path: "admin", module: UsersModule }])] })\nexport class AppModule {}\n`,
+    });
+    expect(lines(g)).toEqual(["GET (/{computed}/users) UsersController.list"]);
+  }, 60_000);
+
+  it("keeps no URL credential or query value of a route path in its facts, and lists no route at a shortened path (4)", async () => {
+    const secret = ["my", "Pass", "word"].join("");
+    const source = [
+      'import { Controller, Get } from "@nestjs/common";',
+      '@Controller("cats")',
+      "export class CatsController {",
+      `  @Get("https://alice:${secret}@example.test/items")`,
+      "  a(): void {}",
+      `  @Get("/items?token=${secret}")`,
+      "  b(): void {}",
+      '  @Get(":id?")',
+      "  c(): void {}",
+      "}",
+    ].join("\n");
+    const parser = await parserFor("typescript");
+    const tree = parser.parse(source);
+    if (!tree) throw new Error("no tree");
+    try {
+      const facts = JSON.stringify(readFacts(tree.rootNode));
+      expect(facts).not.toContain(secret);
+      // An optional parameter's "?" is the route's own, and is kept.
+      expect(facts).toContain(":id?");
+    } finally {
+      tree.delete();
+    }
+    const g = await build({ "src/main.ts": BOOT("AppModule"), "src/app.module.ts": MODULE(["CatsController"], { CatsController: "./cats.controller" }), "src/cats.controller.ts": source });
+    expect(lines(g)).toEqual(["GET /cats/:id? CatsController.c"]);
+  }, 60_000);
+
+  it("decodes a path's JavaScript escapes as the language does, and reads a path with an escape it rejects as computed (5)", async () => {
+    const g = await build({
+      "src/main.ts": BOOT("AppModule"),
+      "src/app.module.ts": MODULE(["CatsController"], { CatsController: "./cats.controller" }),
+      "src/cats.controller.ts": 'import { Controller, Get } from "@nestjs/common";\n\n@Controller("cats")\nexport class CatsController {\n  @Get("a\\u002fb")\n  a(): void {}\n\n  @Get("\\x63\\u{64}")\n  b(): void {}\n\n  @Get("e\\/f")\n  c(): void {}\n\n  @Get("g\\1")\n  d(): void {}\n}\n',
+    });
+    expect(lines(g)).toEqual(["GET /cats/a/b CatsController.a", "GET /cats/cd CatsController.b", "GET /cats/e/f CatsController.c"]);
+    expect(gaps(g).some((u) => u.site?.file === "src/cats.controller.ts" && u.site.line === 14 && u.cause === "dynamic")).toBe(true);
+  }, 60_000);
+
+  it("makes no application of a NestFactory a parameter shadows (2)", async () => {
+    const g = await build({
+      "src/main.ts": 'import { NestFactory } from "@nestjs/core";\nimport { AppModule } from "./app.module";\n\nexport async function bootstrap(NestFactory: { create(m: unknown): Promise<{ listen(p: number): Promise<void> }> }) {\n  const app = await NestFactory.create(AppModule);\n  await app.listen(3000);\n}\nexport const real = NestFactory;\n',
+      ...cats,
+    });
+    expect(regs(g).filter((r) => r.app !== null)).toEqual([]);
+    // The negative control: the same file with the import in use makes one.
+    const real = await build({ "src/main.ts": BOOT("AppModule"), ...cats });
+    expect(regs(real).filter((r) => r.app !== null).length).toBe(1);
+  }, 120_000);
+});
+
 describe("Nest's own path rules", () => {
   it("composes paths exactly as Nest's RoutePathFactory does, with each piece's slashes (1)", () => {
     const p = (o: Partial<Parameters<typeof composePaths>[0]>) => composePaths({ versioning: undefined, version: undefined, module: undefined, ctrl: "/", method: "/", prefix: undefined, exclude: [], requestMethod: "GET", ...o }).map((x) => x.pattern ?? `(${x.partial})`);
