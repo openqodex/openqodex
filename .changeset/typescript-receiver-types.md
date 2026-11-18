@@ -1,0 +1,5 @@
+---
+"openqodex": minor
+---
+
+The code graph finds more TypeScript callers. A call such as `deps.sessions.create()` now binds when `deps` is typed by an interface, a type alias or an object type written in place whose member is a class. It also binds through destructuring (`const { sessions } = deps`, `({ sessions }: Deps)`), through `x!`, `x?.`, `as` casts, `Readonly`, `Partial`, `Required`, `Pick` and `Omit`, and through `A & B` when only one side declares the member. A member typed by a type parameter takes the type argument (`Box<Sessions>`). A function with no declared result now has the result its body provably returns, including an object literal taken apart after `await`. That evidence is `receiver-inferred`: certain for a function, likely for a method. A method called on an object type itself still stays a gap. A caller list's unknown examples now list first the gaps whose receiver names the class; the floor count is unchanged. Every graph rebuilds once.

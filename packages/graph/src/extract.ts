@@ -32,7 +32,10 @@ import type { TreeVisitor } from "./walk.js";
 // plugins' facts beside the language facts (FileFacts.frameworks). 18: how
 // a Ruby class takes a mixin written as an expression. 19: Java (its
 // package, static imports, constructors, varargs and each call's argument count).
-export const EXTRACTOR_VERSION = 25;
+// 26: TypeScript member types: interface properties, object types written in
+// place and aliased, intersections, destructured names, type arguments, the
+// result a function's body returns, and each member call's receiver as written.
+export const EXTRACTOR_VERSION = 26;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -110,7 +113,17 @@ function sameType(a: TypeRef | undefined, b: TypeRef | undefined): boolean {
     && !a.promise === !b.promise && !a.awaited === !b.awaited
     && a.kind === b.kind && a.param === b.param && (a.args?.length ?? 0) === (b.args?.length ?? 0)
     && (a.args ?? []).every((arg, i) => sameType(arg, b.args?.[i]))
-    && a.bound?.import === b.bound?.import && a.bound?.imported === b.bound?.imported && sameType(a.on, b.on);
+    && a.bound?.import === b.bound?.import && a.bound?.imported === b.bound?.imported && sameType(a.on, b.on)
+    && (a.path ?? []).join(".") === (b.path ?? []).join(".") && a.fields === b.fields && a.parts === b.parts && a.localDef === b.localDef;
+}
+
+// Two types read where their head names bind the same way.
+function sameRead(a: TypeRef, b: TypeRef): boolean {
+  const ra = (a as Stamped)[READ_IN];
+  const rb = (b as Stamped)[READ_IN];
+  if (!ra || !rb) return ra === rb;
+  const head = a.qualifier ? (a.qualifier.split(".")[0] as string) : a.name;
+  return lookupIn(ra, head) === lookupIn(rb, head) && (!a.on || !b.on || sameRead(a.on, b.on));
 }
 
 // The first scope from `from` outwards that knows `name` as a nested
@@ -659,6 +672,8 @@ class Ctx {
     const bindType = (t: TypeRef | null | undefined): void => {
       if (t?.on) bindType(t.on);
       t?.args?.forEach(bindType);
+      t?.parts?.forEach(bindType);
+      if (t?.fields) Object.values(t.fields).forEach(bindType);
       const s = t as Stamped | null | undefined;
       const at = s?.[READ_IN];
       if (!s || !at) return;
@@ -675,6 +690,7 @@ class Ctx {
       d.bases.forEach(bindType);
       Object.values(d.fields).forEach(bindType);
       d.results?.forEach(bindType);
+      bindType(d.alias);
     }
     for (const c of this.calls) if (c.recv.kind === "type") bindType(c.recv.type);
     for (const v of values) if (v.recv.kind === "type") bindType(v.recv.type);
@@ -796,6 +812,14 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
     const inner = jsTypeRef(t.firstNamedChild);
     return inner ? { ...inner, elem: true } : null;
   }
+  // `A & B`: each side, or nothing when a side cannot be read (a member is
+  // then never proved to come from one side alone).
+  if (t?.type === "intersection_type") {
+    const parts = t.namedChildren.map((c) => jsTypeRef(c));
+    if (parts.length < 2 || parts.some((p) => p === null)) return null;
+    return typeRef({ name: "&", qualifier: null, ...pos(t), parts: parts as TypeRef[] });
+  }
+  let args: TypeRef[] | undefined;
   if (t?.type === "generic_type") {
     const head = t.childForFieldName("name")?.text;
     const arg = t.childForFieldName("type_arguments")?.firstNamedChild ?? null;
@@ -808,6 +832,12 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
       const inner = jsTypeRef(arg);
       return inner ? { ...inner, elem: true } : null;
     }
+    // These keep each member of T they keep, with its type.
+    if (head !== undefined && MEMBER_KEEPING.has(head)) return jsTypeRef(arg);
+    // The arguments, when each can be read: a member typed by the type's own
+    // parameter takes its argument.
+    const read = (t.childForFieldName("type_arguments")?.namedChildren ?? []).filter((c) => c.type !== "comment").map((c) => jsTypeRef(c));
+    if (read.length > 0 && read.every((a) => a !== null)) args = read as TypeRef[];
     t = t.childForFieldName("name");
   }
   if (!t) return null;
@@ -817,8 +847,16 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
     if (constraint !== undefined) return constraint ? { ...constraint } : null;
   }
   // An object type written in place (`{ save(): number }`) names no
-  // definition: "{}" marks it, so a call on it is an untyped receiver.
-  if (t.type === "object_type") return typeRef({ name: "{}", qualifier: null, line, column });
+  // definition: "{}" marks it, so a call on it is an untyped receiver. Its
+  // members' types are kept: a path through a member is typed.
+  if (t.type === "object_type") {
+    const fields = jsObjectTypeFields(t);
+    return typeRef({ name: "{}", qualifier: null, line, column, ...(fields ? { fields } : {}) });
+  }
+  if (args && (t.type === "type_identifier" || t.type === "nested_type_identifier")) {
+    const named = jsTypeRef(t);
+    return named ? { ...named, args } : null;
+  }
   // A predefined type (`string`, `number`) is kept, so a call on it is known to be the language's own.
   if (t.type === "type_identifier" || t.type === "identifier" || t.type === "predefined_type") return typeRef({ name: t.text, qualifier: null, line, column });
   if (t.type === "nested_type_identifier" || t.type === "member_expression") {
@@ -829,20 +867,66 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
   return null;
 }
 
+// Generic types whose members are T's own members with T's types.
+const MEMBER_KEEPING = new Set(["Readonly", "Partial", "Required", "Pick", "Omit", "NonNullable"]);
+
+// The members of an object type written in place, by name: a property its
+// declared type ("?" when the type cannot be read), a method or a property
+// typed by a function "{}". Null when a member cannot be named (an index
+// signature, a call signature, a computed or quoted name) or there is none:
+// which members it has is then not known.
+function jsObjectTypeFields(node: Node): Record<string, TypeRef> | null {
+  const fields: Record<string, TypeRef> = {};
+  let any = false;
+  for (const m of node.namedChildren) {
+    if (m.type === "comment") continue;
+    const name = m.childForFieldName("name");
+    if ((m.type !== "property_signature" && m.type !== "method_signature") || name?.type !== "property_identifier") return null;
+    const annotation = m.type === "property_signature" ? m.childForFieldName("type") : null;
+    const marker = (n: Node, as: string): TypeRef => typeRef({ name: as, qualifier: null, ...pos(n) });
+    if (m.type === "method_signature" || annotation?.firstNamedChild?.type === "function_type") fields[name.text] = marker(m, "{}");
+    else fields[name.text] = jsTypeRef(annotation) ?? marker(m, "?");
+    any = true;
+  }
+  return any ? fields : null;
+}
+
+// A member's declared type; one written as the declaring interface's or
+// class's own unconstrained type parameter is marked with its index, to be
+// read from the type arguments the value's type gives.
+function jsMemberType(annotation: Node | null, params: Map<string, TypeRef | null> | undefined): TypeRef | null {
+  const t = annotation?.type === "type_annotation" ? annotation.firstNamedChild : annotation;
+  if (t?.type === "type_identifier" && params?.has(t.text) && params.get(t.text) === null) {
+    return { name: t.text, qualifier: null, ...pos(t), kind: "param", param: [...params.keys()].indexOf(t.text) };
+  }
+  return jsTypeRef(annotation);
+}
+
+// An expression read for its value: `(x)`, `x!` and `x satisfies T` are x.
+function jsUnwrap(node: Node | null): Node | null {
+  let n = node;
+  while (n && (n.type === "parenthesized_expression" || n.type === "non_null_expression" || n.type === "satisfies_expression") && n.firstNamedChild) n = n.firstNamedChild;
+  return n;
+}
+
 // The receiver of `a.b.c()`: the object `a.b` flattened to a base and a path.
 function jsReceiver(ctx: Ctx, object: Node): Receiver {
   const path: string[] = [];
-  let base: Node | null = object;
+  let base: Node | null = jsUnwrap(object);
   while (base && base.type === "member_expression") {
     const prop = base.childForFieldName("property");
     if (!prop) return { kind: "other" };
     path.unshift(prop.text);
-    base = base.childForFieldName("object");
+    base = jsUnwrap(base.childForFieldName("object"));
   }
   if (!base) return { kind: "other" };
   if (base.type === "this") return { kind: "self", path };
   if (base.type === "super") return path.length === 0 ? { kind: "super" } : { kind: "other" };
-  while (base.type === "parenthesized_expression" && base.firstNamedChild) base = base.firstNamedChild;
+  // `(x as T).m()`: the cast declares the type, as an annotation would.
+  if (base.type === "as_expression") {
+    const type = declared(jsTypeRef(base.namedChildren[1] ?? null));
+    return type ? { kind: "type", type, path } : { kind: "other" };
+  }
   if (base.type === "new_expression") {
     const type = newType(base);
     return type ? { kind: "type", type, path } : { kind: "other" };
@@ -873,7 +957,11 @@ function jsCallee(ctx: Ctx, fn: Node | null): void {
   if (fn.type === "member_expression") {
     const prop = fn.childForFieldName("property");
     const object = fn.childForFieldName("object");
-    if (prop && object) ctx.addCall(prop, jsReceiver(ctx, object));
+    if (prop && object) {
+      const call = ctx.calls[ctx.addCall(prop, jsReceiver(ctx, object))] as CallFact;
+      const text = object.text.replace(/\s+/g, "");
+      if (text.length <= 80 && /^[\w$#.!?()]+$/.test(text)) call.hint = text;
+    }
   }
 }
 
@@ -918,6 +1006,9 @@ function jsSignature(ctx: Ctx, fn: Node, def: number, locals: Map<string, TypeRe
     } else {
       const bound = patternNames(pattern ?? p);
       for (const name of bound) locals?.set(name, null);
+      // `({ sessions }: Deps)`: each name has the type of its member.
+      const from = pattern?.type === "object_pattern" ? declared(jsTypeRef(typeNode)) : null;
+      if (from && pattern) for (const [name, type] of jsPatternTypes(pattern, from)) locals?.set(name, type);
       names.push(bound.length === 1 && (p.type === "assignment_pattern" || pattern?.type === "assignment_pattern") ? (bound[0] as string) : "");
     }
     for (const t of jsTypeNames(typeNode)) ctx.addTypeUse(t, user);
@@ -954,6 +1045,8 @@ function jsArgs(ctx: Ctx, args: Node | null, call: number | undefined): void {
     i++;
   }
 }
+
+const FN_DECLS = new Set(["function_declaration", "generator_function_declaration", "method_definition"]);
 
 function isFnNode(n: Node | null): boolean {
   return n !== null && ["arrow_function", "function_expression", "function", "generator_function"].includes(n.type);
@@ -1153,11 +1246,17 @@ function callType(ctx: Ctx, value: Node | null, depth = 0): TypeRef | null {
   }
   if (v?.type !== "call_expression") return null;
   const fn = v.childForFieldName("function");
-  if (fn?.type === "identifier") return typeRef({ name: fn.text, qualifier: null, ...pos(fn), result: 0 });
+  if (fn?.type === "identifier") {
+    // A function declared inside a function is its definition there; a
+    // parameter or a local of that name calls a value, not a definition.
+    const at = ctx.lookup(ctx.top, fn.text);
+    const localDef = at && at.depth > 0 ? at.fns?.get(fn.text) : undefined;
+    if (at && at.depth > 0 && localDef === undefined && !at.imports?.has(fn.text)) return null;
+    return typeRef({ name: fn.text, qualifier: null, ...pos(fn), result: 0, ...(localDef !== undefined ? { localDef } : {}) });
+  }
   if (fn?.type === "member_expression") {
     const prop = fn.childForFieldName("property");
-    let object = fn.childForFieldName("object");
-    while (object?.type === "parenthesized_expression") object = object.firstNamedChild;
+    const object = jsUnwrap(fn.childForFieldName("object"));
     if (!prop || !object) return null;
     if (object.type === "identifier") {
       const local = ctx.local(object.text);
@@ -1180,12 +1279,12 @@ function callType(ctx: Ctx, value: Node | null, depth = 0): TypeRef | null {
 }
 
 // Read fields before method bodies, including fields declared after their callers.
-function jsFields(node: Node): Record<string, TypeRef> {
+function jsFields(node: Node, params?: Map<string, TypeRef | null>): Record<string, TypeRef> {
   const fields: Record<string, TypeRef> = {};
   for (const member of node.childForFieldName("body")?.namedChildren ?? []) {
     if (member.type === "public_field_definition" || member.type === "field_definition") {
       const name = member.childForFieldName("name") ?? member.childForFieldName("property");
-      const type = jsTypeRef(member.childForFieldName("type")) ?? newType(member.childForFieldName("value"));
+      const type = jsMemberType(member.childForFieldName("type"), params) ?? newType(member.childForFieldName("value"));
       if (name && type) fields[name.text] = type;
     }
     if (member.type !== "method_definition" || member.childForFieldName("name")?.text !== "constructor") continue;
@@ -1197,6 +1296,68 @@ function jsFields(node: Node): Record<string, TypeRef> {
     }
   }
   return fields;
+}
+
+// The type of member `key` of a value of type `from`: read from an object
+// type written in place, else `from` with the member added to its path. A
+// collection or an unawaited promise has no such member of the repository.
+function jsFieldOf(from: TypeRef, key: string): TypeRef | null {
+  if (from.elem || from.promise) return null;
+  if (from.name === "{}" && from.qualifier === null && from.result === undefined && !from.path) {
+    const inner = from.fields?.[key];
+    return inner ? { ...inner, ...(from.declared ? { declared: true } : {}) } : null;
+  }
+  if ((from.path?.length ?? 0) >= MAX_TYPE_DEPTH) return null;
+  return { ...from, path: [...(from.path ?? []), key] };
+}
+
+// The names an object pattern binds with the type of their member of
+// `from`: `{ a }`, `{ a: b }`, `{ a: { c } }`. A default (`{ a = x }`) may
+// give another type and a rest holds what is left: neither is typed.
+function jsPatternTypes(pattern: Node, from: TypeRef, out: [string, TypeRef][] = []): [string, TypeRef][] {
+  for (const p of pattern.namedChildren) {
+    if (p.type === "shorthand_property_identifier_pattern") {
+      const type = jsFieldOf(from, p.text);
+      if (type) out.push([p.text, type]);
+    } else if (p.type === "pair_pattern") {
+      const key = p.childForFieldName("key");
+      const value = p.childForFieldName("value");
+      if (key?.type !== "property_identifier" || !value) continue;
+      const type = jsFieldOf(from, key.text);
+      if (!type) continue;
+      if (value.type === "identifier") out.push([value.text, type]);
+      else if (value.type === "object_pattern") jsPatternTypes(value, type, out);
+    }
+  }
+  return out;
+}
+
+// The type of a value a pattern takes apart: a typed local, a member path
+// of one, `this.field`, a constructor, a call's result or a cast.
+function jsValueType(ctx: Ctx, value: Node | null): TypeRef | null {
+  const v = jsUnwrap(value);
+  if (!v) return null;
+  if (v.type === "identifier") return ctx.local(v.text) ?? null;
+  if (v.type === "new_expression") return newType(v);
+  if (v.type === "call_expression" || v.type === "await_expression") return callType(ctx, v);
+  if (v.type === "as_expression") return declared(jsTypeRef(v.namedChildren[1] ?? null));
+  if (v.type !== "member_expression") return null;
+  const recv = jsReceiver(ctx, v);
+  delete (recv as Tagged)[IDENT];
+  let type: TypeRef | null = null;
+  let rest: string[] = [];
+  if (recv.kind === "type") {
+    type = recv.type;
+    rest = recv.path;
+  } else if (recv.kind === "self" && recv.path.length > 0) {
+    // `this.field`, as a call on it reads it: in a method of a top-level class.
+    const cls = ctx.cls();
+    if (!cls || ctx.defs[ctx.caller()]?.static || !ctx.defs[cls.def]?.topLevel) return null;
+    type = ctx.defs[cls.def]?.fields[recv.path[0] as string] ?? null;
+    rest = recv.path.slice(1);
+  }
+  for (const key of rest) type = type ? jsFieldOf(type, key) : null;
+  return type;
 }
 
 function jsResults(fn: Node): TypeRef[] | undefined {
@@ -1213,15 +1374,108 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     jsSignature(ctx, node, def, locals);
     enteringTypeParams = null;
     const leave = ctx.push({ def, cls: null, locals, ...(typeParams ? { typeParams } : {}) });
+    if (def >= 0 && !(ctx.defs[def] as DefFact).results) {
+      const generator = node.type.startsWith("generator") || node.children.some((c) => c.type === "*");
+      returned.set(def, { types: [], bad: generator, async: node.children.some((c) => c.type === "async") });
+    }
     // An arrow whose body is an expression returns it.
     const body = node.type === "arrow_function" ? node.childForFieldName("body") : null;
     if (body && body.type !== "statement_block") jsReturned(body);
     return leave;
   };
+  // What each function without a declared result returns, read return by
+  // return: the type of each, the locals it rests on, and whether one could
+  // not be read (then the result is not known).
+  type Returned = { t: TypeRef; literal: boolean; deps: { at: Scope; name: string }[] };
+  const returned = new Map<number, { types: Returned[]; bad: boolean; async: boolean }>();
+  // The local a value or a call chain starts from, when its type is not declared.
+  const restsOn = (node: Node | null, deps: Returned["deps"]): void => {
+    let n = jsUnwrap(node);
+    while (n && (n.type === "call_expression" || n.type === "await_expression" || n.type === "member_expression")) {
+      n = jsUnwrap(n.type === "call_expression" ? n.childForFieldName("function") : n.type === "await_expression" ? n.firstNamedChild : n.childForFieldName("object"));
+    }
+    if (n?.type !== "identifier") return;
+    const at = ctx.lookup(ctx.top, n.text);
+    if (at && ctx.local(n.text) !== undefined && !ctx.local(n.text)?.declared) deps.push({ at, name: n.text });
+  };
+  // The type of a returned value, or null when it cannot be proved.
+  const returnType = (node: Node, owner: DefFact, deps: Returned["deps"]): TypeRef | null => {
+    if (node.type === "new_expression") return newType(node);
+    if (node.type === "as_expression") return declared(jsTypeRef(node.namedChildren[1] ?? null));
+    if (node.type === "identifier") {
+      const t = ctx.local(node.text);
+      if (t) restsOn(node, deps);
+      return t ?? null;
+    }
+    if (node.type === "call_expression" || node.type === "await_expression") {
+      const t = callType(ctx, node);
+      // A function that returns its own call: what it returns is never read.
+      if (!t || (t.result !== undefined && !t.on && t.qualifier === null && t.name === owner.name)) return null;
+      restsOn(node, deps);
+      return t;
+    }
+    return null;
+  };
+  // An object literal returned: each member whose value's type is proved and
+  // that no spread after it may replace.
+  const literalType = (node: Node, owner: DefFact, deps: Returned["deps"]): TypeRef | null => {
+    const fields: Record<string, TypeRef> = {};
+    for (const c of node.namedChildren) {
+      // A spread may bring any member, over the ones written before it.
+      if (c.type === "spread_element") {
+        for (const k of Object.keys(fields)) delete fields[k];
+        continue;
+      }
+      const key = c.type === "shorthand_property_identifier" ? c : c.type === "pair" ? c.childForFieldName("key") : null;
+      const value = c.type === "pair" ? jsUnwrap(c.childForFieldName("value")) : c.type === "shorthand_property_identifier" ? c : null;
+      if (!key || !value || (key.type !== "property_identifier" && key.type !== "shorthand_property_identifier")) continue;
+      const t = value.type === "shorthand_property_identifier" ? (ctx.local(value.text) ?? null) : returnType(value, owner, deps);
+      if (value.type === "shorthand_property_identifier" && t) {
+        const at = ctx.lookup(ctx.top, value.text);
+        if (at && !t.declared) deps.push({ at, name: value.text });
+      }
+      if (t) fields[key.text] = t;
+    }
+    return Object.keys(fields).length > 0 ? typeRef({ name: "{}", qualifier: null, ...pos(node), fields }) : null;
+  };
+  const inferReturn = (value: Node | null, owner: number) => {
+    const info = returned.get(owner);
+    if (!info || info.bad) return;
+    const def = ctx.defs[owner] as DefFact;
+    // A return in a finally block replaces whatever the try returned.
+    for (let n = value?.parent ?? null; n && !isFnNode(n) && !FN_DECLS.has(n.type); n = n.parent) {
+      if (n.type === "finally_clause") info.bad = true;
+    }
+    const v = jsUnwrap(value);
+    const sides = v?.type === "ternary_expression" ? [v.childForFieldName("consequence"), v.childForFieldName("alternative")].map(jsUnwrap) : [v];
+    for (const side of sides) {
+      // `return;`, `return null`: no value, as when the body runs out.
+      if (!side || side.type === "null" || side.type === "undefined" || (side.type === "identifier" && side.text === "undefined")) continue;
+      const deps: Returned["deps"] = [];
+      const literal = side.type === "object";
+      const t = literal ? literalType(side, def, deps) : returnType(side, def, deps);
+      if (!t) info.bad = true;
+      else info.types.push({ t, literal, deps });
+    }
+  };
+  // Each function's result, once every scope is read: the one type every
+  // return agrees on, none of the locals it rests on given another value.
+  const settleReturns = () => {
+    for (const [owner, info] of returned) {
+      const def = ctx.defs[owner] as DefFact;
+      const first = info.types[0];
+      if (info.bad || !first || def.results) continue;
+      if (info.types.some((r) => r.deps.some((d) => d.at.reassigned?.has(d.name)))) continue;
+      if (info.types.length > 1 && (info.types.some((r) => r.literal) || !info.types.every((r) => sameType(r.t, first.t) && sameRead(r.t, first.t)))) continue;
+      const t = info.async && !first.t.promise ? { ...first.t, promise: true } : first.t;
+      def.results = [{ ...t, inferred: true }];
+    }
+  };
   // What a return hands back: a name or a member path, either side of a
   // ternary. Each is a value reference; on a named function, a returned one.
   const jsReturned = (value: Node | null) => {
     const owner = ctx.top.fnDecl.def;
+    if (owner >= 0) inferReturn(value, owner);
     const sides = value?.type === "ternary_expression" ? [value.childForFieldName("consequence"), value.childForFieldName("alternative")] : [value];
     for (const side of sides) {
       const v = jsValueNode(ctx, side);
@@ -1288,7 +1542,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         bases.push(...implemented);
         const def = ctx.addDef(node, name, "class", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node) && !isDefaultExport(node), bases, ...(dynamicBases.length > 0 ? { dynamicBases } : {}) });
         const leave = ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
-        (ctx.defs[def] as DefFact).fields = jsFields(node);
+        (ctx.defs[def] as DefFact).fields = jsFields(node, typeParams ?? undefined);
         return leave;
       }
       case "method_definition": {
@@ -1322,7 +1576,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (!name || !cls) return;
         const value = node.childForFieldName("value");
         const annotation = node.childForFieldName("type");
-        const type = jsTypeRef(annotation) ?? newType(value);
+        const type = jsMemberType(annotation, cls.typeParams) ?? newType(value);
         if (type) (ctx.defs[cls.def] as DefFact).fields[name.text] = type;
         for (const t of jsTypeNames(annotation)) ctx.addTypeUse(t, cls.def);
         const v = jsValueNode(ctx, value);
@@ -1346,6 +1600,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           // `const { a } = x`, `const [b] = y`: each name is a local of its
           // scope and hides a definition of the same name outside it.
           for (const n of patternNames(name)) ctx.setLocal(n, null, block);
+          // `const { session } = params`: each name has the type of its member.
+          const from = name.type === "object_pattern" ? (declared(jsTypeRef(node.childForFieldName("type"))) ?? jsValueType(ctx, value)) : null;
+          if (from) for (const [n, type] of jsPatternTypes(name, from)) ctx.setLocal(n, type, block);
           return;
         }
         const isFn = value && ["arrow_function", "function_expression", "function", "generator_function"].includes(value.type);
@@ -1425,6 +1682,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const name = node.childForFieldName("name");
         if (!name || name.type !== "property_identifier") return false;
         const fnType = node.type === "property_signature" ? node.childForFieldName("type")?.firstNamedChild : node;
+        // An interface property whose type is not a function is a field, as a class's is.
+        if (node.type === "property_signature" && where === "interface_body" && fnType?.type !== "function_type") {
+          const type = jsMemberType(node.childForFieldName("type"), cls.typeParams);
+          if (type) (ctx.defs[cls.def] as DefFact).fields[name.text] = type;
+          return false;
+        }
         if (!fnType || (node.type === "property_signature" && fnType.type !== "function_type")) return false;
         const ret = fnType.childForFieldName("return_type");
         const result = node.type === "property_signature" ? jsTypeRef(ret) : jsTypeRef(ret);
@@ -1436,8 +1699,13 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "enum_declaration": {
         const name = node.childForFieldName("name");
         // A type alias keeps what it stands for, so `type Loose = any` is known as any.
+        // An alias of an object type also holds its members as fields, as an
+        // interface does; a call on the alias itself stays untyped.
+        const typeParams = node.type === "type_alias_declaration" ? jsTypeParams(node) : null;
+        enteringTypeParams = typeParams;
         const alias = node.type === "type_alias_declaration" ? jsTypeRef(node.childForFieldName("value")) : null;
-        if (name) ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}) });
+        enteringTypeParams = null;
+        if (name) ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}) });
         return false;
       }
       case "arrow_function":
@@ -1579,6 +1847,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
   // under another name, which the resolver reads from the export table.
   const exported = new Set(ctx.exportsLocal.filter((e) => e.local === e.exported).map((e) => e.local));
   for (const d of ctx.defs) if (d.topLevel && exported.has(d.name)) d.exported = true;
+  settleReturns();
   return ctx.facts();
 }
 

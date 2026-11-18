@@ -1,0 +1,1 @@
+const { sessions } = deps and ({ sessions }: Deps): the graph gave every destructured name no type, so its calls were gaps. A shorthand, a renamed and a nested pattern, from a typed parameter and from a typed local, must bind certain, and a chain on through an awaited declared result too. A name with a default value may hold the default's type, so it stays a gap.

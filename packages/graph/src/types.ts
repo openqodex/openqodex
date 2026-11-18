@@ -46,9 +46,22 @@ export type TypeRef = {
   declared?: boolean;
   bound?: BoundImport;
   rel?: "implements" | "include" | "prepend" | "extend";
-  args?: TypeRef[]; // Java arguments, in declaration order.
-  kind?: "param"; // A Java result naming a class type parameter.
+  args?: TypeRef[]; // Java and TypeScript type arguments, in declaration order.
+  kind?: "param"; // A Java result, or a TypeScript member, naming a class or interface type parameter.
   param?: number; // The class type parameter's index.
+  // TypeScript only. `fields`: an object type written in place (name "{}")
+  // or an object literal a function returns, its members' types; a method
+  // or a function-typed member is a "{}" with no fields. `path`: the type of
+  // these members, read in turn, of the type this names (a name bound by
+  // destructuring). `parts`: an intersection (name "&"), each side.
+  fields?: Record<string, TypeRef>;
+  path?: string[];
+  parts?: TypeRef[];
+  // On a function's result: read from what its body returns, not declared.
+  inferred?: boolean;
+  // With `result`: the call names this file's definition at that index, a
+  // function declared inside a function that no file-level name reaches.
+  localDef?: number;
 };
 
 export type DefFact = {
@@ -182,6 +195,9 @@ export type CallFact = {
   result?: number;
   // A computed call on a name bound to a literal table (index into FileFacts.tables).
   table?: number;
+  // TypeScript and JavaScript: the receiver as written (`deps.sessions`),
+  // when it is a name or a member path; what ranks a gap the call leaves.
+  hint?: string;
 };
 
 export type ImportFact = {
@@ -288,6 +304,9 @@ export type UnknownSite = {
   scope: "file" | "project";
   note?: string;
   candidates?: string[];
+  // The receiver as written and the type it was read as, when known
+  // (`sessions any`): which same-name gaps may be a class's callers.
+  receiver?: string;
 };
 
 // An eligible file the graph did not read, and why.

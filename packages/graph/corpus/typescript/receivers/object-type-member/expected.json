@@ -1,0 +1,98 @@
+{
+  "guards": "binds a path through a member of an aliased or in-place object type and of one side of an intersection, and leaves a method called on the object type itself, or declared by both sides, unknown",
+  "callers": [
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:14",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:22",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:26",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:34",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:10"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:18"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:30"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:6"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:10"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:14"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:18"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:22"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:26"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:30"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:34"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 10,
+      "cause": "untyped-receiver"
+    },
+    {
+      "file": "src/use.ts",
+      "line": 18,
+      "cause": "untyped-receiver"
+    },
+    {
+      "file": "src/use.ts",
+      "line": 30,
+      "cause": "no-receiver-type"
+    }
+  ]
+}
