@@ -137,6 +137,8 @@ function namesRead(facts: readonly ExpressFact[], scopes: ReadonlyMap<number, { 
       heads(f.recv);
       for (const a of f.args) heads(a);
     } else if (f.kind === "server") for (const a of f.args) heads(a);
+    // The name a file exports is read by the module that requires it.
+    else if (f.kind === "cjs-export") heads(f.value);
     else if (f.kind === "value") {
       values.push(f);
       if (f.value.t === "ref" && (f.decl === "assign" ? module(f.name, f.scope) : f.scope === 0)) read.add(f.name);
@@ -341,7 +343,16 @@ const unread = (e: Expr): Expr => ({ t: "other", line: e.line, column: e.column 
 function exportsValue(right: Node): Expr {
   const v = readExpr(right);
   if (v.t !== "object" || right.type !== "object") return v;
-  const hidden = right.namedChildren.filter((c) => c.type === "spread_element" || c.type === "method_definition" || (c.type === "pair" && c.childForFieldName("key")?.type === "computed_property_name")).length;
+  // A method with a static name writes only that member: it competes only with a member of the same name.
+  const named = new Set(v.props.map((p) => p.key));
+  const hidden = right.namedChildren.filter((c) => {
+    if (c.type === "spread_element") return true;
+    if (c.type === "pair") return c.childForFieldName("key")?.type === "computed_property_name";
+    if (c.type !== "method_definition") return false;
+    const name = c.childForFieldName("name");
+    const key = name?.type === "property_identifier" ? name.text : name?.type === "string" ? stringValue(name) : null;
+    return key === null || named.has(key);
+  }).length;
   return hidden > 0 ? { ...v, more: (v.more ?? 0) + hidden } : v;
 }
 // The calls whose first argument is a path or a prefix.

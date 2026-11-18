@@ -65,6 +65,25 @@ const files: Record<string, string> = {
   "spread/app.js": mount(),
   "whole2/users.js": [...TWO, "module.exports = a;", "module.exports = b;"].join("\n"),
   "whole2/app.js": app(["const users = require('./users');"], ["app.use('/users', users);"]),
+  // an arrow function middleware exported from a file that names no express
+  "arrow/auth.js": "const auth = (req, res, next) => next();\nmodule.exports = auth;",
+  "arrow/app.js": app(["const auth = require('./auth');"], ["app.use('/x', auth);"]),
+  // negative control: a call result exported from a file that names no express is still unknown
+  "arrowcall/auth.js": "const auth = makeAuth();\nmodule.exports = auth;",
+  "arrowcall/app.js": app(["const auth = require('./auth');"], ["app.use('/x', auth);"]),
+  // a member of a require, bound to a name
+  "reqmember/users.js": router("module.exports = { users: r };"),
+  "reqmember/app.js": app(["const users = require('./users').users;"], ["app.use('/users', users);"]),
+  // negative control: the same shape with a computed module name stays unknown
+  "reqmemberdyn/app.js": app(["const name = process.env.ROUTES;", "const users = require(name).users;"], ["app.use('/users', users);"]),
+  // a method with a static name beside the router member
+  "method/users.js": [...TWO, "module.exports = { users: a, init() {} };"].join("\n"),
+  "method/app.js": mount(),
+  // negative controls: a method that names the same member, or a computed method name, may rewrite it
+  "methodsame/users.js": [...TWO, "module.exports = { users: a, users() {} };"].join("\n"),
+  "methodsame/app.js": mount(),
+  "methodcomp/users.js": [...TWO, "module.exports = { users: a, [process.env.K]() {} };"].join("\n"),
+  "methodcomp/app.js": mount(),
 };
 
 let root: string;
@@ -142,6 +161,38 @@ describe("the Express plugin on a router required with CommonJS", () => {
     ["module.exports assigned twice", "whole2"],
   ])("never mounts the first of competing writes, and says the mount is not followed: %s", (_name, dir) => {
     expect(regs(`${dir}/users.js`).filter((r) => r.mounted).map((r) => r.pattern)).toEqual([]);
+    expect(gaps(`${dir}/app.js`).filter((u) => u.affects.includes("mounts")).map((u) => u.site?.line)).toEqual([4]);
+  });
+
+  it("reads an arrow function middleware exported from a file with no express as no router, with no gap", () => {
+    expect(gaps("arrow/app.js").filter((u) => u.affects.includes("mounts"))).toEqual([]);
+  });
+
+  it("still says a call result exported from a file with no express is not followed", () => {
+    expect(gaps("arrowcall/app.js").filter((u) => u.affects.includes("mounts")).map((u) => u.site?.line)).toEqual([4]);
+  });
+
+  it("follows a member of a require bound to a name", () => {
+    const [route] = regs("reqmember/users.js");
+    expect(route?.pattern).toBe("/users/:id");
+    expect(route?.mounted).toBe(true);
+    expect(gaps("reqmember/app.js").filter((u) => u.affects.includes("mounts"))).toEqual([]);
+  });
+
+  it("still says a member of a require with a computed module name is not followed", () => {
+    expect(gaps("reqmemberdyn/app.js").filter((u) => u.affects.includes("mounts")).map((u) => u.site?.line)).toEqual([5]);
+  });
+
+  it("keeps the mount of an exported member beside a method with another static name", () => {
+    expect(regs("method/users.js").filter((r) => r.mounted).map((r) => r.pattern)).toEqual(["/users/a"]);
+    expect(gaps("method/app.js").filter((u) => u.affects.includes("mounts"))).toEqual([]);
+  });
+
+  it.each([
+    ["a method named like the member", "methodsame"],
+    ["a method with a computed name", "methodcomp"],
+  ])("still says the mount is not followed beside %s", (_name, dir) => {
+    expect(regs(`${dir}/users.js`).filter((r) => r.mounted)).toEqual([]);
     expect(gaps(`${dir}/app.js`).filter((u) => u.affects.includes("mounts")).map((u) => u.site?.line)).toEqual([4]);
   });
 

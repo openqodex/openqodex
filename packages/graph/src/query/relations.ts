@@ -521,7 +521,7 @@ export function impact(s: Session, req: Request, extra: Extra): Job | Answer {
 export function outline(s: Session, req: Request): Job | Answer {
   const g = s.graph;
   // "", ".", "./" and "/" are the repository root; "./src" is "src".
-  const at = (req.target?.file ?? "").replace(/^(\.\/)+/, "").replace(/(\/\.)+$/, "").replace(/^\.$/, "").replace(/\/+$/, "");
+  const at = (req.target?.file ?? "").replace(/^(\.\/)+/, "").replace(/(\/+\.)*\/*$/, "").replace(/^\.$/, "");
   const root = at === "";
   const keys = g.defsByFile.keys();
   const files: string[] = [];
