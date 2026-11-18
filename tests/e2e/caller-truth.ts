@@ -236,6 +236,16 @@ export function compilerTruth(o: TruthOptions): Truth {
             if (impl && symbol?.declarations?.includes(holder)) decls = [impl];
             else decls = symbol?.declarations?.includes(holder) ? [holder] : (symbol?.declarations ?? [holder]);
           } else decls = symbol?.declarations ?? [];
+          // A union receiver (`Cat | Dog`) names one declaration per member
+          // type and the call may run any of them: every one is a target, each
+          // member keeping its overload rule (the implementation, not the signatures).
+          if (ts.isPropertyAccessExpression(callee)) {
+            const receiver = checker.getNonNullableType(checker.getTypeAtLocation(callee.expression));
+            if (receiver.isUnion()) {
+              const members = receiver.types.map((t) => t.getProperty(callee.name.text)?.declarations ?? []).filter((ds) => ds.length > 0);
+              if (members.length > 1) decls = members.map((ds) => ds.find((d) => (ts.isFunctionDeclaration(d) || ts.isMethodDeclaration(d)) && d.body) ?? ds[0]);
+            }
+          }
           const targets: Target[] = [];
           const seen = new Set<string>();
           let external = false;

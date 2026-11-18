@@ -17,11 +17,12 @@
 //    tiers: a static call from the same package (certain) and a call through
 //    an interface field (possible, to the implementation the change edits).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, openStore } from "../../packages/graph/src/index.js";
 import { git, readJson, reportDir, run } from "./support.js";
+import { pinnedClone } from "./pinned-clone.js";
 import type { ImpactSummary } from "@openqodex/core";
 import { cacheFolder, removeTempDirs, tempDir } from "../temp-dirs.mjs";
 
@@ -398,13 +399,7 @@ const CLONES = cacheFolder("openqodex-graph-acceptance");
 
 // A shallow clone of exactly `sha`, reused when it is already there.
 function clone(repo: Repo): string {
-  const dir = join(CLONES, repo.name);
-  if (existsSync(join(dir, ".git")) && git(dir, "rev-parse", "HEAD").trim() === repo.sha) return dir;
-  mkdirSync(dir, { recursive: true });
-  git(dir, "init", "-q");
-  git(dir, "fetch", "-q", "--depth", "1", repo.url, repo.sha);
-  git(dir, "checkout", "-q", "--force", repo.sha);
-  return dir;
+  return pinnedClone(join(CLONES, repo.name), repo.url, repo.sha);
 }
 
 function grepSites(dir: string, words: string[]): Set<string> {

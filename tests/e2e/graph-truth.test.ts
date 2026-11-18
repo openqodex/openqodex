@@ -20,8 +20,7 @@
 //     ceiling. A call newly bound through an interface adds possible edges
 //     to the classes that declare it, by design: a change that binds more
 //     such calls raises the ceiling on purpose, never silently.
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildGraph, openStore, query } from "../../packages/graph/src/index.js";
@@ -29,6 +28,7 @@ import type { Graph, Item, Session } from "../../packages/graph/src/index.js";
 import { checkCertain, compilerTruth, OUTCOMES, SHAPES, score } from "./caller-truth.js";
 import type { CertainCheck, Scored, Truth } from "./caller-truth.js";
 import { cacheFolder, removeTempDirs, tempDir } from "../temp-dirs.mjs";
+import { pinnedClone } from "./pinned-clone.js";
 
 afterAll(removeTempDirs);
 
@@ -73,14 +73,7 @@ const CLONES = cacheFolder("openqodex-graph-acceptance");
 
 // A shallow clone of exactly `sha`, reused when it is already there.
 function clone(): string {
-  const dir = join(CLONES, REPO.name);
-  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
-  if (existsSync(join(dir, ".git")) && git("rev-parse", "HEAD").trim() === REPO.sha) return dir;
-  mkdirSync(dir, { recursive: true });
-  git("init", "-q");
-  git("fetch", "-q", "--depth", "1", REPO.url, REPO.sha);
-  git("checkout", "-q", "--force", REPO.sha);
-  return dir;
+  return pinnedClone(join(CLONES, REPO.name), REPO.url, REPO.sha);
 }
 
 const pct = (a: number, b: number) => (b === 0 ? "-" : `${((100 * a) / b).toFixed(1)}%`);

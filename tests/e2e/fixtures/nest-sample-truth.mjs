@@ -139,6 +139,12 @@ export function truth(root) {
       if (!meta) continue;
       if (!ts.isObjectLiteralExpression(meta)) throw new Error(`the metadata of ${m.node.name.text} is not an object literal`);
       for (const p of meta.properties) {
+        // Only the two lists that decide which controllers an application serves
+        // must be readable; every other property (providers, exports) is not modelled.
+        const listed = p.name && ts.isIdentifier(p.name) && (p.name.text === "controllers" || p.name.text === "imports");
+        if (listed && (!ts.isPropertyAssignment(p) || !ts.isArrayLiteralExpression(p.initializer))) {
+          throw new Error(`${p.name.text} of ${m.node.name.text} in ${rel(m.file)} is not an array literal; the truth script does not model it`);
+        }
         if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) continue;
         if (!ts.isArrayLiteralExpression(p.initializer)) continue;
         if (p.name.text === "controllers") {

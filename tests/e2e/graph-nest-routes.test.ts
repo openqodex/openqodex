@@ -10,10 +10,11 @@
 // tests/e2e/fixtures/nest-sample-truth.mjs with the TypeScript compiler's own
 // parser, and kept in tests/e2e/fixtures/nest-sample-routes.json; the test
 // rebuilds it from the clone, so the kept list cannot drift from the code.
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { git, root, run } from "./support.js";
+import { pinnedClone } from "./pinned-clone.js";
 import { cacheFolder, removeTempDirs, tempDir } from "../temp-dirs.mjs";
 // @ts-expect-error: a plain JavaScript script with no type declarations.
 import { truth } from "./fixtures/nest-sample-truth.mjs";
@@ -25,13 +26,7 @@ type Route = { app: string; method: string; path: string; handler: string };
 
 // A shallow clone of exactly the pinned commit, shared with graph.test.ts.
 function clone(): string {
-  const dir = join(cacheFolder("openqodex-graph-acceptance"), "nest");
-  if (existsSync(join(dir, ".git")) && git(dir, "rev-parse", "HEAD").trim() === NEST.sha) return dir;
-  mkdirSync(dir, { recursive: true });
-  git(dir, "init", "-q");
-  git(dir, "fetch", "-q", "--depth", "1", NEST.url, NEST.sha);
-  git(dir, "checkout", "-q", "--force", NEST.sha);
-  return dir;
+  return pinnedClone(join(cacheFolder("openqodex-graph-acceptance"), "nest"), NEST.url, NEST.sha);
 }
 
 // The truth script stops on a route shape it does not model, so its list is never quietly short.
@@ -50,6 +45,20 @@ describe("the Nest truth script", () => {
     // The negative control: the same controller with a modelled decorator reads both routes.
     expect((truth(sample('@Get("feed")')) as Route[]).map((r) => `${r.method} ${r.path} ${r.handler}`)).toEqual(["GET /cats src/cats.controller.ts#CatsController.list", "GET /cats/feed src/cats.controller.ts#CatsController.feed"]);
   });
+
+  // Module metadata the script cannot read as a list of names would leave
+  // controllers or imported modules out of the truth list without a word.
+  for (const [what, meta] of [
+    ["shorthand controllers", "{ controllers }"],
+    ["controllers that are not an array literal", "{ controllers: CONTROLLERS }"],
+    ["imports that are not an array literal", "{ controllers: [CatsController], imports: MODULES }"],
+  ] as const) {
+    it(`stops with an error on ${what} instead of skipping them`, () => {
+      const dir = sample('@Get("feed")');
+      writeFileSync(join(dir, "src/app.module.ts"), `import { Module } from "@nestjs/common";\nimport { CatsController } from "./cats.controller";\n\nconst controllers = [CatsController];\nconst CONTROLLERS = [CatsController];\nconst MODULES = [];\n\n@Module(${meta})\nexport class AppModule {}\n`);
+      expect(() => truth(dir)).toThrow(/controllers|imports/);
+    });
+  }
 });
 
 describe.skipIf(process.env.OPENQODEX_E2E_OFFLINE === "1")("graph routes on the Nest sample applications", () => {

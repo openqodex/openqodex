@@ -9,11 +9,10 @@
 // bind nothing and name an unknown at the site instead. Every route call the
 // truth lists must belong to the application, never to an orphan router, so
 // a missing mount cannot hide behind a relative path.
-import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../../packages/graph/src/index.js";
-import { git } from "./support.js";
+import { pinnedClone } from "./pinned-clone.js";
 import { cacheFolder, removeTempDirs } from "../temp-dirs.mjs";
 // @ts-expect-error: a plain script with no type declarations
 import { honoTruth } from "./hono-truth.mjs";
@@ -26,13 +25,7 @@ const CLONES = cacheFolder("openqodex-graph-acceptance");
 // A shallow clone of exactly the pinned commit, reused when it is already
 // there (the same helper as graph.test.ts, same cache folder).
 function clone(): string {
-  const dir = join(CLONES, REPO.name);
-  if (existsSync(join(dir, ".git")) && git(dir, "rev-parse", "HEAD").trim() === REPO.sha) return dir;
-  mkdirSync(dir, { recursive: true });
-  git(dir, "init", "-q");
-  git(dir, "fetch", "-q", "--depth", "1", REPO.url, REPO.sha);
-  git(dir, "checkout", "-q", "--force", REPO.sha);
-  return dir;
+  return pinnedClone(join(CLONES, REPO.name), REPO.url, REPO.sha);
 }
 
 type TruthRoute = { site: string; method: string; path: string; written: string; handler: string; app: string };
