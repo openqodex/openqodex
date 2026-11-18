@@ -32,7 +32,10 @@ import type { TreeVisitor } from "./walk.js";
 // plugins' facts beside the language facts (FileFacts.frameworks). 18: how
 // a Ruby class takes a mixin written as an expression. 19: Java (its
 // package, static imports, constructors, varargs and each call's argument count).
-export const EXTRACTOR_VERSION = 25;
+// 26: calls in an instance field initializer run on the instance, a const
+// function inside an anonymous callback or a module block is a definition,
+// and callback parameters and loop variables take a declared element type.
+export const EXTRACTOR_VERSION = 26;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -106,7 +109,7 @@ function typeRef(t: TypeRef): TypeRef {
 // Assignment preserves a result only when its receiver type also stays the same.
 function sameType(a: TypeRef | undefined, b: TypeRef | undefined): boolean {
   if (!a || !b) return a === b;
-  return a.name === b.name && a.qualifier === b.qualifier && !a.elem === !b.elem && a.result === b.result
+  return a.name === b.name && a.qualifier === b.qualifier && !a.elem === !b.elem && !a.item === !b.item && a.result === b.result
     && !a.promise === !b.promise && !a.awaited === !b.awaited
     && a.kind === b.kind && a.param === b.param && (a.args?.length ?? 0) === (b.args?.length ?? 0)
     && (a.args ?? []).every((arg, i) => sameType(arg, b.args?.[i]))
@@ -257,6 +260,9 @@ class Ctx {
   // Object literals waiting for their table: the declaration that binds
   // the literal is read before the literal's entries.
   pendingTables = new Map<number, { name: string; line: number; scope: Scope; open?: boolean }>();
+  // The class whose instance field initializer the walk is in, -1 for none:
+  // a call there runs on the instance, though its caller is the class.
+  instanceInit = -1;
 
   constructor(readonly lang: Lang) {
     const root = { def: -1, cls: null, locals: new Map(), parent: null, depth: 0, caller: -1, clsScope: null, inFunction: false } as unknown as Scope;
@@ -429,7 +435,7 @@ class Ctx {
     if (implicit) call.implicit = true;
     const callerDef = call.caller >= 0 ? this.defs[call.caller] : undefined;
     // A Java constructor runs on the new instance: its calls are never static.
-    if ((callerDef?.static && !callerDef.ctor) || callerDef?.kind === "class" || callerDef?.kind === "module") call.static = true;
+    if ((callerDef?.static && !callerDef.ctor) || (callerDef?.kind === "class" && this.instanceInit !== call.caller) || callerDef?.kind === "module") call.static = true;
     this.calls.push(call);
     const ident = (recv as Tagged)[IDENT];
     if (ident) delete (recv as Tagged)[IDENT];
@@ -658,6 +664,7 @@ class Ctx {
     // assigned the name something else after.
     const bindType = (t: TypeRef | null | undefined): void => {
       if (t?.on) bindType(t.on);
+      if (t?.values) bindType(t.values);
       t?.args?.forEach(bindType);
       const s = t as Stamped | null | undefined;
       const at = s?.[READ_IN];
@@ -808,6 +815,13 @@ function jsTypeRef(annotation: Node | null): TypeRef | null {
       const inner = jsTypeRef(arg);
       return inner ? { ...inner, elem: true } : null;
     }
+    // A Map keeps its value type for `values()`, unless that is a collection itself.
+    const name = t.childForFieldName("name");
+    if ((head === "Map" || head === "ReadonlyMap") && name) {
+      const map = jsTypeRef(name);
+      const values = jsTypeRef(t.childForFieldName("type_arguments")?.namedChildren.filter((c) => c.type !== "comment")[1] ?? null);
+      return map && values && !values.elem ? { ...map, values } : map;
+    }
     t = t.childForFieldName("name");
   }
   if (!t) return null;
@@ -924,6 +938,17 @@ function jsSignature(ctx: Ctx, fn: Node, def: number, locals: Map<string, TypeRe
   }
   for (const t of jsTypeNames(fn.childForFieldName("return_type"))) ctx.addTypeUse(t, user);
   if (def >= 0 && names.some((n) => n !== "")) (ctx.defs[def] as DefFact).params = names;
+}
+
+// The name of a function's first parameter when it is a plain name with no
+// type written on it, else null.
+function jsUntypedFirstParam(fn: Node): string | null {
+  const single = fn.childForFieldName("parameter"); // x => ...
+  if (single) return single.type === "identifier" ? single.text : null;
+  const p = fn.childForFieldName("parameters")?.namedChildren.find((c) => c.type !== "comment");
+  if (p?.type === "identifier") return p.text;
+  const pattern = p?.type === "required_parameter" ? p.childForFieldName("pattern") : null;
+  return pattern?.type === "identifier" && !p?.childForFieldName("type") && !p?.childForFieldName("value") ? pattern.text : null;
 }
 
 // A name or a member path that may stand for a function of the
@@ -1179,6 +1204,50 @@ function callType(ctx: Ctx, value: Node | null, depth = 0): TypeRef | null {
   return null;
 }
 
+// One element of a value of type `t`: of a declared array or set, or of
+// what a call returns (the resolver checks that result is declared as one).
+function elementType(t: TypeRef | null | undefined): TypeRef | null {
+  if (t?.elem) return { ...t, elem: false };
+  return t && t.result !== undefined && !t.item ? { ...t, item: true } : null;
+}
+
+// The array's or set's own methods whose callback takes an element first.
+const ELEMENT_CALLBACKS = new Set(["forEach", "map", "flatMap", "filter", "find", "findLast", "findIndex", "findLastIndex", "some", "every"]);
+
+// A callback handed first to one of those methods (`items.map((s) => ...)`):
+// the type of its first parameter, an element of the receiver.
+function callbackElement(ctx: Ctx, fn: Node): TypeRef | null {
+  const args = fn.parent;
+  const call = args?.parent;
+  if (args?.type !== "arguments" || call?.type !== "call_expression" || args.firstNamedChild?.startIndex !== fn.startIndex) return null;
+  const callee = call.childForFieldName("function");
+  const prop = callee?.type === "member_expression" ? callee.childForFieldName("property") : null;
+  if (!prop || !ELEMENT_CALLBACKS.has(prop.text)) return null;
+  const elem = elementType(collectionType(ctx, callee?.childForFieldName("object") ?? null));
+  return elem ? { ...elem, declared: false } : null;
+}
+
+// The declared type of a collection a loop or a callback reads: a local, a
+// field of `this`, the values of a Map (`m.values()`), or what a call returns.
+function collectionType(ctx: Ctx, node: Node | null): TypeRef | null {
+  let n = node;
+  while (n?.type === "parenthesized_expression") n = n.firstNamedChild;
+  if (!n) return null;
+  if (n.type === "identifier") return ctx.local(n.text) ?? null;
+  if (n.type === "member_expression" && n.childForFieldName("object")?.type === "this") {
+    const cls = ctx.cls();
+    const field = n.childForFieldName("property");
+    if (!cls?.cls || !field || ctx.defs[ctx.caller()]?.static) return null;
+    return ctx.defs[cls.def]?.fields[field.text] ?? null;
+  }
+  const fn = n.type === "call_expression" ? n.childForFieldName("function") : null;
+  if (fn?.type === "member_expression" && fn.childForFieldName("property")?.text === "values" && n.childForFieldName("arguments")?.namedChildCount === 0) {
+    const map = collectionType(ctx, fn.childForFieldName("object"))?.values;
+    if (map) return { ...map, elem: true };
+  }
+  return callType(ctx, n);
+}
+
 // Read fields before method bodies, including fields declared after their callers.
 function jsFields(node: Node): Record<string, TypeRef> {
   const fields: Record<string, TypeRef> = {};
@@ -1212,11 +1281,23 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     enteringTypeParams = typeParams;
     jsSignature(ctx, node, def, locals);
     enteringTypeParams = null;
+    const first = jsUntypedFirstParam(node);
+    if (first !== null && locals.get(first) === null) {
+      const elem = callbackElement(ctx, node);
+      if (elem) locals.set(first, elem);
+    }
     const leave = ctx.push({ def, cls: null, locals, ...(typeParams ? { typeParams } : {}) });
     // An arrow whose body is an expression returns it.
     const body = node.type === "arrow_function" ? node.childForFieldName("body") : null;
     if (body && body.type !== "statement_block") jsReturned(body);
-    return leave;
+    // In a field initializer only an arrow keeps the instance as `this`.
+    const outer = ctx.instanceInit;
+    if (outer < 0 || node.type === "arrow_function") return leave;
+    ctx.instanceInit = -1;
+    return () => {
+      ctx.instanceInit = outer;
+      leave();
+    };
   };
   // What a return hands back: a name or a member path, either side of a
   // ternary. Each is a value reference; on a named function, a returned one.
@@ -1331,7 +1412,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           const def = ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, static: isStatic(node) });
           return ctx.push({ def, cls: null, locals: null });
         }
-        return;
+        // Any other initializer runs on the instance, unless the field is static.
+        const outer = ctx.instanceInit;
+        ctx.instanceInit = isStatic(node) ? -1 : cls.def;
+        return () => {
+          ctx.instanceInit = outer;
+        };
       }
       case "variable_declarator": {
         const name = node.childForFieldName("name");
@@ -1381,8 +1467,10 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           const def = ctx.addDef(node, name, "function", { topLevel: true, exported: isExportedDecl(node), results: jsResults(value as Node) });
           return ctx.push({ def, cls: null, locals: null, fnAt: (value as Node).startIndex });
         }
-        if (isFn && ctx.caller() >= 0) {
-          // const inner = () => ... inside a function: a definition of that scope.
+        if (isFn && (ctx.caller() >= 0 || isConst)) {
+          // const inner = () => ... inside a function: a definition of that
+          // scope; a const one also inside an anonymous callback (a test
+          // body) or a block at the top of the module.
           const def = ctx.addDef(node, name, "function", { owner: ctx.ownerName(), results: jsResults(value as Node) });
           ctx.declareFn(name.text, def, block);
           return ctx.push({ def, cls: null, locals: null, fnAt: (value as Node).startIndex });
@@ -1555,8 +1643,10 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // with neither, the loop assigns a name declared elsewhere.
         const left = node.childForFieldName("left");
         const right = node.childForFieldName("right");
-        const t = right?.type === "identifier" && node.children.some((c) => c.type === "of") ? ctx.local(right.text) : null;
-        const type = left?.type === "identifier" && t?.elem ? { ...t, elem: false } : null;
+        // The same over a field of `this`, a Map's values() or a call
+        // (`for (const s of all())`): an element of what the call returns.
+        const of = node.children.some((c) => c.type === "of");
+        const type = of && left?.type === "identifier" ? elementType(collectionType(ctx, right)) : null;
         const kind = node.children.find((c) => c.type === "var" || c.type === "let" || c.type === "const")?.type;
         const leave = ctx.push({ def: -1, cls: null, locals: new Map(), block: true });
         for (const n of patternNames(left)) {

@@ -43,6 +43,10 @@ export type TypeRef = {
   // method's declared result at position `result`. Chains nest through `on`.
   on?: TypeRef; // nested at most MAX_TYPE_DEPTH deep
   elem?: boolean;
+  // With `result`: the value is one element of what the call returns, which
+  // must be declared as an array or a set (`for (const s of all())`).
+  item?: boolean;
+  values?: TypeRef; // Map<K, V> and ReadonlyMap: V, read only through `values()`
   declared?: boolean;
   bound?: BoundImport;
   rel?: "implements" | "include" | "prepend" | "extend";
