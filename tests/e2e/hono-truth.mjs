@@ -12,7 +12,9 @@
 // `get`, `post`, `put`, `patch`, `delete`, `options` and `all` with a
 // literal path, and `openapi(route, handler)` with a `createRoute({ method,
 // path })` constant, and joins the prefixes segment by segment, each
-// `/{name}` of an OpenAPI path served as `/:name`. Anything else it meets on
+// `/{name}` of an OpenAPI path served as `/:name`. A call chained on the
+// router's own calls (`app.get(...).post(...)`) is a call on the router.
+// Anything else it meets on
 // the way is listed under `unread` with its site, never guessed.
 //
 // Usage: node tests/e2e/hono-truth.mjs <repo> [<src folder> <root file> <root function>]
@@ -21,6 +23,8 @@ import { join, relative } from "node:path";
 import ts from "typescript";
 
 const METHODS = new Set(["get", "post", "put", "patch", "delete", "options", "all"]);
+// The calls that return the router they are called on, so a call chained on one is on the router.
+const SELF = new Set([...METHODS, "openapi", "route", "use"]);
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -83,8 +87,11 @@ export function honoTruth(repo, srcDir = "packages/trueforge/src", rootFile = "p
     const e = strip(expr);
     if (depth > 20) throw new Error(`too deep at ${site(e)}`);
     if (isHonoNew(e)) {
-      const holder = e.parent;
-      const sym = ts.isVariableDeclaration(holder) ? checker.getSymbolAtLocation(holder.name) : null;
+      // The variable it is bound to, past the wrappers strip removed (`new Hono() as Hono`).
+      let holder = e.parent;
+      while (holder && (ts.isParenthesizedExpression(holder) || ts.isAsExpression(holder) || ts.isSatisfiesExpression(holder) || ts.isNonNullExpression(holder) || ts.isAwaitExpression(holder))) holder = holder.parent;
+      const sym = holder && ts.isVariableDeclaration(holder) ? checker.getSymbolAtLocation(holder.name) : null;
+      if (!sym) unread.push({ site: site(e), why: "a Hono value bound to no variable, so the calls made on it are not found" });
       return { made: e, sym, env };
     }
     if (ts.isIdentifier(e)) {
@@ -112,17 +119,31 @@ export function honoTruth(repo, srcDir = "packages/trueforge/src", rootFile = "p
     }
     return null;
   };
-  // The calls made on a router's variable, in source order.
+  // The calls made on a router's variable, in source order, a call chained
+  // on another (`app.get(...).post(...)`) included when every call under it
+  // returns the router itself; a call chained on any other (`basePath`) is unread.
   const callsOn = (router) => {
     if (!router.sym) return [];
     const out = [];
     const sf = router.made.getSourceFile();
     const visit = (n) => {
-      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && ts.isIdentifier(n.expression.expression) && checker.getSymbolAtLocation(n.expression.expression) === router.sym) out.push(n);
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
+        let recv = strip(n.expression.expression);
+        const under = [];
+        while (ts.isCallExpression(recv) && ts.isPropertyAccessExpression(recv.expression)) {
+          under.push(recv.expression.name.text);
+          recv = strip(recv.expression.expression);
+        }
+        if (ts.isIdentifier(recv) && checker.getSymbolAtLocation(recv) === router.sym) {
+          const other = under.find((m) => !SELF.has(m));
+          if (other === undefined) out.push(n);
+          else unread.push({ site: site(n), why: `a call chained on ${other}, which the truth does not read` });
+        }
+      }
       ts.forEachChild(n, visit);
     };
     visit(sf);
-    return out.sort((a, b) => a.getStart() - b.getStart());
+    return out.sort((a, b) => a.getStart() - b.getStart() || a.getEnd() - b.getEnd());
   };
   const handlerOf = (expr, env) => {
     const e = strip(expr);

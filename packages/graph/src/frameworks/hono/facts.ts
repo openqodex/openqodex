@@ -23,6 +23,7 @@ import { eitherPathText, eitherSegmentText, keepParts, ledForm, methodText } fro
 import type { Expr, Pos, ScopedVisit } from "../express/js.js";
 import { exported, FN_TYPES, identifierName, isExpr, MAX_ITEMS, MAX_SOURCE_BYTES, namePath, patternNames, pos, readExpr, scopedVisitor } from "../express/js.js";
 import { readAlone } from "../../walk.js";
+import type { TreeVisitor } from "../../walk.js";
 
 // The routing methods of a Hono value. Hono has no `head` method.
 export const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "options", "all"] as const;
@@ -35,39 +36,46 @@ const PATH_FIRST: ReadonlySet<string> = new Set<string>([...HTTP_METHODS, "use",
 // How many calls of one chain are read.
 const MAX_CHAIN = 32;
 
+// The types of node that open a function scope (as the shared visitor's).
+const SCOPE_TYPES: ReadonlySet<string> = new Set([...FN_TYPES, "function_declaration", "generator_function_declaration", "method_definition"]);
+
 // A value as this plugin reads it: an expression of the shared reader, or
 // `new X(...)` (`ctor` the constructor's name chain; `bases` the paths of
 // the basePath calls chained on it, innermost first), or a chain of watched
 // calls on another expression (`base`), with the basePath paths in it.
 export type HExpr = Expr | ({ t: "new"; ctor: string[] | null; bases: Expr[] } & Pos) | ({ t: "via"; base: Expr; bases: Expr[] } & Pos);
 
+// A function's scope key: the line it starts on, or, for a function that
+// starts on a line another function already starts on (an inline handler on
+// a one-line factory's line), a negative number unique in the file. Every
+// `scope` below is such a key, 0 for the module.
 export type HonoFact =
-  // A watched member call: `recv.prop(args)`. `scope` is the line of the
+  // A watched member call: `recv.prop(args)`. `scope` is the key of the
   // innermost function around it (0 at module level). `more`: arguments
   // past MAX_ITEMS the reader left out.
   | (FrameworkFactBase & { kind: "call"; recv: HExpr; prop: string; args: HExpr[]; scope: number; more?: number })
   // A name bound to a value: `const app = new Hono()`.
   | (FrameworkFactBase & { kind: "value"; name: string; value: HExpr; scope: number; top: boolean; exported: boolean; decl: "const" | "let" | "var" | "assign" })
   // A value a function returns: a `return` statement or an arrow
-  // function's expression body. `scope`: the line of the function it
+  // function's expression body. `scope`: the key of the function it
   // returns from. Every return of a function that returns a value the
   // plugin may read is kept, the others as an unread placeholder, so
   // resolve knows how many there are.
   | (FrameworkFactBase & { kind: "return"; value: HExpr; scope: number })
   // A named function (a declaration, or a function a declarator binds), at
-  // the line it starts on (its scope key): its name, its parameters in
+  // the line it starts on: its scope key, its name, its parameters in
   // order (null for a pattern), and the scope around it.
-  | (FrameworkFactBase & { kind: "fn"; name: string; params: (string | null)[]; scope: number })
+  | (FrameworkFactBase & { kind: "fn"; key: number; name: string; params: (string | null)[]; scope: number })
   // A parameter of a function with a type written as a name: `(app: Hono)`.
   | (FrameworkFactBase & { kind: "param"; name: string; type: string[]; scope: number })
   // The file is larger than MAX_SOURCE_BYTES and was not read.
   | (FrameworkFactBase & { kind: "too-large"; bytes: number })
   // The file has regions the parser could not read (the first at `line`).
   | (FrameworkFactBase & { kind: "syntax-error"; regions: number })
-  // A function's scope: the line it starts on, the scope around it (0 for
-  // the module) and every name it declares. `all`: more names than
-  // MAX_SCOPE_NAMES, so every name counts as declared there.
-  | (FrameworkFactBase & { kind: "scope"; parent: number; names: string[]; all: boolean });
+  // A function's scope, at the line it starts on: its key, the scope around
+  // it (0 for the module) and every name it declares. `all`: more names
+  // than MAX_SCOPE_NAMES, so every name counts as declared there.
+  | (FrameworkFactBase & { kind: "scope"; key: number; parent: number; names: string[]; all: boolean });
 
 export const MAX_SCOPE_NAMES = 256;
 // How many functions out resolve follows a name's binding.
@@ -154,7 +162,15 @@ export function reader(root: Node): FactReader<HonoFact> {
   // import (aliased or not), or `ns.createRoute` of a namespace import.
   const createRouteNames = new Set<string>();
   const createRouteSpaces = new Set<string>();
-  const scopes = new Map<number, { parent: number; names: Set<string>; all: boolean }>();
+  const scopes = new Map<number, { line: number; column: number; parent: number; names: Set<string>; all: boolean }>();
+  // The shared visitor gives a function by its line alone, so this reader
+  // keeps its own stack of scope keys: `entering` is the key of the
+  // function being entered, `open` the keys of the functions around a node.
+  const lines = new Set<number>();
+  let extraKeys = 0;
+  let entering = 0;
+  const open: { depth: number; key: number }[] = [];
+  const current = (): number => (open.length > 0 ? (open[open.length - 1] as { key: number }).key : 0);
   const declare = (at: number, names: readonly string[]) => {
     if (at === 0) return;
     const s = scopes.get(at);
@@ -164,11 +180,11 @@ export function reader(root: Node): FactReader<HonoFact> {
       else s.names.add(n);
     }
   };
-  const visit: ScopedVisit = (node, scope, up, type, upType): void => {
-    const isFn = FN_TYPES.has(type) || type === "function_declaration" || type === "generator_function_declaration" || type === "method_definition";
-    if (isFn) {
-      const own = node.startPosition.row + 1;
-      if (!scopes.has(own)) scopes.set(own, { parent: scope, names: new Set(), all: false });
+  const visit: ScopedVisit = (node, _line, up, type, upType): void => {
+    const scope = current();
+    if (SCOPE_TYPES.has(type)) {
+      const own = entering;
+      scopes.set(own, { ...pos(node), parent: scope, names: new Set(), all: false });
       const nameNode = type === "function_declaration" || type === "generator_function_declaration" ? node.childForFieldName("name") : null;
       const declName = nameNode ? identifierName(nameNode.text) : null;
       if (declName !== null) declare(scope, [declName]);
@@ -183,7 +199,7 @@ export function reader(root: Node): FactReader<HonoFact> {
         const id = up(1)?.childForFieldName("name");
         name = id?.type === "identifier" ? identifierName(id.text) : null;
       }
-      if (name !== null && !node.hasError) out.push({ kind: "fn", ...pos(node), name, params: paramNames(node), scope });
+      if (name !== null && !node.hasError) out.push({ kind: "fn", ...pos(node), key: own, name, params: paramNames(node), scope });
       // An arrow function's expression body is the value it returns.
       if (type === "arrow_function") {
         const body = node.childForFieldName("body");
@@ -268,12 +284,13 @@ export function reader(root: Node): FactReader<HonoFact> {
         if (id === null || !ann) return;
         const named = typeName(ann);
         const owner = up(2);
-        if (named) out.push({ kind: "param", ...pos(node), name: id, type: named, scope: owner ? owner.startPosition.row + 1 : 0 });
+        // A function's parameter is in the function's own scope, the one just entered.
+        if (named) out.push({ kind: "param", ...pos(node), name: id, type: named, scope: owner && SCOPE_TYPES.has(owner.type) ? scope : owner ? owner.startPosition.row + 1 : 0 });
         return;
       }
     }
   };
-  const visitor = scopedVisitor(
+  const shared = scopedVisitor(
     visit,
     (line) => {
       if (broken++ === 0) firstBroken = line;
@@ -281,17 +298,47 @@ export function reader(root: Node): FactReader<HonoFact> {
     TYPES,
     KEEP,
   );
+  const visitor: TreeVisitor = {
+    ...shared,
+    enter(node, type, field, depth, up, upType) {
+      const fn = SCOPE_TYPES.has(type);
+      if (fn) {
+        const line = node.startPosition.row + 1;
+        entering = lines.has(line) ? -++extraKeys : line;
+        lines.add(line);
+      }
+      const descend = shared.enter(node, type, field, depth, up, upType);
+      if (descend !== false && fn) open.push({ depth, key: entering });
+      return descend;
+    },
+    leave(depth) {
+      while (open.length > 0 && (open[open.length - 1] as { depth: number }).depth >= depth) open.pop();
+      shared.leave?.(depth);
+    },
+  };
   const finish = (): HonoFact[] => {
     if (broken > 0) out.push({ kind: "syntax-error", line: firstBroken, column: 1, regions: broken });
-    const scopeFacts: HonoFact[] = [...scopes].map(([line, s]) => ({ kind: "scope", line, column: 1, parent: s.parent, names: [...s.names], all: s.all }));
+    const scopeFacts: HonoFact[] = [...scopes].map(([key, s]) => ({ kind: "scope", line: s.line, column: s.column, key, parent: s.parent, names: [...s.names], all: s.all }));
     const kept = keepRead([...scopeFacts, ...trimReturns(out)], createRouteNames, createRouteSpaces);
     if (namesModule) return kept;
     // A file that names no Hono module makes no Hono value and defines no
-    // createRoute: it keeps its watched calls and the values they read.
-    const calls = kept.filter((f) => f.kind === "call");
-    if (calls.length === 0) return kept.filter((f) => f.kind === "too-large" || f.kind === "syntax-error");
-    const read = namesRead(kept);
-    return kept.filter((f) => f.kind === "call" || f.kind === "scope" || f.kind === "syntax-error" || (f.kind === "value" && read.has(f.name)));
+    // createRoute, but its functions may hand a router on: a factory that
+    // calls another, a wrapper that passes one through, a handler declared
+    // in a function. A file with watched calls keeps them, its functions,
+    // their scopes and returns. A file with none keeps only the module
+    // functions that return a value resolve may read, with their scopes
+    // and returns: no other file can reach anything else in it. Both keep
+    // the values that what they keep reads.
+    let keep: (f: HonoFact) => boolean;
+    if (kept.some((f) => f.kind === "call")) keep = (f) => f.kind === "call" || f.kind === "scope" || f.kind === "fn" || f.kind === "return" || f.kind === "syntax-error";
+    else {
+      const top = new Set(kept.flatMap((f) => (f.kind === "fn" && f.scope === 0 ? [f.key] : [])));
+      const own = new Set(kept.flatMap((f) => (f.kind === "return" && top.has(f.scope) ? [f.scope] : [])));
+      if (own.size === 0) return kept.filter((f) => f.kind === "too-large" || f.kind === "syntax-error");
+      keep = (f) => f.kind === "syntax-error" || ((f.kind === "fn" || f.kind === "scope") && own.has(f.key)) || (f.kind === "return" && own.has(f.scope));
+    }
+    const read = namesRead(kept.filter((f) => keep(f) || f.kind === "value"));
+    return kept.filter((f) => keep(f) || (f.kind === "value" && read.has(f.name)));
   };
   return { visitor, finish };
 }
@@ -313,8 +360,8 @@ function trimReturns(facts: HonoFact[]): HonoFact[] {
   return facts.map((f): HonoFact => (f.kind === "return" && !readable(f.value) ? { ...f, value: { t: "other", line: f.value.line, column: f.value.column } } : f)).filter((f) => f.kind !== "return" || factories.has(f.scope));
 }
 
-// The names a file's watched calls read, and the names the values of those
-// names read in turn.
+// The names a file's watched calls and kept returns read, and the names the
+// values of those names read in turn.
 function namesRead(facts: readonly HonoFact[]): Set<string> {
   const read = new Set<string>();
   const heads = (e: HExpr): void => {
@@ -345,6 +392,7 @@ function namesRead(facts: readonly HonoFact[]): Set<string> {
     }
   };
   for (const f of facts) {
+    if (f.kind === "return") heads(f.value);
     if (f.kind !== "call") continue;
     heads(f.recv);
     for (const a of f.args) heads(a);
@@ -367,7 +415,7 @@ const unread = (e: { line: number; column: number }): Expr => ({ t: "other", lin
 
 function keepRead(facts: HonoFact[], createRouteNames: ReadonlySet<string>, createRouteSpaces: ReadonlySet<string>): HonoFact[] {
   const scopes = new Map<number, { parent: number; names: Set<string>; all: boolean }>();
-  for (const f of facts) if (f.kind === "scope") scopes.set(f.line, { parent: f.parent, names: new Set(f.names), all: f.all });
+  for (const f of facts) if (f.kind === "scope") scopes.set(f.key, { parent: f.parent, names: new Set(f.names), all: f.all });
   const binding = (name: string, scope: number): number => {
     let at = scope;
     for (let guard = 0; at !== 0 && guard <= scopes.size; guard++) {
@@ -541,7 +589,7 @@ export function isHonoFact(v: unknown): v is HonoFact {
     case "return":
       return isHExpr(f.value) && Number.isInteger(f.scope);
     case "fn":
-      return typeof f.name === "string" && Array.isArray(f.params) && f.params.length <= MAX_ITEMS && f.params.every((p) => p === null || typeof p === "string") && Number.isInteger(f.scope);
+      return Number.isInteger(f.key) && typeof f.name === "string" && Array.isArray(f.params) && f.params.length <= MAX_ITEMS && f.params.every((p) => p === null || typeof p === "string") && Number.isInteger(f.scope);
     case "param":
       return typeof f.name === "string" && strings(f.type) && Number.isInteger(f.scope);
     case "too-large":
@@ -549,7 +597,7 @@ export function isHonoFact(v: unknown): v is HonoFact {
     case "syntax-error":
       return Number.isInteger(f.regions);
     case "scope":
-      return Number.isInteger(f.parent) && strings(f.names) && (f.names as string[]).length <= MAX_SCOPE_NAMES && typeof f.all === "boolean";
+      return Number.isInteger(f.key) && Number.isInteger(f.parent) && strings(f.names) && (f.names as string[]).length <= MAX_SCOPE_NAMES && typeof f.all === "boolean";
     default:
       return false;
   }
