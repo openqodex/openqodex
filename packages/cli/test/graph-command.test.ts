@@ -14,6 +14,8 @@
 //     it is: a newline in a file name puts the rest on its own line, read
 //     as the tool's own output, and a control character reaches the
 //     terminal.
+//  8. The `--context` snippets lose the indentation of the source lines, so
+//     nested code prints flat.
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -207,5 +209,15 @@ describe("text from the repository in the command's output", () => {
       // oxlint-disable-next-line no-control-regex
       expect(r.stdout).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
     }
+  });
+});
+
+describe("source lines around a place (8)", () => {
+  it("keeps the indentation of each source line in the text output", () => {
+    const root = repo({ ...files, "src/nest.ts": 'import { core } from "./core";\nexport function nest(a: boolean): number {\n  if (a) {\n    return core();\n  }\n  return 0;\n}\n' });
+    const r = cli(root, "graph", "callers", "core", "--context", "2");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.split("\n")).toContain("  4|     return core();");
+    expect(r.stdout.split("\n")).toContain("  3|   if (a) {");
   });
 });

@@ -573,7 +573,7 @@ export function outline(s: Session, req: Request): Job | Answer {
       defs = null;
       file++;
     }
-    const notRead = g.status.notRead.filter((n) => n.file === at || n.file.startsWith(`${at}/`));
+    const notRead = g.status.notRead.filter((n) => root || n.file === at || n.file.startsWith(`${at}/`));
     const reasons = notRead.length > 0 ? [`${notRead.length} ${notRead.length === 1 ? "file" : "files"} here ${notRead.length === 1 ? "was" : "were"} not read: ${notRead.slice(0, 5).map((n) => `${n.file} (${n.reason})`).join(", ")}`] : [];
     return listing({ ...base, unknown: withFloor(base, reasons) }, all);
   };

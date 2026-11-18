@@ -10,6 +10,8 @@
 //     gives a prefix match as the target.
 //  5. `outline .` or an empty path is refused or finds nothing.
 //  6. A truncated JSON or MCP answer has no sentence saying how to go on.
+//  7. The outline of the repository root lists no file that was not read
+//     and sets no floor, so a partial outline reads as whole.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import { query } from "../src/query/engine.js";
@@ -101,5 +103,16 @@ describe("dead ends of the graph answers", () => {
     expect(a.truncated.by).toBe("limit");
     expect(a.truncated.note).toBe(`truncated by limit: ${a.truncated.omitted} more; --cursor ${a.truncated.cursor}`);
     expect(query(s, { apiVersion: 1, kind: "search", text: "helper" }).truncated.note).toBeUndefined();
+  });
+
+  it("7. the root outline names a file that was not read and sets the floor", async () => {
+    const root = makeRepo({ "svc/a.ts": "export function save() {\n  return 1;\n}\n", "svc/big.ts": `export function big() {\n  return 1;\n}\n${"// pad\n".repeat(400)}` });
+    const graph = await buildGraph({ repoRoot: root, store: null, maxFileBytes: 1024 });
+    const s: Session = { graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false };
+    for (const file of ["svc", "."]) {
+      const a = query(s, { apiVersion: 1, kind: "outline", target: { file }, limit: 500 });
+      expect(a.unknown.floor, file).toBe(true);
+      expect(a.unknown.reasons.join(" "), file).toMatch(/1 file here was not read: svc\/big\.ts/);
+    }
   });
 });
