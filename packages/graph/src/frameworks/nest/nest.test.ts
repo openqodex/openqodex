@@ -419,6 +419,44 @@ describe("the Nest plugin on what the release review found", () => {
   }, 120_000);
 });
 
+describe("the Nest plugin on what the second review found", () => {
+  const app = { "src/main.ts": BOOT("AppModule"), "src/app.module.ts": MODULE(["CatsController"], { CatsController: "./cats.controller" }) };
+  // The guards and interceptors each route applies, in order, by class name.
+  const mw = (g: Graph, handler: string): string[] => {
+    const id = regs(g).find((r) => r.handler.written === handler)?.id;
+    return (g.frameworks?.edges ?? [])
+      .filter((e) => e.plugin === "nest" && e.kind === "applies_middleware" && e.from === id)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((e) => /#([^@]+)@/.exec(e.to)?.[1] ?? e.to);
+  };
+
+  it("keeps a method's route decorators when a comment stands between them and the method, and never gives them to a later method (3)", async () => {
+    const g = await build({
+      ...app,
+      "src/cats.controller.ts":
+        'import { Controller, Get, Post } from "@nestjs/common";\n\n@Controller("cats")\nexport class CatsController {\n  @Get(":id")\n  // finds one cat\n  find(): string {\n    return "cat";\n  }\n\n  @Get()\n  /* every cat */\n  // and a second comment\n  list(): string[] {\n    return [];\n  }\n\n  @Post()\n  create(): void {}\n\n  @Get("stray")\n  // a field, not a method\n  label = "cats";\n\n  plain(): void {}\n}\n',
+    });
+    expect(lines(g)).toEqual(["GET /cats CatsController.list", "GET /cats/:id CatsController.find", "POST /cats CatsController.create"]);
+  }, 60_000);
+
+  it("applies a base class's guards and interceptors before a subclass's own, as Nest's metadata merge does, and only the base's when the subclass declares none, through a base with no decorators (3)", async () => {
+    const g = await build({
+      "src/main.ts": BOOT("AppModule"),
+      "src/app.module.ts": MODULE(["CatsController", "DogsController", "BirdsController"], { CatsController: "./cats.controller", DogsController: "./cats.controller", BirdsController: "./cats.controller" }),
+      "src/guards.ts": "export class AuthGuard {}\nexport class RoleGuard {}\nexport class TeamGuard {}\nexport class LogInterceptor {}\nexport class TimeInterceptor {}\n",
+      "src/base.controller.ts":
+        'import { Get, UseGuards, UseInterceptors } from "@nestjs/common";\nimport { AuthGuard, LogInterceptor, TeamGuard } from "./guards";\n\n@UseGuards(AuthGuard)\n@UseInterceptors(LogInterceptor)\nexport abstract class RootController {\n  @Get("health")\n  health(): void {}\n\n  @Get("ping")\n  ping(): void {}\n}\n\nexport abstract class MidController extends RootController {\n  health(): void {}\n}\n\n@UseGuards(TeamGuard)\nexport abstract class TeamController extends MidController {}\n',
+      "src/cats.controller.ts":
+        'import { Controller, Get, UseGuards, UseInterceptors } from "@nestjs/common";\nimport { RootController, TeamController } from "./base.controller";\nimport { RoleGuard, TimeInterceptor } from "./guards";\n\n@Controller("cats")\n@UseGuards(RoleGuard)\n@UseInterceptors(TimeInterceptor)\nexport class CatsController extends TeamController {\n  @Get()\n  list(): void {}\n}\n\n@Controller("dogs")\nexport class DogsController extends RootController {\n  @Get()\n  list(): void {}\n}\n\n@Controller("birds")\n@UseGuards(RoleGuard)\nexport class BirdsController {\n  @Get()\n  list(): void {}\n}\n',
+    });
+    // Routes and guards reach a controller through a base class with no decorators; its undecorated health() overrides the route.
+    expect(lines(g)).toEqual(["GET /birds BirdsController.list", "GET /cats CatsController.list", "GET /cats/ping RootController.ping", "GET /dogs DogsController.list", "GET /dogs/health RootController.health", "GET /dogs/ping RootController.ping"]);
+    expect(mw(g, "CatsController.list")).toEqual(["AuthGuard", "TeamGuard", "RoleGuard", "LogInterceptor", "TimeInterceptor"]);
+    expect(mw(g, "DogsController.list")).toEqual(["AuthGuard", "LogInterceptor"]);
+    expect(mw(g, "BirdsController.list")).toEqual(["RoleGuard"]);
+  }, 60_000);
+});
+
 describe("Nest's own path rules", () => {
   it("composes paths exactly as Nest's RoutePathFactory does, with each piece's slashes (1)", () => {
     const p = (o: Partial<Parameters<typeof composePaths>[0]>) => composePaths({ versioning: undefined, version: undefined, module: undefined, ctrl: "/", method: "/", prefix: undefined, exclude: [], requestMethod: "GET", ...o }).map((x) => x.pattern ?? `(${x.partial})`);
