@@ -11,9 +11,9 @@
 // answered (not found, a capability this build lacks, a bad request) or
 // the build failed.
 import { display, findRepoRoot, loadConfig, OpenQodexError } from "@openqodex/core";
-import { laterEdits, openStore, OPERATIONS, parseTarget, pinGeneration, pinWorkTree, query } from "@openqodex/graph";
+import { laterEdits, openStore, OPERATIONS, parseTarget, pinGeneration, pinWorkTree, query, shapeAnswer } from "@openqodex/graph";
 import { openqodexHome } from "@openqodex/scanners";
-import type { Answer, GraphStore, Item, Operation, Pinned, Request } from "@openqodex/graph";
+import type { Answer, GraphStore, Item, Operation, Pinned, Request, Shaped } from "@openqodex/graph";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
 
@@ -37,6 +37,7 @@ export const USAGE = [
   "  unknowns [--file <path> | --name <name>]",
   "  explain <edge id>",
   "  options: --json, --limit <n>, --cursor <c>, --tokens <n>, --budget-ms <ms>, --generation <build id>, --cwd <dir>",
+  "           --context <0..10> (source lines around each place), --compact (with --json: items without edge ids)",
 ].join("\n");
 
 function out(line = ""): void {
@@ -80,7 +81,7 @@ function itemLine(i: Item, op: Operation): string {
 }
 
 // One fact per line: sites as file:line, tiers spelled out.
-function printText(a: Answer, op: Operation): void {
+function printText(a: Shaped, op: Operation): void {
   if (a.error) {
     line(`${a.error.code}: ${a.error.message}`);
     if (Array.isArray(a.target)) for (const c of a.target) line(`  candidate ${c.file}:${c.line} ${c.kind} ${c.name} (${c.id})`);
@@ -98,6 +99,10 @@ function printText(a: Answer, op: Operation): void {
     else if (op === "outline") line(`${String(i.file)}:${String(i.line)} ${String(i.kind)} ${String(i.qualified)}${i.exported ? ", exported" : ""}, ${String(i.callerSites)} call sites in, ${String(i.calleeSites)} out`);
     else line(JSON.stringify(raw));
   });
+  for (const c of a.context?.snippets ?? []) {
+    line(`lines around ${c.file}:${c.line}${c.from === null ? ": not readable" : c.changedSince ? ", as this build read them; the file changed since" : ""}`);
+    c.lines.forEach((l, k) => line(`  ${c.start + k}| ${l}`));
+  }
   if (a.counts.certain !== null) line(`counts: ${a.counts.certain} certain, ${a.counts.likely} likely, ${a.counts.possible} possible`);
   const tr = a.truncated;
   if (tr.by === "limit" || (tr.by === "budget" && tr.cursor)) line(`truncated by ${tr.by}: ${tr.omitted ?? "an unknown number of"} more; --cursor ${tr.cursor}`);
@@ -114,8 +119,8 @@ function exitOf(a: Answer): number {
 
 export async function run(args: string[]): Promise<number> {
   const { global, bools, values, positionals } = parseFlags(args, {
-    bools: ["--json", "--full"],
-    values: ["--file", "--name", "--tier", "--depth", "--limit", "--cursor", "--generation", "--base", "--edges", "--level", "--project", "--text", "--tokens", "--budget-ms"],
+    bools: ["--json", "--full", "--compact"],
+    values: ["--file", "--name", "--tier", "--depth", "--limit", "--cursor", "--generation", "--base", "--edges", "--level", "--project", "--text", "--tokens", "--budget-ms", "--context"],
     positionals: 3,
     globals: ["--cwd", "--config", "--quiet"],
   });
@@ -209,7 +214,8 @@ export async function run(args: string[]): Promise<number> {
       cursor: values.get("--cursor"),
       ...(tokens !== undefined || ms !== undefined ? { budget: { ...(tokens !== undefined ? { tokens } : {}), ...(ms !== undefined ? { ms } : {}) } } : {}),
     };
-    const answer = query(session, request, { changes: pinned.changes, change: pinned.change, scope: pinned.scope });
+    const asked = query(session, request, { changes: pinned.changes, change: pinned.change, scope: pinned.scope });
+    const answer = await shapeAnswer(asked, session, { repoRoot, context: intFlag(values, "--context"), compact: json && bools.has("--compact"), maxFileBytes: settings.maxFileBytes });
     if (json) out(JSON.stringify(answer));
     else printText(answer, kind);
     return exitOf(answer);
