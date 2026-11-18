@@ -99,6 +99,10 @@ export type DefFact = {
   // A Java method whose last parameter is varargs (`Object... rest`): it
   // takes any number of arguments from its fixed parameters up.
   varargs?: boolean;
+  // A TypeScript interface property typed by a named type (`resolve:
+  // ResolveFn`): a member a call may name, which returns what that type's
+  // call signature returns. The type as written.
+  signature?: TypeRef;
   // A Java constructor: a method named like its class, called by `new`.
   // It is not static: its body runs on the new instance.
   ctor?: boolean;

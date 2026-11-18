@@ -102,8 +102,10 @@ const BUILTINS: Record<Family, ReadonlySet<string>> = {
 // Built-in types whose methods are the language's: a call on a value of
 // one is external, never a gap of the repository.
 const BUILTIN_TYPES: Record<Family, ReadonlySet<string>> = {
+  // Partial, Required, Readonly, Pick and Omit are not here: a value of one
+  // has the members of a type of the repository.
   js: new Set(
-    "string number boolean bigint symbol never void undefined null String Number Boolean BigInt Symbol Object Array ReadonlyArray Map ReadonlyMap Set ReadonlySet WeakMap WeakSet Promise PromiseLike Date RegExp Error TypeError RangeError Function Record Partial Required Readonly Pick Omit Iterable IterableIterator AsyncIterable AsyncIterableIterator Iterator Generator AsyncGenerator ArrayBuffer SharedArrayBuffer DataView Uint8Array Int8Array Uint16Array Int16Array Uint32Array Int32Array Float32Array Float64Array BigInt64Array BigUint64Array Buffer URL URLSearchParams AbortController AbortSignal TextEncoder TextDecoder".split(" "),
+    "string number boolean bigint symbol never void undefined null String Number Boolean BigInt Symbol Object Array ReadonlyArray Map ReadonlyMap Set ReadonlySet WeakMap WeakSet Promise PromiseLike Date RegExp Error TypeError RangeError Function Record Iterable IterableIterator AsyncIterable AsyncIterableIterator Iterator Generator AsyncGenerator ArrayBuffer SharedArrayBuffer DataView Uint8Array Int8Array Uint16Array Int16Array Uint32Array Int32Array Float32Array Float64Array BigInt64Array BigUint64Array Buffer URL URLSearchParams AbortController AbortSignal TextEncoder TextDecoder".split(" "),
   ),
   python: new Set("str int float bool bytes bytearray list dict set frozenset tuple complex List Dict Set FrozenSet Tuple Sequence Mapping MutableMapping MutableSequence Iterable Iterator".split(" ")),
   go: new Set("string int int8 int16 int32 int64 uint uint8 uint16 uint32 uint64 uintptr float32 float64 complex64 complex128 byte rune bool error".split(" ")),
@@ -1348,6 +1350,13 @@ export function createWorld(input: ResolveInput): World {
     if (v?.v === "ext") return "ext";
     if (v?.v !== "sym" || v.ids.length !== 1) return null;
     const cls = classOfId.get(v.ids[0] as string);
+    // A TypeScript alias of a named type (`type AnyBox = Box<unknown>`, `type
+    // Client = Pick<Api, "list">`) is that type wherever a member is looked up.
+    const named = cls && family === "js" && !asType ? namedAlias(cls) : null;
+    if (named) {
+      const inner = typeKey(named.file, named.family, named.t, depth + 1);
+      return inner === null || inner === "ext" ? inner : { ...inner, ev: chain(v.ev, inner.ev) };
+    }
     if (cls) return { key: cls, ev: v.ev };
     if (asType) return null;
     const def = defById.get(v.ids[0] as string);
@@ -1431,6 +1440,33 @@ export function createWorld(input: ResolveInput): World {
     }
     return found;
   };
+  // The named type a TypeScript alias stands for, when it is one: not an
+  // object type, an intersection or an untyped one, which are read apart.
+  const namedAlias = (key: string): { file: string; family: Family; t: TypeRef } | null => {
+    const info = classes.get(key);
+    if (info?.family !== "js" || info.ids.length !== 1) return null;
+    const def = defById.get(info.ids[0] as string);
+    const t = def?.kind === "type" ? def.alias : undefined;
+    if (!def || !t || t.parts || t.fields || t.path || t.elem || t.name === "{}" || (t.qualifier === null && JS_UNTYPED.has(t.name))) return null;
+    return { file: def.file, family: def.family, t };
+  };
+  // What a call of a definition returns, and where that type was written:
+  // its own declared or inferred result, or for a property typed by a named
+  // function type, that type's.
+  const resultsOf = (def: Def): { file: string; family: Family; owner: string | null; results: (TypeRef | null)[] } | null => {
+    if (def.results) return { file: def.file, family: def.family, owner: def.owner, results: def.results };
+    if (!def.signature) return null;
+    let v = typeValue(def.file, def.signature);
+    for (let hops = 0; v?.v === "sym" && v.ids.length === 1 && hops < MAX_DEPTH; hops++) {
+      const target = defById.get(v.ids[0] as string);
+      if (target?.kind !== "type") return null;
+      if (target.results) return { file: target.file, family: target.family, owner: target.owner, results: target.results };
+      // `type A = B`: the function type B names.
+      if (!target.alias || target.alias.parts || target.alias.fields) return null;
+      v = typeValue(target.file, target.alias);
+    }
+    return null;
+  };
   // A function declared inside a function, by its index in the file's definitions.
   const localTarget = (file: string, index: number): ResultTarget => {
     const id = defIdsOf(file)[index];
@@ -1473,7 +1509,10 @@ export function createWorld(input: ResolveInput): World {
       receiver = on;
       const hit = methodOn(on.key, t.name, "i", 0);
       if (!hit || !("ids" in hit)) return null;
-      const ids = hit.ids.filter((id) => defById.get(id)?.results?.[t.result ?? 0]);
+      const ids = hit.ids.filter((id) => {
+        const def = defById.get(id);
+        return def ? resultsOf(def)?.results[t.result ?? 0] : undefined;
+      });
       if (ids.length === 0) return null;
       found = { ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
     } else {
@@ -1487,8 +1526,9 @@ export function createWorld(input: ResolveInput): World {
     let out: TypeHit = null;
     for (const id of found.ids) {
       const def = defById.get(id);
-      const result = def?.results?.[t.result ?? 0];
-      if (!def || !result) return null;
+      const from = def ? resultsOf(def) : null;
+      const result = from?.results[t.result ?? 0];
+      if (!def || !from || !result) return null;
       let inner: TypeHit;
       if (def.family === "java" && result.param !== undefined) {
         // Arguments belong to the receiver's file, which may differ from the method's file.
@@ -1502,12 +1542,12 @@ export function createWorld(input: ResolveInput): World {
         // name: awaited when the caller or the body awaits it.
         inner = result.promise && !t.awaited
           ? "ext"
-          : typeKey(def.file, def.family, { ...result, promise: undefined, inferred: undefined, ...(result.awaited || t.awaited ? { awaited: true } : {}) }, depth + 1, false, def.owner);
+          : typeKey(from.file, from.family, { ...result, promise: undefined, inferred: undefined, ...(result.awaited || t.awaited ? { awaited: true } : {}) }, depth + 1, false, from.owner);
       } else {
         // Only an awaited call exposes the value inside a declared Promise.
         inner = result.promise && !t.awaited
           ? "ext"
-          : typeKey(def.file, def.family, { ...result, result: undefined, promise: undefined }, depth + 1, false, def.owner);
+          : typeKey(from.file, from.family, { ...result, result: undefined, promise: undefined }, depth + 1, false, from.owner);
       }
       if (inner === null) return null;
       if (out !== null && (inner === "ext" ? out !== "ext" : out === "ext" || out.key !== inner.key)) return null;
@@ -2293,12 +2333,13 @@ export function createWorld(input: ResolveInput): World {
     } else found = t.localDef !== undefined ? localTarget(s.file, t.localDef) : namedResultTarget(s.file, t);
     if (found === null || found === "ext" || found.ids.length !== 1) return found === "ext" ? found : null;
     const def = defById.get(found.ids[0] as string);
-    const result = def?.results?.[t.result ?? 0];
-    if (!def || !result) return null;
+    const from = def ? resultsOf(def) : null;
+    const result = from?.results[t.result ?? 0];
+    if (!def || !from || !result) return null;
     if (result.promise && !t.awaited) return "ext";
     const ev = result.inferred ? chain(found.ev, inferredEv(def)) : found.ev;
     const read: TypeRef = { ...result, promise: undefined, inferred: undefined, ...(result.result !== undefined && (result.awaited || t.awaited) ? { awaited: true } : {}) };
-    return { file: def.file, family: def.family, t: read, ev: evOf(s.ev, ev) };
+    return { file: from.file, family: from.family, t: read, ev: evOf(s.ev, ev) };
   }, null);
   // The type itself once its member path is walked, its result read and
   // its alias followed; null or "ext" when a step is not known.
@@ -2354,12 +2395,12 @@ export function createWorld(input: ResolveInput): World {
     }
     const k = typeKey(n.file, n.family, n.t, depth + 1);
     if (k === null || k === "ext") return "unknown";
-    const m = methodOn(k.key, name, "i", 0);
-    if (m && "gap" in m) return "unknown";
-    if (m) return "method";
     const f = fieldRef(k.key, name);
     if (f === "ext") return "unknown";
     if (f) return { ...f, ev: evOf(evOf(n.ev, k.ev), f.ev) };
+    const m = methodOn(k.key, name, "i", 0);
+    if (m && "gap" in m) return "unknown";
+    if (m) return "method";
     return outsideBase(k.key) || (classes.get(k.key)?.dynamic.length ?? 0) > 0 ? "unknown" : null;
   }, "unknown");
   // The type of member `name` of a value of type `s`.
@@ -2783,6 +2824,13 @@ export function createWorld(input: ResolveInput): World {
         // type written in place or aliased, an intersection, a result read
         // from a body): read structurally.
         const structurally = (): TypeHit => (family === "js" ? toHit({ file, family, t: r.path.length > 0 ? { ...r.type, path: r.path } : r.type, ev: null }, 0) : null);
+        // A path whose last member is a collection or a built-in type
+        // (`input.names.map()` with `names: string[]`): the language's own method.
+        const builtinEnd = (): boolean => {
+          if (family !== "js" || r.path.length === 0) return false;
+          const n = normalize({ file, family, t: { ...r.type, path: r.path }, ev: null }, 0);
+          return n !== null && n !== "ext" && (n.t.elem === true || (n.t.qualifier === null && BUILTIN_TYPES.js.has(n.t.name) && resolveLocal(n.file, n.t.name) === null));
+        };
         if (untypedType(file, family, r.type, 0)) {
           // A path through a member the object type declares has that member's type.
           const members = r.type.fields !== undefined || !(r.type.qualifier === null && JS_UNTYPED.has(r.type.name));
@@ -2791,6 +2839,7 @@ export function createWorld(input: ResolveInput): World {
             const kind = through.ev.kind === "receiver-inferred" ? "receiver-inferred" : "receiver-field";
             return withDispatch(onClass(through.key, call.name, "i", { ...through.ev, kind, rule: "receiver-type" }), { key: through.key, side: "i" });
           }
+          if (through === null && builtinEnd()) return { ext: true };
           const spelled = r.type.name === "{}" ? "by an object type written in place" : `${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}`;
           return { unknown: "untyped-receiver", shape: "typed", note: `a value typed ${spelled} may be anything with a method of this name` };
         }
@@ -2825,6 +2874,7 @@ export function createWorld(input: ResolveInput): World {
         }
         const key = typed ?? followPath(t, r.path);
         if (key === "ext") return { ext: true };
+        if (key === null && builtinEnd()) return { ext: true };
         if (key === null) return { unknown: "no-receiver-type", shape: "typed", note: "a field whose type no rule knows" };
         const kind = key.ev.kind === "receiver-inferred" ? "receiver-inferred" : receiverKind(r.type, r.path);
         const out = onClass(key.key, call.name, "i", { ...key.ev, kind, rule: "receiver-type" });

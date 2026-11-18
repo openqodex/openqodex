@@ -691,6 +691,7 @@ class Ctx {
       Object.values(d.fields).forEach(bindType);
       d.results?.forEach(bindType);
       bindType(d.alias);
+      bindType(d.signature);
     }
     for (const c of this.calls) if (c.recv.kind === "type") bindType(c.recv.type);
     for (const v of values) if (v.recv.kind === "type") bindType(v.recv.type);
@@ -1686,6 +1687,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (node.type === "property_signature" && where === "interface_body" && fnType?.type !== "function_type") {
           const type = jsMemberType(node.childForFieldName("type"), cls.typeParams);
           if (type) (ctx.defs[cls.def] as DefFact).fields[name.text] = type;
+          // Typed by a name, it may be a function type declared elsewhere
+          // (`resolve: ResolveFn`): a member a call can name, as a property
+          // spelled with a function type is. A call can name it only then.
+          if (type && type.kind !== "param" && !type.elem && !type.promise && !type.parts && type.name !== "{}" && type.name !== "?" && (fnType?.type === "type_identifier" || fnType?.type === "nested_type_identifier" || fnType?.type === "generic_type")) {
+            ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, signature: type });
+          }
           return false;
         }
         if (!fnType || (node.type === "property_signature" && fnType.type !== "function_type")) return false;
@@ -1703,9 +1710,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // interface does; a call on the alias itself stays untyped.
         const typeParams = node.type === "type_alias_declaration" ? jsTypeParams(node) : null;
         enteringTypeParams = typeParams;
-        const alias = node.type === "type_alias_declaration" ? jsTypeRef(node.childForFieldName("value")) : null;
+        const value = node.type === "type_alias_declaration" ? node.childForFieldName("value") : null;
+        const alias = value ? jsTypeRef(value) : null;
+        // A function type (`type ResolveFn = (t: string) => Store`): what a call of a value of it returns.
+        const result = value?.type === "function_type" ? declared(jsTypeRef(value.childForFieldName("return_type"))) : null;
         enteringTypeParams = null;
-        if (name) ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}) });
+        if (name) ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}), ...(result ? { results: [result] } : {}) });
         return false;
       }
       case "arrow_function":

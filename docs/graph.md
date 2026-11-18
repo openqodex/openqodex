@@ -243,6 +243,8 @@ TypeScript reads a receiver's type through these shapes, each at the tier its st
 - `x!`, `x?.`, `(x)`, `x satisfies T` as `x`, and `x as T` as a `T`; `Readonly`, `Partial`, `Required`, `Pick`, `Omit` and `NonNullable` of `T` as `T`;
 - `A & B`: a member or a method binds only when exactly one side declares it, and stays a gap when both do or a side cannot be read;
 - a member typed by the interface's or class's own type parameter takes the argument the value's type gives (`Box<Sessions>` makes `value: T` a `Sessions`);
+- a type alias of a named type (`type AnyBox = Box<unknown>`, `type Client = Pick<Api, "list">`) is that type;
+- an interface property typed by a named type (`resolve: ResolveFn`) is a member a call can name, as one spelled with a function type is, and a call of it returns what the function type returns;
 - the result of a function with no declared result: its one return, or several that agree, of `new X()`, a typed local or parameter, another call's result or an object literal (taken apart after the call). `async` wraps it in a promise that only `await` opens. Returns that disagree or cannot be read, a local given another value, a return in a `finally` block and a function that returns its own call leave a gap. The evidence is `receiver-inferred`: certain for a function, likely for a method, since an override may return another type.
 
 A caller list's five unknown examples list first the same-name gaps whose receiver as written, or its type, names the class (`sessions` or `userSessions` for `Sessions`, `resolver` for `IResolver`); the count of same-name gaps stays every one in the repository.
