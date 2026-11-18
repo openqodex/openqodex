@@ -333,7 +333,12 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
       if (direct) return direct;
       // `const app = other` passes a known value on.
       if (decl.value.t === "ref" && !(decl.value.path.length === 1 && decl.value.path[0] === name)) return valueIn(file, decl.value.path, decl.scope, decl.line, depth + 1);
-      return null;
+      return fromRequire(file, decl, undefined, depth)?.val ?? null;
+    }
+    // `m.users` where `m` holds `require("./m")`.
+    if (path.length === 2 && writes.length === 1) {
+      const got = fromRequire(file, writes[0] as Fact<"value">, path[1] as string, depth);
+      if (got) return got.val;
     }
     if (at !== 0) {
       // A parameter or a local with no value the facts hold: only a parameter typed as Express says what it is.
@@ -364,6 +369,65 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
 
   const topValue = (file: string, name: string): Fact<"value"> | null => (fx(file).values.get(name) ?? []).find((v) => v.top) ?? null;
 
+  // ---------- CommonJS ----------
+  // `const m = require("./m")` and `const { a } = require("./m")` bind a name
+  // to what a module assigns to `module.exports` or `exports`. `settled`: the
+  // plugin knows what the name holds, a router, an application or a value
+  // that is none (a function, a package). A name it cannot settle may be a
+  // router, so a mount of it is an unknown, never a silent loss.
+  type Got = { val: Val | Param | null; settled: boolean; note: string };
+  const unsettled = (note: string): Got => ({ val: null, settled: false, note });
+  const isRequire = (e: Expr, file: string, scope: number): boolean => e.t === "call" && e.fn.t === "ref" && e.fn.path.length === 1 && e.fn.path[0] === "require" && bindingScope(file, scope, "require") === 0;
+  const requireBound = (file: string, decl: Fact<"value">): boolean => isRequire(decl.value.t === "member" ? decl.value.obj : decl.value, file, decl.scope);
+
+  // What a file assigns to an export name: `exports.n = x`, `module.exports.n = x`,
+  // or a member of `module.exports = { n }`; "default" is `module.exports` itself.
+  const cjsEntry = (file: string, name: string): { value: Expr; line: number; column: number } | null => {
+    const own = fx(file).cjs.get(name);
+    if (own) return own;
+    const whole = name === "default" ? undefined : fx(file).cjs.get("default");
+    const member = whole?.value.t === "object" ? whole.value.props.find((p) => p.key === name) : undefined;
+    return whole && member ? { value: member.value, line: whole.line, column: whole.column } : null;
+  };
+  // An export that is a function: middleware or a handler, never a router.
+  const notRouter = (file: string, e: Expr): boolean => {
+    if (e.t === "fn") return true;
+    if (e.t !== "ref" || e.path.length !== 1) return false;
+    const name = e.path[0] as string;
+    return fx(file).functions.has(name) || (topValue(file, name)?.value.t === "fn");
+  };
+  const exportOf = (file: string, name: string, depth: number): Got => {
+    if (!index.languageFacts(file)) return unsettled(`${file} was not read`);
+    const val = exportedValue(file, name, depth + 1);
+    if (val) return { val, settled: true, note: "" };
+    const entry = cjsEntry(file, name);
+    if (entry && notRouter(file, entry.value)) return { val: null, settled: true, note: "" };
+    return unsettled(entry ? `${file} exports ${show(entry.value)}, which the plugin cannot read as a router` : `${file} has no export the plugin can read under that name`);
+  };
+  // `member`: the name read off the whole module (`m.users`).
+  const fromRequire = (file: string, decl: Fact<"value">, member: string | undefined, depth: number): Got | null => {
+    if (!requireBound(file, decl)) return null;
+    const imp = index.languageFacts(file)?.imports.find((i) => i.line === decl.line && i.column === decl.column && (i.namespace === decl.name || i.names.some((n) => n.local === decl.name)));
+    if (!imp) return unsettled("the module the require names is computed or not a plain string");
+    const named = imp.names.find((n) => n.local === decl.name);
+    if (named && member !== undefined) return unsettled(`${decl.name}.${member} reads a member of a destructured name`);
+    if (!take("lookups")) return unsettled(`the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`);
+    const mod = index.module(file, imp.spec);
+    if (mod.kind === "external") return { val: null, settled: true, note: "" };
+    if (mod.kind !== "module") return unsettled(`no file in the repository is named by require(${JSON.stringify(imp.spec)})`);
+    return exportOf(mod.file, named ? named.imported : (member ?? "default"), depth + 1);
+  };
+  // Why a name a mount reads is not followed through a require; null when it is no require or is no router.
+  const requireGap = (file: string, path: readonly string[], scope: number): string | null => {
+    const name = path[0] as string;
+    const writes = writesOf(file, name, bindingScope(file, scope, name));
+    if (!writes.some((w) => requireBound(file, w))) return null;
+    if (writes.length > 1) return `${name} is assigned more than once`;
+    if (path.length > 2) return `${path.join(".")} reads deeper than one member of the module`;
+    const got = fromRequire(file, writes[0] as Fact<"value">, path[1], 0);
+    return got === null || got.settled ? null : got.note;
+  };
+
   const exportedValue = (file: string, name: string, depth: number): Val | Param | null => {
     if (depth > MAX_MOUNT_DEPTH) return null;
     const lf = index.languageFacts(file);
@@ -372,7 +436,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     const direct = (fx(file).values.get(name) ?? []).find((v) => v.top && v.exported);
     if (direct) return valueIn(file, [direct.name], 0, direct.line, depth);
     local ??= lf?.exportsLocal.find((x) => x.exported === name)?.local ?? null;
-    const cjs = fx(file).cjs.get(name);
+    const cjs = cjsEntry(file, name);
     if (!local && cjs) {
       if (cjs.value.t === "ref" && cjs.value.path.length === 1) local = cjs.value.path[0] as string;
       else return classify(file, { name, value: cjs.value, scope: 0, line: cjs.line, column: cjs.column });
@@ -646,6 +710,9 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
             addUnknown({ plugin: PLUGIN, site: e.site, scope: scopeOf(app, e.file), affects: ["mounts", "handles"], cause: "unsupported-rule", name: show(a), note: `${show(a)} is an application mounted here as a sub-application; the plugin lists its routes on it alone, not under this mount path`, count: null, exact: false });
             continue;
           }
+          // A router brought in by a require the plugin cannot follow is not listed under this mount.
+          const lost = target ? null : a.t === "ref" ? requireGap(e.file, a.path, e.scope) : isRequire(a, e.file, e.scope) ? "the module name is written in the call, where the plugin does not read it" : null;
+          if (lost !== null) addUnknown({ plugin: PLUGIN, site: e.site, scope: scopeOf(app, e.file), affects: ["mounts", "handles"], cause: "dynamic", name: show(a), note: `${show(a)} comes from a CommonJS require the plugin cannot follow (${lost}), so it may be a router whose routes are not listed under this mount`, count: null, exact: false });
           if (mw.length >= MAX_MIDDLEWARE_CHAIN) {
             middlewareOmitted++;
             continue;
