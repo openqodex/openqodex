@@ -1,0 +1,105 @@
+// Six small dead ends of the graph answers (the trueforge report, problems
+// 4, 10, 11, 12 and 13). Ways it could fail, written before the code:
+//  1. A callers answer with same-name calls the graph could not bind says
+//     so only on its last line, so an agent reads the rows as the whole list;
+//     or a list with no such calls gets a warning it should not have.
+//  2. `implementers` on a file says "not found" or "is a file" and offers
+//     nothing to ask next.
+//  3. `unknowns --file` lists rows of other files with no word on why.
+//  4. `search` for a name with one exact definition gives no target, or
+//     gives a prefix match as the target.
+//  5. `outline .` or an empty path is refused or finds nothing.
+//  6. A truncated JSON or MCP answer has no sentence saying how to go on.
+import { afterAll, describe, expect, it } from "vitest";
+import { buildGraph } from "../src/index.js";
+import { query } from "../src/query/engine.js";
+import type { Session } from "../src/query/engine.js";
+import { makeRepo } from "./helpers.js";
+import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
+
+afterAll(removeTempDirs);
+
+async function session(files: Record<string, string>): Promise<Session> {
+  const graph = await buildGraph({ repoRoot: makeRepo(files), store: null });
+  return { graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false };
+}
+
+const repo = {
+  "svc/a.ts": "export function save() {\n  return 1;\n}\nexport function load() {\n  return 2;\n}\n",
+  "svc/b.ts": 'import { save } from "./a";\nexport function go(h: any) {\n  h.save();\n  return save();\n}\n',
+  "svc/c.ts": "export function dyn(t: any, k: string) {\n  return t[k]();\n}\n",
+  "svc/types.ts": "export interface IThing {\n  run(): void;\n}\nexport class Thing implements IThing {\n  run() {}\n}\nexport function helper() {}\nexport const x = 1;\n",
+  "other/z.ts": "export function z() {\n  return 1;\n}\n",
+};
+
+describe("dead ends of the graph answers", () => {
+  it("1. callers warns first when same-name calls could not be bound, and not otherwise", async () => {
+    const s = await session(repo);
+    const a = query(s, { apiVersion: 1, kind: "callers", target: { name: "save" } });
+    expect(a.warning).toBe("1 call named save could not be bound; this list may be missing callers. See: openqodex graph unknowns --name save");
+    expect(a.unknown.floor).toBe(true);
+    const clean = query(s, { apiVersion: 1, kind: "callers", target: { name: "z" } });
+    expect(clean.warning).toBeUndefined();
+    expect(query(s, { apiVersion: 1, kind: "callees", target: { name: "go" } }).warning).toBeUndefined();
+  });
+
+  it("2. implementers on a file name answers with the classes and interfaces the file defines", async () => {
+    const s = await session(repo);
+    for (const target of [{ name: "svc/types.ts" }, { file: "svc/types.ts" }]) {
+      const a = query(s, { apiVersion: 1, kind: "implementers", target });
+      expect(a.error?.code).toBe("ambiguous");
+      expect((a.target as { name: string }[]).map((c) => c.name).sort()).toEqual(["IThing", "Thing"]);
+      expect((a.target as { file: string; line: number }[]).map((c) => `${c.file}:${c.line}`).sort()).toEqual(["svc/types.ts:1", "svc/types.ts:4"]);
+    }
+    // A file with no class or interface stays an error with no candidates.
+    const none = query(s, { apiVersion: 1, kind: "implementers", target: { name: "other/z.ts" } });
+    expect(none.error).not.toBeNull();
+    expect(none.target).toBeNull();
+  });
+
+  it("3. unknowns --file says how many rows come from other files of the package", async () => {
+    const s = await session(repo);
+    const a = query(s, { apiVersion: 1, kind: "unknowns", target: { file: "svc/b.ts" } });
+    const rows = a.items as { file: string; scope: string }[];
+    expect(rows.some((r) => r.file === "svc/c.ts" && r.scope === "project")).toBe(true);
+    const others = rows.filter((r) => r.file !== "svc/b.ts").length;
+    expect(a.unknown.reasons).toEqual([`${others} of these ${rows.length} rows come from other files of the same package: a call through a value there could reach this file, so they are listed (scope project)`]);
+    // By name there is no file to compare with: no such line.
+    expect(query(s, { apiVersion: 1, kind: "unknowns", target: { name: "save" } }).unknown.reasons).toEqual([]);
+  });
+
+  it("4. search puts one exact name match in target, never a prefix match, hits stay leads", async () => {
+    const s = await session(repo);
+    const one = query(s, { apiVersion: 1, kind: "search", text: "helper" });
+    expect(one.target).toMatchObject({ name: "helper", file: "svc/types.ts", score: 1 });
+    expect(one.items).toEqual([]);
+    expect(one.leads.map((l) => l.name)).toEqual(["helper"]);
+    // Prefix only: no target.
+    expect(query(s, { apiVersion: 1, kind: "search", text: "hel" }).target).toBeNull();
+    // Two exact matches: no target.
+    const two = await session({ "a.ts": "export function run() {}\n", "b.ts": "export function run() {}\n" });
+    expect(query(two, { apiVersion: 1, kind: "search", text: "run" }).target).toBeNull();
+    // A file path hit is not a symbol match.
+    expect(query(s, { apiVersion: 1, kind: "search", text: "svc/a.ts" }).target).toBeNull();
+  });
+
+  it("5. outline of . , ./ and an empty path is the repository root", async () => {
+    const s = await session(repo);
+    const all = query(s, { apiVersion: 1, kind: "outline", target: { file: "svc" } });
+    const root = query(s, { apiVersion: 1, kind: "outline", target: { file: "." }, limit: 500 });
+    expect(root.error).toBeNull();
+    const files = [...new Set((root.items as { file: string }[]).map((i) => i.file))].sort();
+    expect(files).toEqual(["other/z.ts", "svc/a.ts", "svc/b.ts", "svc/c.ts", "svc/types.ts"]);
+    expect(all.error).toBeNull();
+    for (const file of ["", "./", "/"]) expect(query(s, { apiVersion: 1, kind: "outline", target: { file }, limit: 500 }).items).toEqual(root.items);
+    expect(query(s, { apiVersion: 1, kind: "outline", target: { file: "./svc" }, limit: 500 }).items).toEqual(all.items);
+  });
+
+  it("6. a truncated answer carries the paging sentence the CLI prints", async () => {
+    const s = await session(repo);
+    const a = query(s, { apiVersion: 1, kind: "search", text: "s", limit: 1 });
+    expect(a.truncated.by).toBe("limit");
+    expect(a.truncated.note).toBe(`truncated by limit: ${a.truncated.omitted} more; --cursor ${a.truncated.cursor}`);
+    expect(query(s, { apiVersion: 1, kind: "search", text: "helper" }).truncated.note).toBeUndefined();
+  });
+});

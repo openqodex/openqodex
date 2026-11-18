@@ -94,6 +94,11 @@ describe("openqodex graph", () => {
     expect((JSON.parse(routes.stdout) as Answer).error?.code).toBe("unsupported");
     // Every build resolves uses as a value or a type, so references answers.
     expect(cli(root, "graph", "references", "core").status).toBe(0);
+    // A React package reads components, never routes: the answer stays a boundary.
+    const ui = repo({ ...files, "package.json": '{ "name": "ui", "dependencies": { "react": "18.3.1" } }\n', "src/App.tsx": "export function App() {\n  return <div>hi</div>;\n}\n" });
+    const withReact = cli(ui, "graph", "routes", "--json");
+    expect(withReact.status).toBe(2);
+    expect((JSON.parse(withReact.stdout) as Answer).error?.code).toBe("unsupported");
   });
 
   it("exits 0 for an answer that is a floor, and 2 for a name the graph does not hold (4)", () => {
@@ -129,6 +134,34 @@ describe("openqodex graph", () => {
     expect(c.status, c.stderr).toBe(0);
     const removed = (JSON.parse(c.stdout) as Answer).items.filter((x) => (x as { type: string }).type === "removed") as { name: string }[];
     expect(removed.map((x) => x.name)).toContain("total");
+  });
+});
+
+describe("dead ends of the text answers", () => {
+  const unbound = {
+    ...files,
+    "src/svc.ts": "export function save(): number {\n  return 1;\n}\n",
+    "src/use2.ts": 'import { save } from "./svc";\nexport function go(h: any): number {\n  h.save();\n  return save() + save();\n}\n',
+  };
+
+  it("prints the unbound-calls warning before the rows of callers, and the same text in JSON", () => {
+    const root = repo(unbound);
+    const r = cli(root, "graph", "callers", "save");
+    expect(r.status, r.stderr).toBe(0);
+    const lines = r.stdout.split("\n");
+    const warning = "1 call named save could not be bound; this list may be missing callers. See: openqodex graph unknowns --name save";
+    expect(lines[0]).toBe(`warning: ${warning}`);
+    expect(lines.findIndex((l) => l.startsWith("floor:"))).toBeGreaterThan(lines.findIndex((l) => l.includes("src/use2.ts:")));
+    expect((JSON.parse(cli(root, "graph", "callers", "save", "--json").stdout) as Answer).warning).toBe(warning);
+    expect(cli(root, "graph", "callers", "core").stdout).not.toMatch(/^warning:/m);
+  });
+
+  it("prints the paging sentence from the answer's own field", () => {
+    const root = repo(files);
+    const r = cli(root, "graph", "search", "o", "--limit", "1");
+    const a = JSON.parse(cli(root, "graph", "search", "o", "--limit", "1", "--json").stdout) as Answer;
+    expect(a.truncated.note).toMatch(/^truncated by limit: \d+ more; --cursor /);
+    expect(r.stdout.split("\n")).toContain(a.truncated.note);
   });
 });
 
