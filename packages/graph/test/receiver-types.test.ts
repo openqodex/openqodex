@@ -283,3 +283,48 @@ describe("floor examples", () => {
     expect(a.unknown.causes["untyped-receiver"]).toBe(7);
   });
 });
+
+describe("structural lookups on cyclic types", () => {
+  it("finishes fast on self-referencing, mutually recursive and long alias chains, and leaves an unknown", async () => {
+    const chain = Array.from({ length: 60 }, (_, i) => `type C${i} = C${i + 1};`).join("\n");
+    const g = await graphOf({
+      "lib.ts": LIB,
+      "cycles.ts": [
+        "import { Sessions } from './lib';",
+        "type A = { b: B; m(): void };",
+        "type B = { a: A };",
+        "interface I { j: J }",
+        "interface J { i: I }",
+        "type S = S;",
+        "type T = T & T & T & T & T & T & T & T;",
+        "type U = { u: U } & { u: U } & { u: U } & { u: U };",
+        "type V = W & W; type W = V & V;",
+        chain,
+        "type C60 = { s: Sessions };",
+        "type Loop0 = Loop1; type Loop1 = Loop0;",
+        "interface Base extends Back { own: number }",
+        "type Back = Base;",
+        "export function f(x: A, y: I, s: S, t: T, u: U, v: V, c: C0, l: Loop0, b: Base) {",
+        "  x.b.a.b.a.b.a.b.a.b.a.m(); // cyc-a",
+        "  y.j.i.j.i.j.i.go(); // cyc-i",
+        "  s.p.close(); // cyc-s",
+        "  t.p.q.close(); // cyc-t",
+        "  t.close(); // cyc-t2",
+        "  u.u.u.u.u.u.u.u.close(); // cyc-u",
+        "  v.p.close(); // cyc-v",
+        "  v.close(); // cyc-v2",
+        "  c.s.close(); // cyc-c",
+        "  l.p.close(); // cyc-l",
+        "  b.p.close(); // cyc-b",
+        "  b.own.p.close(); // cyc-b2",
+        "}",
+        "",
+      ].join("\n"),
+    });
+    const gaps = g.unknowns.filter((u) => u.file === "cycles.ts");
+    // Every call on a cyclic type is a gap, none an edge.
+    expect(gaps.filter((u) => u.name === "close").length).toBeGreaterThanOrEqual(9);
+    const close = into(g, symbol(g, "lib.ts", "close", "Sessions"));
+    expect(close.filter((c) => c.startsWith("cycles.ts:"))).toEqual([]);
+  }, 20_000);
+});

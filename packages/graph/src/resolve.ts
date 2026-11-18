@@ -2228,6 +2228,23 @@ export function createWorld(input: ResolveInput): World {
   const evOf = (a: Ev | null, b: Ev | null): Ev | null => (a === null ? b : b === null ? a : chain(a, b));
   const inPlace = (t: TypeRef): boolean => t.name === "{}" && t.qualifier === null && t.result === undefined && !t.path;
   const structural = (t: TypeRef): boolean => t.path !== undefined || t.parts !== undefined || inPlace(t);
+  // One structural lookup, from its first call to its last, whatever path it
+  // takes through types, aliases, bases and results: one budget of steps and
+  // one set of the member lookups it is inside of. Types of an untrusted
+  // repository may refer to themselves in any way (`interface I extends A`
+  // with `type A = I`), so a lookup that meets one again, or uses up the
+  // budget, is not known: null, never a loop.
+  const STRUCT_STEPS = 1024;
+  let walk: { left: number; open: Set<string> } | null = null;
+  const guarded = <A extends unknown[], R>(f: (...args: A) => R, spent: R) => (...args: A): R => {
+    const outer = walk === null;
+    if (outer) walk = { left: STRUCT_STEPS, open: new Set() };
+    try {
+      return (walk as { left: number }).left-- > 0 ? f(...args) : spent;
+    } finally {
+      if (outer) walk = null;
+    }
+  };
   // A type alias of the repository (`type X = Y`): what it stands for.
   const aliasOf = (key: string): Struct | null => {
     const info = classes.get(key);
@@ -2237,9 +2254,18 @@ export function createWorld(input: ResolveInput): World {
   };
   // The declared type of member `name` of class `key`, as written: on the
   // class, through the alias it is, or on a base.
-  const fieldRef = (key: string, name: string, depth = 0, seen = new Set<string>()): Struct | "ext" | null => {
-    if (depth > MAX_DEPTH || seen.has(key)) return null;
-    seen.add(key);
+  const fieldRef = guarded((key: string, name: string, depth: number = 0): Struct | "ext" | null => {
+    const open = (walk as { open: Set<string> }).open;
+    const tag = `${key}\u0000${name}`;
+    if (depth > MAX_DEPTH || open.has(tag)) return null;
+    open.add(tag);
+    try {
+      return fieldRefIn(key, name, depth);
+    } finally {
+      open.delete(tag);
+    }
+  }, null);
+  const fieldRefIn = (key: string, name: string, depth: number): Struct | "ext" | null => {
     const info = classes.get(key);
     const t = info?.fields.get(name);
     if (info && t) return { file: info.file, family: info.family, t, ev: null };
@@ -2247,7 +2273,7 @@ export function createWorld(input: ResolveInput): World {
     if (alias) return stepStruct(alias, name, depth + 1);
     const b = basesOf(key);
     for (let i = 0; i < b.keys.length; i++) {
-      const hit = fieldRef(b.keys[i] as string, name, depth + 1, seen);
+      const hit = fieldRef(b.keys[i] as string, name, depth + 1);
       if (hit === "ext") return hit;
       if (hit) return { ...hit, ev: throughBase(b.evs[i] as Ev, hit.ev), inherited: true };
     }
@@ -2255,7 +2281,7 @@ export function createWorld(input: ResolveInput): World {
   };
   // The one function a call's result names, and that result's type, when
   // it is read structurally (an object literal the body returns).
-  const resultOf = (s: Struct, depth: number): Struct | "ext" | null => {
+  const resultOf = guarded((s: Struct, depth: number): Struct | "ext" | null => {
     const t = s.t;
     let found: { ids: string[]; ev: Ev } | "ext" | null;
     if (t.on) {
@@ -2273,10 +2299,10 @@ export function createWorld(input: ResolveInput): World {
     const ev = result.inferred ? chain(found.ev, inferredEv(def)) : found.ev;
     const read: TypeRef = { ...result, promise: undefined, inferred: undefined, ...(result.result !== undefined && (result.awaited || t.awaited) ? { awaited: true } : {}) };
     return { file: def.file, family: def.family, t: read, ev: evOf(s.ev, ev) };
-  };
+  }, null);
   // The type itself once its member path is walked, its result read and
   // its alias followed; null or "ext" when a step is not known.
-  const normalize = (start: Struct, depth: number): Struct | "ext" | null => {
+  const normalize = guarded((start: Struct, depth: number): Struct | "ext" | null => {
     let s = start;
     for (let steps = 0; steps <= MAX_TYPE_DEPTH; steps++) {
       const t = s.t;
@@ -2305,10 +2331,10 @@ export function createWorld(input: ResolveInput): World {
       s = { ...alias, ev: evOf(s.ev, k.ev) };
     }
     return null;
-  };
+  }, null);
   // Whether one side of an intersection declares `name`: as a field (its
   // type), as a method, not at all, or "unknown" when that cannot be told.
-  const declares = (side: Struct, name: string, depth: number): Struct | "method" | null | "unknown" => {
+  const declares = guarded((side: Struct, name: string, depth: number): Struct | "method" | null | "unknown" => {
     if (depth > MAX_TYPE_DEPTH) return "unknown";
     const n = normalize(side, depth);
     if (n === null || n === "ext") return "unknown";
@@ -2335,9 +2361,9 @@ export function createWorld(input: ResolveInput): World {
     if (f === "ext") return "unknown";
     if (f) return { ...f, ev: evOf(evOf(n.ev, k.ev), f.ev) };
     return outsideBase(k.key) || (classes.get(k.key)?.dynamic.length ?? 0) > 0 ? "unknown" : null;
-  };
+  }, "unknown");
   // The type of member `name` of a value of type `s`.
-  const stepStruct = (s: Struct, name: string, depth = 0): Struct | "ext" | null => {
+  const stepStruct = guarded((s: Struct, name: string, depth: number = 0): Struct | "ext" | null => {
     if (depth > MAX_TYPE_DEPTH) return null;
     const n = normalize(s, depth);
     if (n === null || n === "ext") return n;
@@ -2364,17 +2390,17 @@ export function createWorld(input: ResolveInput): World {
       return arg ? { file: n.file, family: n.family, t: arg, ev } : null;
     }
     return { ...f, ev, inherited: undefined };
-  };
+  }, null);
   // The class a structural type comes to, for a call on it.
-  const toHit = (s: Struct, depth: number): TypeHit => {
+  const toHit = guarded((s: Struct, depth: number): TypeHit => {
     const n = normalize(s, depth);
     if (n === null || n === "ext") return n;
     if (structural(n.t)) return null;
     const k = typeKey(n.file, n.family, n.t, depth + 1);
     return k === null || k === "ext" || n.ev === null ? k : { ...k, ev: chain(n.ev, k.ev) };
-  };
+  }, null);
   // A method called on an intersection: the one side that declares it.
-  const intersectionCall = (s: Struct, name: string): TypeHit => {
+  const intersectionCall = guarded((s: Struct, name: string): TypeHit => {
     const n = normalize(s, 0);
     if (n === null || n === "ext" || !n.t.parts) return null;
     let one: TypeHit = null;
@@ -2385,7 +2411,7 @@ export function createWorld(input: ResolveInput): World {
       if (d === "method") one = toHit(side, 1);
     }
     return one;
-  };
+  }, null);
 
   const rbGlobal = (name: string): Outcome => {
     const ids = rbTop.get(name);
