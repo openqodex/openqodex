@@ -162,6 +162,9 @@ export function reader(root: Node): FactReader<HonoFact> {
   // import (aliased or not), or `ns.createRoute` of a namespace import.
   const createRouteNames = new Set<string>();
   const createRouteSpaces = new Set<string>();
+  // The local names an export clause (`export { app }`) or a default export
+  // (`export default app`) exports, for a file that names no Hono module.
+  const exportNames = new Set<string>();
   const scopes = new Map<number, { line: number; column: number; parent: number; names: Set<string>; all: boolean }>();
   // The shared visitor gives a function by its line alone, so this reader
   // keeps its own stack of scope keys: `entering` is the key of the
@@ -218,6 +221,14 @@ export function reader(root: Node): FactReader<HonoFact> {
       case "import_statement":
       case "export_statement": {
         const spec = specifier(node.childForFieldName("source"));
+        if (type === "export_statement" && spec === null) {
+          const local = node.childForFieldName("value");
+          if (local?.type === "identifier") exportNames.add(local.text);
+          for (const s of node.namedChildren.find((c) => c.type === "export_clause")?.namedChildren ?? []) {
+            const name = s.type === "export_specifier" ? s.childForFieldName("name") : null;
+            if (name?.type === "identifier") exportNames.add(name.text);
+          }
+        }
         if (spec === null || !honoModule(spec)) return;
         namesModule = true;
         if (type !== "import_statement" || spec !== "@hono/zod-openapi") return;
@@ -325,20 +336,26 @@ export function reader(root: Node): FactReader<HonoFact> {
     // createRoute, but its functions may hand a router on: a factory that
     // calls another, a wrapper that passes one through, a handler declared
     // in a function. A file with watched calls keeps them, its functions,
-    // their scopes and returns. A file with none keeps only the module
-    // functions that return a value resolve may read, with their scopes
-    // and returns: no other file can reach anything else in it. Both keep
-    // the values that what they keep reads.
+    // their scopes and returns, and the parameters the calls read, whose
+    // types tell a router of another library from one with no type. A file
+    // with none keeps only the module functions that return a value resolve
+    // may read, with their scopes and returns. Both keep the module values
+    // the file exports that resolve may read (`export const app =
+    // createApp()`, `export const v1 = app.basePath("/v1")`), since another
+    // file may import one and register routes on it: no other file can reach
+    // anything else in it. Both keep the values that what they keep reads.
+    const exportedValue = (f: HonoFact): boolean => f.kind === "value" && f.top && (f.exported || exportNames.has(f.name)) && f.value.t !== "new" && readable(f.value);
+    const calls = kept.some((f) => f.kind === "call");
     let keep: (f: HonoFact) => boolean;
-    if (kept.some((f) => f.kind === "call")) keep = (f) => f.kind === "call" || f.kind === "scope" || f.kind === "fn" || f.kind === "return" || f.kind === "syntax-error";
+    if (calls) keep = (f) => f.kind === "call" || f.kind === "scope" || f.kind === "fn" || f.kind === "return" || f.kind === "syntax-error" || exportedValue(f);
     else {
       const top = new Set(kept.flatMap((f) => (f.kind === "fn" && f.scope === 0 ? [f.key] : [])));
       const own = new Set(kept.flatMap((f) => (f.kind === "return" && top.has(f.scope) ? [f.scope] : [])));
-      if (own.size === 0) return kept.filter((f) => f.kind === "too-large" || f.kind === "syntax-error");
-      keep = (f) => f.kind === "syntax-error" || ((f.kind === "fn" || f.kind === "scope") && own.has(f.key)) || (f.kind === "return" && own.has(f.scope));
+      if (own.size === 0 && !kept.some(exportedValue)) return kept.filter((f) => f.kind === "too-large" || f.kind === "syntax-error");
+      keep = (f) => f.kind === "syntax-error" || ((f.kind === "fn" || f.kind === "scope") && own.has(f.key)) || (f.kind === "return" && own.has(f.scope)) || exportedValue(f);
     }
-    const read = namesRead(kept.filter((f) => keep(f) || f.kind === "value"));
-    return kept.filter((f) => keep(f) || (f.kind === "value" && read.has(f.name)));
+    const read = namesRead(kept.filter((f) => keep(f) || f.kind === "value"), kept.flatMap((f) => (exportedValue(f) && f.kind === "value" ? [f.name] : [])));
+    return kept.filter((f) => keep(f) || (f.kind === "value" && read.has(f.name)) || (calls && f.kind === "param" && read.has(f.name)));
   };
   return { visitor, finish };
 }
@@ -361,9 +378,9 @@ function trimReturns(facts: HonoFact[]): HonoFact[] {
 }
 
 // The names a file's watched calls and kept returns read, and the names the
-// values of those names read in turn.
-function namesRead(facts: readonly HonoFact[]): Set<string> {
-  const read = new Set<string>();
+// values of those names (and of the names in `seed`) read in turn.
+function namesRead(facts: readonly HonoFact[], seed: readonly string[] = []): Set<string> {
+  const read = new Set<string>(seed);
   const heads = (e: HExpr): void => {
     switch (e.t) {
       case "ref":

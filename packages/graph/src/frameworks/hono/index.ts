@@ -13,7 +13,7 @@ import type { HonoFact } from "./facts.js";
 import { isHonoFact, readFacts, reader, wants } from "./facts.js";
 import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 
-export const VERSION = 6;
+export const VERSION = 7;
 
 const SUPPORTED = "Hono 4 and @hono/zod-openapi";
 const app = "hono-app";
