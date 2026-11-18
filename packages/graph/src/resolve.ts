@@ -59,8 +59,9 @@ export const DISPATCH_CAP = 32;
 // as written on a gap.
 // 19: an element of a call's result declared as an array or a set
 // (TypeRef.item). 20: a file's project is the nearest root of its own
-// language family (projectFolder).
-export const RESOLVER_VERSION = 20;
+// language family (projectFolder). 21: a callback's parameter typed by the
+// function type the called definition declares (TypeRef.callback).
+export const RESOLVER_VERSION = 21;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -1470,6 +1471,16 @@ export function createWorld(input: ResolveInput): World {
     }
     return null;
   };
+  // What `t` reads on a called definition: its declared result, or with
+  // `callback` the declared type of a parameter of a function it takes.
+  const declaredOn = (def: Def, t: TypeRef): { from: { file: string; family: Family; owner: string | null }; result: TypeRef | null | undefined } | null => {
+    if (!t.callback) {
+      const from = resultsOf(def);
+      return from ? { from, result: from.results[t.result ?? 0] } : null;
+    }
+    const { arg, param } = t.callback;
+    return { from: def, result: def.callbacks?.find((c) => c.arg === arg)?.params[param] };
+  };
   // A function declared inside a function, by its index in the file's definitions.
   const localTarget = (file: string, index: number): ResultTarget => {
     const id = defIdsOf(file)[index];
@@ -1514,23 +1525,25 @@ export function createWorld(input: ResolveInput): World {
       if (!hit || !("ids" in hit)) return null;
       const ids = hit.ids.filter((id) => {
         const def = defById.get(id);
-        return def ? resultsOf(def)?.results[t.result ?? 0] : undefined;
+        return def ? declaredOn(def, t)?.result : undefined;
       });
       if (ids.length === 0) return null;
       found = { ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
     } else {
       found = t.localDef !== undefined ? localTarget(file, t.localDef) : resultTargets[family](file, t, nesting);
-      if (found === "ext") return "ext";
+      // A function outside the repository may hand its callback a value of the repository.
+      if (found === "ext") return t.callback ? null : "ext";
       // A constructor or a Go type conversion names its class directly.
       const key = found?.ids.length === 1 ? classOfId.get(found.ids[0] as string) : undefined;
-      if (key && found && !t.item) return { key, ev: found.ev };
+      if (key && found && !t.item && !t.callback) return { key, ev: found.ev };
     }
     if (!found) return null;
     let out: TypeHit = null;
     for (const id of found.ids) {
       const def = defById.get(id);
-      const from = def ? resultsOf(def) : null;
-      const result = from?.results[t.result ?? 0];
+      const declared = def ? declaredOn(def, t) : null;
+      const from = declared?.from;
+      const result = declared?.result;
       if (!def || !from || !result) return null;
       // An element of the result: only of one declared as an array or a set,
       // and never through a Promise, where `Promise<T[]>` and `Promise<T>[]`
@@ -2747,7 +2760,9 @@ export function createWorld(input: ResolveInput): World {
           }
           const note = r.type.parts
             ? "an intersection whose sides do not show which one alone declares the member"
-            : r.type.result !== undefined
+            : r.type.callback
+              ? `what ${named} hands its callback is not known to the graph`
+              : r.type.result !== undefined
               ? `what ${named} returns is not known to the graph`
               : `the type ${named} is not found in the graph`;
           return { unknown: "no-receiver-type", shape: "typed", note };
@@ -2874,7 +2889,9 @@ export function createWorld(input: ResolveInput): World {
           // `result`: the value is what calling `named` returns, not a type of that name.
           const note = r.type.parts
             ? "an intersection whose sides do not show which one alone declares the member"
-            : r.type.result !== undefined
+            : r.type.callback
+              ? `what ${named} hands its callback is not known to the graph`
+              : r.type.result !== undefined
               ? `what ${named} returns is not known to the graph`
               : `the type ${named} is not found in the graph`;
           return { unknown: "no-receiver-type", shape: "typed", note };
