@@ -1,0 +1,34 @@
+{
+  "guards": "follows createRoute constants across files, router factories, withAuth-style wrappers and nested prefixes into the full path of every OpenAPI route, and turns what it cannot follow into an unknown",
+  "frameworks": {
+    "plugin": "hono",
+    "apps": 1,
+    "registrations": [
+      { "site": "src/app.ts:22", "methods": ["GET"], "pattern": "/healthz", "status": "unresolved", "mounted": true },
+      { "site": "src/apis/users.ts:12", "methods": ["GET"], "pattern": "/api/v1/users", "handler": "src/apis/users.ts#listUsersHandler", "status": "bound", "mounted": true },
+      { "site": "src/apis/users.ts:12", "methods": ["GET"], "pattern": "/api/v1/settings/members", "handler": "src/apis/users.ts#listUsersHandler", "status": "bound", "mounted": true },
+      { "site": "src/apis/users.ts:13", "methods": ["GET"], "pattern": "/api/v1/users/:user_id", "handler": "src/apis/users.ts#createUsersRouter.getUserHandler", "status": "bound", "mounted": true },
+      { "site": "src/apis/users.ts:14", "methods": ["DELETE"], "pattern": "/api/v1/users/:user_id/sessions/:session_id", "handler": null, "status": "unresolved", "mounted": true }
+    ],
+    "edges": [
+      { "kind": "mounts", "from": "fw:hono:app:src/app.ts:21", "to": "fw:hono:router:src/app.ts:8", "tier": "certain" },
+      { "kind": "mounts", "from": "fw:hono:router:src/app.ts:8", "to": "fw:hono:router:src/apis/users.ts:11", "tier": "certain" },
+      { "kind": "mounts", "from": "fw:hono:router:src/apis/settings.ts:5", "to": "fw:hono:router:src/apis/users.ts:11", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:src/apis/users.ts:12", "to": "src/middleware.ts#requireAuth", "tier": "certain" }
+    ],
+    "roles": [
+      { "target": "src/apis/users.ts#listUsersHandler", "role": "route_handler", "detail": "hono" },
+      { "target": "src/middleware.ts#requireAuth", "role": "middleware", "detail": "hono" }
+    ],
+    "unknowns": [
+      { "file": "src/apis/users.ts", "line": 14, "cause": "unsupported-rule" },
+      { "file": "src/apis/users.ts", "line": 15, "cause": "dynamic" },
+      { "file": "src/app.ts", "line": 26, "cause": "miss" }
+    ],
+    "notRegistrations": ["src/apis/users.ts:15"],
+    "noRegistrationsIn": ["src/schemas.ts", "src/routes/userRoutes.ts"],
+    "notEdges": [
+      { "kind": "mounts", "from": "fw:hono:router:src/app.ts:15" }
+    ]
+  }
+}
