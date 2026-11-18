@@ -68,9 +68,10 @@ const LIMIT: Record<Spend, number> = { facts: MAX_FACTS_READ, lookups: MAX_LOOKU
 
 type Fact<K extends HonoFact["kind"]> = Extract<HonoFact, { kind: K }>;
 
-// One function call followed: the function's file and the line it starts
-// on, its parameters bound to the call's arguments where the call was
-// made, and a key naming the chain of calls that led here.
+// One function call followed: the function's file and its scope key (the
+// line it starts on, see facts.ts), its parameters bound to the call's
+// arguments where the call was made, and a key naming the chain of calls
+// that led here.
 type Ctx = { file: string; fn: number; args: Map<string, { e: HExpr; w: Where }>; key: string; depth: number };
 // Where an expression is read: its file, the function scope around it,
 // and the call it was reached through (null: read as written, no call).
@@ -245,7 +246,7 @@ function run(index: PluginIndex<HonoFact>): Analysis {
           break;
         case "fn":
           push(f.fns, fact.name, fact);
-          if (!f.fnAt.has(fact.line)) f.fnAt.set(fact.line, fact);
+          if (!f.fnAt.has(fact.key)) f.fnAt.set(fact.key, fact);
           break;
         case "return":
           push(f.returns, fact.scope, fact);
@@ -260,7 +261,7 @@ function run(index: PluginIndex<HonoFact>): Analysis {
           f.syntaxError = fact;
           break;
         case "scope":
-          if (!f.scopes.has(fact.line)) f.scopes.set(fact.line, fact);
+          if (!f.scopes.has(fact.key)) f.scopes.set(fact.key, fact);
           break;
       }
     }
@@ -365,10 +366,23 @@ function run(index: PluginIndex<HonoFact>): Analysis {
     const decl = topValue(file, local);
     return decl ? { k: "expr", w: { file, scope: 0, ctx: null }, e: { t: "ref", path: [local], line: decl.line, column: decl.column } } : { k: "none" };
   };
+  // The file and name the one import of the file that binds `name` names.
+  // The graph binds a value exported through a clause (`const app = new
+  // Hono(); export { app }`) to nothing, since it is no definition, so its
+  // import is followed here, to that module's own export table.
+  const importedFrom = (file: string, name: string): { file: string; name: string } | null => {
+    const imps = (index.languageFacts(file)?.imports ?? []).filter((i) => !i.scoped && !i.reexport && !i.typeOnly && i.names.some((n) => n.local === name));
+    const imp = imps.length === 1 ? imps[0] : undefined;
+    const imported = imp?.names.find((n) => n.local === name)?.imported;
+    if (!imp || !imported || !take("lookups")) return null;
+    const m = index.module(file, imp.spec);
+    return m.kind === "module" ? { file: m.file, name: imported } : null;
+  };
   const fromImport = (file: string, path: readonly string[]): Deref => {
     let found: Lookup = lookup(file, path);
     let target: { file: string; name: string } | null = null;
     if (found.kind === "miss") target = { file: found.target, name: found.name };
+    else if (found.kind === "none" && path.length === 1) target = importedFrom(file, path[0] as string);
     else if (found.kind === "none" && path.length === 2) {
       found = lookup(file, [path[0] as string]);
       if (found.kind === "module") target = { file: found.file, name: path[1] as string };
@@ -496,15 +510,15 @@ function run(index: PluginIndex<HonoFact>): Analysis {
         if (target.k === "gap") return target;
         const ctxDepth = (w.ctx?.depth ?? 0) + 1;
         if (ctxDepth > MAX_CALL_DEPTH || depth > MAX_CALL_DEPTH * 4) return gap("fan-out-capped", `the router passes through more than ${MAX_CALL_DEPTH} function calls, past what the plugin follows`, show(fn));
-        const rets = fx(target.file).returns.get(target.fn.line) ?? [];
+        const rets = fx(target.file).returns.get(target.fn.key) ?? [];
         const label = target.fn.name;
         const args = new Map<string, { e: HExpr; w: Where }>();
         target.fn.params.forEach((p, i) => {
           const a = e.args[i];
           if (p !== null && a) args.set(p, { e: a, w });
         });
-        const ctx: Ctx = { file: target.file, fn: target.fn.line, args, key: `${w.ctx?.key ?? ""}@${w.file}:${e.line}:${e.column}`, depth: ctxDepth };
-        const inner: Where = { file: target.file, scope: target.fn.line, ctx };
+        const ctx: Ctx = { file: target.file, fn: target.fn.key, args, key: `${w.ctx?.key ?? ""}@${w.file}:${e.line}:${e.column}`, depth: ctxDepth };
+        const inner: Where = { file: target.file, scope: target.fn.key, ctx };
         if (rets.length !== 1) {
           for (const r of rets) value(inner, r.value, calls, mark, depth + 1);
           if (rets.length === 0) return gap("unsupported-rule", `${label} returns no value the plugin reads`, label);
@@ -618,9 +632,9 @@ function run(index: PluginIndex<HonoFact>): Analysis {
       else if (d.e.t === "via") work.push({ w: d.w, e: d.e.base });
       else if (d.e.t === "call") {
         const t = fnOf(d.w, d.e.fn);
-        if (t.k === "gap" || reachedFns.has(`${t.file}:${t.fn.line}`)) continue;
-        reachedFns.add(`${t.file}:${t.fn.line}`);
-        for (const r of fx(t.file).returns.get(t.fn.line) ?? []) work.push({ w: { file: t.file, scope: t.fn.line, ctx: null }, e: r.value });
+        if (t.k === "gap" || reachedFns.has(`${t.file}:${t.fn.key}`)) continue;
+        reachedFns.add(`${t.file}:${t.fn.key}`);
+        for (const r of fx(t.file).returns.get(t.fn.key) ?? []) work.push({ w: { file: t.file, scope: t.fn.key, ctx: null }, e: r.value });
       }
     }
   };
@@ -841,7 +855,12 @@ function run(index: PluginIndex<HonoFact>): Analysis {
           }
           const pathArg = f.args[isOn ? 1 : 0];
           const handlers = f.args.slice(isOn ? 2 : 1);
-          if (!pathArg || handlers.length === 0) continue;
+          if (!pathArg) continue;
+          if (handlers.length === 0) {
+            // `get(path)` only sets the path; `get(handler)` registers the handler at the last path set on the value, which the plugin does not track.
+            if (!isOn && !pathLike(w, pathArg)) addUnknown({ plugin: PLUGIN, site: ev.site, scope: { file: ev.file }, affects: ["handles"], cause: "unsupported-rule", name: showH(pathArg), note: `${f.prop} is called with no path, so the route that ${showH(pathArg)} handles is at the last path set on this value, which the plugin does not track; it is not listed as a route`, count: null, exact: false });
+            continue;
+          }
           const written = pathArg.t === "new" || pathArg.t === "via" ? null : evaluate(pathArg, constant(ev.file, ev.scope));
           const h = handlers[handlers.length - 1] as HExpr;
           if (written === null || methods === null) {
