@@ -3,7 +3,7 @@
 // the test links and the calls from files named like tests, and neither on
 // whether some other plugin found something else in the repository. Ways
 // it could fail, written before the code:
-//  1. A React package next to an unread Hono app turns `routes` into a
+//  1. A React package next to an unread Koa app turns `routes` into a
 //     clean empty success (no items, floor false), because the React
 //     plugin found components.
 //  2. `routes` says unsupported without naming the server framework the
@@ -55,6 +55,15 @@ const SYNTH_TESTS = {
   "tests/suite.ts": "import type { IStore } from '../src/store';\n// Shared contract suite: the store arrives as the interface type (like storeContractSuite.ts).\nexport function contract(makeStore: () => IStore) {\n  const store = makeStore();\n  return store.finish('done');\n}\n",
   "src/store.ts": "export function isNonTerminal(state: string): boolean { return state !== 'done'; }\nexport interface IStore { finish(state: string): boolean }\nexport class Store implements IStore {\n  finish(state: string) { return !isNonTerminal(state); }\n}\n",
 };
+// A server framework no route reader of this build reads.
+const KOA_APP = { "src/server.ts": "import Koa from 'koa';\nconst app = new Koa();\napp.use((ctx) => { ctx.body = 'ok'; });\napp.listen(3000);\n" };
+const KOA = { "package.json": '{"name":"koa-demo","version":"1.0.0","dependencies":{"koa":"^2.15.0"}}\n', ...KOA_APP };
+const KOA_REACT = {
+  "package.json": '{"name":"root","private":true,"workspaces":["ui","."],"dependencies":{"koa":"^2.15.0"}}\n',
+  "ui/package.json": '{"name":"ui","version":"1.0.0","dependencies":{"react":"^19.0.0"}}\n',
+  "ui/App.tsx": "import React from 'react';\nexport function App() { return <div>hi</div>; }\n",
+  ...KOA_APP,
+};
 const REACT_PKG = { "package.json": '{ "name": "synth", "dependencies": { "react": "18.3.1" } }\n', "src/App.tsx": "import React from 'react';\nexport function App() { return <div>hi</div>; }\n" };
 
 const FASTAPI = {
@@ -68,19 +77,28 @@ const EXPRESS = {
 };
 
 describe("routes rest on the route readers alone", () => {
-  it("answers unsupported for the Hono repro and names Hono (2)", async () => {
-    const a = ask(await built(HONO), { kind: "routes" });
+  it("answers unsupported for a Koa app and names Koa (2)", async () => {
+    const a = ask(await built(KOA), { kind: "routes" });
     expect(a.error?.code).toBe("unsupported");
-    expect(a.error?.message).toMatch(/Hono/);
+    expect(a.error?.message).toMatch(/Koa/);
   }, 60_000);
 
-  it("answers the same for Hono with a React package beside it, never an empty success (1)", async () => {
-    const g = await built(HONO_REACT);
+  it("answers the same for Koa with a React package beside it, never an empty success (1)", async () => {
+    const g = await built(KOA_REACT);
     expect((g.frameworks?.plugins ?? []).find((p) => p.id === "react")?.status).toBe("ok");
     const a = ask(g, { kind: "routes" });
     expect(a.error?.code).toBe("unsupported");
-    expect(a.error?.message).toMatch(/Hono/);
+    expect(a.error?.message).toMatch(/Koa/);
     expect(a.items).toEqual([]);
+  }, 60_000);
+
+  it("lists the routes of the Hono repro, alone and with a React package beside it, and names no unread server", async () => {
+    for (const files of [HONO, HONO_REACT]) {
+      const a = ask(await built(files), { kind: "routes" });
+      expect(a.error).toBeNull();
+      expect(routeKeys(a)).toEqual(["GET /api/v1/users/:id", "GET /healthz", "POST /api/v1/users"]);
+      expect(a.unknown.reasons.join(" ")).not.toMatch(/does not read/);
+    }
   }, 60_000);
 
   it("answers unsupported for a React-only repository, naming no framework it does not declare (1)", async () => {
@@ -101,12 +119,12 @@ describe("routes rest on the route readers alone", () => {
     expect(a.error?.message).toMatch(/github\.com\/gin-gonic\/gin/);
   }, 60_000);
 
-  it("lists the FastAPI routes of a repository with a Hono package too, as a floor that names Hono (3)", async () => {
-    const a = ask(await built({ ...FASTAPI, "web/package.json": '{"name":"web","dependencies":{"hono":"^4.0.0"}}\n', "web/src/app.ts": HONO_APP["src/app.ts"], "web/src/users.ts": HONO_APP["src/users.ts"] }), { kind: "routes" });
+  it("lists the FastAPI routes of a repository with a Koa package too, as a floor that names Koa (3)", async () => {
+    const a = ask(await built({ ...FASTAPI, "web/package.json": '{"name":"web","dependencies":{"koa":"^2.15.0"}}\n', "web/src/server.ts": KOA_APP["src/server.ts"] }), { kind: "routes" });
     expect(a.error).toBeNull();
     expect(routeKeys(a)).toEqual(["GET /items"]);
     expect(a.unknown.floor).toBe(true);
-    expect(a.unknown.reasons.join(" ")).toMatch(/Hono/);
+    expect(a.unknown.reasons.join(" ")).toMatch(/Koa/);
   }, 60_000);
 
   it("leaves the routes of an Express or FastAPI app unchanged when a React package is added (1, 4)", async () => {
@@ -204,9 +222,10 @@ describe("tests keep their name-based leads whatever else a plugin found (5, 6)"
 });
 
 describe("capabilities say per question what this build cannot answer (7)", () => {
-  it("lists routes as unsupported for Hono with React, naming Hono, and not for FastAPI with React", async () => {
-    const hono = unsupported(ask(await built(HONO_REACT), { kind: "capabilities" }));
-    expect(hono.routes).toMatch(/Hono/);
+  it("lists routes as unsupported for Koa with React, naming Koa, and not for Hono or FastAPI with React", async () => {
+    const koa = unsupported(ask(await built(KOA_REACT), { kind: "capabilities" }));
+    expect(koa.routes).toMatch(/Koa/);
+    expect(unsupported(ask(await built(HONO_REACT), { kind: "capabilities" })).routes).toBeUndefined();
     const fastapi = unsupported(ask(await built({ ...FASTAPI, "ui/package.json": '{"name":"ui","dependencies":{"react":"^19.0.0"}}\n', "ui/App.tsx": REACT_PKG["src/App.tsx"] }), { kind: "capabilities" }));
     expect(fastapi.routes).toBeUndefined();
   }, 60_000);

@@ -1,0 +1,5 @@
+---
+"openqodex": minor
+---
+
+The code graph now reads Hono applications, including `@hono/zod-openapi`. `openqodex graph routes` lists every route a Hono app serves with its method, its full path, its handler and the application that serves it, instead of answering that Hono is not read. Routes registered with `openapi()` and a `createRoute` constant from another file are listed, routers that a factory function builds and a wrapper such as `withAuth(router, middleware)` returns are composed under their `route()` prefix, and an OpenAPI `{id}` is shown as `:id`, as Hono serves it. Two apps in one repository keep their routes apart. A part the graph cannot follow, such as a router a function returns from two places or an inline handler, is reported as an unknown at its line instead of a guessed path.
