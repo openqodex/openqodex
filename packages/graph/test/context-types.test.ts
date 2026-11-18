@@ -59,8 +59,42 @@ describe("this in a field initializer (1)", () => {
       ].join("\n"),
     });
     expect(tiers(g, defAt(g, "src/box.ts", "open", 5))).toEqual(["src/box.ts:2 certain", "src/box.ts:4 certain"]);
-    // `this` in the object's own method is the object: never the instance.
-    expect(tiers(g, defAt(g, "src/box.ts", "open", 8)).filter((s) => !s.startsWith("src/box.ts:11 "))).toEqual(["src/box.ts:3 certain"]);
+    // `this` in the object's own method is the object: neither side of the class.
+    expect(tiers(g, defAt(g, "src/box.ts", "open", 8))).toEqual(["src/box.ts:3 certain"]);
+  });
+
+  it("never binds this in a function or an object method nested in a class to the class, and keeps arrows bound", async () => {
+    const g = await graphOf({
+      "src/a.ts": [
+        "export class A {",
+        "  run(): number {",
+        "    const o = { go() { return this.x(); } };",
+        "    const f = function () { return this.x(); };",
+        "    function g() { return this.x(); }",
+        "    const h = () => this.x();",
+        "    [1].forEach(() => this.x());",
+        "    const k = function () { return () => this.x(); };",
+        "    return o.go() + f() + g() + h() + k()();",
+        "  }",
+        "  x(): number {",
+        "    return 1;",
+        "  }",
+        "  static x(): number {",
+        "    return 2;",
+        "  }",
+        "  static presets = [{ go() { return this.x(); } }, function () { return this.x(); }];",
+        "  static arrows = [() => this.x()];",
+        "  later = function () { return this.x(); };",
+        "}",
+        "",
+      ].join("\n"),
+    });
+    // Line 6 is an arrow too, but a const arrow is a definition of its own,
+    // whose `this` the resolver does not follow yet: unbound, never wrong.
+    expect(tiers(g, defAt(g, "src/a.ts", "x", 11))).toEqual(["src/a.ts:19 certain", "src/a.ts:7 certain"]);
+    expect(tiers(g, defAt(g, "src/a.ts", "x", 14))).toEqual(["src/a.ts:18 certain"]);
+    const unknown = g.unknowns.filter((u) => u.name === "x").map((u) => u.line);
+    for (const line of [3, 4, 5, 8, 17]) expect(unknown).toContain(line);
   });
 
   it("keeps a class nested in an instance initializer reading its own static fields as static", async () => {
@@ -246,5 +280,79 @@ describe("callback parameters and loop variables (3)", () => {
     });
     const id = symbol(g, "src/server.ts", "listTools", "Server");
     expect(tiers(g, id)).toEqual([10, 7, 8, 9].map((l) => `src/pool.ts:${l} certain`));
+  });
+});
+
+describe("a callback's parameters from the declared function type it is passed as (4)", () => {
+  const tracing = [
+    "export interface Span {",
+    "  setOutput(o: string): void;",
+    "}",
+    "export interface Tracing {",
+    "  withSpan<T>(name: string, operation: (span: Span) => Promise<T>): Promise<T>;",
+    "  generic<S>(operation: (s: S) => void): void;",
+    "  loose(operation: Function): void;",
+    "}",
+    "export function span<T>(name: string, fn: (s: Span, depth: number) => T): T {",
+    "  return fn({ setOutput() {} }, 0);",
+    "}",
+    "export class Box<V> {",
+    "  each(fn: (v: V) => void): void {}",
+    "}",
+    "export class Item {",
+    "  setOutput(o: string): void {}",
+    "}",
+    "// A class that shares a type parameter's name: never what `S` means in generic.",
+    "export class S {",
+    "  setOutput(o: string): void {}",
+    "}",
+    "",
+  ].join("\n");
+
+  it("types each untyped parameter of the callback by the declared function type", async () => {
+    const g = await graphOf({
+      "src/tracing.ts": tracing,
+      "src/use.ts": [
+        'import { span, type Tracing } from "./tracing";',
+        "export class Tool {",
+        "  constructor(private tracing: Tracing) {}",
+        "  run(): Promise<number> {",
+        '    return this.tracing.withSpan("x", async (span) => {',
+        '      span.setOutput("a");',
+        "      return 1;",
+        "    });",
+        "  }",
+        "}",
+        'export function plain(): void {',
+        '  span("y", (s) => s.setOutput("b"));',
+        "}",
+        "",
+      ].join("\n"),
+    });
+    const id = symbol(g, "src/tracing.ts", "setOutput", "Span");
+    expect(tiers(g, id)).toEqual(["src/use.ts:12 certain", "src/use.ts:6 certain"]);
+  });
+
+  it("leaves a parameter typed by a type parameter, a loose function type or an unknown callee unbound", async () => {
+    const g = await graphOf({
+      "src/tracing.ts": tracing,
+      "src/use.ts": [
+        'import { Box, Item, type Tracing } from "./tracing";',
+        "declare function external(fn: (s: unknown) => void): void;",
+        "export function use(tracing: Tracing, box: Box<Item>, other): void {",
+        "  tracing.generic((s) => s.setOutput(\"a\"));",
+        "  tracing.loose((s) => s.setOutput(\"b\"));",
+        "  box.each((v) => v.setOutput(\"c\"));",
+        "  other.withSpan(\"x\", (s) => s.setOutput(\"d\"));",
+        "  external((s) => s.setOutput(\"e\"));",
+        "  tracing.withSpan(\"x\", (s, extra) => extra.setOutput(\"f\"));",
+        "}",
+        "",
+      ].join("\n"),
+    });
+    for (const owner of ["Span", "Item", "S"]) {
+      const id = symbol(g, "src/tracing.ts", "setOutput", owner);
+      expect(tiers(g, id).filter((s) => s.startsWith("src/use.ts") && s.endsWith("certain"))).toEqual([]);
+    }
   });
 });
