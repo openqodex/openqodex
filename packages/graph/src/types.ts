@@ -334,6 +334,10 @@ export type GraphStatus = {
   stages: Record<string, number>;
   cuts: Cut[];
   notRead: NotRead[];
+  // Source files of known languages the graph does not parse, by language.
+  // Informational: never a reason, never a floor. Absent in a build kept by
+  // an older version.
+  unreadLanguages?: { language: string; files: number }[];
 };
 
 export type Graph = {

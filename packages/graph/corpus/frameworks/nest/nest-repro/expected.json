@@ -1,0 +1,13 @@
+{
+  "guards": "lists the routes of the reported two-file Nest app (engine-routes/synth/nest) with their controller methods instead of answering that no framework is read, and says that the root module written in place is not read",
+  "frameworks": {
+    "plugin": "nest",
+    "apps": 1,
+    "registrations": [
+      { "site": "src/users.controller.ts:4", "methods": ["GET"], "pattern": "/users/:id", "handler": "src/users.controller.ts#UsersController.findOne", "status": "bound", "mounted": false },
+      { "site": "src/users.controller.ts:6", "methods": ["POST"], "pattern": "/users", "handler": "src/users.controller.ts#UsersController.create", "status": "bound", "mounted": false }
+    ],
+    "roles": [{ "target": "src/users.controller.ts#UsersController.findOne", "role": "route_handler", "detail": "nest" }],
+    "unknowns": [{ "file": "src/main.ts", "line": 3, "cause": "unsupported-rule" }]
+  }
+}
