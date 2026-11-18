@@ -81,6 +81,7 @@ function itemLine(i: Item, op: Operation): string {
 
 // One fact per line: sites as file:line, tiers spelled out.
 function printText(a: Answer, op: Operation): void {
+  if (a.warning) line(`warning: ${a.warning}`);
   if (a.error) {
     line(`${a.error.code}: ${a.error.message}`);
     if (Array.isArray(a.target)) for (const c of a.target) line(`  candidate ${c.file}:${c.line} ${c.kind} ${c.name} (${c.id})`);
@@ -100,10 +101,11 @@ function printText(a: Answer, op: Operation): void {
   });
   if (a.counts.certain !== null) line(`counts: ${a.counts.certain} certain, ${a.counts.likely} likely, ${a.counts.possible} possible`);
   const tr = a.truncated;
-  if (tr.by === "limit" || (tr.by === "budget" && tr.cursor)) line(`truncated by ${tr.by}: ${tr.omitted ?? "an unknown number of"} more; --cursor ${tr.cursor}`);
+  if (tr.by === "limit" || (tr.by === "budget" && tr.cursor)) line(tr.note ?? `truncated by ${tr.by}: ${tr.omitted ?? "an unknown number of"} more; --cursor ${tr.cursor}`);
   else if (tr.by === "budget") line(`stopped at the time budget: what lies past ${tr.frontierTotal ?? "the"} unexpanded ${tr.frontierTotal === 1 ? "point" : "points"} is not counted; ask again with a larger --budget-ms`);
   else if (tr.by === "depth") line(`stopped at the depth asked: ${tr.frontierTotal ?? "some"} ${tr.frontierTotal === 1 ? "point has" : "points have"} more past it; --depth goes further`);
   if (a.unknown.floor) line(`floor: ${a.unknown.reasons.join("; ") || "the graph could not see every relation"}`);
+  else if (op === "unknowns") for (const r of a.unknown.reasons) line(`note: ${r}`);
   const g = a.graph;
   line(`graph: build ${g.generation ?? "not saved"}, ${g.status}, ${g.mode}${g.reasons.length > 0 ? `: ${g.reasons.join("; ")}` : ""}${g.freshness.laterEditsKnown ? "; files changed since this build" : ""}`);
 }

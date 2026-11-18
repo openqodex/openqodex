@@ -72,6 +72,8 @@ export type Answer = {
   leads: Candidate[];
   unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[] };
   truncated: Truncated;
+  // Set when the rows alone could mislead: said first by every reader of the answer.
+  warning?: string;
   graph: { generation: string | null; treeSha: string | null; builtAt: string | null; status: "ok" | "partial"; reasons: string[]; mode: "fresh" | "retained"; freshness: { laterEditsKnown: boolean } };
 };
 
