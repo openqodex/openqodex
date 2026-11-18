@@ -57,7 +57,9 @@ export const DISPATCH_CAP = 32;
 // types written in place and aliased, intersections, destructured names,
 // type arguments), results inferred from a function's body, the receiver
 // as written on a gap.
-export const RESOLVER_VERSION = 18;
+// 19: an element of a call's result declared as an array or a set
+// (TypeRef.item).
+export const RESOLVER_VERSION = 19;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -1520,7 +1522,7 @@ export function createWorld(input: ResolveInput): World {
       if (found === "ext") return "ext";
       // A constructor or a Go type conversion names its class directly.
       const key = found?.ids.length === 1 ? classOfId.get(found.ids[0] as string) : undefined;
-      if (key && found) return { key, ev: found.ev };
+      if (key && found && !t.item) return { key, ev: found.ev };
     }
     if (!found) return null;
     let out: TypeHit = null;
@@ -1529,6 +1531,10 @@ export function createWorld(input: ResolveInput): World {
       const from = def ? resultsOf(def) : null;
       const result = from?.results[t.result ?? 0];
       if (!def || !from || !result) return null;
+      // An element of the result: only of one declared as an array or a set,
+      // and never through a Promise, where `Promise<T[]>` and `Promise<T>[]`
+      // read the same.
+      if (t.item && (!result.elem || result.promise)) return null;
       let inner: TypeHit;
       if (def.family === "java" && result.param !== undefined) {
         // Arguments belong to the receiver's file, which may differ from the method's file.
@@ -1547,7 +1553,7 @@ export function createWorld(input: ResolveInput): World {
         // Only an awaited call exposes the value inside a declared Promise.
         inner = result.promise && !t.awaited
           ? "ext"
-          : typeKey(from.file, from.family, { ...result, result: undefined, promise: undefined }, depth + 1, false, from.owner);
+          : typeKey(from.file, from.family, { ...result, result: undefined, promise: undefined, ...(t.item ? { elem: false } : {}) }, depth + 1, false, from.owner);
       }
       if (inner === null) return null;
       if (out !== null && (inner === "ext" ? out !== "ext" : out === "ext" || out.key !== inner.key)) return null;

@@ -1,0 +1,27 @@
+{
+  "guards": "binds this.m() in an instance field initializer to the instance method and in a static one to the static method, never the other way",
+  "callers": [
+    {
+      "to": "src/sandbox.ts#Sandbox.handleExec@8",
+      "site": "src/sandbox.ts:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sandbox.ts#Sandbox.handleExec@11",
+      "site": "src/sandbox.ts:7",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notCertain": [
+    {
+      "to": "src/sandbox.ts#Sandbox.handleExec@11",
+      "site": "src/sandbox.ts:6"
+    },
+    {
+      "to": "src/sandbox.ts#Sandbox.handleExec@8",
+      "site": "src/sandbox.ts:7"
+    }
+  ]
+}
