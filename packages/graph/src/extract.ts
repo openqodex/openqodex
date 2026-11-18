@@ -38,7 +38,11 @@ import type { TreeVisitor } from "./walk.js";
 // 27: calls in an instance field initializer run on the instance, a const
 // function inside an anonymous callback or a module block is a definition,
 // and callback parameters and loop variables take a declared element type.
-export const EXTRACTOR_VERSION = 27;
+// 28: `this` and `super` outside an arrow, a method or a class field's
+// function give no receiver type, and each parameter declared as a function
+// type keeps that function's parameter types (DefFact.callbacks), which an
+// untyped parameter of a callback passed there takes (TypeRef.callback).
+export const EXTRACTOR_VERSION = 28;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none

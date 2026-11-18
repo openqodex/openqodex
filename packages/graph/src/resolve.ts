@@ -59,8 +59,9 @@ export const DISPATCH_CAP = 32;
 // as written on a gap.
 // 19: an element of a call's result declared as an array or a set
 // (TypeRef.item). 20: a file's project is the nearest root of its own
-// language family (projectFolder).
-export const RESOLVER_VERSION = 20;
+// language family (projectFolder). 21: a callback's parameter typed by the
+// function type the called definition declares (TypeRef.callback).
+export const RESOLVER_VERSION = 21;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
