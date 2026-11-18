@@ -21,7 +21,7 @@
 // cursor pages are copied, never changed.
 import { showBlob } from "../capture/git.js";
 import { DEFAULT_MAX_FILE_BYTES } from "../build.js";
-import { keptName } from "../frameworks/shared/kept.js";
+import { hidesKey, keptName, redactedWhole } from "../frameworks/shared/kept.js";
 import { RepoReader } from "../safe-fs.js";
 import type { Answer, Session } from "./answer.js";
 
@@ -54,6 +54,23 @@ const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !
 const placeOf = (v: unknown): { file: string; line: number } | null =>
   isRec(v) && typeof v.file === "string" && Number.isInteger(v.line) && (v.line as number) > 0 ? { file: v.file, line: v.line as number } : null;
 
+// The lists inside an item whose entries are items too: an impact's hops and
+// a route's handles. Compacting and the lines around places both walk them.
+const NESTED = ["hops", "handles"] as const;
+
+// The sites one item names, in order: its own site (or, with no site and no
+// hops, its own file and line), the site of each nested entry, and the site
+// in its evidence (a framework edge that `explain` gives).
+function sitesOf(item: Rec, add: (p: { file: string; line: number } | null) => void): void {
+  if (isRec(item.site)) add(placeOf(item.site));
+  else if (!Array.isArray(item.hops)) add(placeOf(item));
+  for (const key of NESTED) {
+    const list = item[key];
+    if (Array.isArray(list)) for (const h of list) add(isRec(h) ? placeOf(h.site) : null);
+  }
+  if (isRec(item.evidence)) add(placeOf(item.evidence.site));
+}
+
 // Every place an answer names, in order, once each: the target, the items
 // (an edge's site, the sites of an impact's hops, or an item's own file and
 // line), and the leads.
@@ -66,18 +83,16 @@ function places(a: Answer): { file: string; line: number }[] {
     out.push(p);
   };
   for (const t of Array.isArray(a.target) ? a.target : [a.target]) add(placeOf(t));
-  for (const item of a.items) {
-    if (!isRec(item)) continue;
-    if (isRec(item.site)) add(placeOf(item.site));
-    else if (Array.isArray(item.hops)) for (const h of item.hops) add(isRec(h) ? placeOf(h.site) : null);
-    else add(placeOf(item));
-  }
+  for (const item of a.items) if (isRec(item)) sitesOf(item, add);
   for (const l of a.leads) add(placeOf(l));
   return out;
 }
 
 function shown(line: string): string {
-  const l = keptName(line.endsWith("\r") ? line.slice(0, -1) : line);
+  const raw = line.endsWith("\r") ? line.slice(0, -1) : line;
+  // A key hidden by percent-encoding cannot be cut out of the line: the
+  // whole line goes, as a kept string does.
+  const l = hidesKey(raw) ? redactedWhole(raw) : keptName(raw);
   return l.length > MAX_LINE ? `${l.slice(0, MAX_LINE)}${CUT}` : l;
 }
 
@@ -115,7 +130,7 @@ function compactItem(v: unknown): unknown {
     const { column: _c, rule: _r, via: _v, ...site } = v.site;
     out.site = site;
   }
-  if (Array.isArray(v.hops)) out.hops = v.hops.map(compactItem);
+  for (const key of NESTED) if (Array.isArray(v[key])) out[key] = (v[key] as unknown[]).map(compactItem);
   return out;
 }
 

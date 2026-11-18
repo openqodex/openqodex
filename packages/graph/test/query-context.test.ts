@@ -117,3 +117,75 @@ describe("the compact form", () => {
     expect(JSON.stringify(await shapeAnswer(a, s, { repoRoot: root, context: 0, compact: false }))).toBe(JSON.stringify(a));
   });
 });
+
+// A Hono app with a route and its handler, and a React test beside a
+// plain test that calls the same function (the shapes the review of query
+// answers raised: nested handles, evidence sites, many leads, encoded keys).
+const HONO_FILES = {
+  "package.json": '{"name":"hono-demo","version":"1.0.0","dependencies":{"hono":"^4.0.0"}}\n',
+  "src/app.ts": "import { Hono } from 'hono';\nimport { users } from './users';\nconst app = new Hono();\napp.get('/healthz', c => c.text('ok'));\napp.route('/api/v1/users', users);\nexport default app;\n",
+  "src/users.ts": "import { Hono } from 'hono';\nimport { getUser } from './handlers';\nexport const users = new Hono();\nusers.get('/:id', getUser);\nusers.post('/', c => c.json({}));\n",
+  "src/handlers.ts": "export function getUser(c: { json(v: unknown): unknown }) {\n  return c.json({});\n}\n",
+};
+
+async function honoSession(): Promise<{ root: string; s: Session }> {
+  const root = makeRepo(HONO_FILES);
+  commitAll(root);
+  const graph = await buildGraph({ repoRoot: root, store: null });
+  return { root, s: { graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false } };
+}
+
+describe("nested sites in framework answers (2, 3)", () => {
+  it("compacts the handles of a route answer like any other item (2)", async () => {
+    const { root, s } = await honoSession();
+    const a = query(s, { apiVersion: 1, kind: "routes" });
+    const withHandles = (a.items as { handles: unknown[] }[]).filter((r) => r.handles.length > 0);
+    expect(withHandles.length).toBeGreaterThan(0);
+    const c = await shapeAnswer(a, s, { repoRoot: root, compact: true });
+    for (const r of c.items as { handles: Record<string, unknown>[] }[]) {
+      for (const h of r.handles) {
+        expect(h).not.toHaveProperty("edge");
+        expect(h.site).not.toHaveProperty("column");
+        expect(h.site).not.toHaveProperty("via");
+        expect(h.site).not.toHaveProperty("rule");
+      }
+    }
+  }, 60_000);
+
+  it("gives lines for the site of an explained framework edge and for route handle sites (3)", async () => {
+    const { root, s } = await honoSession();
+    const routes = query(s, { apiVersion: 1, kind: "routes" });
+    const handles = (routes.items as { handles: { edge: string; site: { file: string; line: number } }[] }[]).flatMap((r) => r.handles);
+    expect(handles.length).toBeGreaterThan(0);
+    const shaped = (await shapeAnswer(routes, s, { repoRoot: root, context: 0 })) as Shaped;
+    expect(shaped.context).toBeUndefined();
+    const withLines = (await shapeAnswer(routes, s, { repoRoot: root, context: 1 })) as Shaped;
+    const at = withLines.context?.snippets.map((x) => `${x.file}:${x.line}`) ?? [];
+    for (const h of handles) expect(at).toContain(`${h.site.file}:${h.site.line}`);
+    const explained = query(s, { apiVersion: 1, kind: "explain", target: { id: (handles[0] as { edge: string }).edge } });
+    const site = (explained.items[0] as { evidence?: { site: { file: string; line: number } } }).evidence?.site;
+    expect(site).toBeDefined();
+    const e = (await shapeAnswer(explained, s, { repoRoot: root, context: 1 })) as Shaped;
+    expect(e.context?.snippets.map((x) => `${x.file}:${x.line}`)).toContain(`${site?.file}:${site?.line}`);
+  }, 60_000);
+});
+
+describe("an encoded key in a context line (4)", () => {
+  it("redacts the whole line when its percent-decoded form holds a key", async () => {
+    const root = makeRepo({
+      "core.ts": "export function core(): number {\n  return 1;\n}\n",
+      "use.ts": 'import { core } from "./core";\nexport function use(): number {\n  const u = "https://x.test/?t=ghp%5Fabcdefghijklmnopqrstuvwx";\n  return core();\n}\n',
+    });
+    commitAll(root);
+    const graph = await buildGraph({ repoRoot: root, store: null });
+    const s: Session = { graph, generation: "g", treeSha: null, builtAt: null, laterEditsKnown: false };
+    const a = query(s, { apiVersion: 1, kind: "callers", target: { name: "core" } });
+    const out = (await shapeAnswer(a, s, { repoRoot: root, context: 1 })) as Shaped;
+    const text = JSON.stringify(out);
+    expect(text).not.toContain("ghp%5F");
+    expect(text).not.toContain("abcdefghijklmnopqrstuvwx");
+    const lines = out.context?.snippets.find((x) => x.file === "use.ts")?.lines ?? [];
+    expect(lines.some((l) => /^\[redacted:[0-9a-f]{8}\]$/.test(l))).toBe(true);
+    expect(lines).toContain("  return core();");
+  });
+});

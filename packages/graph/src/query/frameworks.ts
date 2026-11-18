@@ -30,6 +30,7 @@ import type { Graph, GraphNode, GraphSite } from "../types.js";
 import { candidate, counts, empty, fail, isAnswer, listing, Point, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Job, Request, Session } from "./answer.js";
 import { edgeId } from "./ids.js";
+import { limitOf } from "./page.js";
 import { Pass, RANK, sortWithin, Walk } from "./traverse.js";
 import type { Item } from "./traverse.js";
 
@@ -323,7 +324,10 @@ export function tests(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
     // With links the leads ride beside them, and the links are the page.
     const into = links.length > 0 ? "items" : "leads";
     const page = links.length > 0 ? links : leads;
-    const answer = (): Answer => ({ ...base, target, ...(links.length > 0 ? { counts: counts(links), leads } : {}), unknown });
+    // The leads beside the links are one page long, not paged: every page
+    // would repeat them. The rest are said, and `callers` lists them all.
+    const cap = limitOf(req);
+    const answer = (): Answer => ({ ...base, target, ...(links.length > 0 ? { counts: counts(links), leads: leads.slice(0, cap) } : {}), unknown });
     const linked = new Set(links.map((l) => l.from));
     walk ??= new Walk(g, at.id, "in", 2, tiers);
     if (!walk.run(budget)) return stoppedAt(answer(), page, walk.pending(), walk.pending().length, into);
@@ -337,7 +341,10 @@ export function tests(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
     });
     if (!picked.run(budget)) return stoppedAt(answer(), page, [], picked.left, into);
     // Calls from test files no link holds: the links are not every test.
-    if (links.length > 0 && leads.length > 0) Object.assign(unknown, { floor: true, reasons: [`${leads.length} files or functions named like tests call into \`${at.name}\` and no framework test link holds them: they are leads, not test links`, ...unknown.reasons] });
+    if (links.length > 0 && leads.length > 0) {
+      const more = leads.length > cap ? `; the first ${cap} are listed, ${leads.length - cap} more are not: \`graph callers ${at.name} --depth 2\` lists them` : "";
+      Object.assign(unknown, { floor: true, reasons: [`${leads.length} files or functions named like tests call into \`${at.name}\` and no framework test link holds them: they are leads, not test links${more}`, ...unknown.reasons] });
+    }
     return listing(answer(), page, { into });
   };
 }

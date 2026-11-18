@@ -230,3 +230,24 @@ describe("capabilities say per question what this build cannot answer (7)", () =
     expect(fastapi.routes).toBeUndefined();
   }, 60_000);
 });
+
+describe("tests answer with many leads (review of query answers, 1)", () => {
+  it("caps the leads at the page limit, says how many more there are, and repeats nothing on a later page", async () => {
+    const calls: Record<string, string> = {};
+    for (let i = 0; i < 12; i++) calls[`test/extra${i}.test.ts`] = `import { fmt } from "../src/fmt";\nexport function checks${i}(): boolean {\n  return fmt(${i}) === "${i}";\n}\n`;
+    const g = await built({
+      "package.json": '{ "name": "ui", "dependencies": { "react": "18.3.1" }, "devDependencies": { "@testing-library/react": "16.0.0", "vitest": "2.1.0" } }\n',
+      "src/fmt.ts": "export function fmt(n: number): string {\n  return String(n);\n}\n",
+      "src/Card.tsx": 'import { fmt } from "./fmt";\nexport function Card({ n }: { n: number }) {\n  return <div>{fmt(n)}</div>;\n}\n',
+      "src/Card.test.tsx": 'import { render } from "@testing-library/react";\nimport { describe, expect, it } from "vitest";\nimport { Card } from "./Card";\nimport { fmt } from "./fmt";\n\ndescribe("Card", () => {\n  it("shows the number", () => {\n    render(<Card n={1} />);\n    expect(fmt(1)).toBe("1");\n  });\n});\n',
+      ...calls,
+    });
+    const a = ask(g, { kind: "tests", target: { name: "fmt" }, limit: 3 });
+    expect(a.error).toBeNull();
+    expect(a.items.length).toBeGreaterThan(0);
+    expect(a.leads.length).toBeLessThanOrEqual(3);
+    expect(a.unknown.reasons.join(" ")).toMatch(/12 files or functions/);
+    expect(a.unknown.reasons.join(" ")).toMatch(/9 more/);
+    expect(a.unknown.reasons.join(" ")).toMatch(/callers/);
+  }, 60_000);
+});
