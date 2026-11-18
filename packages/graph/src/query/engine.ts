@@ -22,7 +22,7 @@ import type { Tier } from "../model/records.js";
 import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Extra, Job, Listing, Request, Session } from "./answer.js";
-import { frameworkLayer, noLayerReason, routes, tests } from "./frameworks.js";
+import { frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
 import { edgeId, readEdgeId } from "./ids.js";
 import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, readCursor } from "./page.js";
 import { Overrides, dynamicBases, implementers, importCycles, impact, methodsNamed, outline, packages, path, references, relationsOf } from "./relations.js";
@@ -40,12 +40,14 @@ const LANGUAGES = ["typescript", "tsx", "javascript", "python", "go", "ruby", "j
 // What this build can answer, and what it cannot yet.
 function capabilities(s: Session): Record<string, unknown> {
   const rel = relationsOf(s.graph);
-  const layer = frameworkLayer(s.graph);
   const unsupported: Record<string, string> = {};
+  // Routes and tests each by the plugins that read them (query/frameworks.ts).
+  const routesWhy = routesUnsupported(s.graph);
+  const testsWhy = testsUnread(s.graph);
   if (![...rel].some((k) => ["uses_value", "uses_type", "reads", "writes", "may_invoke", "decorates"].includes(k))) unsupported.references = "uses of a symbol as a value or a type are not resolved";
-  if (!layer) unsupported.routes = `${noLayerReason(s.graph)}: routes and handlers are not read`;
+  if (routesWhy !== null) unsupported.routes = `${routesWhy}: routes and handlers are not read`;
   if (!rel.has("dispatches_to")) unsupported["implementers of a method"] = "calls through interfaces and base types are not resolved; overrides are found by name from the inheritance";
-  if (!layer) unsupported.tests = `${noLayerReason(s.graph)}: files named like tests are leads only`;
+  if (testsWhy !== null) unsupported.tests = `${testsWhy}: files named like tests are leads only`;
   return {
     apiVersion: API_VERSION,
     modelVersion: MODEL_VERSION,
