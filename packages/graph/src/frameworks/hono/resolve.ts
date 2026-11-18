@@ -81,8 +81,8 @@ type Where = { file: string; scope: number; ctx: Ctx | null };
 // basePath paths of the chain it was reached through, outermost last.
 type Inst = { key: string; file: string; line: number; column: number; ctx: Ctx | null; bases: { e: Expr; w: Where }[] };
 type Gap = { k: "gap"; cause: FrameworkUnknown["cause"]; note: string; name: string | null; viaCall?: boolean };
-type Res = { k: "inst"; inst: Inst } | { k: "param"; name: string; type: string | null } | Gap | { k: "none" };
-type Deref = { k: "expr"; w: Where; e: HExpr } | { k: "param"; name: string; type: string | null } | Gap | { k: "none" };
+type Res = { k: "inst"; inst: Inst } | { k: "param"; name: string; type: string | null; named: boolean } | Gap | { k: "none" };
+type Deref = { k: "expr"; w: Where; e: HExpr } | { k: "param"; name: string; type: string | null; named: boolean } | Gap | { k: "none" };
 
 type Identity = {
   ctors: Map<string, string>; // local name to the class it is: Hono, OpenAPIHono
@@ -425,7 +425,7 @@ function run(index: PluginIndex<HonoFact>): Analysis {
         const typed = (fx(w.file).params.get(name) ?? []).find((p) => p.scope === at);
         const ids = identity(w.file);
         const honoTyped = typed && ((typed.type.length === 1 && ids.types.has(typed.type[0] as string)) || (typed.type.length === 2 && ids.spaces.has(typed.type[0] as string) && (typed.type[1] === "Hono" || typed.type[1] === "OpenAPIHono")));
-        return { k: "param", name, type: honoTyped && typed ? typed.type.join(".") : null };
+        return { k: "param", name, type: honoTyped && typed ? typed.type.join(".") : null, named: typed !== undefined };
       }
       return { k: "none" };
     }
@@ -550,6 +550,9 @@ function run(index: PluginIndex<HonoFact>): Analysis {
     return { method: method.toUpperCase(), path, w };
   };
 
+  // A path argument: a literal, a constant, or a computed string.
+  const pathLike = (w: Where, e: HExpr | undefined): boolean => e !== undefined && (e.t === "str" || e.t === "dyn" || (e.t === "ref" && evaluate(e, constant(w.file, w.scope)) !== null));
+
   // ---------- events on each Hono value ----------
   type Base = { type: "route" | "use" | "openapi" | "mount" | "foreign"; file: string; site: Site; scope: number; f: Fact<"call">; bases: { e: Expr; w: Where }[] };
   const events = new Map<string, Base[]>();
@@ -603,6 +606,15 @@ function run(index: PluginIndex<HonoFact>): Analysis {
       if (type === "use" && (r.k === "param" || (r.k === "gap" && r.viaCall === true && value(w, f.recv, true, null).k === "inst"))) {
         const on = r.k === "param" ? `the parameter ${r.name}` : `the router ${showH(f.recv)} returns`;
         addUnknown({ plugin: PLUGIN, site, scope: { file }, affects: ["applies_middleware"], cause: r.k === "param" ? "dynamic" : "unsupported-rule", name: showH(f.recv), note: `use is called on ${on}, which the plugin does not follow to a router, so the middleware it adds is applied to no route; the middleware chains of the routes it may cover are not known whole`, count: null, exact: false });
+        continue;
+      }
+      // A route on a parameter with no type written as a name (none, `any`,
+      // `unknown`): the caller decides which router it lands on, which the
+      // plugin does not follow from here, so the route is not listed and is
+      // an unknown. A call no route could be (`c.get("user")`, one
+      // argument) is no route.
+      if (r.k === "param" && !r.named && ((type === "route" && f.args.length >= (f.prop === "on" ? 3 : 2) && pathLike(w, f.args[f.prop === "on" ? 1 : 0])) || (type === "openapi" && f.args.length >= 2))) {
+        addUnknown({ plugin: PLUGIN, site, scope: { file }, affects: ["handles", "mounts"], cause: "dynamic", name: showH(f.recv), note: `a route is registered on the parameter ${r.name}, which has no type the plugin reads, so which router it lands on, and under which prefix, is decided by the caller; it is not listed as a route`, count: null, exact: false });
         continue;
       }
       if (r.k === "param" && r.type !== null) {
@@ -803,9 +815,6 @@ function run(index: PluginIndex<HonoFact>): Analysis {
       order++;
     }
   };
-
-  // A path argument: a literal, a constant, or a computed string.
-  const pathLike = (w: Where, e: HExpr | undefined): boolean => e !== undefined && (e.t === "str" || e.t === "dyn" || (e.t === "ref" && evaluate(e, constant(w.file, w.scope)) !== null));
 
   const compose = (app: string | null, inst: Inst, prefix: string | null, inherited: Mw[], via: Site[], stack: readonly string[], depth: number, cut: { file: string; scope: number; line: number } | null) => {
     reached.add(inst.key);
