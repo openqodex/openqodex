@@ -11,9 +11,9 @@
 // answered (not found, a capability this build lacks, a bad request) or
 // the build failed.
 import { display, findRepoRoot, loadConfig, OpenQodexError } from "@openqodex/core";
-import { laterEdits, openStore, OPERATIONS, parseTarget, pinGeneration, pinWorkTree, query } from "@openqodex/graph";
+import { laterEdits, openStore, OPERATIONS, parseTarget, pinGeneration, pinWorkTree, query, shapeAnswer } from "@openqodex/graph";
 import { openqodexHome } from "@openqodex/scanners";
-import type { Answer, GraphStore, Item, Operation, Pinned, Request } from "@openqodex/graph";
+import type { Answer, GraphStore, Item, Operation, Pinned, Request, Shaped } from "@openqodex/graph";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
 
@@ -23,11 +23,12 @@ export const USAGE = [
   "  status | capabilities",
   "  search <text>",
   "  symbol | callers | callees <name | file:line> [--file <path>] [--depth 1..3] [--tier certain,likely]",
+  "  callees <name | file:line> --edges calls,defines   also into the definitions it holds",
   "  implementers <class | interface | Class.method> [--depth 1..8]",
   "  references <name | file:line>     uses as a value or a type",
   "  routes [<handler>] [--text <path part>]",
   "  tests <name | file:line>",
-  "  path <from> <to> [--edges calls,inherits,imports] [--depth 1..8]",
+  "  path <from> <to> [--edges calls,inherits,defines,imports] [--depth 1..8]",
   "  impact [<name | file:line>]        with no symbol: what the change reaches",
   "  importers <file>",
   "  outline <file | folder>",
@@ -37,6 +38,7 @@ export const USAGE = [
   "  unknowns [--file <path> | --name <name>]",
   "  explain <edge id>",
   "  options: --json, --limit <n>, --cursor <c>, --tokens <n>, --budget-ms <ms>, --generation <build id>, --cwd <dir>",
+  "           --context <0..10> (source lines around each place), --compact (with --json: items without edge ids)",
 ].join("\n");
 
 function out(line = ""): void {
@@ -65,7 +67,7 @@ function intFlag(values: Map<string, string>, name: string): number | undefined 
   return Number(v);
 }
 
-const VERB: Record<string, string> = { calls: "calls", inherits: "inherits", imports: "imports", overrides: "overrides", implements: "implements" };
+const VERB: Record<string, string> = { calls: "calls", inherits: "inherits", imports: "imports", overrides: "overrides", implements: "implements", defines: "defines" };
 
 function siteLine(i: Item): string {
   return `${i.site.file}:${i.site.line}`;
@@ -73,14 +75,24 @@ function siteLine(i: Item): string {
 
 function itemLine(i: Item, op: Operation): string {
   const tail = `, ${i.site.tier}${i.depth > 1 && op !== "path" ? `, ${i.depth} hops` : ""}${i.site.note ? `: ${i.site.note}` : ""} [${i.edge}]`;
-  if (op === "callees") return `${siteLine(i)} calls ${i.toName ?? i.to}${tail}`;
+  // A defines hop is a definition held in the body, never a call.
+  if (op === "callees") return `${siteLine(i)} ${i.kind === "defines" ? `${i.fromName ?? i.from} defines` : "calls"} ${i.toName ?? i.to}${tail}`;
   if (op === "path" || op === "implementers" || op === "references") return `${siteLine(i)} ${i.fromName ?? i.from} ${VERB[i.kind] ?? i.kind} ${i.toName ?? i.to}${tail}`;
   if (i.kind === "imports") return `${siteLine(i)} imports it${tail}`;
   return `${siteLine(i)} in ${i.fromName ?? i.from}${tail}`;
 }
 
 // One fact per line: sites as file:line, tiers spelled out.
-function printText(a: Answer, op: Operation): void {
+const LANGUAGE_NAMES: Record<string, string> = { rust: "Rust", c: "C", "c++": "C++", "c#": "C#", kotlin: "Kotlin", swift: "Swift", php: "PHP", scala: "Scala" };
+
+// "412 Rust files not read: Rust is not supported by this build"
+function unreadLine(u: { language: string; files: number }): string {
+  const name = LANGUAGE_NAMES[u.language] ?? u.language;
+  return `${u.files} ${name} ${u.files === 1 ? "file" : "files"} not read: ${name} is not supported by this build`;
+}
+
+function printText(a: Shaped, op: Operation): void {
+  if (a.warning) line(`warning: ${a.warning}`);
   if (a.error) {
     line(`${a.error.code}: ${a.error.message}`);
     if (Array.isArray(a.target)) for (const c of a.target) line(`  candidate ${c.file}:${c.line} ${c.kind} ${c.name} (${c.id})`);
@@ -97,13 +109,23 @@ function printText(a: Answer, op: Operation): void {
     else if (op === "cycles" && Array.isArray(i.members)) line(`cycle of ${String(i.size)}: ${(i.members as string[]).join(", ")}`);
     else if (op === "outline") line(`${String(i.file)}:${String(i.line)} ${String(i.kind)} ${String(i.qualified)}${i.exported ? ", exported" : ""}, ${String(i.callerSites)} call sites in, ${String(i.calleeSites)} out`);
     else line(JSON.stringify(raw));
+    if (op === "status" || op === "capabilities") for (const u of (i.unreadLanguages ?? []) as { language: string; files: number }[]) line(unreadLine(u));
   });
+  for (const c of a.context?.snippets ?? []) {
+    line(`lines around ${c.file}:${c.line}${c.from === null ? ": not readable" : c.changedSince ? ", as this build read them; the file changed since" : ""}`);
+    // The source line keeps its own indent; the rest of it goes through display().
+    c.lines.forEach((l, k) => {
+      const lead = /^[ \t]*/.exec(l)?.[0] ?? "";
+      out(`  ${c.start + k}| ${lead.replace(/\t/g, "    ")}${display(l.slice(lead.length))}`);
+    });
+  }
   if (a.counts.certain !== null) line(`counts: ${a.counts.certain} certain, ${a.counts.likely} likely, ${a.counts.possible} possible`);
   const tr = a.truncated;
-  if (tr.by === "limit" || (tr.by === "budget" && tr.cursor)) line(`truncated by ${tr.by}: ${tr.omitted ?? "an unknown number of"} more; --cursor ${tr.cursor}`);
+  if (tr.by === "limit" || (tr.by === "budget" && tr.cursor)) line(tr.note ?? `truncated by ${tr.by}: ${tr.omitted ?? "an unknown number of"} more; --cursor ${tr.cursor}`);
   else if (tr.by === "budget") line(`stopped at the time budget: what lies past ${tr.frontierTotal ?? "the"} unexpanded ${tr.frontierTotal === 1 ? "point" : "points"} is not counted; ask again with a larger --budget-ms`);
   else if (tr.by === "depth") line(`stopped at the depth asked: ${tr.frontierTotal ?? "some"} ${tr.frontierTotal === 1 ? "point has" : "points have"} more past it; --depth goes further`);
   if (a.unknown.floor) line(`floor: ${a.unknown.reasons.join("; ") || "the graph could not see every relation"}`);
+  else if (op === "unknowns") for (const r of a.unknown.reasons) line(`note: ${r}`);
   const g = a.graph;
   line(`graph: build ${g.generation ?? "not saved"}, ${g.status}, ${g.mode}${g.reasons.length > 0 ? `: ${g.reasons.join("; ")}` : ""}${g.freshness.laterEditsKnown ? "; files changed since this build" : ""}`);
 }
@@ -114,8 +136,8 @@ function exitOf(a: Answer): number {
 
 export async function run(args: string[]): Promise<number> {
   const { global, bools, values, positionals } = parseFlags(args, {
-    bools: ["--json", "--full"],
-    values: ["--file", "--name", "--tier", "--depth", "--limit", "--cursor", "--generation", "--base", "--edges", "--level", "--project", "--text", "--tokens", "--budget-ms"],
+    bools: ["--json", "--full", "--compact"],
+    values: ["--file", "--name", "--tier", "--depth", "--limit", "--cursor", "--generation", "--base", "--edges", "--level", "--project", "--text", "--tokens", "--budget-ms", "--context"],
     positionals: 3,
     globals: ["--cwd", "--config", "--quiet"],
   });
@@ -176,6 +198,7 @@ export async function run(args: string[]): Promise<number> {
       else {
         line(`Built ${s.filesParsed} of ${s.eligibleFiles} files in ${(s.durationMs / 1000).toFixed(1)} s: ${s.parses} parsed, ${s.cacheHits} from cache, mode ${s.mode} (predicted ${s.predictedMs ?? "?"} ms).`);
         line(`build ${s.generation ?? "not saved"}, ${s.status}${s.reasons.length > 0 ? `: ${s.reasons.join("; ")}` : ""}`);
+        for (const u of s.unreadLanguages ?? []) line(unreadLine(u));
       }
       return s.generation === null && store !== null ? EXIT_TOOL_FAILED : EXIT_OK;
     }
@@ -209,7 +232,8 @@ export async function run(args: string[]): Promise<number> {
       cursor: values.get("--cursor"),
       ...(tokens !== undefined || ms !== undefined ? { budget: { ...(tokens !== undefined ? { tokens } : {}), ...(ms !== undefined ? { ms } : {}) } } : {}),
     };
-    const answer = query(session, request, { changes: pinned.changes, change: pinned.change, scope: pinned.scope });
+    const asked = query(session, request, { changes: pinned.changes, change: pinned.change, scope: pinned.scope });
+    const answer = await shapeAnswer(asked, session, { repoRoot, context: intFlag(values, "--context"), compact: json && bools.has("--compact"), maxFileBytes: settings.maxFileBytes });
     if (json) out(JSON.stringify(answer));
     else printText(answer, kind);
     return exitOf(answer);

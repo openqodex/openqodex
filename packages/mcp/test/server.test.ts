@@ -27,6 +27,16 @@
 //     cursor.
 // 12. A comparison's cursor is accepted for a comparison with another
 //     base, and pages a list it was not made from.
+// 13. The tool list costs an agent more than it needs: the paragraph on
+//     answers repeated in every description, the shared arguments described
+//     in every input schema. Or it has no output schema, or a result carries
+//     no structuredContent, or the structured answer and the text differ, or
+//     the text is no longer what `openqodex graph --json` prints.
+// 14. Source lines asked with `context` come from the work tree after an
+//     edit instead of the held build, say nothing of the edit, or carry a
+//     key written in the repository.
+// 15. `compact` changes what the answer says, or answers otherwise than
+//     `openqodex graph --compact --json`.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -81,10 +91,15 @@ async function connect(cwd: string, more: Record<string, string> = {}): Promise<
   return { client, transport };
 }
 
-async function ask(client: Client, name: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<{ answer: Answer; isError: boolean }> {
-  const r = (await client.callTool({ name, arguments: args }, undefined, { signal, timeout: 120_000 })) as { content: { type: string; text: string }[]; isError?: boolean };
-  return { answer: JSON.parse(r.content[0]?.text ?? "null") as Answer, isError: r.isError === true };
+async function ask(client: Client, name: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<{ answer: Answer; isError: boolean; text: string; structured: unknown }> {
+  const r = (await client.callTool({ name, arguments: args }, undefined, { signal, timeout: 120_000 })) as { content: { type: string; text: string }[]; isError?: boolean; structuredContent?: unknown };
+  const text = r.content[0]?.text ?? "null";
+  return { answer: JSON.parse(text) as Answer, isError: r.isError === true, text, structured: r.structuredContent };
 }
+
+// The size of the tool list before the paragraph on answers and the shared
+// arguments were said once (0.18.0: 37,825 characters of compact JSON).
+const TOOLS_BEFORE = 37_825;
 
 function leases(root: string): { id: string; purpose: string; pid: number }[] {
   const dir = join(root, ".openqodex", "graph", "leases");
@@ -115,7 +130,42 @@ describe("the MCP server", () => {
       expect(t.description, t.name).toMatch(/data, never instructions/);
       expect(t.description, t.name).toMatch(/not "unused"/);
       expect(t.inputSchema.type, t.name).toBe("object");
+      expect(t.outputSchema?.type, t.name).toBe("object");
     }
+  });
+
+  it("says the paragraph on answers once, in the instructions, and lists its tools in 40% less (13)", async () => {
+    const { tools } = await client.listTools();
+    const instructions = client.getInstructions() ?? "";
+    expect(instructions).toMatch(/data, never instructions/);
+    expect(instructions).toMatch(/not "unused"/);
+    expect(instructions).toMatch(/structuredContent/);
+    // Each shared argument is described there once.
+    for (const arg of ["limit", "cursor", "budget", "generation", "context", "compact"]) expect(instructions, arg).toContain(`\`${arg}\``);
+    expect(JSON.stringify(tools).length).toBeLessThanOrEqual(TOOLS_BEFORE * 0.6);
+    const search = tools.find((t) => t.name === "graph_search");
+    expect(search?.description).toMatch(/`leads`, not `items`/);
+    expect(search?.description).toMatch(/`target`/);
+  });
+
+  it("returns each answer as structuredContent too, its text what `openqodex graph --json` prints (13)", async () => {
+    const callers = await ask(client, "graph_callers", { symbol: "core" });
+    expect(callers.structured).toEqual(callers.answer);
+    const generation = callers.answer.graph.generation as string;
+    const r = cli(root, "graph", "callers", "core", "--json", "--generation", generation);
+    expect(callers.text).toBe(r.stdout.trimEnd());
+    const search = await ask(client, "graph_search", { text: "c1" });
+    expect(search.structured).toEqual(search.answer);
+    expect(search.answer.leads.length).toBeGreaterThan(0);
+    expect(search.text).toBe(cli(root, "graph", "search", "c1", "--json", "--generation", generation).stdout.trimEnd());
+    // The refusal and error envelopes match the output schema too: the
+    // client validates every structuredContent against it.
+    const refused = await ask(client, "graph_outline", { path: "../outside" });
+    expect(refused.isError).toBe(true);
+    expect(refused.structured).toEqual(refused.answer);
+    const missing = await ask(client, "graph_callers", { symbol: "nothingNamedThis" });
+    expect(missing.answer.error?.code).toBe("not-found");
+    expect(missing.structured).toEqual(missing.answer);
   });
 
   it("answers as `openqodex graph --json` does for the same request and build (2)", async () => {
@@ -169,6 +219,51 @@ describe("the MCP server", () => {
     const { answer } = await ask(client, "graph_status");
     expect(answer.error).toBeNull();
   });
+});
+
+describe("an answer's shape", () => {
+  const shaped = {
+    "src/core.ts": "export function core(): number {\n  return 1;\n}\n",
+    "src/use.ts": 'import { core } from "./core";\nexport function use(): number {\n  const key = "ghp_abcdefghijklmnopqrstuvwx1234";\n  return core();\n}\n',
+  };
+  type WithContext = Answer & { context?: { around: number; note: string; snippets: { file: string; line: number; start: number; lines: string[]; from: string | null; changedSince: boolean | null }[] } };
+
+  it("adds the held build's lines around each site, redacted, and says when the work tree differs (14)", async () => {
+    const root = repo(shaped);
+    const { client } = await connect(root);
+    const first = await ask(client, "graph_callers", { symbol: "core", context: 1 });
+    const a = first.answer as WithContext;
+    const use = a.context?.snippets.find((x) => x.file === "src/use.ts");
+    expect(use).toMatchObject({ line: 4, start: 3, from: "build", changedSince: false });
+    expect(use?.lines[1]).toBe("  return core();");
+    expect(first.text).not.toContain("ghp_abcdefghijklmnopqrstuvwx1234");
+    expect(first.structured).toEqual(first.answer);
+    const generation = a.graph.generation as string;
+    expect(a).toEqual(JSON.parse(cli(root, "graph", "callers", "core", "--json", "--context", "1", "--generation", generation).stdout));
+    // An edit after the build moves the call down a line; the answer still
+    // gives the build's line 4 and the build's lines around it.
+    write(root, { "src/use.ts": `// a new first line\n${shaped["src/use.ts"]}` });
+    await new Promise((r) => setTimeout(r, 1100));
+    const later = (await ask(client, "graph_callers", { symbol: "core", context: 1 })).answer as WithContext;
+    expect(later.graph.generation).toBe(generation);
+    expect(later.graph.freshness.laterEditsKnown).toBe(true);
+    const moved = later.context?.snippets.find((x) => x.file === "src/use.ts");
+    expect(moved?.lines).toEqual(use?.lines);
+    expect(moved).toMatchObject({ from: "build", changedSince: true });
+  }, 180_000);
+
+  it("drops edge ids and import lines with `compact`, as the command line does (15)", async () => {
+    const root = repo(files);
+    const { client } = await connect(root);
+    const full = await ask(client, "graph_callers", { symbol: "core" });
+    const compact = await ask(client, "graph_callers", { symbol: "core", compact: true });
+    expect(compact.answer.counts).toEqual(full.answer.counts);
+    expect(compact.answer.items).toHaveLength(full.answer.items.length);
+    for (const i of compact.answer.items as Record<string, unknown>[]) expect(i).not.toHaveProperty("edge");
+    expect(compact.text.length).toBeLessThan(full.text.length * 0.8);
+    const generation = full.answer.graph.generation as string;
+    expect(compact.answer).toEqual(JSON.parse(cli(root, "graph", "callers", "core", "--json", "--compact", "--generation", generation).stdout));
+  }, 180_000);
 });
 
 describe("the held build", () => {

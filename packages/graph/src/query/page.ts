@@ -35,6 +35,8 @@ export type Truncated = {
   // points past the depth asked, up to 50; their count is `frontierTotal`.
   frontier?: string[];
   frontierTotal?: number;
+  // How to go on, as the command line says it; set with a cursor.
+  note?: string;
 };
 
 // What of a request a cursor is bound to: everything but the position and
@@ -121,6 +123,10 @@ export function keptJob(g: Graph, id: string): Job | null {
 // The page of a whole list at `offset`, cut further by the token budget. At
 // least one item is returned when any is left, so a client paging with a
 // tiny budget still moves forward. Past the last page, the depth asked.
+export function pagingNote(by: "limit" | "budget", omitted: number | null, cursor: string | null): string {
+  return `truncated by ${by}: ${omitted ?? "an unknown number of"} more; --cursor ${cursor}`;
+}
+
 export function pageOf(generation: string | null, req: Bindable & { limit?: number; budget?: { items?: number; tokens?: number } }, l: Listing, offset: number): Answer {
   let items = l.all.slice(offset, offset + limitOf(req));
   let byTokens = false;
@@ -140,7 +146,11 @@ export function pageOf(generation: string | null, req: Bindable & { limit?: numb
   }
   const rest = l.all.length - offset - items.length;
   let truncated: Truncated = { by: null, omitted: 0, omittedExact: true, cursor: null };
-  if (rest > 0) truncated = { by: byTokens ? "budget" : "limit", omitted: rest, omittedExact: true, cursor: cursorFor(generation, req, offset + items.length) };
+  if (rest > 0) {
+    const by = byTokens ? "budget" : "limit";
+    const cursor = cursorFor(generation, req, offset + items.length);
+    truncated = { by, omitted: rest, omittedExact: true, cursor, note: pagingNote(by, rest, cursor) };
+  }
   else if (l.beyond) truncated = { by: "depth", omitted: null, omittedExact: false, cursor: null, frontier: l.beyond.frontier.slice(0, 50), frontierTotal: l.beyond.frontier.length };
   return { ...l.answer, [l.into]: items, truncated };
 }

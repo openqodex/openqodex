@@ -43,12 +43,39 @@ export type TypeRef = {
   // method's declared result at position `result`. Chains nest through `on`.
   on?: TypeRef; // nested at most MAX_TYPE_DEPTH deep
   elem?: boolean;
+  // With `result`: the value is one element of what the call returns, which
+  // must be declared as an array or a set (`for (const s of all())`).
+  item?: boolean;
+  values?: TypeRef; // Map<K, V> and ReadonlyMap: V, read only through `values()`
+  // With `result`: not what the call returns but the declared type of
+  // parameter `param` of the function the call takes as argument `arg`
+  // (`span("x", (s) => ...)` with `span(name, fn: (s: Span) => T)`).
+  callback?: { arg: number; param: number };
   declared?: boolean;
   bound?: BoundImport;
   rel?: "implements" | "include" | "prepend" | "extend";
-  args?: TypeRef[]; // Java arguments, in declaration order.
-  kind?: "param"; // A Java result naming a class type parameter.
+  args?: TypeRef[]; // Java and TypeScript type arguments, in declaration order.
+  kind?: "param"; // A Java result, or a TypeScript member, naming a class or interface type parameter.
   param?: number; // The class type parameter's index.
+  // TypeScript only. `fields`: an object type written in place (name "{}")
+  // or an object literal a function returns, its members' types; a method
+  // or a function-typed member is a "{}" with no fields. `path`: the type of
+  // these members, read in turn, of the type this names (a name bound by
+  // destructuring). `parts`: an intersection (name "&"), each side.
+  fields?: Record<string, TypeRef>;
+  path?: string[];
+  parts?: TypeRef[];
+  // On an intersection of one side: `Pick<T, K>` keeps only the members
+  // `only` names, `Omit<T, K>` every member but those `omit` names. `open`:
+  // K also names keys not written out (`keyof X | "a"`), which may be kept.
+  only?: string[];
+  omit?: string[];
+  open?: boolean;
+  // On a function's result: read from what its body returns, not declared.
+  inferred?: boolean;
+  // With `result`: the call names this file's definition at that index, a
+  // function declared inside a function that no file-level name reaches.
+  localDef?: number;
 };
 
 export type DefFact = {
@@ -69,6 +96,10 @@ export type DefFact = {
   dynamicBases?: { line: number; column: number; head?: TypeRef; rel?: "include" | "extend" | "prepend" }[];
   fields: Record<string, TypeRef>; // classes and structs: field name to its declared or constructed type
   results?: (TypeRef | null)[]; // functions and methods: the declared result types
+  // Each parameter declared as a function type: its position and the
+  // declared type of each of that function's parameters (null: none, or a
+  // type parameter, which the call may fill with any type).
+  callbacks?: { arg: number; params: (TypeRef | null)[] }[];
   static?: boolean; // methods called on the class itself: JS `static`, Ruby `def self.x`
   // A hash of the definition without its name, comments and whitespace
   // (top-level definitions and members of top-level classes only).
@@ -86,6 +117,10 @@ export type DefFact = {
   // A Java method whose last parameter is varargs (`Object... rest`): it
   // takes any number of arguments from its fixed parameters up.
   varargs?: boolean;
+  // A TypeScript interface property typed by a named type (`resolve:
+  // ResolveFn`): a member a call may name, which returns what that type's
+  // call signature returns. The type as written.
+  signature?: TypeRef;
   // A Java constructor: a method named like its class, called by `new`.
   // It is not static: its body runs on the new instance.
   ctor?: boolean;
@@ -182,6 +217,9 @@ export type CallFact = {
   result?: number;
   // A computed call on a name bound to a literal table (index into FileFacts.tables).
   table?: number;
+  // TypeScript and JavaScript: the receiver as written (`deps.sessions`),
+  // when it is a name or a member path; what ranks a gap the call leaves.
+  hint?: string;
 };
 
 export type ImportFact = {
@@ -288,6 +326,9 @@ export type UnknownSite = {
   scope: "file" | "project";
   note?: string;
   candidates?: string[];
+  // The receiver as written and the type it was read as, when known
+  // (`sessions any`): which same-name gaps may be a class's callers.
+  receiver?: string;
 };
 
 // An eligible file the graph did not read, and why.
@@ -311,6 +352,10 @@ export type GraphStatus = {
   stages: Record<string, number>;
   cuts: Cut[];
   notRead: NotRead[];
+  // Source files of known languages the graph does not parse, by language.
+  // Informational: never a reason, never a floor. Absent in a build kept by
+  // an older version.
+  unreadLanguages?: { language: string; files: number }[];
 };
 
 export type Graph = {

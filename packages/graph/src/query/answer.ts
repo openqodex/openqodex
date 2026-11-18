@@ -47,7 +47,7 @@ export type Request = {
   to?: Target; // path: the other end
   text?: string; // search
   tiers?: Tier[];
-  edges?: string[]; // path: the relations to walk; default calls and inherits
+  edges?: string[]; // path and callees: the relations to walk; path default calls, inherits and defines, callees default the calls profile
   depth?: number;
   level?: "files" | "projects"; // cycles
   limit?: number;
@@ -72,6 +72,8 @@ export type Answer = {
   leads: Candidate[];
   unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[] };
   truncated: Truncated;
+  // Set when the rows alone could mislead: said first by every reader of the answer.
+  warning?: string;
   graph: { generation: string | null; treeSha: string | null; builtAt: string | null; status: "ok" | "partial"; reasons: string[]; mode: "fresh" | "retained"; freshness: { laterEditsKnown: boolean } };
 };
 

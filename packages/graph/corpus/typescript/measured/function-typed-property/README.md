@@ -1,0 +1,3 @@
+Deps.resolveStore is typed by the named function type ResolveStore; Deps.resolveDirect spells the same type in place. An interface property typed by a named type is a member a call names, and its result is what that function type returns, so deps.resolveStore(t).list() binds certain to SkillStore.list, as the control listDirect does. Before the fix resolveStore was no member (`Deps is an interface or a type alias without that member`) and its result had no type. Trueforge: deps.resolveSkillStore(c).listSkills() and the other `chained result` misses, 23 sites.
+
+The call goes through an interface, so it also keeps the interface note (unsupported-rule: a value of that shape may be any object), as every interface call does; no other unknown is left.

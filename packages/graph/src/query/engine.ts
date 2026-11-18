@@ -19,14 +19,15 @@
 import { floorReasons, toImpactUnknown } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
+import { CALLER_KINDS } from "../types.js";
 import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Extra, Job, Listing, Request, Session } from "./answer.js";
-import { frameworkLayer, noLayerReason, routes, tests } from "./frameworks.js";
+import { frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
 import { edgeId, readEdgeId } from "./ids.js";
-import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, readCursor } from "./page.js";
+import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, pagingNote, readCursor } from "./page.js";
 import { Overrides, dynamicBases, implementers, importCycles, impact, methodsNamed, outline, packages, path, references, relationsOf } from "./relations.js";
-import { budgetOf, prepareTraversal, sortWithin, spent, Walk } from "./traverse.js";
+import { budgetOf, definesEdge, holderOf, prepareTraversal, sortWithin, spent, Walk } from "./traverse.js";
 import type { Budget } from "./traverse.js";
 
 export { OPERATIONS, parseTarget, resolveTarget } from "./answer.js";
@@ -40,16 +41,19 @@ const LANGUAGES = ["typescript", "tsx", "javascript", "python", "go", "ruby", "j
 // What this build can answer, and what it cannot yet.
 function capabilities(s: Session): Record<string, unknown> {
   const rel = relationsOf(s.graph);
-  const layer = frameworkLayer(s.graph);
   const unsupported: Record<string, string> = {};
+  // Routes and tests each by the plugins that read them (query/frameworks.ts).
+  const routesWhy = routesUnsupported(s.graph);
+  const testsWhy = testsUnread(s.graph);
   if (![...rel].some((k) => ["uses_value", "uses_type", "reads", "writes", "may_invoke", "decorates"].includes(k))) unsupported.references = "uses of a symbol as a value or a type are not resolved";
-  if (!layer) unsupported.routes = `${noLayerReason(s.graph)}: routes and handlers are not read`;
+  if (routesWhy !== null) unsupported.routes = `${routesWhy}: routes and handlers are not read`;
   if (!rel.has("dispatches_to")) unsupported["implementers of a method"] = "calls through interfaces and base types are not resolved; overrides are found by name from the inheritance";
-  if (!layer) unsupported.tests = `${noLayerReason(s.graph)}: files named like tests are leads only`;
+  if (testsWhy !== null) unsupported.tests = `${testsWhy}: files named like tests are leads only`;
   return {
     apiVersion: API_VERSION,
     modelVersion: MODEL_VERSION,
     languages: LANGUAGES,
+    ...(s.graph.status.unreadLanguages ? { unreadLanguages: s.graph.status.unreadLanguages } : {}),
     operations: OPERATIONS,
     relations: [...rel].sort(),
     certainEvidence: [...CERTAIN_KINDS],
@@ -75,6 +79,18 @@ function unknownsBy(g: Graph): UnknownIndex {
 }
 export const unknownsInside = (g: Graph, id: string): UnknownSite[] => unknownsBy(g).byCaller.get(id) ?? [];
 const unknownsNamed = (g: Graph, name: string): UnknownSite[] => unknownsBy(g).byName.get(name) ?? [];
+
+// Same-name gaps with first the ones whose receiver may be the target's
+// class: a word of the receiver as written, or of its type, is the class
+// name, or ends with it (`sessions`, `userSessions` for Sessions; an
+// interface's name without its leading I). The rest keep their order.
+function mayBe(named: UnknownSite[], n: GraphNode): UnknownSite[] {
+  const owner = qualified(n).split(".").slice(-2, -1)[0];
+  if (!owner) return named;
+  const names = [owner, ...(/^I[A-Z]/.test(owner) ? [owner.slice(1)] : [])].map((o) => o.toLowerCase());
+  const hit = (u: UnknownSite) => (u.receiver ?? "").toLowerCase().split(/[^a-z0-9_$]+/).some((w) => w !== "" && names.some((o) => w.endsWith(o)));
+  return [...named.filter(hit), ...named.filter((u) => !hit(u))];
+}
 
 // The indexes questions read, built once per graph when a session opens it
 // (open.ts), so no question's budget pays for them.
@@ -116,7 +132,10 @@ function searchJob(s: Session, req: Request): Job | Answer {
     }
     if (!sortWithin(scored, (a, b) => b.score - a.score || a.file.localeCompare(b.file) || a.line - b.line || a.id.localeCompare(b.id), budget)) return stoppedAt(base, [], [], null, "leads");
     // Search results are leads: never counted as callers or anything else.
-    return listing(base, scored, { into: "leads" });
+    // One definition with exactly the name searched is also named as the
+    // target; a prefix match, a file path hit or two exact names never is.
+    const exact = scored.filter((c) => c.score === 1);
+    return listing(exact.length === 1 ? { ...base, target: exact[0] as Candidate } : base, scored, { into: "leads" });
   };
 }
 
@@ -137,7 +156,12 @@ function unknownsJob(s: Session, req: Request): Job {
     const causes: Record<string, number | null> = {};
     for (const u of hits) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
     if (notRead.length > 0) causes["file-not-parsed"] = notRead.length;
-    return listing({ ...base, unknown: { ...base.unknown, causes } }, [...notRead, ...hits.map(toImpactUnknown)]);
+    // A call through a value in another file of the package could reach this
+    // file, so those rows are listed (scope project); say how many.
+    const reasons = [...base.unknown.reasons];
+    const others = project === null ? 0 : hits.filter((u) => u.file !== t.file).length;
+    if (others > 0) reasons.push(`${others} of these ${notRead.length + hits.length} rows come from other files of the same package: a call through a value there could reach this file, so they are listed (scope project)`);
+    return listing({ ...base, unknown: { ...base.unknown, causes, reasons } }, [...notRead, ...hits.map(toImpactUnknown)]);
   };
 }
 
@@ -157,6 +181,15 @@ function explainJob(s: Session, req: Request): Job | Answer {
   const layer = frameworkLayer(g);
   const fw = layer?.edges.find((x) => x.kind === kind && x.from === from && x.to === to && x.evidence.site.file === file && x.evidence.site.line === line && x.evidence.site.column === column);
   if (fw) return { ...base, items: [{ edge: id, from: fw.from, to: fw.to, kind: fw.kind, plugin: fw.plugin, app: fw.app, evidence: fw.evidence, why: fw.evidence.note ?? `${fw.evidence.kind} proves it` }] };
+  // A defines hop the query derived from the nesting: derived again.
+  if (kind === "defines") {
+    const holder = holderOf(g, to);
+    const d = g.nodes.get(to);
+    const hop = holder && d && holder.id === from ? definesEdge(holder, d) : null;
+    const at = hop?.sites[0];
+    if (!hop || !at || at.file !== file || at.line !== line || at.column !== column) return fail(s, "explain", "not-found", `no edge ${id} in this graph`);
+    return { ...base, items: [{ edge: id, from, to, kind, site: at, why: `${d?.name} is defined inside ${holder?.name}; the parse proves the nesting, not that ${holder?.name} calls it` }] };
+  }
   // An override the query derived from the inheritance: derived again.
   const m = kind === "overrides" ? g.nodes.get(to) : undefined;
   if (!m) return fail(s, "explain", "not-found", `no edge ${id} in this graph`);
@@ -169,11 +202,17 @@ function explainJob(s: Session, req: Request): Job | Answer {
   };
 }
 
-// Callers and callees to a depth, with the floor of each.
-function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
+// Callers and callees to a depth, with the floor of each. Callees walk
+// the relations `edges` names when it is given, so `defines` (a function
+// to a definition in its body) is walked only when asked.
+const CALLEE_EDGES = new Set<string>([...CALLER_KINDS, "defines"]);
+function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answer {
   const g = s.graph;
   const kind = req.kind as "callers" | "callees";
   const depth = Math.min(Math.max(1, req.depth ?? 1), 3);
+  const edges = kind === "callees" && req.edges && req.edges.length > 0 ? req.edges : null;
+  const unknownEdge = edges?.find((k) => !CALLEE_EDGES.has(k));
+  if (unknownEdge) return fail(s, kind, "bad-request", `callees walks ${[...CALLEE_EDGES].join(", ")}; not ${unknownEdge}`);
   const point = new Point(g, req.target);
   let n: GraphNode | null = null;
   let w: Walk | null = null;
@@ -184,7 +223,7 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
       const o = point.outcome(s, kind);
       if (isAnswer(o)) return o;
       n = o;
-      w = new Walk(g, n.id, kind === "callers" ? "in" : "out", depth, tiers);
+      w = new Walk(g, n.id, kind === "callers" ? "in" : "out", depth, tiers, edges ? new Set(edges) : null);
     }
     const walk = w as Walk;
     const target = candidate(g, n, 1);
@@ -196,7 +235,7 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
       reasons = floorReasons(g, { id: n.id, name: n.name, file: n.file }, new Set());
       const named = unknownsNamed(g, n.name);
       for (const u of named) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
-      examples = named.slice(0, 5).map(toImpactUnknown);
+      examples = mayBe(named, n).slice(0, 5).map(toImpactUnknown);
     } else {
       // What it calls is a floor when a call inside any point the walk
       // expanded could not be bound: at every hop, not only the first.
@@ -209,6 +248,9 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job {
     }
     const partial = g.status.status === "partial";
     const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples } };
+    // The same count the floor reason gives, said before the rows.
+    const unbound = kind === "callers" ? (g.unknownNames.get(n.name) ?? 0) : 0;
+    if (unbound > 0) answer.warning = `${unbound} ${unbound === 1 ? "call" : "calls"} named ${n.name} could not be bound; this list may be missing callers. See: openqodex graph unknowns --name ${n.name}`;
     return listing(answer, walk.items, { beyond: walk.beyond ? { frontier: walk.past } : null });
   };
 }
@@ -303,6 +345,7 @@ function settle(s: Session, req: Request, job: Job, out: Listing | Answer, offse
   if (out.stopped) {
     const id = keepJob(s.graph, job);
     const a = out.answer;
+    const cursor = cursorFor(s.generation, req, offset, id);
     return {
       ...a,
       [out.into]: out.all.slice(offset, offset + limitOf(req)),
@@ -312,7 +355,8 @@ function settle(s: Session, req: Request, job: Job, out: Listing | Answer, offse
         by: "budget",
         omitted: null,
         omittedExact: false,
-        cursor: cursorFor(s.generation, req, offset, id),
+        cursor,
+        note: pagingNote("budget", null, cursor),
         frontier: out.stopped.frontier.slice(0, 50),
         ...(out.stopped.frontierTotal !== null ? { frontierTotal: out.stopped.frontierTotal } : {}),
       },

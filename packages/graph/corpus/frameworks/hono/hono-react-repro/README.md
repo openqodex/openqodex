@@ -1,0 +1,1 @@
+A copy of the Hono app with a React package beside it from the trueforge report (engine-routes/synth/hono-react). Because the React plugin found an application, the graph answered `routes` with an empty list, exit 0 and no floor: it said there are no routes. The case checks that the three Hono routes are listed with their full paths.

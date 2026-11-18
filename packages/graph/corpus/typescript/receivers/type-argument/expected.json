@@ -1,0 +1,42 @@
+{
+  "guards": "reads a member typed by an interface's or a class's type parameter as the type argument the value's type gives",
+  "callers": [
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:5",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:9",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:13"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:5"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:9"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:13"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 13,
+      "cause": "no-receiver-type"
+    }
+  ]
+}

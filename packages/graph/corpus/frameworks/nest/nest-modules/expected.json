@@ -1,0 +1,32 @@
+{
+  "guards": "composes each Nest route under the global prefix, its exclusions, URI versions and RouterModule paths of the application whose root module reaches it, and lists a controller shared by two applications once for each with its own path",
+  "frameworks": {
+    "plugin": "nest",
+    "apps": 2,
+    "registrations": [
+      { "site": "src/health.controller.ts:5", "methods": ["GET"], "pattern": "/v1/health", "handler": "src/health.controller.ts#HealthController.check", "status": "bound", "mounted": true },
+      { "site": "src/pets/cats.controller.ts:5", "methods": ["GET"], "pattern": "/api/v1/pets/cats", "handler": "src/pets/cats.controller.ts#CatsController.list", "status": "bound", "mounted": true },
+      { "site": "src/pets/cats.controller.ts:10", "methods": ["GET"], "pattern": "/api/v1/pets/cats/:id", "handler": "src/pets/cats.controller.ts#CatsController.find" },
+      { "site": "src/pets/cats.controller.ts:16", "methods": ["GET"], "pattern": "/api/v2/pets/cats/new", "handler": "src/pets/cats.controller.ts#CatsController.newest" },
+      { "site": "src/pets/dogs.controller.ts:5", "methods": ["GET"], "pattern": "/api/v1/pets/dogs", "handler": "src/pets/dogs.controller.ts#DogsController.list" },
+      { "site": "src/pets/dogs.controller.ts:5", "methods": ["GET"], "pattern": "/api/pets/dogs", "handler": "src/pets/dogs.controller.ts#DogsController.list" },
+      { "site": "src/shared/shared.controller.ts:5", "methods": ["GET"], "pattern": "/api/v1/shared", "handler": "src/shared/shared.controller.ts#SharedController.info", "mounted": true },
+      { "site": "src/shared/shared.controller.ts:5", "methods": ["GET"], "pattern": "/shared", "handler": "src/shared/shared.controller.ts#SharedController.info", "mounted": true },
+      { "site": "src/admin/admin.controller.ts:5", "methods": ["GET"], "pattern": "/admin/stats", "handler": "src/admin/admin.controller.ts#AdminController.stats", "mounted": true }
+    ],
+    "edges": [
+      { "kind": "mounts", "from": "fw:nest:app:src/main.ts:8", "to": "src/pets/cats.controller.ts#CatsController", "tier": "certain" },
+      { "kind": "mounts", "from": "fw:nest:app:src/main.ts:8", "to": "src/shared/shared.controller.ts#SharedController", "tier": "certain" },
+      { "kind": "mounts", "from": "fw:nest:app:src/admin-main.ts:5", "to": "src/shared/shared.controller.ts#SharedController", "tier": "certain" },
+      { "kind": "mounts", "from": "fw:nest:app:src/admin-main.ts:5", "to": "src/admin/admin.controller.ts#AdminController", "tier": "certain" }
+    ],
+    "notEdges": [
+      { "kind": "mounts", "from": "fw:nest:app:src/admin-main.ts:5", "to": "src/pets/cats.controller.ts#CatsController" },
+      { "kind": "mounts", "from": "fw:nest:app:src/main.ts:8", "to": "src/admin/admin.controller.ts#AdminController" }
+    ],
+    "maxUnknowns": [
+      { "file": "src/main.ts", "cause": "dynamic", "max": 0 },
+      { "file": "src/app.module.ts", "cause": "dynamic", "max": 0 }
+    ]
+  }
+}

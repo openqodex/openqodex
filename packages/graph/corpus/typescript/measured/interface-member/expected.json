@@ -1,0 +1,27 @@
+{
+  "guards": "binds a call through a member of a parameter typed by an interface or by a type alias of an object type to the member's declared class",
+  "callers": [
+    {
+      "to": "src/sessions.ts#Sessions.create",
+      "site": "src/router.ts:10",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.create",
+      "site": "src/router.ts:14",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/router.ts",
+      "line": 10
+    },
+    {
+      "file": "src/router.ts",
+      "line": 14
+    }
+  ]
+}
