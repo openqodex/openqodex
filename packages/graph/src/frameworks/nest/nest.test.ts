@@ -25,7 +25,7 @@ import { parserFor } from "../../parser.js";
 import { query } from "../../query/engine.js";
 import { expectLinear, growthTests, onCpuClock, readerCpuMs } from "../../test-timing.js";
 import { MAX_SOURCE_BYTES, readFacts } from "./facts.js";
-import { composePaths, excludes, MAX_PATHS_PER_ROUTE, MAX_REGISTRATIONS } from "./resolve.js";
+import { composePaths, excludes, MAX_MIDDLEWARE_EDGES, MAX_PATHS_PER_ROUTE, MAX_REGISTRATIONS } from "./resolve.js";
 
 // Every repository a test makes, removed when the file ends.
 const made: string[] = [];
@@ -338,6 +338,58 @@ describe("the Nest plugin on what a review found", () => {
     // The negative control: the same file with the import in use makes one.
     const real = await build({ "src/main.ts": BOOT("AppModule"), ...cats });
     expect(regs(real).filter((r) => r.app !== null).length).toBe(1);
+  }, 120_000);
+});
+
+describe("the Nest plugin on what the release review found", () => {
+  const app = { "src/main.ts": BOOT("AppModule"), "src/app.module.ts": MODULE(["CatsController"], { CatsController: "./cats.controller" }) };
+  const controller = (head: string, path: string) => `import { Controller, Get } from "@nestjs/common";\n${head}\n@Controller(${path})\nexport class CatsController {\n  @Get()\n  list(): string[] {\n    return [];\n  }\n}\n`;
+
+  it("reads a path constant that names a constant declared before it, through any number of steps (1)", async () => {
+    const one = await build({ ...app, "src/cats.controller.ts": controller('const BASE = "cats";\nconst P = BASE;\n', "P") });
+    expect(lines(one)).toEqual(["GET /cats CatsController.list"]);
+    const three = await build({ ...app, "src/cats.controller.ts": controller('const A = "cats";\nconst B = A;\nconst C = B;\n', "C") });
+    expect(lines(three)).toEqual(["GET /cats CatsController.list"]);
+    const table = await build({
+      "src/main.ts": BOOT("AppModule"),
+      "src/users.module.ts": 'import { Controller, Get, Module } from "@nestjs/common";\n\n@Controller("users")\nexport class UsersController {\n  @Get()\n  list(): string[] {\n    return [];\n  }\n}\n\n@Module({ controllers: [UsersController] })\nexport class UsersModule {}\n',
+      "src/app.module.ts": 'import { Module } from "@nestjs/common";\nimport { RouterModule } from "@nestjs/core";\nimport { UsersModule } from "./users.module";\n\nconst ADMIN = "admin";\nconst ROUTES = [{ path: ADMIN, module: UsersModule }];\n\n@Module({ imports: [UsersModule, RouterModule.register(ROUTES)] })\nexport class AppModule {}\n',
+    });
+    expect(lines(table)).toEqual(["GET /admin/users UsersController.list"]);
+    // The negative control: a `let` read through a constant stays computed.
+    const changing = await build({ ...app, "src/cats.controller.ts": controller('let BASE = "cats";\nconst P = BASE;\n', "P") });
+    expect(lines(changing)).not.toContain("GET /cats CatsController.list");
+    expect(regs(changing).every((r) => r.pattern === null)).toBe(true);
+  }, 120_000);
+
+  it("reads a path constant exported through an export clause, and never an aliased one, which may name another constant (1)", async () => {
+    const using = (name: string) => controller(`import { ${name} } from "./paths";\n`, name);
+    const clause = await build({ ...app, "src/paths.ts": 'const PREFIX = "cats";\nexport { PREFIX };\n', "src/cats.controller.ts": using("PREFIX") });
+    expect(lines(clause)).toEqual(["GET /cats CatsController.list"]);
+    // The negative controls: a swap by alias, and a constant never exported.
+    const swapped = await build({ ...app, "src/paths.ts": 'const A = "cats";\nconst B = "dogs";\nexport { A as B, B as A };\n', "src/cats.controller.ts": using("B") });
+    expect(regs(swapped).map((r) => r.pattern)).toEqual([null]);
+    const hidden = await build({ ...app, "src/paths.ts": 'const PREFIX = "cats";\nexport const OTHER = "dogs";\n', "src/cats.controller.ts": using("PREFIX") });
+    expect(regs(hidden).map((r) => r.pattern)).toEqual([null]);
+  }, 120_000);
+
+  it("counts every guard and interceptor edge it leaves out past its cap, not one per route", async () => {
+    // Two controllers of 300 routes (under the cap on one class's members), each route with 60 guards.
+    const guards = Array.from({ length: 60 }, (_, i) => `G${i}`);
+    const routes = 300;
+    const methods = Array.from({ length: routes }, (_, i) => `  @Get("r${i}")\n  r${i}(): void {}\n`).join("\n");
+    const ctl = (name: string, path: string) => `@Controller("${path}")\n@UseGuards(${guards.join(", ")})\nexport class ${name} {\n${methods}}\n`;
+    const g = await build({
+      "src/main.ts": BOOT("AppModule"),
+      "src/app.module.ts": MODULE(["CatsController", "DogsController"], { CatsController: "./cats.controller", DogsController: "./cats.controller" }),
+      "src/guards.ts": guards.map((n) => `export class ${n} {}\n`).join(""),
+      "src/cats.controller.ts": `import { Controller, Get, UseGuards } from "@nestjs/common";\nimport { ${guards.join(", ")} } from "./guards";\n\n${ctl("CatsController", "cats")}\n${ctl("DogsController", "dogs")}`,
+    });
+    expect(regs(g).length).toBe(2 * routes);
+    const edges = (g.frameworks?.edges ?? []).filter((e) => e.plugin === "nest" && e.kind === "applies_middleware").length;
+    expect(edges).toBe(MAX_MIDDLEWARE_EDGES);
+    const cap = gaps(g).find((u) => u.note?.includes("guard and interceptor edges"));
+    expect(cap?.count).toBe(2 * routes * guards.length - MAX_MIDDLEWARE_EDGES);
   }, 120_000);
 });
 

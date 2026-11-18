@@ -10,7 +10,7 @@
 // @nestjs/common (Get, Post, Put, Delete, Patch, Options, Head, All,
 // Search, Sse); its path is the controller's path and the method's path
 // joined. A shape the script does not model (a global prefix, versioning,
-// RouterModule, a path that is not a string literal) stops it with an error,
+// RouterModule, @RequestMapping, a path that is not a string literal) stops it with an error,
 // so the truth list is never quietly wrong.
 //
 // Usage: node tests/e2e/fixtures/nest-sample-truth.mjs <folder holding the samples>
@@ -181,6 +181,7 @@ export function truth(root) {
       if (c.node.heritageClauses?.some((h) => h.token === ts.SyntaxKind.ExtendsKeyword)) throw new Error(`${c.node.name.text} extends a class; the truth script does not model inherited routes`);
       for (const member of c.node.members) {
         if (!ts.isMethodDeclaration(member) || !member.name || !ts.isIdentifier(member.name)) continue;
+        if (decorators(member).map((d) => decoCall(c.file, d)).some((d) => d && d.name === "RequestMapping")) throw new Error(`${c.node.name.text}.${member.name.text} has @RequestMapping; the truth script does not model it`);
         const route = decorators(member).map((d) => decoCall(c.file, d)).find((d) => d && d.name in METHODS);
         if (!route) continue;
         if (decorators(member).map((d) => decoCall(c.file, d)).some((d) => d && d.name === "Version")) throw new Error(`${c.node.name.text}.${member.name.text} has @Version; the truth script does not model it`);
