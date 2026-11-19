@@ -50,8 +50,9 @@ const REPO = {
 const MAX_WRONG_CERTAIN = 0;
 // (c) Production truth sites found certain or likely, of all production
 // truth sites: 3617 on 0a67e51f (tf-graph before any fix), 3948 once the
-// TypeScript receiver, callback and `this` types landed.
-const BASELINE_PROD_RECALL = { found: 3948, of: 4021 };
+// TypeScript receiver, callback and `this` types landed, 3961 once a local
+// copied from a member took the member's type.
+const BASELINE_PROD_RECALL = { found: 3961, of: 4021 };
 // (c) Possible edges at production truth sites into a target the checker
 // does not name: 548 on 0a67e51f, 922 since. All 922 are dispatch to a
 // class or object that declares the interface (dispatch-implements).
