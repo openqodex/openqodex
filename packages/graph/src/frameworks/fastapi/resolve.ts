@@ -37,7 +37,7 @@
 import type { Cause, Tier } from "../../model/records.js";
 import { weakest } from "../../model/records.js";
 import type { DefFact, GraphNode } from "../../types.js";
-import type { Detection, FrameworkEdge, FrameworkEvidence, FrameworkUnknown, HandlerStatus, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
+import type { Detection, FrameworkCall, FrameworkEdge, FrameworkEvidence, FrameworkUnknown, HandlerStatus, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
 import { appId, entityId } from "../plugin.js";
 import type { FastApiFact, ParamDep } from "./facts.js";
 import { MAX_SOURCE_BYTES, ROUTE_METHODS } from "./facts.js";
@@ -112,6 +112,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   const unknowns: FrameworkUnknown[] = [];
   const registrations: Registration[] = [];
   const apps: Detection[] = [];
+  const calls: FrameworkCall[] = [];
 
   const gapSeen = new Set<string>();
   const gapsLeft: { count: number; first: Site | null } = { count: 0, first: null };
@@ -179,12 +180,13 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   const tooDeep: { count: number; first: Site | null } = { count: 0, first: null };
 
   // ---------- facts by file, values by name ----------
-  type FileFacts = { values: Map<string, Fact<"value">[]>; routes: Fact<"route">[]; calls: Fact<"call">[]; tooLarge: Fact<"too-large"> | null; broken: Fact<"syntax-error"> | null };
+  // `deps`: the functions whose parameters declare calls, by `name@line`.
+  type FileFacts = { values: Map<string, Fact<"value">[]>; routes: Fact<"route">[]; calls: Fact<"call">[]; deps: Map<string, Fact<"deps">>; tooLarge: Fact<"too-large"> | null; broken: Fact<"syntax-error"> | null };
   const byFile = new Map<string, FileFacts>();
   const factsIn = (file: string): FileFacts => {
     let f = byFile.get(file);
     if (f) return f;
-    f = { values: new Map(), routes: [], calls: [], tooLarge: null, broken: null };
+    f = { values: new Map(), routes: [], calls: [], deps: new Map(), tooLarge: null, broken: null };
     byFile.set(file, f);
     for (const x of index.factsOf(file)) {
       switch (x.kind) {
@@ -199,6 +201,9 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
           break;
         case "call":
           f.calls.push(x);
+          break;
+        case "deps":
+          f.deps.set(`${x.fn}@${x.def}`, x);
           break;
         case "too-large":
           f.tooLarge = x;
@@ -618,7 +623,41 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   // application's, the includes' and the routers' own, the decorator's,
   // then the parameters'. Entries past MAX_MIDDLEWARE_CHAIN are counted
   // and left out.
-  const applyDeps = (reg: Registration, chain: Dep[], omitted: number, app: string | null) => {
+  // A dependency is a call from what declares it: each route handler it
+  // runs for, and a dependency whose parameters declare it (FastAPI solves
+  // those first). Each pair and site once; each dependency reached is read
+  // for its own dependencies once (followDeps).
+  const callSeen = new Set<string>();
+  const depsQueue: string[] = [];
+  const depsSeen = new Set<string>();
+  const addCall = (from: string, to: string, tier: Tier, ev: FrameworkEvidence) => {
+    const k = `${from}\0${to}\0${ev.site.file}:${ev.site.line}:${ev.site.column}`;
+    if (!callSeen.has(k)) {
+      callSeen.add(k);
+      calls.push({ from, to, site: ev.site, tier, evidence: "fastapi-depends", via: ev.via, note: tier === "certain" ? null : (ev.note ?? DEP_NOTE), rule: "fastapi-dependency" });
+    }
+    if (!depsSeen.has(to)) {
+      depsSeen.add(to);
+      depsQueue.push(to);
+    }
+  };
+  const followDeps = () => {
+    for (let i = 0; i < depsQueue.length; i++) {
+      const id = depsQueue[i] as string;
+      const n = index.node(id);
+      const fact = n ? factsIn(n.file).deps.get(`${n.name}@${n.startLine}`) : undefined;
+      if (!n || !fact) continue;
+      for (const p of fact.params) {
+        const b = bindDep({ call: p.call, file: n.file, type: p.type, scope: fact.scope, list: false });
+        for (const t of b?.targets ?? []) {
+          if (!spend(caps.depEdges, t.ev.site)) return;
+          addCall(id, t.id, t.ev.tier, t.ev);
+        }
+      }
+    }
+  };
+
+  const applyDeps = (reg: Registration, handler: { targets: string[]; tier: Tier }, chain: Dep[], omitted: number, app: string | null) => {
     let left = omitted;
     let order = 0;
     for (const d of chain) {
@@ -634,6 +673,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
       for (const t of b.targets) {
         if (!spend(caps.depEdges, t.ev.site) || !emit({ from: reg.id, to: t.id, kind: "applies_middleware", plugin: PLUGIN, app, evidence: t.ev, order: order - 1 })) break;
         addRole(t.id, "middleware", "fastapi-dependency", app, t.ev);
+        for (const h of handler.targets) addCall(h, t.id, weakest(handler.tier, t.ev.tier), t.ev);
       }
     }
     if (left > 0) gap({ plugin: PLUGIN, site: reg.site, scope: { file: reg.site.file }, affects: ["applies_middleware"], cause: "fan-out-capped", name: null, note: `the route's dependency chain is longer than the ${MAX_MIDDLEWARE_CHAIN} dependencies the plugin keeps (or a dependency list was longer than it reads); ${left} were left out`, count: left, exact: true });
@@ -735,7 +775,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
         if (emit({ from: id, to: t, kind: "handles", plugin: PLUGIN, app, evidence: ev })) addRole(t, "route_handler", "fastapi", app, ev);
       }
       const decorator = depsOfList(e.file, e.deps, e.scope);
-      applyDeps(reg, [...deps, ...decorator.deps, ...e.params.map((p) => ({ call: p.call, file: e.file, type: p.type, scope: e.scope, list: false }))], omitted + decorator.omitted + e.paramsOmitted, app);
+      applyDeps(reg, bound, [...deps, ...decorator.deps, ...e.params.map((p) => ({ call: p.call, file: e.file, type: p.type, scope: e.scope, list: false }))], omitted + decorator.omitted + e.paramsOmitted, app);
     }
 
     if (only) return;
@@ -810,6 +850,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
     else lateBy.set(router, new Set([e]));
   }
   for (const [router, set] of lateBy) compose(router, null, "", [], 0, [], [router.id], 0, null, set);
+  followDeps();
 
   // ---------- test requests ----------
   // The registrations of each application by the first segment of their
@@ -985,7 +1026,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   const lostAt = gapsLeft.first;
   if (gapsLeft.count > 0) gap({ plugin: PLUGIN, site: lostAt, scope: { build: true }, affects: all, cause: "fan-out-capped", name: null, note: `the plugin keeps ${MAX_UNKNOWNS} unknowns in one build; ${gapsLeft.count} more were counted and left out`, count: gapsLeft.count, exact: true }, true);
 
-  return { apps, output: { roles, entities: registrations, edges, unknowns } };
+  return { apps, output: { roles, entities: registrations, edges, unknowns, calls } };
 }
 
 // Whether a path names a pytest test module: `test_*.py` or `*_test.py`.
