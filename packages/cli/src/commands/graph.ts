@@ -107,6 +107,7 @@ function printText(a: Shaped, op: Operation): void {
     else if (i.site && i.edge) line(itemLine(i, op));
     else if (Array.isArray(i.hops)) line(`${String(i.type)}: ${(i.hops as Item[]).map((h) => `${siteLine(h)} ${h.fromName ?? h.from} ${VERB[h.kind] ?? h.kind} ${h.toName ?? h.to} (${h.site.tier})`).join(" < ")}`);
     else if (op === "cycles" && Array.isArray(i.members)) line(`cycle of ${String(i.size)}: ${(i.members as string[]).join(", ")}`);
+    else if (op === "search") line(`match ${String(i.file)}:${String(i.line)} ${String(i.kind)} ${String(i.name)}, ${String(i.tier)} (${String(i.id)})`);
     else if (op === "outline") line(`${String(i.file)}:${String(i.line)} ${String(i.kind)} ${String(i.qualified)}${i.exported ? ", exported" : ""}, ${String(i.callerSites)} call sites in, ${String(i.calleeSites)} out`);
     else line(JSON.stringify(raw));
     if (op === "status" || op === "capabilities") for (const u of (i.unreadLanguages ?? []) as { language: string; files: number }[]) line(unreadLine(u));

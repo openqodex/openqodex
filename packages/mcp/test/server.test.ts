@@ -37,6 +37,15 @@
 //     key written in the repository.
 // 15. `compact` changes what the answer says, or answers otherwise than
 //     `openqodex graph --compact --json`.
+// 16. An answer costs an agent many times what grep does for the same
+//     rows, mostly the long edge id on every item: the default answer is
+//     not short, its short edge id does not explain, an old long id no
+//     longer explains, or `full` no longer gives the whole item.
+// 17. A name that matches several definitions gives the agent nothing to
+//     pick from in the default form.
+// 18. A question that compares (`impact` of the change) is answered from
+//     the comparison's build, not the held one: a short edge id it gives
+//     is kept where `graph_explain` never looks, and explains to nothing.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -144,17 +153,18 @@ describe("the MCP server", () => {
     for (const arg of ["limit", "cursor", "budget", "generation", "context", "compact"]) expect(instructions, arg).toContain(`\`${arg}\``);
     expect(JSON.stringify(tools).length).toBeLessThanOrEqual(TOOLS_BEFORE * 0.6);
     const search = tools.find((t) => t.name === "graph_search");
-    expect(search?.description).toMatch(/`leads`, not `items`/);
+    expect(search?.description).toMatch(/exact and prefix name matches in `items`/);
+    expect(search?.description).toMatch(/other hits in `leads`/);
     expect(search?.description).toMatch(/`target`/);
   });
 
   it("returns each answer as structuredContent too, its text what `openqodex graph --json` prints (13)", async () => {
-    const callers = await ask(client, "graph_callers", { symbol: "core" });
+    const callers = await ask(client, "graph_callers", { symbol: "core", full: true });
     expect(callers.structured).toEqual(callers.answer);
     const generation = callers.answer.graph.generation as string;
     const r = cli(root, "graph", "callers", "core", "--json", "--generation", generation);
     expect(callers.text).toBe(r.stdout.trimEnd());
-    const search = await ask(client, "graph_search", { text: "c1" });
+    const search = await ask(client, "graph_search", { text: "c1", full: true });
     expect(search.structured).toEqual(search.answer);
     expect(search.answer.leads.length).toBeGreaterThan(0);
     expect(search.text).toBe(cli(root, "graph", "search", "c1", "--json", "--generation", generation).stdout.trimEnd());
@@ -169,14 +179,14 @@ describe("the MCP server", () => {
   });
 
   it("answers as `openqodex graph --json` does for the same request and build (2)", async () => {
-    const { answer } = await ask(client, "graph_callers", { symbol: "core" });
+    const { answer } = await ask(client, "graph_callers", { symbol: "core", full: true });
     expect(answer.error).toBeNull();
     expect(answer.counts.certain).toBe(12);
     const generation = answer.graph.generation as string;
     const r = cli(root, "graph", "callers", "core", "--json", "--generation", generation);
     expect(r.status, r.stderr).toBe(0);
     expect(answer).toEqual(JSON.parse(r.stdout));
-    const path = await ask(client, "graph_path", { from: "c3", to: "core" });
+    const path = await ask(client, "graph_path", { from: "c3", to: "core", full: true });
     const p = cli(root, "graph", "path", "c3", "core", "--json", "--generation", generation);
     expect(path.answer).toEqual(JSON.parse(p.stdout));
   });
@@ -202,11 +212,11 @@ describe("the MCP server", () => {
   });
 
   it("cuts by a token budget without touching the counts, and pages on (4)", async () => {
-    const { answer } = await ask(client, "graph_callers", { symbol: "core", budget: { tokens: 1 } });
+    const { answer } = await ask(client, "graph_callers", { symbol: "core", budget: { tokens: 1 }, full: true });
     expect(answer.items).toHaveLength(1);
     expect(answer.counts.certain).toBe(12);
     expect(answer.truncated).toMatchObject({ by: "budget", omitted: 11, omittedExact: true });
-    const next = await ask(client, "graph_callers", { symbol: "core", budget: { tokens: 1 }, cursor: answer.truncated.cursor });
+    const next = await ask(client, "graph_callers", { symbol: "core", budget: { tokens: 1 }, cursor: answer.truncated.cursor, full: true });
     expect(next.answer.items).toHaveLength(1);
     expect(next.answer.items[0]).not.toEqual(answer.items[0]);
   });
@@ -231,7 +241,7 @@ describe("an answer's shape", () => {
   it("adds the held build's lines around each site, redacted, and says when the work tree differs (14)", async () => {
     const root = repo(shaped);
     const { client } = await connect(root);
-    const first = await ask(client, "graph_callers", { symbol: "core", context: 1 });
+    const first = await ask(client, "graph_callers", { symbol: "core", context: 1, full: true });
     const a = first.answer as WithContext;
     const use = a.context?.snippets.find((x) => x.file === "src/use.ts");
     expect(use).toMatchObject({ line: 4, start: 3, from: "build", changedSince: false });
@@ -244,7 +254,7 @@ describe("an answer's shape", () => {
     // gives the build's line 4 and the build's lines around it.
     write(root, { "src/use.ts": `// a new first line\n${shaped["src/use.ts"]}` });
     await new Promise((r) => setTimeout(r, 1100));
-    const later = (await ask(client, "graph_callers", { symbol: "core", context: 1 })).answer as WithContext;
+    const later = (await ask(client, "graph_callers", { symbol: "core", context: 1, full: true })).answer as WithContext;
     expect(later.graph.generation).toBe(generation);
     expect(later.graph.freshness.laterEditsKnown).toBe(true);
     const moved = later.context?.snippets.find((x) => x.file === "src/use.ts");
@@ -255,14 +265,103 @@ describe("an answer's shape", () => {
   it("drops edge ids and import lines with `compact`, as the command line does (15)", async () => {
     const root = repo(files);
     const { client } = await connect(root);
-    const full = await ask(client, "graph_callers", { symbol: "core" });
-    const compact = await ask(client, "graph_callers", { symbol: "core", compact: true });
+    const full = await ask(client, "graph_callers", { symbol: "core", full: true });
+    const compact = await ask(client, "graph_callers", { symbol: "core", compact: true, full: true });
     expect(compact.answer.counts).toEqual(full.answer.counts);
     expect(compact.answer.items).toHaveLength(full.answer.items.length);
     for (const i of compact.answer.items as Record<string, unknown>[]) expect(i).not.toHaveProperty("edge");
     expect(compact.text.length).toBeLessThan(full.text.length * 0.8);
     const generation = full.answer.graph.generation as string;
     expect(compact.answer).toEqual(JSON.parse(cli(root, "graph", "callers", "core", "--json", "--compact", "--generation", generation).stdout));
+  }, 180_000);
+});
+
+describe("the short form, the default over MCP", () => {
+  type Edge = Record<string, unknown> & { edge: string; site: Record<string, unknown> };
+
+  it("gives short edge ids that explain, keeps old long ids working, and gives the whole item with `full` (16)", async () => {
+    const root = repo(files);
+    const { client } = await connect(root);
+    const full = await ask(client, "graph_callers", { symbol: "core", full: true });
+    const short = await ask(client, "graph_callers", { symbol: "core" });
+    expect(short.structured).toEqual(short.answer);
+    expect(short.answer.counts).toEqual(full.answer.counts);
+    expect(short.answer.unknown).toEqual(full.answer.unknown);
+    expect(short.answer.target).toEqual(full.answer.target);
+    const items = short.answer.items as Edge[];
+    const whole = full.answer.items as Edge[];
+    expect(items).toHaveLength(whole.length);
+    items.forEach((i, n) => {
+      const w = whole[n] as Edge;
+      expect(i.edge).toMatch(/^e:[A-Za-z0-9_-]{12}$/);
+      // The target end and the column, rule and import line are left out;
+      // file, line, tier, evidence and the caller stay.
+      expect(i).not.toHaveProperty("to");
+      expect(i).not.toHaveProperty("toName");
+      expect(i.site).not.toHaveProperty("column");
+      expect(i.site).not.toHaveProperty("via");
+      expect(i.site).toMatchObject({ file: w.site.file, line: w.site.line, tier: w.site.tier, evidence: w.site.evidence });
+      expect(i.from).toBe(w.from);
+    });
+    expect(short.text.length).toBeLessThan(full.text.length * 0.6);
+    // The same edge gets the same short id on every ask.
+    const again = await ask(client, "graph_callers", { symbol: "core" });
+    expect((again.answer.items as Edge[]).map((i) => i.edge)).toEqual(items.map((i) => i.edge));
+    // A short id explains the edge its long id names; the long id still does.
+    const first = items[0] as Edge;
+    const byShort = await ask(client, "graph_explain", { edge: first.edge });
+    expect(byShort.answer.error).toBeNull();
+    const byLong = await ask(client, "graph_explain", { edge: (whole[0] as Edge).edge });
+    expect(byLong.answer.error).toBeNull();
+    expect(byShort.answer.items).toEqual(byLong.answer.items);
+    expect((byShort.answer.items[0] as Edge).site).toEqual((whole[0] as Edge).site);
+    // A short id this build never gave is not found, never a guess.
+    const unknown = await ask(client, "graph_explain", { edge: "e:AAAAAAAAAAAA" });
+    expect(unknown.answer.error?.code).toBe("not-found");
+    // compact false asks the whole item too.
+    expect((await ask(client, "graph_callers", { symbol: "core", compact: false })).answer).toEqual(full.answer);
+  }, 180_000);
+
+  it("gives edge ids that all explain in the answer of a question that compares (18)", async () => {
+    const root = repo(files);
+    write(root, { "src/core.ts": "export function core(): number {\n  return 2;\n}\n" });
+    const { client } = await connect(root);
+    const a = await ask(client, "graph_impact", {});
+    expect(a.answer.error).toBeNull();
+    const edges: string[] = [];
+    const collect = (v: unknown) => {
+      if (typeof v !== "object" || v === null) return;
+      const r = v as Record<string, unknown>;
+      if (typeof r.edge === "string") edges.push(r.edge);
+      for (const key of ["hops", "handles"]) if (Array.isArray(r[key])) (r[key] as unknown[]).forEach(collect);
+    };
+    a.answer.items.forEach(collect);
+    expect(edges.length).toBeGreaterThan(0);
+    for (const edge of edges) {
+      const why = await ask(client, "graph_explain", { edge });
+      expect(why.answer.error, edge).toBeNull();
+    }
+    // The rest of the short form still holds: no column or import line.
+    const hop = (a.answer.items as { hops?: Edge[] }[]).flatMap((i) => i.hops ?? [])[0] as Edge;
+    expect(hop.site).not.toHaveProperty("column");
+  }, 180_000);
+
+  it("gives the candidates of an ambiguous name, to pick one by id (17)", async () => {
+    const root = repo({
+      "a.ts": "export function run(): number {\n  return 1;\n}\n",
+      "b.ts": "export function run(): number {\n  return 2;\n}\n",
+      "c.ts": 'import { run } from "./a";\nexport function go(): number {\n  return run();\n}\n',
+    });
+    const { client } = await connect(root);
+    const a = await ask(client, "graph_callers", { symbol: "run" });
+    expect(a.isError).toBe(false);
+    expect(a.answer.error?.code).toBe("ambiguous");
+    const picks = a.answer.target as { id: string; name: string; kind: string; file: string; line: number }[];
+    expect(picks.map((c) => `${c.name} ${c.kind} ${c.file}:${c.line}`).sort()).toEqual(["run function a.ts:1", "run function b.ts:1"]);
+    const chosen = picks.find((c) => c.file === "a.ts") as { id: string };
+    const one = await ask(client, "graph_callers", { id: chosen.id });
+    expect(one.answer.error).toBeNull();
+    expect((one.answer.items as Edge[]).map((i) => `${i.site.file}:${i.site.line}`)).toEqual(["c.ts:3"]);
   }, 180_000);
 });
 
