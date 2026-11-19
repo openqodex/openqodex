@@ -136,13 +136,13 @@ function searchJob(s: Session, req: Request): Job | Answer {
     }
     if (!sortWithin(scored, (a, b) => b.score - a.score || a.file.localeCompare(b.file) || a.line - b.line || a.id.localeCompare(b.id), budget)) return stoppedAt(base, [], [], null, "leads");
     // A definition named exactly as searched, or whose name starts with it,
-    // is an item: certain for the exact name, possible for the rest (another
-    // case, a prefix). A name that only holds the text and a file path hit
+    // is an item: likely for the exact name (a name match alone is never
+    // certain), possible for the rest (another case, a prefix). A name that only holds the text and a file path hit
     // are leads. Neither is counted as callers or anything else. One
     // definition with exactly the name searched is also named as the
     // target; a prefix match, a file path hit or two exact names never is.
     const exact = scored.filter((c) => c.score === 1);
-    const hits = scored.map((c) => (c.score >= PREFIX_SCORE ? { ...c, tier: c.score === 1 ? "certain" : "possible" } : c));
+    const hits = scored.map((c) => (c.score >= PREFIX_SCORE ? { ...c, tier: c.score === 1 ? "likely" : "possible" } : c));
     return listing(exact.length === 1 ? { ...base, target: exact[0] as Candidate } : base, hits, { into: "items", lead: (c) => (c as Candidate).score < PREFIX_SCORE });
   };
 }

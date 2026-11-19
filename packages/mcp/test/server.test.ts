@@ -43,6 +43,9 @@
 //     longer explains, or `full` no longer gives the whole item.
 // 17. A name that matches several definitions gives the agent nothing to
 //     pick from in the default form.
+// 18. A question that compares (`impact` of the change) is answered from
+//     the comparison's build, not the held one: a short edge id it gives
+//     is kept where `graph_explain` never looks, and explains to nothing.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -317,6 +320,30 @@ describe("the short form, the default over MCP", () => {
     expect(unknown.answer.error?.code).toBe("not-found");
     // compact false asks the whole item too.
     expect((await ask(client, "graph_callers", { symbol: "core", compact: false })).answer).toEqual(full.answer);
+  }, 180_000);
+
+  it("gives edge ids that all explain in the answer of a question that compares (18)", async () => {
+    const root = repo(files);
+    write(root, { "src/core.ts": "export function core(): number {\n  return 2;\n}\n" });
+    const { client } = await connect(root);
+    const a = await ask(client, "graph_impact", {});
+    expect(a.answer.error).toBeNull();
+    const edges: string[] = [];
+    const collect = (v: unknown) => {
+      if (typeof v !== "object" || v === null) return;
+      const r = v as Record<string, unknown>;
+      if (typeof r.edge === "string") edges.push(r.edge);
+      for (const key of ["hops", "handles"]) if (Array.isArray(r[key])) (r[key] as unknown[]).forEach(collect);
+    };
+    a.answer.items.forEach(collect);
+    expect(edges.length).toBeGreaterThan(0);
+    for (const edge of edges) {
+      const why = await ask(client, "graph_explain", { edge });
+      expect(why.answer.error, edge).toBeNull();
+    }
+    // The rest of the short form still holds: no column or import line.
+    const hop = (a.answer.items as { hops?: Edge[] }[]).flatMap((i) => i.hops ?? [])[0] as Edge;
+    expect(hop.site).not.toHaveProperty("column");
   }, 180_000);
 
   it("gives the candidates of an ambiguous name, to pick one by id (17)", async () => {

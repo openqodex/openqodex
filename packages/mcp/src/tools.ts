@@ -70,7 +70,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "graph_search",
     op: "search",
-    description: `Find definitions by name before asking about one: exact and prefix name matches in \`items\` (a prefix never certain), other hits in \`leads\`, best first, scored 1 for the exact name; never counted as callers. A unique exact match is also in \`target\`. ${DATA}`,
+    description: `Find definitions by name before asking about one: exact and prefix name matches in \`items\` (never certain: an exact name likely, a prefix possible), other hits in \`leads\`, best first, scored 1 for the exact name; never counted as callers. A unique exact match is also in \`target\`. ${DATA}`,
     properties: { text: str("A name or part of one.") },
     required: ["text"],
   },

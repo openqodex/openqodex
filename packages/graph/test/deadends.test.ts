@@ -10,7 +10,8 @@
 //  3. `unknowns --file` lists rows of other files with no word on why.
 //  4. `search` for a name with one exact definition gives no target, or
 //     gives a prefix match as the target; or puts every hit in `leads` and
-//     none in `items`, or calls a prefix match certain.
+//     none in `items`, or calls any name match certain (a name match
+//     alone is never certain).
 //  5. `outline .` or an empty path is refused or finds nothing.
 //  6. A truncated JSON or MCP answer has no sentence saying how to go on.
 //  7. The outline of the repository root lists no file that was not read
@@ -73,13 +74,20 @@ describe("dead ends of the graph answers", () => {
       "Sub.ts": 'import { Widget } from "./Widget";\nexport class Sub extends Widget {}\n',
       "a/defs.ts": "export class A {}\n",
       "b/defs.ts": "export class B {}\n",
+      "c/defs.ts": "export function f() {}\n",
+      "x/util.ts": "export class U {}\n",
+      "y/util.ts": "export function u() {}\n",
     });
     const widget = query(s, { apiVersion: 1, kind: "implementers", target: { name: "Widget" } });
     expect(widget.error).toBeNull();
     expect((widget.items as { site: { file: string } }[]).map((i) => i.site.file)).toEqual(["Sub.ts"]);
     const shared = query(s, { apiVersion: 1, kind: "implementers", target: { name: "defs" } });
     expect(shared.error?.code).toBe("ambiguous");
+    // A file that defines no class or interface is no candidate.
     expect((shared.target as { file: string; kind: string }[]).map((c) => `${c.kind} ${c.file}`).sort()).toEqual(["file a/defs.ts", "file b/defs.ts"]);
+    const one = query(s, { apiVersion: 1, kind: "implementers", target: { name: "util" } });
+    expect(one.error?.code).toBe("ambiguous");
+    expect((one.target as { name: string; file: string }[]).map((c) => `${c.name} ${c.file}`)).toEqual(["U x/util.ts"]);
     expect(query(s, { apiVersion: 1, kind: "implementers", target: { name: "nothing" } }).error?.code).toBe("not-found");
   });
 
@@ -98,7 +106,7 @@ describe("dead ends of the graph answers", () => {
     const s = await session(repo);
     const one = query(s, { apiVersion: 1, kind: "search", text: "helper" });
     expect(one.target).toMatchObject({ name: "helper", file: "svc/types.ts", score: 1 });
-    expect(one.items).toEqual([expect.objectContaining({ name: "helper", file: "svc/types.ts", score: 1, tier: "certain" })]);
+    expect(one.items).toEqual([expect.objectContaining({ name: "helper", file: "svc/types.ts", score: 1, tier: "likely" })]);
     expect(one.leads).toEqual([]);
     expect(one.counts).toEqual({ certain: null, likely: null, possible: null });
     // Prefix only: no target, an item never certain.
