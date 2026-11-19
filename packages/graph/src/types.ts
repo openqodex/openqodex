@@ -52,6 +52,10 @@ export type TypeRef = {
   // (`span("x", (s) => ...)` with `span(name, fn: (s: Span) => T)`).
   callback?: { arg: number; param: number };
   declared?: boolean;
+  // A TypeScript local given a member without an annotation: the member's
+  // type, so the value may be of any class below it, as a field's is; unlike
+  // `declared`, an assignment to the local ends it.
+  member?: boolean;
   bound?: BoundImport;
   rel?: "implements" | "include" | "prepend" | "extend";
   args?: TypeRef[]; // Java and TypeScript type arguments, in declaration order.

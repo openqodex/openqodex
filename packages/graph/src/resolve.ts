@@ -65,8 +65,10 @@ export const DISPATCH_CAP = 32;
 // its use gives. 24: a member a Pick or an Omit leaves out is no member of
 // the type. 25: a method called on a local copied from a property typed by
 // a name that is no function type binds on the local's type, never as a
-// value alias of the property.
-export const RESOLVER_VERSION = 25;
+// value alias of the property. 26: a local given a member (TypeRef.member)
+// dispatches as a field does, and a copy of a property whose named type the
+// graph cannot read keeps its may_invoke edge beside the call's own binding.
+export const RESOLVER_VERSION = 26;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -1476,6 +1478,25 @@ export function createWorld(input: ResolveInput): World {
     }
     return null;
   };
+  // Whether a definition a value names holds a function: true for one
+  // that is not a property typed by a name, and for a property whose named
+  // type leads to a function type; false when it leads to a class, an
+  // interface or an object type; null when the graph cannot tell.
+  const holdsFunction = (id: string): boolean | null => {
+    const def = defById.get(id);
+    if (!def?.signature) return true;
+    let v = typeValue(def.file, def.signature);
+    for (let hops = 0; hops < MAX_DEPTH; hops++) {
+      const target = v?.v === "sym" && v.ids.length === 1 ? defById.get(v.ids[0] as string) : undefined;
+      if (!target) return null;
+      if (target.kind !== "type" || target.iface) return false;
+      if (target.results) return true;
+      if (!target.alias || target.alias.parts) return null;
+      if (target.alias.fields) return false;
+      v = typeValue(target.file, target.alias);
+    }
+    return null;
+  };
   // What `t` reads on a called definition: its declared result, or with
   // `callback` the declared type of a parameter of a function it takes.
   const declaredOn = (def: Def, t: TypeRef): { from: { file: string; family: Family; owner: string | null }; result: TypeRef | null | undefined } | null => {
@@ -2242,7 +2263,7 @@ export function createWorld(input: ResolveInput): World {
     | { unknown: Cause; shape: Shape; note?: string; candidates?: string[] | null; scope?: "file" | "project" };
 
   const receiverKind = (t: TypeRef, path: string[]): EvidenceKind => {
-    if (path.length > 0) return "receiver-field";
+    if (path.length > 0 || t.member) return "receiver-field";
     if (t.declared) return "receiver-annotation";
     if (t.result !== undefined) return "receiver-result";
     return "receiver-constructor";
@@ -3166,15 +3187,15 @@ export function createWorld(input: ResolveInput): World {
           const ref = f.values[call.alias];
           // A method called on a local copied from a property typed by a
           // name (`repo: Repo`) runs that property only when the name is a
-          // function type; else the call binds on the local's type.
-          const ids = call.recv.kind === "none" ? v?.ids : v?.ids.filter((id) => {
-            const d = defById.get(id);
-            return !d?.signature || resultsOf(d) !== null;
-          });
-          if (ids && ids.length > 0 && ref) {
+          // function type; when it is a class or an object type the call
+          // binds on the local's type alone, and when the graph cannot tell
+          // (a type from outside the repository) it does both.
+          const held = v ? v.ids.map((id) => [id, call.recv.kind === "none" ? true : holdsFunction(id)] as const) : [];
+          const ids = held.filter(([, fn]) => fn !== false).map(([id]) => id);
+          if (ids.length > 0 && ref) {
             const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.aliasOf ?? call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
             for (const t of ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
-            continue;
+            if (held.every(([, fn]) => fn === true)) continue;
           }
         }
         // What a call returned, called: the functions that callee returns by name.

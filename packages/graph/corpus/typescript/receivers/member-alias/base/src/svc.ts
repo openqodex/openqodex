@@ -1,4 +1,4 @@
-import { DoneFn, Other, SessionHandle, TurnFn } from "./session";
+import type { ExtFn } from "ext-lib"; import { DoneFn, Other, SessionHandle, TurnFn } from "./session";
 
 export interface Deps {
   handle: SessionHandle;
@@ -64,6 +64,8 @@ export class Service {
 
 export interface Hooks {
   done: DoneFn;
+  inline: (x: string) => string | number;
+  ext: ExtFn;
 }
 
 export class Hooked {
@@ -72,5 +74,15 @@ export class Hooked {
   viaUnreadFnCall(): void {
     const done = this.hooks.done;
     done.call(null, "j");
+  }
+
+  viaInlineFnCall(): void {
+    const inline = this.hooks.inline;
+    inline.call(null, "k");
+  }
+
+  viaOutsideFnCall(): void {
+    const ext = this.hooks.ext;
+    ext.call(null, "l");
   }
 }

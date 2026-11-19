@@ -51,8 +51,10 @@ import type { TreeVisitor } from "./walk.js";
 // 32: a local declared from a member (`const repo = this.deps.repo`) takes
 // that member's type. 33: such a local and an unannotated destructured name
 // are not declared (assigned again, they lose the type), and a function type
-// alias whose result cannot be read keeps a null result.
-export const EXTRACTOR_VERSION = 33;
+// alias whose result cannot be read keeps a null result. 34: such a local
+// keeps its member's type as one that may be any class below it
+// (TypeRef.member).
+export const EXTRACTOR_VERSION = 34;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -1848,8 +1850,8 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           // `const { session } = params`: each name has the type of its member.
           const annotation = name.type === "object_pattern" ? declared(jsTypeRef(node.childForFieldName("type"))) : null;
           const from = name.type === "object_pattern" ? (annotation ?? jsValueType(ctx, value)) : null;
-          // Unannotated, the names are not declared: one assigned again loses its type.
-          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, annotation ? type : { ...type, declared: false }, block);
+          // Unannotated, the names hold a member's type but are not declared: one assigned again loses its type.
+          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, annotation ? type : { ...type, declared: false, member: true }, block);
           return;
         }
         const isFn = value && ["arrow_function", "function_expression", "function", "generator_function"].includes(value.type);
@@ -1894,10 +1896,10 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           return ctx.push({ def, cls: null, locals: null, fnAt: (value as Node).startIndex });
         }
         // `const repo = this.deps.repo`: the local has the member's type, as
-        // `const { repo } = this.deps` gives it, never as declared, so a
-        // local assigned again loses it.
+        // `const { repo } = this.deps` gives it: a member's type (any class
+        // below it), never declared, so a local assigned again loses it.
         const member = jsUnwrap(value)?.type === "member_expression" ? jsValueType(ctx, value) : null;
-        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value) ?? (member ? { ...member, declared: false } : null), block);
+        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value) ?? (member ? { ...member, declared: false, member: true } : null), block);
         return;
       }
       case "statement_block":

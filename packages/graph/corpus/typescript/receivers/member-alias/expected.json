@@ -39,7 +39,19 @@
     },
     {
       "to": "src/svc.ts#Hooks.done",
-      "site": "src/svc.ts:74",
+      "site": "src/svc.ts:76",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/svc.ts#Hooks.inline",
+      "site": "src/svc.ts:81",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/svc.ts#Hooks.ext",
+      "site": "src/svc.ts:86",
       "tier": "possible",
       "kind": "may_invoke"
     }
