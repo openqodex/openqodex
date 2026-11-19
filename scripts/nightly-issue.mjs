@@ -4,17 +4,22 @@
 //   the run link and the tests that failed, job by job;
 // - success: comments on the open issue with the green run and closes it;
 // - anything else (cancelled, skipped): changes nothing.
-// The issue is the open one whose title is exactly TITLE. The failing tests
-// are read from the failed jobs' logs: the lines vitest starts with FAIL. A
-// failed job whose log names no test (a setup step, a timeout) is listed by
-// its name, so the issue never reads as if nothing failed.
+// The issue is an open one the Actions bot opened (gh's --author
+// app/github-actions) whose title is exactly TITLE: the repository is
+// public, so anyone can open an issue with that title, and the script never
+// acts on theirs. With two of the bot's open, a failure comments on the
+// older and a green run closes both. The failing tests are read from the
+// failed jobs' logs: the lines vitest starts with FAIL. Every failed job is
+// listed by its name, with its tests in a code block (a test name's
+// backticks or @mention cannot break the markdown or ping anyone), a count
+// of those past the cap, or why none is listed.
 // Usage: node scripts/nightly-issue.mjs
 //   (RESULT, RUN_ID and SHA from the workflow; gh reads GH_TOKEN and GH_REPO)
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 export const TITLE = "Nightly full gate fails on main";
-// A failure list longer than this is cut, with a count of the rest.
+// Tests past this many, over the whole issue, are counted per job, not listed.
 const MAX_TESTS = 50;
 
 // Runs gh and returns its stdout; the test passes its own in place of it.
@@ -52,23 +57,29 @@ function readLog(gh, path) {
   return null;
 }
 
+// A fenced code block that no run of backticks in the lines can close.
+function codeBlock(lines) {
+  const longest = Math.max(0, ...lines.map((l) => Math.max(0, ...(l.match(/`+/g) ?? []).map((r) => r.length))));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return [`${fence}text`, ...lines, fence];
+}
+
 function failureBody({ sha, url, jobs }) {
   const lines = [`The nightly full gate failed on \`main\` at ${sha}.`, "", `Run: ${url}`, ""];
-  let shown = 0;
-  let cut = 0;
+  let room = MAX_TESTS;
   for (const job of jobs) {
     lines.push(`**${job.name}**`);
     if (job.tests === null) lines.push("- the log could not be read; open the run");
     else if (job.tests.length === 0) lines.push("- no failing test in the log: a step before or after the tests failed; open the run");
-    for (const test of job.tests ?? []) {
-      if (shown < MAX_TESTS) {
-        lines.push(`- \`${test}\``);
-        shown++;
-      } else cut++;
+    else {
+      const shown = job.tests.slice(0, room);
+      room -= shown.length;
+      if (shown.length > 0) lines.push(...codeBlock(shown));
+      const rest = job.tests.length - shown.length;
+      if (rest > 0) lines.push(`- ${rest} more failing tests in this job; the run lists them`);
     }
     lines.push("");
   }
-  if (cut > 0) lines.push(`And ${cut} more failing tests; the run lists them all.`, "");
   if (jobs.length === 0) lines.push("No job is marked failed; open the run.", "");
   lines.push("The next green nightly run closes this issue.");
   return lines.join("\n");
@@ -80,16 +91,18 @@ export function report({ result, runId, sha, repo, server = "https://github.com"
     return 0;
   }
   const url = `${server}/${repo}/actions/runs/${runId}`;
-  const open = JSON.parse(gh(["issue", "list", "--state", "open", "--limit", "1000", "--json", "number,title"])).find((i) => i.title === TITLE);
+  const ours = JSON.parse(gh(["issue", "list", "--state", "open", "--author", "app/github-actions", "--limit", "1000", "--json", "number,title"]))
+    .filter((i) => i.title === TITLE)
+    .sort((a, b) => a.number - b.number);
   if (result === "success") {
-    if (open === undefined) {
-      log("the full gate passed and no issue is open");
-      return 0;
+    if (ours.length === 0) log("the full gate passed and no issue is open");
+    for (const issue of ours) {
+      gh(["issue", "close", String(issue.number), "--comment", `The nightly full gate passed on \`main\` at ${sha}: ${url}`]);
+      log(`the full gate passed; issue ${issue.number} closed`);
     }
-    gh(["issue", "close", String(open.number), "--comment", `The nightly full gate passed on \`main\` at ${sha}: ${url}`]);
-    log(`the full gate passed; issue ${open.number} closed`);
     return 0;
   }
+  const open = ours[0];
   // One JSON object per failed job of this run, the reusable workflow's
   // jobs among them.
   const listed = gh(["api", "--paginate", `repos/${repo}/actions/runs/${runId}/jobs?per_page=100`, "--jq", '.jobs[] | select(.conclusion == "failure") | {id, name}']);

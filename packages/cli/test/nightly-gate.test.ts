@@ -20,7 +20,20 @@
 //  6. The release publishes a commit whose full gate failed, was cancelled
 //     or never ran; or a push that publishes nothing waits on the full gate.
 //  7. A job other than the nightly report can write issues.
-import { readFileSync } from "node:fs";
+// Added after the review:
+//  8. The script acts on an issue someone else opened with the same title
+//     (the repository is public), instead of the Actions bot's own.
+//  9. A job whose tests come after the cap on listed tests shows no line,
+//     so it reads as if it passed.
+// 10. A test name with backticks or an @mention breaks the issue's markdown
+//     or pings someone.
+// 11. A workflow runs scripts/gate.sh without --full for a purpose that
+//     needs the real scanners: the pin bump's gate then skips the scanner
+//     install, the end-to-end tests and the golden run, and its pull
+//     request still says the gate passed.
+// 12. main's merge queue lookup counts a run that failed, or a run of
+//     another event, as the queue having tested the commit.
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
@@ -44,14 +57,22 @@ const unitFail = `2026-11-18T21:24:12.8532455Z ${ESC}[41m${ESC}[1m FAIL ${ESC}[2
 const e2eFail = `2026-11-19T20:41:00.0000000Z ${ESC}[41m${ESC}[1m FAIL ${ESC}[22m${ESC}[49m tests/e2e/graph-truth.test.ts${ESC}[2m > ${ESC}[22mtrueforge${ESC}[2m > ${ESC}[22mfinds every route`;
 
 type Job = { id: number; name: string; log: string | Error };
+// An open issue; bot says the Actions bot opened it, not a person.
+type Issue = { number: number; title: string; bot?: boolean };
 
 // A fake gh that answers the four reads and records every write. gh 2.105
 // prints a log with colour codes only with --allow-escape-sequences
-// ("new"); an older gh does not know that flag ("old").
-function fakeGh(openIssues: { number: number; title: string }[], failedJobs: Job[], ghVersion: "new" | "old" = "new") {
+// ("new"); an older gh does not know that flag ("old"). Asked with
+// --author app/github-actions, it lists only the bot's issues, as GitHub
+// does.
+function fakeGh(openIssues: Issue[], failedJobs: Job[], ghVersion: "new" | "old" = "new") {
   const writes: string[][] = [];
   const gh: Gh = (args) => {
-    if (args[0] === "issue" && args[1] === "list") return JSON.stringify(openIssues);
+    if (args[0] === "issue" && args[1] === "list") {
+      const author = args[args.indexOf("--author") + 1];
+      const listed = args.includes("--author") ? openIssues.filter((i) => author === "app/github-actions" && i.bot === true) : openIssues;
+      return JSON.stringify(listed.map(({ number, title }) => ({ number, title })));
+    }
     if (args[0] === "api" && args[1] === "--paginate") return failedJobs.map(({ id, name }) => JSON.stringify({ id, name })).join("\n") + "\n";
     if (args[0] === "api") {
       const flag = args.includes("--allow-escape-sequences");
@@ -97,7 +118,7 @@ describe("the nightly issue", () => {
     const body = create[5];
     expect(body).toContain(sha);
     expect(body).toContain("https://github.com/o/r/actions/runs/99");
-    expect(body).toContain("**gate / Gate (ubuntu-latest)**\n- `packages/graph/src/frameworks/nest/nest.test.ts > the Nest plugin (5) > reads a route`\n- `tests/e2e/graph-truth.test.ts > trueforge > finds every route`");
+    expect(body).toContain("**gate / Gate (ubuntu-latest)**\n```text\npackages/graph/src/frameworks/nest/nest.test.ts > the Nest plugin (5) > reads a route\ntests/e2e/graph-truth.test.ts > trueforge > finds every route\n```");
     expect(body).toContain("**gate / Gate (macos-latest)**\n- no failing test in the log");
     expect(body).toContain("**gate / Scanner-only benchmark**\n- the log could not be read");
     expect(body).not.toContain(ESC);
@@ -107,15 +128,15 @@ describe("the nightly issue", () => {
     for (const version of ["new", "old"] as const) {
       const { gh, writes } = fakeGh([], [{ id: 1, name: "gate / Gate (ubuntu-latest)", log: e2eFail }], version);
       run("failure", gh);
-      expect(writes[0][5], version).toContain("- `tests/e2e/graph-truth.test.ts > trueforge > finds every route`");
+      expect(writes[0][5], version).toContain("```text\ntests/e2e/graph-truth.test.ts > trueforge > finds every route\n```");
     }
   });
 
   it("comments on the open issue instead of opening a second one (failure 1)", () => {
     const { gh, writes } = fakeGh(
       [
-        { number: 4, title: "Something else" },
-        { number: 7, title: TITLE },
+        { number: 4, title: "Something else", bot: true },
+        { number: 7, title: TITLE, bot: true },
       ],
       [{ id: 1, name: "gate / Gate (ubuntu-latest)", log: e2eFail }],
     );
@@ -127,8 +148,8 @@ describe("the nightly issue", () => {
   it("closes the open issue on a green run, and touches no other issue (failure 4)", () => {
     const { gh, writes } = fakeGh(
       [
-        { number: 4, title: `${TITLE} (old)` },
-        { number: 7, title: TITLE },
+        { number: 4, title: `${TITLE} (old)`, bot: true },
+        { number: 7, title: TITLE, bot: true },
       ],
       [],
     );
@@ -139,6 +160,69 @@ describe("the nightly issue", () => {
     const none = fakeGh([{ number: 4, title: `${TITLE} (old)` }], []);
     run("success", none.gh);
     expect(none.writes).toEqual([]);
+  });
+
+  it("acts only on the issues the Actions bot opened, with none, one or two open (failure 8)", () => {
+    const failed = [{ id: 1, name: "gate / Gate (ubuntu-latest)", log: e2eFail }];
+    // A person's issue with the same title: a failure opens the bot's own,
+    // and a green run closes nothing.
+    const person = { number: 3, title: TITLE };
+    let fake = fakeGh([person], failed);
+    run("failure", fake.gh);
+    expect(fake.writes.map((w) => w.slice(0, 2))).toEqual([["issue", "create"]]);
+    fake = fakeGh([person], []);
+    run("success", fake.gh);
+    expect(fake.writes).toEqual([]);
+    // The person's and the bot's: only the bot's is commented on or closed.
+    fake = fakeGh([person, { number: 7, title: TITLE, bot: true }], failed);
+    run("failure", fake.gh);
+    expect(fake.writes.map((w) => w.slice(0, 3))).toEqual([["issue", "comment", "7"]]);
+    fake = fakeGh([person, { number: 7, title: TITLE, bot: true }], []);
+    run("success", fake.gh);
+    expect(fake.writes.map((w) => w.slice(0, 3))).toEqual([["issue", "close", "7"]]);
+    // Two of the bot's: a failure comments on the older, a green run closes both.
+    const two = [
+      { number: 9, title: TITLE, bot: true },
+      { number: 7, title: TITLE, bot: true },
+    ];
+    fake = fakeGh(two, failed);
+    run("failure", fake.gh);
+    expect(fake.writes.map((w) => w.slice(0, 3))).toEqual([["issue", "comment", "7"]]);
+    fake = fakeGh(two, []);
+    run("success", fake.gh);
+    expect(fake.writes.map((w) => w.slice(0, 3))).toEqual([
+      ["issue", "close", "7"],
+      ["issue", "close", "9"],
+    ]);
+  });
+
+  it("names every failed job and counts the tests past the cap (failure 9)", () => {
+    const many = Array.from({ length: 50 }, (_, i) => ` FAIL  tests/e2e/many.test.ts > case ${i}`).join("\n");
+    const three = Array.from({ length: 3 }, (_, i) => ` FAIL  tests/e2e/late.test.ts > case ${i}`).join("\n");
+    const { gh, writes } = fakeGh(
+      [],
+      [
+        { id: 1, name: "gate / Gate (ubuntu-latest)", log: many },
+        { id: 2, name: "gate / Gate (macos-latest)", log: three },
+      ],
+    );
+    run("failure", gh);
+    const body = writes[0][5];
+    expect(body).toContain("tests/e2e/many.test.ts > case 49");
+    expect(body).toContain("**gate / Gate (macos-latest)**\n- 3 more failing tests in this job; the run lists them");
+  });
+
+  it("puts test names in a code block that their backticks cannot close (failure 10)", () => {
+    const name = "tests/e2e/x.test.ts > says ```hi``` to @octocat";
+    const { gh, writes } = fakeGh([], [{ id: 1, name: "gate / Gate (ubuntu-latest)", log: ` FAIL  ${name}` }]);
+    run("failure", gh);
+    const lines = writes[0][5].split("\n");
+    const at = lines.indexOf(name);
+    expect(at).toBeGreaterThan(0);
+    // The fence above and below is longer than any run of backticks inside.
+    expect(lines[at - 1]).toBe("````text");
+    expect(lines[at + 1]).toBe("````");
+    expect(lines.filter((l) => l.includes("@octocat"))).toEqual([name]);
   });
 
   it("changes nothing on a cancelled, skipped or empty result (failure 5)", () => {
@@ -153,7 +237,7 @@ describe("the nightly issue", () => {
   });
 });
 
-type Workflow = { permissions?: Record<string, string>; jobs: Record<string, { if?: string; needs?: string[]; uses?: string; with?: Record<string, unknown>; permissions?: Record<string, string>; steps?: { uses?: string; with?: Record<string, string> }[] }> };
+type Workflow = { permissions?: Record<string, string>; jobs: Record<string, { if?: string; needs?: string[]; uses?: string; with?: Record<string, unknown>; permissions?: Record<string, string>; steps?: { uses?: string; run?: string; with?: Record<string, string> }[] }> };
 const workflow = (name: string) => parse(readFileSync(join(root, ".github", "workflows", name), "utf8")) as Workflow;
 const inner = (value: string) => /^\$\{\{\s*([\s\S]*?)\s*\}\}$/.exec(value)?.[1] ?? value;
 // A GitHub expression of the shapes these workflows use (&&, ||, ==, !=,
@@ -208,6 +292,32 @@ describe("the release and the full gate", () => {
         expect(evaluate(job.if ?? "", needs), `${failed} ${result}`).toBe(false);
       }
     }
+  });
+
+  it("runs scripts/gate.sh with --full in every workflow (failure 11)", () => {
+    const calls: string[] = [];
+    for (const name of readdirSync(join(root, ".github", "workflows")).filter((f) => f.endsWith(".yml"))) {
+      for (const [id, j] of Object.entries(workflow(name).jobs)) {
+        for (const step of j.steps ?? []) {
+          for (const line of (step.run ?? "").split("\n")) if (/scripts\/gate\.sh\b/.test(line)) calls.push(`${name} ${id}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(calls).toEqual(["pin-bump.yml gate: bash scripts/gate.sh --full"]);
+  });
+
+  it("skips main's gate only on a passed merge queue run of ci.yml on this very commit (failure 12)", () => {
+    const run = workflow("ci.yml").jobs["queue-tested"].steps?.[0]?.run ?? "";
+    const command = /gh run list (.*?) \|\|/.exec(run)?.[1] ?? "";
+    // Words as the shell splits them: a double-quoted word may hold \".
+    const words = command.match(/"(?:\\.|[^"\\])*"|\S+/g) ?? [];
+    const flag = (name: string) => words[words.indexOf(name) + 1];
+    expect(flag("--workflow")).toBe("ci.yml");
+    expect(flag("--event")).toBe("merge_group");
+    expect(flag("--status")).toBe("success");
+    expect(flag("--commit")).toBe('"$GITHUB_SHA"');
+    expect(flag("--jq")).toBe('"map(select(.headSha == \\"$GITHUB_SHA\\")) | length"');
+    expect(run).toContain('if [ "$found" -gt 0 ] 2>/dev/null; then tested=true; else tested=false; fi');
   });
 
   it("gives issue write to the nightly report job alone (failure 7)", () => {

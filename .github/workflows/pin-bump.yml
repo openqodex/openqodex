@@ -111,13 +111,15 @@ jobs:
       - run: pnpm build
       - name: Check every pinned download
         run: node scripts/refresh-toolchain.mjs --verify
+      # --full: the scanner check, the end-to-end tests and the golden run
+      # are what start the new scanner; without it the gate skips them.
       - name: Gate
         id: gate
         continue-on-error: true
         env:
           OPENQODEX_E2E_HOME: ${{ runner.temp }}/openqodex-e2e-home
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/gate.sh
+        run: bash scripts/gate.sh --full
       - name: Record the gate's outcome
         env:
           OUTCOME: ${{ steps.gate.outcome }}
