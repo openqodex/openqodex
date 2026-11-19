@@ -49,7 +49,9 @@ import type { TreeVisitor } from "./walk.js";
 // built-in generic the file declares or imports is the file's own type, and
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
 // 32: an interface member marked `?` is optional (DefFact.optional).
-export const EXTRACTOR_VERSION = 32;
+// 33: an interface in `declare module "x"` or `declare global` augments a
+// type (DefFact.augments).
+export const EXTRACTOR_VERSION = 33;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -1913,7 +1915,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           if (ref) bases.push(ref);
         }
         enteringTypeParams = null;
-        const def = ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), bases, iface: true });
+        // `declare module "x" { interface T { ... } }` and `declare global`: members added to a type of a package or of the runtime.
+        const block = (node.parent?.type === "export_statement" ? node.parent : node).parent;
+        const holder = block?.type === "statement_block" ? block.parent : null;
+        const augments = holder?.type === "ambient_declaration" || (holder?.type === "module" && holder.childForFieldName("name")?.type === "string" && holder.parent?.type === "ambient_declaration");
+        const def = ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), bases, iface: true, ...(augments ? { augments: true } : {}) });
         return ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
       }
       case "method_signature":

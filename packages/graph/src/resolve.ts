@@ -68,8 +68,10 @@ export const SHAPE_CAP = 20;
 // its use gives. 24: a member a Pick or an Omit leaves out is no member of
 // the type. 25: a file that imports one module on several lines keeps an
 // import site for each. 26: a call through a TypeScript interface reaches
-// the classes that match it by shape (by-shape).
-export const RESOLVER_VERSION = 26;
+// the classes that match it by shape (by-shape). 27: a TypeScript call on
+// what a package returned is external at any depth, unless the repository
+// subclasses, implements or augments a package's type with that method.
+export const RESOLVER_VERSION = 27;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -1520,6 +1522,56 @@ export function createWorld(input: ResolveInput): World {
     });
   };
 
+  // Whether a class is a subtype of a type outside the graph: it, or a
+  // class or interface above it, extends or implements one, or names a
+  // base with an expression.
+  const subtypeMemo = new Map<string, boolean>();
+  const subtypeOfOutside = (key: string, depth = 0): boolean => {
+    const kept = subtypeMemo.get(key);
+    if (kept !== undefined) return kept;
+    subtypeMemo.set(key, false);
+    const info = classes.get(key);
+    const b = basesOf(key);
+    let out =
+      b.outside ||
+      (info?.bases.some((r) => {
+        if (r.rel !== "implements") return false;
+        const k = typeKey(info.file, info.family, r, 0, false, info.nesting);
+        return k === null || k === "ext";
+      }) ??
+        false);
+    if (!out && depth <= MAX_DEPTH) out = b.keys.some((k) => k !== key && subtypeOfOutside(k, depth + 1));
+    subtypeMemo.set(key, out);
+    return out;
+  };
+  // The method names by which a value a package's own function or method
+  // hands back may run the repository's code: the methods of a class or a
+  // module-level object that is a subtype of a type outside the graph (a
+  // subclass of the package's class, an implementation of its interface),
+  // and the members an interface in `declare module` or `declare global`
+  // adds to a package's type. A call of another name on such a value runs
+  // the package's code.
+  let packageMemberNames: Set<string> | null = null;
+  const packageMemberNamed = (name: string): boolean => {
+    if (packageMemberNames === null) {
+      packageMemberNames = new Set();
+      for (const [k, info] of classes) {
+        if (info.family !== "js") continue;
+        const augments = info.ids.some((id) => defById.get(id)?.augments === true);
+        if (!augments && !(classLike(k) && subtypeOfOutside(k))) continue;
+        for (const n of methodsOn.i.get(k)?.keys() ?? []) packageMemberNames.add(n);
+      }
+    }
+    return packageMemberNames.has(name);
+  };
+  // Whether `t` is what a package's own function or method returned: a call
+  // of a name a package exports, or of a method on a value of a package's type.
+  const packageResult = (file: string, family: Family, t: TypeRef, depth: number): boolean => {
+    if (family !== "js" || t.result === undefined || t.callback || t.localDef !== undefined || depth > MAX_TYPE_DEPTH) return false;
+    if (t.on) return typeKey(file, family, t.on, depth + 1) === "ext";
+    return namedResultTarget(file, t) === "ext";
+  };
+
   // Every candidate must declare the same result type. Receiver lookup follows the family's method rules.
   const resultType = (file: string, family: Family, t: TypeRef, depth: number, nesting: string | null): TypeHit => {
     let found: ResultTarget;
@@ -1527,7 +1579,11 @@ export function createWorld(input: ResolveInput): World {
     if (t.on) {
       // A receiver typed by an intersection (`Pick<T, K>` is one): the side that declares the method.
       const on = (family === "js" ? intersectionCall({ file, family, t: t.on, ev: null }, t.name) : null) ?? typeKey(file, family, t.on, depth + 1, false, nesting);
-      // An external receiver has no readable method declaration.
+      // An external receiver has no readable method declaration. In
+      // TypeScript what its method returns is the package's too, unless the
+      // receiver is itself what a package returned and the repository adds
+      // a method of that name to a package's type, which may be what runs.
+      if (on === "ext" && family === "js") return packageResult(file, family, t.on, depth) && packageMemberNamed(t.name) ? null : "ext";
       if (on === null || on === "ext") return null;
       receiver = on;
       const hit = methodOn(on.key, t.name, "i", 0);
@@ -2429,7 +2485,8 @@ export function createWorld(input: ResolveInput): World {
     let found: { ids: string[]; ev: Ev } | "ext" | null;
     if (t.on) {
       const on = typeKey(s.file, s.family, t.on, depth + 1);
-      if (on === null || on === "ext") return on;
+      if (on === "ext") return packageResult(s.file, s.family, t.on, depth) && packageMemberNamed(t.name) ? null : "ext";
+      if (on === null) return null;
       const hit = methodOn(on.key, t.name, "i", 0);
       if (!hit || !("ids" in hit)) return null;
       found = { ids: hit.ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
@@ -3007,7 +3064,15 @@ export function createWorld(input: ResolveInput): World {
           return { unknown: "untyped-receiver", shape: "typed", note: `a value typed ${spelled} may be anything with a method of this name` };
         }
         const t = typeKey(file, family, r.type);
-        if (t === "ext") return { ext: true };
+        // What a package's function or method returned: its methods are the
+        // package's, unless the repository adds a method of that name to a
+        // package's type (a subclass, an implementation, `declare module`),
+        // which the value may be.
+        const fromPackage = (): Outcome =>
+          family === "js" && packageMemberNamed(call.name) && packageResult(file, family, r.type, 0)
+            ? { unknown: "no-receiver-type", shape: "typed", note: `what ${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name} returns comes from a package, and the repository adds a method ${call.name} to a package's type, by a subclass, an implementation or \`declare module\`, which the value may be` }
+            : { ext: true };
+        if (t === "ext") return fromPackage();
         // A collection itself (an array, a list, a slice) or a value of a
         // built-in type the file does not redefine: the method is the
         // language's own.
@@ -3029,7 +3094,7 @@ export function createWorld(input: ResolveInput): World {
           return { unknown: "no-receiver-type", shape: "typed", note };
         }
         const key = typed ?? followPath(t, r.path);
-        if (key === "ext") return { ext: true };
+        if (key === "ext") return fromPackage();
         if (key === null && builtinEnd()) return { ext: true };
         if (key === null) return { unknown: "no-receiver-type", shape: "typed", note: "a field whose type no rule knows" };
         const kind = key.ev.kind === "receiver-inferred" ? "receiver-inferred" : receiverKind(r.type, r.path);

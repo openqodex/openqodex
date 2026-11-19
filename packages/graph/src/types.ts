@@ -115,6 +115,9 @@ export type DefFact = {
   // A TypeScript interface member marked `?` (`close?(): void`): a value of
   // the interface need not have it, so a class matched by shape need not either.
   optional?: boolean;
+  // A TypeScript interface declared in `declare module "x"` or `declare
+  // global`: it adds members to a type that may come from outside the repository.
+  augments?: boolean;
   anonymous?: boolean; // a Java object or enum constant body, never a source-level type name
   pointer?: boolean; // a Go method with a pointer receiver
   // A Java method whose last parameter is varargs (`Object... rest`): it

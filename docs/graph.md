@@ -54,7 +54,7 @@ A step through inheritance is part of the proof: a method found on a base class 
 
 A call no rule can bind is kept as an unknown with its cause, never dropped:
 
-- external: the name comes from a declared dependency or the standard library. Only these are external; an import of a module that is not in the repository and that no manifest declares is a miss.
+- external: the name comes from a declared dependency or the standard library. Only these are external; an import of a module that is not in the repository and that no manifest declares is a miss. In TypeScript a method called on what a package's own function or method returned is external too, at any depth of a chain (`db.selectFrom("t").where(...).execute()` with `db: Kysely<DB>`, `z.string().min(1).optional()`), so it leaves the floor of every repository method of that name. It stays a no-receiver-type gap when the repository has a method of that name in a class or a module-level object that extends or implements a type from outside the repository, at any depth, or in an interface declared in `declare module "x"` or `declare global`: the value may be one of those, so the call may run the repository's code.
 - no-receiver-type: a method called on a value whose type no rule knows, or a member that an interface or a type alias does not declare.
 - untyped-receiver: a method called on a value typed `any`, `unknown`, `object` or an object type written in place such as `{ save(): number }` (Python `object` or `Any`, Go `any`). It may reach any method of that name, so it is never counted as external. A call through a member of an object type (`deps.sessions.create()` with `deps: { sessions: Sessions }`) is not: it binds through the member's declared type.
 - not-exported: a path of a workspace package that its `exports` map does not expose.
@@ -83,6 +83,7 @@ A file is listed as not read, with the reason, when it is over `graph.max_file_b
 - A dependency that a lockfile links by path (a pnpm `link:` entry, `link: true` in `package-lock.json`) or that yarn declares as `workspace:<path>` is bound to the workspace package of its name, not by where the path leads.
 - A `file:` or `link:` path whose folders, once each `..` is taken by its spelling, hold a symbolic link is never bound, even where npm or pnpm would follow that link to the workspace package.
 - A tsconfig `extends` given as a list (TypeScript 5) is not followed: it is a metadata-unreadable unknown, and the build is partial.
+- A package's generic method that hands back an object of the repository, such as `app.get(UsersService).findAll()` or `container.resolve(Job).run()`, is not told apart from one that hands back the package's own object: the call on its result is external, unless the class extends or implements a type from outside the repository.
 
 ## The graph's folder
 
