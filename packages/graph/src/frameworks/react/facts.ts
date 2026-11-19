@@ -11,7 +11,7 @@
 // stops at the nearest element above, so a deeply nested file stays linear.
 import type { Node } from "web-tree-sitter";
 import type { FactReader, FrameworkFactBase } from "../plugin.js";
-import { readAlone } from "../../walk.js";
+import { hasError, readAlone } from "../../walk.js";
 import type { TreeVisitor, UpType } from "../../walk.js";
 import { exported, identifierName, MAX_SOURCE_BYTES, namePath, pos } from "../express/js.js";
 
@@ -236,7 +236,7 @@ export function reader(root: Node): FactReader<ReactFact> {
         if (n?.type === "identifier" && value?.type === "call_expression") {
           const callee = namePath(value.childForFieldName("function"));
           const id = identifierName(n.text);
-          if (id !== null && callee && callee[callee.length - 1] === "createContext" && topFn() === null && !node.hasError) out.push({ kind: "context", ...pos(node), name: id, callee });
+          if (id !== null && callee && callee[callee.length - 1] === "createContext" && topFn() === null && !hasError(node)) out.push({ kind: "context", ...pos(node), name: id, callee });
         }
       } else if (JSX_TYPES.has(type)) {
         const nameNode = type === "jsx_element" ? (node.childForFieldName("open_tag")?.childForFieldName("name") ?? null) : node.childForFieldName("name");
@@ -248,7 +248,7 @@ export function reader(root: Node): FactReader<ReactFact> {
           const f = out[fn.fact];
           if (f && f.kind === "component") f.returnsJsx = true;
         }
-        if (name && !node.hasError && (name.length > 1 || isComponentName(name[0] as string))) {
+        if (name && !hasError(node) && (name.length > 1 || isComponentName(name[0] as string))) {
           let render: string[] | null = null;
           if (parentType === "arguments" && upType(2) === "call_expression" && up(1)?.firstNamedChild?.id === node.id) render = namePath((up(2) as Node).childForFieldName("function"));
           out.push({ kind: "element", ...pos(node), name, local: (locals.get(name[0] as string) ?? 0) > 0, render });
@@ -259,7 +259,7 @@ export function reader(root: Node): FactReader<ReactFact> {
           const f = out[fn.fact];
           if (f && f.kind === "component") f.returnsJsx = true;
         }
-      } else if (type === "call_expression" && !node.hasError) {
+      } else if (type === "call_expression" && !hasError(node)) {
         const fn = node.childForFieldName("function");
         // A member callee's name path ends in its property and holds two or
         // more names: it can only be a hook's (`React.useState`).

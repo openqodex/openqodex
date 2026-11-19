@@ -13,6 +13,7 @@
 // walk over a tree is one pass with no step back up the parents.
 import type { Node } from "web-tree-sitter";
 import { assembledText } from "../shared/kept.js";
+import { hasError } from "../../walk.js";
 import type { TreeVisitor, Up, UpType } from "../../walk.js";
 
 // The largest file a JavaScript plugin reads, in bytes. A larger file gets
@@ -159,7 +160,7 @@ export function namePath(start: Node | null): string[] | null {
   const parts: string[] = [];
   let node = start;
   while (node) {
-    if (parts.length >= MAX_NAME_PARTS || node.hasError) return null;
+    if (parts.length >= MAX_NAME_PARTS || hasError(node)) return null;
     if (node.type === "parenthesized_expression") {
       node = node.firstNamedChild;
       continue;
@@ -187,7 +188,7 @@ export function namePath(start: Node | null): string[] | null {
 export function stringValue(node: Node | null): string | null {
   if (!node) return null;
   if (node.type !== "string" && node.type !== "template_string") return null;
-  if (node.hasError || node.endIndex - node.startIndex > MAX_STRING + 2) return null;
+  if (hasError(node) || node.endIndex - node.startIndex > MAX_STRING + 2) return null;
   let out = "";
   for (const c of node.namedChildren) {
     if (c.type === "template_substitution") return null;
@@ -234,7 +235,7 @@ function stringParts(start: Node): Part[] | null {
       continue;
     }
     if (node.type === "template_string") {
-      if (node.hasError || node.endIndex - node.startIndex > MAX_STRING) return null;
+      if (hasError(node) || node.endIndex - node.startIndex > MAX_STRING) return null;
       for (const c of node.namedChildren) {
         if (c.type === "template_substitution") {
           const inner = c.firstNamedChild;

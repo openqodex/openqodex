@@ -1,0 +1,5 @@
+---
+"openqodex": minor
+---
+
+Code graph answers now say when code the graph did not read could change them. In a repository with Rust, C, C++, C#, Kotlin, Swift, PHP or Scala files, a `search`, a `routes` listing and any question about a name the graph does not hold set the floor with a reason such as "2 Rust files not read", so a Rust function no longer looks like it does not exist. A question about one symbol gets the reason only from a language that can call it by name: Kotlin and Scala files for a Java method, never Rust files for a TypeScript function. Each answer's `unknown` now also has `groups`: its gaps by cause, with a count and at most two examples each. Each answer has `listIncomplete`, true on a floor, and the command line prints "certain (list incomplete)" in the counts line. The route readers now read a tagged template with type arguments (``sql<Row>`select 1` ``) and a cast to an import type with an array suffix (`x as import('./t').Row[]`); on a large TypeScript repository, `routes` went from 43 parse notes to 6.

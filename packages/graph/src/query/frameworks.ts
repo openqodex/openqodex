@@ -185,9 +185,20 @@ class Gaps {
       const prev = causes[u.cause];
       causes[u.cause] = prev === null || u.count === null ? null : (prev ?? 0) + u.count;
     }
-    const reasons = [...this.missing, ...this.hit.slice(0, 10).map((u) => `${u.plugin}: ${u.note}${u.site ? ` (${u.site.file}:${u.site.line})` : ""}`)];
+    const said = (u: FwUnknown) => `${u.plugin}: ${u.note}${u.site ? ` (${u.site.file}:${u.site.line})` : ""}`;
+    const reasons = [...this.missing, ...this.hit.slice(0, 10).map(said)];
     if (this.hit.length > 10) reasons.push(`and ${this.hit.length - 10} more gaps of the framework layer`);
-    return { ...base.unknown, floor: base.unknown.floor || reasons.length > 0, reasons: [...reasons, ...base.unknown.reasons], causes };
+    // The same gaps by cause: the count `causes` gives, the places that
+    // hold them, and the first two of each.
+    const byCause = new Map<string, { cause: string; places: number; examples: string[] }>();
+    for (const u of this.hit) {
+      let g = byCause.get(u.cause);
+      if (!g) byCause.set(u.cause, (g = { cause: u.cause, places: 0, examples: [] }));
+      g.places++;
+      if (g.examples.length < 2) g.examples.push(said(u));
+    }
+    const groups = [...byCause.values()].map((g) => ({ cause: g.cause, count: causes[g.cause] ?? null, places: g.places, examples: g.examples }));
+    return { ...base.unknown, floor: base.unknown.floor || reasons.length > 0, reasons: [...reasons, ...base.unknown.reasons], causes, groups };
   }
 }
 
