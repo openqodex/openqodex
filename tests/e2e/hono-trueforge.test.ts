@@ -4,8 +4,9 @@
 // serves with the TypeScript compiler's own name binding, and this test
 // requires the graph to list exactly those routes for that application:
 // the registration site, the method, the full path with each `{id}` served
-// as `:id`, the path as written, and the handler's definition. Where the
-// handler is an inline function, a call or a computed value, the graph must
+// as `:id`, the path as written, and the handler's definition. A handler
+// written in place is bound to the definition the graph makes for it at its
+// own line. Where the handler is a call or a computed value, the graph must
 // bind nothing and name an unknown at the site instead. Every route call the
 // truth lists must belong to the application, never to an orphan router, so
 // a missing mount cannot hide behind a relative path.

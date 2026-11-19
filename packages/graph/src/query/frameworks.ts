@@ -52,7 +52,8 @@ type FwRegistration = {
 type FwEdge = { from: string; to: string; kind: string; plugin: string; app: string | null; evidence: FwEvidence; category?: string };
 type FwUnknown = { plugin: string; site: FwSite | null; affects: string[]; cause: string; name: string | null; note: string; count: number | null; exact: boolean };
 type FwRun = { id: string; status: string; reason: string | null; apps?: number };
-type FwLayer = { registrations: FwRegistration[]; edges: FwEdge[]; unknowns: FwUnknown[]; runs: FwRun[] };
+type FwApp = { id: string; site: FwSite };
+type FwLayer = { registrations: FwRegistration[]; edges: FwEdge[]; unknowns: FwUnknown[]; runs: FwRun[]; apps: FwApp[] };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
@@ -68,10 +69,11 @@ export function frameworkLayer(g: Graph): FwLayer | null {
   const f = (g as unknown as { frameworks?: unknown }).frameworks;
   if (!isObj(f) || !Array.isArray(f.entities) || !Array.isArray(f.edges) || !Array.isArray(f.unknowns)) return null;
   const runs = runsOf(g);
+  const apps = Array.isArray(f.apps) ? f.apps.filter((a): a is FwApp => isObj(a) && typeof a.id === "string" && isObj(a.site) && typeof a.site.file === "string") : [];
   const registrations = f.entities.filter((e): e is FwRegistration => isObj(e) && e.kind === "registration" && isObj(e.site) && isObj(e.handler) && Array.isArray(e.methods));
   const edges = f.edges.filter((e): e is FwEdge => isObj(e) && typeof e.from === "string" && typeof e.to === "string" && typeof e.kind === "string" && isObj(e.evidence) && isObj(e.evidence.site));
   const unknowns = f.unknowns.filter((u): u is FwUnknown => isObj(u) && Array.isArray(u.affects) && typeof u.cause === "string");
-  return { registrations, edges, unknowns, runs };
+  return { registrations, edges, unknowns, runs, apps };
 }
 
 // The plugins of this build whose rules emit `kind` (a route
@@ -202,6 +204,10 @@ type Route = {
   site: FwSite;
   handler: FwRegistration["handler"];
   handles: { to: string; site: GraphSite; premises: string[]; edge: string }[];
+  // The route belongs to an application a test file builds (or, with no
+  // application, is registered in a test file), by the graph's one rule
+  // for test files.
+  isTest: boolean;
 };
 
 // A target that names one point (an id, a name, a file and line), as
@@ -228,6 +234,7 @@ export function routes(s: Session, req: Request): Job | Answer {
   let regs: Pass<FwRegistration> | null = null;
   let sorted = false;
   const gaps = new Gaps(layer, "handles", readersOf("registration"));
+  const appFile = new Map(layer.apps.map((a) => [a.id, a.site.file]));
   return (budget) => {
     const base = empty(s, "routes");
     if (point && !n) {
@@ -247,8 +254,10 @@ export function routes(s: Session, req: Request): Job | Answer {
     regs ??= new Pass(layer.registrations, (r) => {
       if (at && !handlesPoint.has(r.id) && !r.handler.targets.includes(at.id)) return;
       if (text && !(r.pattern ?? r.written ?? "").includes(text) && r.name !== text) return;
+      const isTest = isTestPath((r.app !== null ? appFile.get(r.app) : undefined) ?? r.site.file);
+      if (isTest && req.excludeTests) return;
       const handles = (handlesOf.get(r.id) ?? []).map((e) => ({ to: e.to, site: fwSite(e.evidence), premises: e.evidence.premises, edge: edgeId(e, e.evidence.site) }));
-      items.push({ id: r.id, plugin: r.plugin, app: r.app, methods: r.methods, pattern: r.pattern, name: r.name, mounted: r.mounted, site: r.site, handler: r.handler, handles });
+      items.push({ id: r.id, plugin: r.plugin, app: r.app, methods: r.methods, pattern: r.pattern, name: r.name, mounted: r.mounted, site: r.site, handler: r.handler, handles, isTest });
     });
     if (!regs.run(budget)) return stoppedAt({ ...base, target }, items, [], regs.left);
     if (!sorted) {

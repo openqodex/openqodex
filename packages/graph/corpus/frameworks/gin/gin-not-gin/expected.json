@@ -1,0 +1,15 @@
+{
+  "guards": "produces no gin route, application, middleware or role from a repository package named gin whose calls read exactly like gin's",
+  "callers": [
+    {
+      "to": "main.go#home",
+      "site": "main_test.go:6",
+      "tier": "certain"
+    }
+  ],
+  "frameworks": {
+    "plugin": "gin",
+    "apps": 0,
+    "none": ["registration", "handles", "mounts", "applies_middleware", "role"]
+  }
+}

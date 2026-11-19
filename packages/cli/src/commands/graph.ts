@@ -26,7 +26,7 @@ export const USAGE = [
   "  callees <name | file:line> --edges calls,defines   also into the definitions it holds",
   "  implementers <class | interface | Class.method> [--depth 1..8]",
   "  references <name | file:line>     uses as a value or a type",
-  "  routes [<handler>] [--text <path part>]",
+  "  routes [<handler>] [--text <path part>] [--exclude-tests]",
   "  tests <name | file:line>",
   "  path <from> <to> [--edges calls,inherits,defines,imports] [--depth 1..8]",
   "  impact [<name | file:line>]        with no symbol: what the change reaches",
@@ -136,7 +136,7 @@ function exitOf(a: Answer): number {
 
 export async function run(args: string[]): Promise<number> {
   const { global, bools, values, positionals } = parseFlags(args, {
-    bools: ["--json", "--full", "--compact"],
+    bools: ["--json", "--full", "--compact", "--exclude-tests"],
     values: ["--file", "--name", "--tier", "--depth", "--limit", "--cursor", "--generation", "--base", "--edges", "--level", "--project", "--text", "--tokens", "--budget-ms", "--context"],
     positionals: 3,
     globals: ["--cwd", "--config", "--quiet"],
@@ -224,6 +224,7 @@ export async function run(args: string[]): Promise<number> {
       target,
       ...(kind === "path" ? { to: parseTarget(positionals[2], undefined) } : {}),
       text: kind === "search" ? positionals[1] : values.get("--text"),
+      ...(bools.has("--exclude-tests") ? { excludeTests: true } : {}),
       tiers,
       edges: values.get("--edges")?.split(",").map((e) => e.trim()),
       depth: intFlag(values, "--depth"),

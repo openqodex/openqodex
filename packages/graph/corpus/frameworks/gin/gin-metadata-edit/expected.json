@@ -1,0 +1,11 @@
+{
+  "guards": "binds a gin handler from another package once go.mod names the module the import uses, with no edit to the files that hold them",
+  "frameworks": {
+    "plugin": "gin",
+    "apps": 1,
+    "registrations": [
+      { "site": "main.go:11", "methods": ["GET"], "pattern": "/ping", "handler": "handlers/ping.go#Ping", "status": "bound", "mounted": true }
+    ],
+    "roles": [{ "target": "handlers/ping.go#Ping", "role": "route_handler", "detail": "gin" }]
+  }
+}

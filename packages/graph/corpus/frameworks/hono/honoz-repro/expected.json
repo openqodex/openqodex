@@ -4,7 +4,7 @@
     "plugin": "hono",
     "apps": 1,
     "registrations": [
-      { "site": "src/app.ts:4", "methods": ["GET"], "pattern": "/api/v1/users/:id", "status": "unresolved", "mounted": true }
+      { "site": "src/app.ts:4", "methods": ["GET"], "pattern": "/api/v1/users/:id", "handler": "src/app.ts#<openapi getUserRoute>", "status": "bound", "mounted": true }
     ],
     "edges": [
       { "kind": "mounts", "from": "fw:hono:app:src/app.ts:5", "to": "fw:hono:router:src/app.ts:3", "tier": "certain" }
