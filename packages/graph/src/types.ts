@@ -108,6 +108,11 @@ export type DefFact = {
   // A hash of the definition without its name, comments and whitespace
   // (top-level definitions and members of top-level classes only).
   bodyHash?: string;
+  // A function written in place where a route handler goes (extract.ts,
+  // routeHandlerName): the index of the definition it is written in, -1 at
+  // the top level. It stays a definition only when a framework plugin binds
+  // it; otherwise its calls go back to that definition (inline-fold.ts).
+  inlineIn?: number;
   // A TypeScript type alias: the type it stands for (`type Loose = any`).
   alias?: TypeRef;
   // A member declared without a body that runs: a TypeScript interface

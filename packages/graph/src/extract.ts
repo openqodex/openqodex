@@ -60,7 +60,10 @@ import type { TreeVisitor } from "./walk.js";
 // of a call, a `new`, an instantiation or a base, or the constraint or
 // default of a type parameter is a type use; a mapped type's key and an
 // `infer` name are not.
-export const EXTRACTOR_VERSION = 36;
+// 38: a route handler written in place (`app.get("/x", (c) => ...)`, a gin
+// `r.GET("/x", func(c *gin.Context) {...})`) is a definition of its own,
+// with the definition it is written in (DefFact.inlineIn).
+export const EXTRACTOR_VERSION = 38;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -198,6 +201,41 @@ function pos(node: Node): { line: number; column: number } {
 
 function stringContent(node: Node): string {
   return node.text.replace(/^['"`]|['"`]$/g, "");
+}
+
+// The member calls whose last argument, a function written in place, is a
+// route handler: `app.get("/x", (c) => ...)`, `router.openapi(route, c =>
+// ...)`, `r.GET("/x", func(c *gin.Context) { ... })`. An `on` call is a
+// route only with a method, a path and a handler (an event listener has two
+// arguments).
+const JS_ROUTE_CALLS = new Set(["get", "post", "put", "patch", "delete", "options", "head", "all", "on", "openapi"]);
+const GO_ROUTE_CALLS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "Any", "Handle"]);
+const LABEL_MAX = 64;
+// A route label's characters: no space, dot, `#`, `@`, `<` or `>`, so the
+// name never reads as a qualified name or a symbol id.
+const labelChar = (c: number) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || "/_:{}*-$~+!".includes(String.fromCharCode(c));
+
+// The name of a function written in place as a route handler, or null when
+// it is not one: `<get /login>` from the call's method and its first
+// argument (a short plain string or a name), `<get>` when that argument is
+// anything else. The brackets keep the name apart from every source name,
+// so no call ever binds to it by name.
+function routeHandlerName(fn: Node, calls: ReadonlySet<string>): string | null {
+  let arg = fn;
+  while (arg.parent && ["parenthesized_expression", "as_expression", "satisfies_expression"].includes(arg.parent.type)) arg = arg.parent;
+  const list = arg.parent;
+  if (!list || (list.type !== "arguments" && list.type !== "argument_list")) return null;
+  const args = list.namedChildren.filter((c) => c.type !== "comment");
+  if (args.length < 2 || args[args.length - 1]?.id !== arg.id) return null;
+  const call = list.parent;
+  const callee = call?.type === "call_expression" ? call.childForFieldName("function") : null;
+  const prop = callee?.type === "member_expression" ? callee.childForFieldName("property") : callee?.type === "selector_expression" ? callee.childForFieldName("field") : null;
+  if (!prop || !calls.has(prop.text) || (prop.text === "on" && args.length < 3)) return null;
+  const first = args[0] as Node;
+  const text = first.type === "identifier" ? first.text : ["string", "interpreted_string_literal", "raw_string_literal"].includes(first.type) ? stringContent(first) : "";
+  let clean = text.length > 0 && text.length <= LABEL_MAX;
+  for (let i = 0; clean && i < text.length; i++) clean = labelChar(text.charCodeAt(i));
+  return clean ? `<${prop.text} ${text}>` : `<${prop.text}>`;
 }
 
 // A short hash of a definition's text without its own name, its comments
@@ -2067,6 +2105,13 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           const def = ctx.addDef(pair, key, "method", { owner: cls.cls, exported: true, results: jsResults(node), static: true });
           return fnFrame(node, def);
         }
+        // A route handler written in place is a definition of its own, so
+        // the calls in it have it as their caller; one no framework plugin
+        // binds is folded back into the code around it (inline-fold.ts). An
+        // arrow inside a class stays the class's: `this` in it is the class's
+        // instance.
+        const route = node.type === "arrow_function" && cls ? null : routeHandlerName(node, JS_ROUTE_CALLS);
+        if (route) return fnFrame(node, ctx.addDef(node, node.firstChild ?? node, "function", { name: route, owner: ctx.ownerName(), inlineIn: ctx.caller() }, node));
         return fnFrame(node, -1);
       }
       case "call_expression": {
@@ -2866,6 +2911,10 @@ function extractGo(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
       case "func_literal": {
         const locals = new Map<string, TypeRef | null>();
         goParams(node.childForFieldName("parameters"), locals);
+        // A route handler written in place is a definition of its own,
+        // folded back when no framework plugin binds it (inline-fold.ts).
+        const route = routeHandlerName(node, GO_ROUTE_CALLS);
+        if (route) return ctx.push({ def: ctx.addDef(node, node.firstChild ?? node, "function", { name: route, owner: ctx.ownerName(), inlineIn: ctx.caller() }, node), cls: null, locals });
         return ctx.push({ def: -1, cls: null, locals });
       }
       case "short_var_declaration": {

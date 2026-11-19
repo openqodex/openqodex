@@ -386,7 +386,7 @@ const namedChildren = (list: Node | null): Node[] => {
 // unused constant is not kept.
 // "segment" and "tsegment": a later piece of a route's and of a request's
 // path; "tpath": a constant after an address, kept only as a request path.
-type Form = "pattern" | "path" | "method" | "target" | "tpath" | "segment" | "tsegment";
+export type Form = "pattern" | "path" | "method" | "target" | "tpath" | "segment" | "tsegment";
 const unread = (e: Expr): Expr => ({ t: "other", line: e.line, column: e.column });
 const isHostChar = (c: number) => (c >= 48 && c <= 58) || ((c | 32) >= 97 && (c | 32) <= 122) || c === 45 || c === 46 || c === 91 || c === 93;
 
@@ -424,7 +424,7 @@ const FORMS: Record<Form, (s: string) => string | null> = { pattern: keptShape(p
 // The path form of each place a text is read in.
 const PATH_FORM: Partial<Record<Form, "route" | "request">> = { pattern: "route", path: "route", target: "request" };
 
-function keepRead(facts: GoHttpFact[]): GoHttpFact[] {
+function keepRead(facts: GoHttpFact[], READ: Record<string, (Form | null)[]>): GoHttpFact[] {
   // A package constant of this file, as resolve reads one (the first
   // declaration of the name), from one index made once, so a lookup per
   // concatenation never scans the facts again.
@@ -486,7 +486,6 @@ function keepRead(facts: GoHttpFact[]): GoHttpFact[] {
         return e;
     }
   };
-  const READ: Record<string, (Form | null)[]> = { Handle: ["pattern"], HandleFunc: ["pattern"], NewRequest: ["method", "target"], NewRequestWithContext: [null, "method", "target"] };
   const out: GoHttpFact[] = facts.map((f) => {
     switch (f.kind) {
       case "call": {
@@ -542,7 +541,18 @@ function keepOutside(f: GoHttpFact): boolean {
   }
 }
 
+// What one plugin reads with this walk: the selector calls it watches, and
+// for each, the form each argument's text is kept in (null: names only).
+export type ReadSpec = { watched: ReadonlySet<string>; read: Record<string, (Form | null)[]> };
+const NET_HTTP: ReadSpec = { watched: WATCHED, read: { Handle: ["pattern"], HandleFunc: ["pattern"], NewRequest: ["method", "target"], NewRequestWithContext: [null, "method", "target"] } };
+
 export function readFacts(root: Node): GoHttpFact[] {
+  return readFactsWith(root, NET_HTTP);
+}
+
+// The same walk for another Go router (gin): its own watched calls and the
+// forms their arguments are kept in.
+export function readFactsWith(root: Node, spec: ReadSpec): GoHttpFact[] {
   if (root.endIndex > MAX_SOURCE_BYTES) return [{ kind: "too-large", line: 1, column: 1, bytes: root.endIndex }];
   const out: GoHttpFact[] = root.hasError ? [{ kind: "parse-error", line: 1, column: 1 }] : [];
   // The depths of the ERROR nodes the walk is inside: nothing is read there.
@@ -703,7 +713,7 @@ export function readFacts(root: Node): GoHttpFact[] {
         const callee = node.childForFieldName("function");
         if (callee?.type !== "selector_expression") return;
         const prop = callee.childForFieldName("field")?.text;
-        if (!prop || !WATCHED.has(prop) || node.hasError) return;
+        if (!prop || !spec.watched.has(prop) || node.hasError) return;
         const b: Budget = { left: MAX_EXPR_NODES };
         const recv = read(callee.childForFieldName("operand"), b, 0, declHere);
         const { args, omitted } = readArgs(node.childForFieldName("arguments"), b, 0, declHere);
@@ -736,7 +746,7 @@ export function readFacts(root: Node): GoHttpFact[] {
       // Leaving the node at this depth: the scopes it opened close, and the names it declares bind.
       close(depth);
       if (cursor.gotoNextSibling()) break;
-      if (!cursor.gotoParent()) return keepRead(out.some((f) => f.kind === "call" || f.kind === "server") ? out : out.filter(keepOutside));
+      if (!cursor.gotoParent()) return keepRead(out.some((f) => f.kind === "call" || f.kind === "server") ? out : out.filter(keepOutside), spec.read);
       depth--;
     }
   }

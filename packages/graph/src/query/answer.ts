@@ -46,6 +46,7 @@ export type Request = {
   target?: Target;
   to?: Target; // path: the other end
   text?: string; // search
+  excludeTests?: boolean; // routes: leave out the routes of applications built in test files
   tiers?: Tier[];
   edges?: string[]; // path and callees: the relations to walk; path default calls, inherits and defines, callees default the calls profile
   depth?: number;

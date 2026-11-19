@@ -32,6 +32,7 @@
 // text.
 import type { Detection, Entity, FrameworkEdge, FrameworkEvidence, FrameworkEvidenceKind, FrameworkUnknown, HandlerStatus, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
 import { appId, entityId } from "../plugin.js";
+import { inlineHandler } from "../shared/inline.js";
 import type { Tier } from "../../model/records.js";
 import type { ExpressFact } from "./facts.js";
 import { HTTP_METHODS, MAX_SCOPE_CHAIN } from "./facts.js";
@@ -622,7 +623,11 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   };
   const bindOnce = (file: string, e: Expr, scope: number, line: number, role: "handler" | "middleware"): Bound => {
     const none = (status: HandlerStatus, cause: FrameworkUnknown["cause"], note: string, name: string | null): Bound => ({ status, targets: [], tier: "certain", kind: "route-call", via: null, note: null, why: { cause, note, name } });
-    if (e.t === "fn") return none("unresolved", "unsupported-rule", `the ${role} is an inline function, which has no symbol of its own; the calls it makes are counted under the code around it`, null);
+    if (e.t === "fn") {
+      const inline = role === "handler" ? inlineHandler(index, file, e) : null;
+      if (inline) return { status: "bound", targets: [inline], tier: "certain", kind: "route-call", via: null, note: null, why: null };
+      return none("unresolved", "unsupported-rule", `the ${role} is an inline function, which has no symbol of its own; the calls it makes are counted under the code around it`, null);
+    }
     if (e.t === "call") {
       const inner = e.args.find((a) => a.t === "ref");
       const wrapper = show(e.fn);

@@ -34,6 +34,7 @@ import { EXTRACTOR_VERSION, extract } from "./extract.js";
 import { frameworkReaders } from "./frameworks/facts.js";
 import { contextFingerprint, runFrameworks } from "./frameworks/stage.js";
 import { pluginsKey } from "./frameworks/registry.js";
+import { foldInline } from "./inline-fold.js";
 import type { FrameworkCall } from "./frameworks/plugin.js";
 import { MODEL_VERSION, TIER_RANK } from "./model/records.js";
 import type { Cut } from "./model/records.js";
@@ -462,6 +463,11 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop: overBudget, calls: frameworkCalls });
     addFrameworkCalls(resolved.edges, frameworkCalls);
     for (const p of frameworks.plugins) if (p.status === "failed" || (p.status === "stopped" && inputs.some((i) => i.facts.frameworks?.[p.id]))) reasons.push(p.reason ?? `the ${p.id} plugin did not run`);
+    // A function written in place that no plugin bound is the code around it again.
+    const bound = new Set<string>();
+    for (const e of frameworks.edges) bound.add(e.from).add(e.to);
+    for (const r of frameworks.roles) bound.add(r.target);
+    foldInline(resolved, inputs, bound);
     stage("frameworks");
 
     // ---------- removed, moved and the export surface ----------
@@ -728,6 +734,8 @@ function removedSymbols(files: ChangedFile[], baseDefs: Map<string, { file: stri
     for (const n of resolved.defsByFile.get(path) ?? []) if (!now.has(keyOf(n))) now.set(keyOf(n), n);
     const gone: GraphNode[] = [];
     for (const d of base.facts.defs) {
+      // A function written in place is no symbol another file names: never a removed one.
+      if (d.inlineIn !== undefined) continue;
       let to = now.get(baseKey(d));
       if (to && !renamed) continue;
       let byBody = false;

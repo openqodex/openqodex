@@ -18,6 +18,8 @@
 //     nested code prints flat.
 //  9. A list on a floor prints its certain count as if it were every
 //     caller.
+// 10. `routes` mixes the small applications tests build with the real ones,
+//     and gives no way to tell them apart or leave them out.
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -234,5 +236,32 @@ describe("source lines around a place (8)", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout.split("\n")).toContain("  4|     return core();");
     expect(r.stdout.split("\n")).toContain("  3|   if (a) {");
+  });
+});
+
+describe("routes of applications built in tests (10)", () => {
+  const app = {
+    "package.json": '{ "name": "svc", "dependencies": { "hono": "4.6.0" } }\n',
+    "src/app.ts": 'import { Hono } from "hono";\nexport const app = new Hono();\napp.get("/health", health);\nfunction health(c: any) {\n  return c.text("ok");\n}\n',
+    "src/users.ts": 'import { Hono } from "hono";\nexport const users = new Hono();\nusers.get("/:id", show);\nfunction show(c: any) {\n  return c.text("u");\n}\n',
+    "src/main.ts": 'import { app } from "./app";\nimport { users } from "./users";\napp.route("/users", users);\n',
+    "test/users.test.ts": 'import { Hono } from "hono";\nimport { users } from "../src/users";\nconst t = new Hono();\nt.route("/u", users);\nt.get("/fake", fake);\nfunction fake(c: any) {\n  return c.text("f");\n}\n',
+  };
+  type RouteItem = { pattern: string | null; isTest: boolean; site: { file: string } };
+
+  it("marks each route whose application a test file builds, and leaves them out with --exclude-tests", () => {
+    const root = repo(app);
+    const all = cli(root, "graph", "routes", "--json", "--limit", "100");
+    expect(all.status, all.stderr).toBe(0);
+    const items = (JSON.parse(all.stdout) as Answer).items as RouteItem[];
+    const flagged = items.map((r) => `${r.pattern} ${r.isTest}`).sort();
+    // The users router is mounted twice: by the application, and by the test's own application.
+    expect(flagged).toEqual(["/fake true", "/health false", "/u/:id true", "/users/:id false"]);
+    const real = cli(root, "graph", "routes", "--json", "--limit", "100", "--exclude-tests");
+    expect(real.status, real.stderr).toBe(0);
+    expect(((JSON.parse(real.stdout) as Answer).items as RouteItem[]).map((r) => r.pattern).sort()).toEqual(["/health", "/users/:id"]);
+    const text = cli(root, "graph", "routes", "--exclude-tests");
+    expect(text.status, text.stderr).toBe(0);
+    expect(text.stdout).not.toContain("/fake");
   });
 });
