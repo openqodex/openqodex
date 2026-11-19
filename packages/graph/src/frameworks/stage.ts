@@ -12,7 +12,8 @@ import { normalisePy } from "../discovery/projects.js";
 import type { World } from "../resolve.js";
 import type { FileFacts, GraphEdge, GraphNode } from "../types.js";
 import { FRAMEWORK_EDGE_KINDS, MAX_ENTITIES_PER_APP, MAX_EDGES_PER_APP, RESERVED_FACT_KINDS, validateFrameworkEvidence } from "./plugin.js";
-import type { Detection, Entity, FrameworkEdge, FrameworkFactBase, FrameworkPlugin, FrameworkUnknown, PluginIndex, RoleAssignment } from "./plugin.js";
+import type { Detection, Entity, FrameworkCall, FrameworkEdge, FrameworkFactBase, FrameworkPlugin, FrameworkUnknown, PluginIndex, RoleAssignment } from "./plugin.js";
+import { validateEvidence } from "../model/records.js";
 import { PLUGINS, pluginsKey } from "./registry.js";
 import { deriveTestCalls } from "./shared/tests.js";
 
@@ -86,6 +87,9 @@ export type StageInput = {
   projectOf: (file: string) => string;
   plugins?: readonly FrameworkPlugin[];
   stop?: () => boolean;
+  // Where the plugins' calls go (PluginOutput.calls), each checked; the
+  // build adds them to the code graph's calls edges.
+  calls?: FrameworkCall[];
 };
 
 // What the plugins' output depends on besides the source files. Folded into
@@ -202,6 +206,11 @@ export function runFrameworks(input: StageInput): FrameworkData {
           return false;
         });
       const roles = keep(result.roles);
+      const calls = (result.calls ?? []).filter((c) => {
+        if (validateEvidence({ kind: c.evidence, tier: c.tier, via: c.via, note: c.note, rule: c.rule }) === null) return true;
+        run.invalid++;
+        return false;
+      });
       const unknowns = [...dropped, ...result.unknowns];
       const capped = capPerApp(plugin.id, result.entities, [...keep(result.edges), ...deriveTestCalls(plugin.id, roles, index)], unknowns);
       const edges = capped.edges;
@@ -212,6 +221,7 @@ export function runFrameworks(input: StageInput): FrameworkData {
       for (const e of capped.entities) data.entities.push(e);
       for (const e of edges) data.edges.push(e);
       for (const u of unknowns) data.unknowns.push(u);
+      if (input.calls) for (const c of calls) input.calls.push(c);
       if (run.invalid > 0) run.reason = `${run.invalid} evidence records failed the check and were left out`;
     } catch (error) {
       // A plugin that fails contributes nothing to this build.

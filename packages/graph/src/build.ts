@@ -4,7 +4,8 @@
 // (runtime/predict.ts) decides the mode: under the line the graph is built
 // fresh from facts; over it the retained index of the same capture is
 // loaded when one exists, else the build runs under the budget and keeps an
-// index for next time.
+// index for next time. Before either, a question on a work tree the folder
+// already holds a complete build of, with its index, loads that index.
 //
 // Every stage checks the budget between files, so a 1 ms budget stops a
 // cached vscode build within moments, partial and saying so. Facts come in
@@ -33,7 +34,8 @@ import { EXTRACTOR_VERSION, extract } from "./extract.js";
 import { frameworkReaders } from "./frameworks/facts.js";
 import { contextFingerprint, runFrameworks } from "./frameworks/stage.js";
 import { pluginsKey } from "./frameworks/registry.js";
-import { MODEL_VERSION } from "./model/records.js";
+import type { FrameworkCall } from "./frameworks/plugin.js";
+import { MODEL_VERSION, TIER_RANK } from "./model/records.js";
 import type { Cut } from "./model/records.js";
 import { grammarVersion, parserFor } from "./parser.js";
 import { RESOLVER_VERSION, createWorld, projectFolder, stableKey, symbolId } from "./resolve.js";
@@ -278,15 +280,40 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
   const goModules = readGoModules(traced.reader, inv.all);
   stage("projects");
 
-  // ---------- the mode ----------
   const meta = store ? asPredictMeta(store.readMeta()?.predict ?? null) : null;
-  const cached = store ? order.reduce((n, e) => n + Number(store.hasFacts(factsKey(e.lang, e.blob))), 0) : 0;
-  const predicted = predictMs(meta, { eligible, cached });
-  const decided = args.mode ? { mode: args.mode, streak: 0 } : decideMode(meta, predicted);
   const config = { budgetMs, maxFiles, maxFileBytes, maxHeapMb: Math.round(maxHeap / 1024 / 1024) };
   const versions = { model: MODEL_VERSION, extractor: EXTRACTOR_VERSION, resolver: RESOLVER_VERSION, policy: POLICY_VERSION };
   // What a kept index was resolved from (captureDigest above).
   const digest = captureDigest({ inv, only: args.only ?? null, maxFileBytes, reads: traced.entries(), model });
+
+  // ---------- the kept index of this very capture ----------
+  // A question on a work tree the folder already holds a complete build
+  // of, with its index, loads that index whatever the mode: the same graph
+  // (retained equals fresh), with nothing to parse, read or resolve. The
+  // five-second rule decides how to build only when there is something to
+  // build, so nothing is predicted or recorded here, and the answer names
+  // the mode the rule holds (with no mode recorded yet, it builds). A
+  // forced mode (tests, `graph build --full`) and a comparison with a base
+  // always build. The store checks every file
+  // of the index against its build's manifest: a file cut short, changed or
+  // gone makes the build unusable, and the graph is built as if it were
+  // not there.
+  if (!args.mode && !args.base && store && meta) {
+    const kept = store.list().find((m) => m.capture.digest === digest && m.complete && m.hasIndex);
+    const opened = kept ? store.open({ id: kept.id }) : null;
+    const loaded = opened ? readIndex(opened) : null;
+    if (kept && loaded) {
+      stage("load-index");
+      const durationMs = Math.round(performance.now() - started);
+      args.onProgress?.(`Code graph: ${plural(loaded.status.filesParsed, "file")} from the kept index in ${(durationMs / 1000).toFixed(1)} s`);
+      return { ...loaded, repoRoot: args.repoRoot, digest, status: { ...loaded.status, durationMs, parses: 0, cacheHits: 0, mode: meta.mode, generation: kept.id, predictedMs: null, stages } };
+    }
+  }
+
+  // ---------- the mode ----------
+  const cached = store ? order.reduce((n, e) => n + Number(store.hasFacts(factsKey(e.lang, e.blob))), 0) : 0;
+  const predicted = predictMs(meta, { eligible, cached });
+  const decided = args.mode ? { mode: args.mode, streak: 0 } : decideMode(meta, predicted);
   stage("predict");
 
   // Retained: the same capture's index, when a complete one is kept.
@@ -305,7 +332,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
         // the record is lost; the next build decides again
       }
       args.onProgress?.(`Code graph: ${plural(loaded.status.filesParsed, "file")} from the retained index in ${(durationMs / 1000).toFixed(1)} s`);
-      return { ...loaded, repoRoot: args.repoRoot, status: { ...loaded.status, durationMs, parses: 0, cacheHits: 0, mode: "retained", generation: reused.id, predictedMs: predicted, stages } };
+      return { ...loaded, repoRoot: args.repoRoot, digest, status: { ...loaded.status, durationMs, parses: 0, cacheHits: 0, mode: "retained", generation: reused.id, predictedMs: predicted, stages } };
     }
   }
 
@@ -431,7 +458,9 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // ---------- frameworks ----------
     // After symbol resolution, on every build: a file whose content did not
     // change is re-read when a framework is newly detected around it.
-    const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop: overBudget });
+    const frameworkCalls: FrameworkCall[] = [];
+    const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop: overBudget, calls: frameworkCalls });
+    addFrameworkCalls(resolved.edges, frameworkCalls);
     for (const p of frameworks.plugins) if (p.status === "failed" || (p.status === "stopped" && inputs.some((i) => i.facts.frameworks?.[p.id]))) reasons.push(p.reason ?? `the ${p.id} plugin did not run`);
     stage("frameworks");
 
@@ -553,6 +582,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       projectOf,
       exportChanges: exportsDiff,
       frameworks,
+      digest,
       status: {
         status: skipped > 0 || removalUnchecked > 0 || resolved.budgetFiles.length > 0 || hidingGaps.length > 0 ? "partial" : "ok",
         reason: reasons[0] ?? null,
@@ -584,7 +614,13 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // a relation: its index is never loaded as if nothing were missing.
     const later = new Set<NotRead["reason"]>(["budget", "parse-cap", "memory", "slow-parse", "unreadable"]);
     const complete = !notRead.some((n) => later.has(n.reason)) && resolved.budgetFiles.length === 0 && hidingGaps.length === 0;
-    const withIndex = decided.mode === "retained" && complete;
+    // Under the five-second line too, a complete build of the work tree keeps
+    // its index, so the next question on the same tree loads it (the kept
+    // index above), but only when what it says is what any build of these
+    // files would say: no file changed while it was read, and no facts file
+    // was refused or left unsaved, whose reasons belong to this build alone.
+    const steady = changedDuringBuild === 0 && untrusted === 0 && changed === 0 && storageRefused === 0;
+    const withIndex = complete && (decided.mode === "retained" || (!args.mode && !args.base && steady));
     // A kept build of the same capture and configuration is the same graph:
     // it is named, and nothing new is written.
     const same = store && complete ? store.list().find((m) => m.capture.digest === digest && m.complete && (m.hasIndex || !withIndex)) : undefined;
@@ -727,6 +763,29 @@ function removedSymbols(files: ChangedFile[], baseDefs: Map<string, { file: stri
 }
 
 // A world's walk cuts, each kind once whichever version of the code made it.
+// The calls a framework makes on behalf of a symbol (a FastAPI route's
+// dependencies) join the calls edges: one more site on the edge between
+// the two symbols, or a new edge.
+function addFrameworkCalls(edges: GraphEdge[], calls: readonly FrameworkCall[]): void {
+  if (calls.length === 0) return;
+  const byPair = new Map<string, GraphEdge>();
+  for (const e of edges) if (e.kind === "calls") byPair.set(`${e.from}\0${e.to}`, e);
+  for (const c of calls) {
+    const site = { file: c.site.file, line: c.site.line, column: c.site.column, tier: c.tier, evidence: c.evidence, via: c.via, note: c.note, rule: c.rule };
+    const key = `${c.from}\0${c.to}`;
+    const e = byPair.get(key);
+    if (!e) {
+      const made: GraphEdge = { from: c.from, to: c.to, kind: "calls", tier: c.tier, sites: [site] };
+      edges.push(made);
+      byPair.set(key, made);
+      continue;
+    }
+    if (e.sites.some((s) => s.file === site.file && s.line === site.line && s.column === site.column && s.evidence === site.evidence)) continue;
+    e.sites.push(site);
+    e.tier = TIER_RANK[site.tier] > TIER_RANK[e.tier] ? site.tier : e.tier;
+  }
+}
+
 function addWalkCuts(cuts: Cut[], world: World): void {
   for (const cut of world.walkCuts()) if (!cuts.some((x) => x.by === cut.by && x.note === cut.note)) cuts.push(cut);
 }

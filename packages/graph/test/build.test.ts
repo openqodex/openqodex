@@ -152,7 +152,8 @@ describe("cache", () => {
     const first = await buildGraph({ repoRoot: root, store });
     expect(first.status.parses).toBe(3);
 
-    const warm = await buildGraph({ repoRoot: root, store });
+    // Forced fresh on an unchanged tree: an unforced build would load the kept index, not the facts.
+    const warm = await buildGraph({ repoRoot: root, store, mode: "fresh" });
     expect(warm.status.parses).toBe(0);
     expect(warm.status.cacheHits).toBe(3);
     expect(callSites(warm, symbol(warm, "a.py", "a"))).toEqual(["c.py:4"]);
@@ -164,7 +165,7 @@ describe("cache", () => {
 
     // Every facts file corrupt: each one the build needs is parsed again and rewritten.
     for (const f of factsFiles(root)) writeFileSync(f, "{not json");
-    const repaired = await buildGraph({ repoRoot: root, store });
+    const repaired = await buildGraph({ repoRoot: root, store, mode: "fresh" });
     expect(repaired.status.parses).toBe(3);
     expect(callSites(repaired, symbol(repaired, "a.py", "a"))).toEqual(["c.py:5"]);
     expect(factsFiles(root).filter((f) => { try { JSON.parse(readFileSync(f, "utf8")); return true; } catch { return false; } })).toHaveLength(3);
@@ -201,7 +202,8 @@ describe("cache", () => {
   });
 
   // A blocked open would freeze this process, so the build runs in a child
-  // with a 20 second limit, from the built package.
+  // with a 20 second limit, from the built package. Forced fresh: the tree is
+  // unchanged, and an unforced build would load the kept index, not the facts.
   it("never blocks on a named pipe in place of a facts file", async () => {
     const root = repo(files);
     const store = await storeOf(root);
@@ -210,7 +212,7 @@ describe("cache", () => {
     unlinkSync(entry);
     execFileSync("mkfifo", [entry]);
     const built = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "../dist/index.js")).href;
-    const script = `const { buildGraph, openStore } = await import(${JSON.stringify(built)}); const s = await openStore(${JSON.stringify(root)}, { home: ${JSON.stringify(home)} }); const g = await buildGraph({ repoRoot: ${JSON.stringify(root)}, store: s.ok ? s.store : null }); process.stdout.write(String(g.status.parses));`;
+    const script = `const { buildGraph, openStore } = await import(${JSON.stringify(built)}); const s = await openStore(${JSON.stringify(root)}, { home: ${JSON.stringify(home)} }); const g = await buildGraph({ repoRoot: ${JSON.stringify(root)}, store: s.ok ? s.store : null, mode: "fresh" }); process.stdout.write(String(g.status.parses));`;
     const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", timeout: 20_000 });
     expect(child.status, child.stderr).toBe(0);
     expect(child.stdout).toBe("1");

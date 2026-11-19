@@ -49,7 +49,7 @@ type FwRegistration = {
   mounted: boolean;
   handler: { written: string; status: string; targets: string[] };
 };
-type FwEdge = { from: string; to: string; kind: string; plugin: string; app: string | null; evidence: FwEvidence; category?: string };
+type FwEdge = { from: string; to: string; kind: string; plugin: string; app: string | null; evidence: FwEvidence; category?: string; order?: number };
 type FwUnknown = { plugin: string; site: FwSite | null; affects: string[]; cause: string; name: string | null; note: string; count: number | null; exact: boolean };
 type FwRun = { id: string; status: string; reason: string | null; apps?: number };
 type FwLayer = { registrations: FwRegistration[]; edges: FwEdge[]; unknowns: FwUnknown[]; runs: FwRun[] };
@@ -213,6 +213,10 @@ type Route = {
   site: FwSite;
   handler: FwRegistration["handler"];
   handles: { to: string; site: GraphSite; premises: string[]; edge: string }[];
+  // What runs before the handler, in order (FastAPI's Depends and
+  // Security, a framework's middleware): the registration's
+  // applies_middleware edges.
+  dependencies: { to: string; order: number | null; site: GraphSite; premises: string[]; edge: string }[];
 };
 
 // A target that names one point (an id, a name, a file and line), as
@@ -233,6 +237,7 @@ export function routes(s: Session, req: Request): Job | Answer {
   // The handles edges by the registration they leave, and the registrations
   // whose handler is the point.
   const handlesOf = new Map<string, FwEdge[]>();
+  const depsOf = new Map<string, FwEdge[]>();
   const handlesPoint = new Set<string>();
   let edges: Pass<FwEdge> | null = null;
   const items: Route[] = [];
@@ -250,6 +255,7 @@ export function routes(s: Session, req: Request): Job | Answer {
     const at = n;
     const target = at ? candidate(g, at, 1) : null;
     edges ??= new Pass(layer.edges, (e) => {
+      if (e.kind === "applies_middleware") (depsOf.get(e.from) ?? depsOf.set(e.from, []).get(e.from))?.push(e);
       if (e.kind !== "handles") return;
       (handlesOf.get(e.from) ?? handlesOf.set(e.from, []).get(e.from))?.push(e);
       if (at && e.to === at.id) handlesPoint.add(e.from);
@@ -259,7 +265,8 @@ export function routes(s: Session, req: Request): Job | Answer {
       if (at && !handlesPoint.has(r.id) && !r.handler.targets.includes(at.id)) return;
       if (text && !(r.pattern ?? r.written ?? "").includes(text) && r.name !== text) return;
       const handles = (handlesOf.get(r.id) ?? []).map((e) => ({ to: e.to, site: fwSite(e.evidence), premises: e.evidence.premises, edge: edgeId(e, e.evidence.site) }));
-      items.push({ id: r.id, plugin: r.plugin, app: r.app, methods: r.methods, pattern: r.pattern, name: r.name, mounted: r.mounted, site: r.site, handler: r.handler, handles });
+      const dependencies = (depsOf.get(r.id) ?? []).map((e) => ({ to: e.to, order: e.order ?? null, site: fwSite(e.evidence), premises: e.evidence.premises, edge: edgeId(e, e.evidence.site) })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      items.push({ id: r.id, plugin: r.plugin, app: r.app, methods: r.methods, pattern: r.pattern, name: r.name, mounted: r.mounted, site: r.site, handler: r.handler, handles, dependencies });
     });
     if (!regs.run(budget)) return stoppedAt({ ...base, target }, items, [], regs.left);
     if (!sorted) {

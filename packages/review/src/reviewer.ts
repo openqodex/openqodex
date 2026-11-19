@@ -155,7 +155,7 @@ export type Budget = { authorize(call: AuthorizeRequest): Promise<boolean>; dead
 // `instructions`: the repository owners' own rules for the review, as the
 // host keeps them: the brief quotes them under the owners' heading with the
 // framing the laptop gives .openqodex/custom-instructions.md, so they can
-// widen what is flagged and never switch a check off; over 32 KB the call
+// widen what is flagged and never switch a check off; over 128 KB the call
 // throws, never cut. Advisory context belongs in `context`.
 // `previousReviewedSha`: the head of the last review; when the clone proves
 // it an ancestor of the head, only what changed since is the review's
