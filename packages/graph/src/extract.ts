@@ -50,7 +50,8 @@ import type { TreeVisitor } from "./walk.js";
 // an annotation's types are read at most MAX_TYPE_DEPTH deep. 32: a type
 // named in an interface property, a type alias, a type argument of a
 // call, a `new`, an instantiation or a base, or the constraint or default
-// of a type parameter is a type use.
+// of a type parameter is a type use; a mapped type's key and an `infer`
+// name are not.
 export const EXTRACTOR_VERSION = 32;
 
 type Frame = {
@@ -810,10 +811,18 @@ function jsTypeParams(node: Node): Map<string, TypeRef | null> | null {
 }
 
 // Every named type in an annotation (`Map<string, Repo[]>` names Repo);
-// type parameters and predefined types are not.
+// type parameters and predefined types are not, nor a name the annotation
+// binds itself: a mapped type's key (`[K in keyof T]`) or an `infer X`,
+// local to the whole annotation.
 function jsTypeNames(node: Node | null): TypeRef[] {
   const out: TypeRef[] = [];
+  const bound = new Set<string>();
   typeNodes(node, (n) => {
+    if (n.type === "mapped_type_clause" || n.type === "infer_type") {
+      const name = n.type === "mapped_type_clause" ? n.childForFieldName("name") : n.firstNamedChild;
+      if (name?.type === "type_identifier") bound.add(name.text);
+      return false;
+    }
     if (n.type === "type_identifier") {
       if (typeParam(n.text) === undefined) out.push(typeRef({ name: n.text, qualifier: null, ...pos(n) }));
       return true;
@@ -826,7 +835,7 @@ function jsTypeNames(node: Node | null): TypeRef[] {
     }
     return false;
   });
-  return out;
+  return bound.size === 0 ? out : out.filter((t) => t.qualifier !== null || !bound.has(t.name));
 }
 
 // The named types in the type arguments a base is written with

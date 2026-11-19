@@ -10,6 +10,8 @@
 //  3. A class that declares `implements T` is not listed, though it names T.
 //  4. A same-named type of another folder is linked by its name, or a type
 //     parameter that shadows the imported name is taken for the import.
+//  4b. A mapped type's key (`[K in keyof T]`) or an `infer X` name is
+//     taken for a type of the repository of the same name.
 //  5. A file that imports the type and has no row for it says nothing: the
 //     list reads as whole (floor false) when a use may be missing.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -104,6 +106,20 @@ const files: Record<string, string> = {
   // The same name, another type: never linked to src/store.ts.
   "src/other/store.ts": "export interface ISessionStore {\n  other(): void;\n}\n",
   "src/other/deps.ts": ['import type { ISessionStore } from "./store";', "", "export interface OtherDeps {", "  store: ISessionStore; // other-property", "}", ""].join("\n"),
+  // Types named K and X, and names a type binds locally with the same spelling.
+  "src/letters.ts": "export interface K {\n  k: 1;\n}\n\nexport interface X {\n  x: 1;\n}\n",
+  "src/mapped.ts": [
+    'import type { K, X } from "./letters";',
+    "",
+    "export function both(k: K, x: X): void {} // real-uses",
+    "",
+    "export type Opt<T> = { [K in keyof T]?: T[K] }; // mapped-key",
+    "",
+    "export type Elem<T> = T extends Array<infer X> ? X : never; // infer-var",
+    "",
+    "export function keys(a: { [K in string]: K }): void {} // mapped-param",
+    "",
+  ].join("\n"),
   // Imported and named nowhere the graph reads: a use may be missing.
   "src/unused.ts": ['import type { ISessionStore } from "./index";', "", "export const unused = 1;", ""].join("\n"),
 };
@@ -149,6 +165,15 @@ describe("references of a TypeScript type", () => {
     expect((o.items as Item[]).map((i) => [where(i), i.kind, i.site.tier])).toEqual([[at(files, "src/other/deps.ts", "other-property"), "uses_type", "certain"]]);
     // Every file that imports the other type has a row: the list is whole.
     expect(o.unknown.floor).toBe(false);
+  });
+
+  it("takes no mapped type key and no infer name for a type of the same name (4b)", () => {
+    for (const name of ["K", "X"]) {
+      const a = q({ kind: "references", target: { id: symbol(graph, "src/letters.ts", name) } });
+      const sites = (a.items as Item[]).map(where);
+      expect(sites).toContain(at(files, "src/mapped.ts", "real-uses"));
+      for (const marker of ["mapped-key", "infer-var", "mapped-param"]) expect(sites).not.toContain(at(files, "src/mapped.ts", marker));
+    }
   });
 
   it("sets the floor, naming the file, when a file imports the type and has no row for it (5)", () => {
