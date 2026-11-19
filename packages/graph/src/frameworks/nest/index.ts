@@ -11,7 +11,8 @@ import type { NestFact } from "./facts.js";
 import { isNestFact, readFacts, wants } from "./facts.js";
 import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 
-export const VERSION = 6;
+// 7: a tagged template with type arguments and a cast to an import type with an array suffix are read, not a region the parser could not read.
+export const VERSION = 7;
 const SUPPORTED = "Nest 8 to 11";
 
 const app = "nest-app";

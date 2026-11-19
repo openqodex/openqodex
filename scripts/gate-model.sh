@@ -3,7 +3,7 @@
 # and the real Codex as the reviewer, then the planted scan sample of the
 # benchmark. It spends real usage, so it runs on a logged-in Mac once per
 # release, before the version pull request merges, and never in CI. The
-# other tiers: pnpm gate:fast before a push, pnpm gate for the real
+# other tiers: pnpm gate:fast before a push, pnpm gate --full for the real
 # programs (scripts/gate.sh says what each runs).
 #
 # It refuses when CI is set, fails when either login is missing, and fails

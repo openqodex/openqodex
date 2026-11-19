@@ -49,6 +49,15 @@ const UNREAD_EXT: Record<string, string> = {
   ".scala": "scala",
 };
 
+// The name a person reads for each language of UNREAD_EXT.
+const UNREAD_NAMES: Record<string, string> = { rust: "Rust", c: "C", "c++": "C++", "c#": "C#", kotlin: "Kotlin", swift: "Swift", php: "PHP", scala: "Scala" };
+
+// "412 Rust files not read: Rust is not supported by this build"
+export function unreadNote(u: { language: string; files: number }): string {
+  const name = UNREAD_NAMES[u.language] ?? u.language;
+  return `${u.files} ${name} ${u.files === 1 ? "file" : "files"} not read: ${name} is not supported by this build`;
+}
+
 // Folders that hold generated, vendored or installed code, never the repo's
 // own, and the tool's own folders.
 export const SKIP_DIRS = new Set([

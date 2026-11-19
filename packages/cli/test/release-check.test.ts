@@ -6,7 +6,10 @@
 //     permission or a GITHUB_TOKEN that can write, so a package it runs could
 //     publish, tag or push; or it runs before the publish, or can stop it.
 //  2. An action in the release workflow is named by a tag its owner can move,
-//     not by a commit.
+//     not by a commit; or the workflow it calls for the full gate (ci.yml,
+//     since 2026-11-19), or a local action that one uses, names one so.
+//  6. The full gate the release calls gets a secret (secrets: inherit or a
+//     named one), or a token that can write.
 //  3. The check job checks out anything but this repository's tag of the new
 //     version, or keeps the checkout's credentials in .git/config.
 //  4. A secret of the job (NPM_TOKEN, NODE_AUTH_TOKEN, GITHUB_TOKEN, the
@@ -24,9 +27,14 @@ import { parse } from "yaml";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 type Step = { uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, unknown> };
-type Job = { needs?: string | string[]; if?: string; permissions?: Record<string, string>; steps: Step[]; outputs?: Record<string, string> };
-const workflow = parse(readFileSync(join(root, ".github/workflows/release.yml"), "utf8")) as { permissions?: Record<string, string>; jobs: Record<string, Job> };
-const checkJob = Object.entries(workflow.jobs).find(([, job]) => job.steps.some((s) => s.run?.includes("check-self-update.mjs")));
+// A job runs steps, or calls a reusable workflow (uses, with, secrets) and
+// has none.
+type Job = { needs?: string | string[]; if?: string; permissions?: Record<string, string>; steps?: Step[]; outputs?: Record<string, string>; uses?: string; with?: Record<string, unknown>; secrets?: unknown };
+type Workflow = { permissions?: Record<string, string>; jobs: Record<string, Job> };
+const readYaml = (rel: string) => parse(readFileSync(join(root, rel), "utf8")) as Workflow & { runs?: { steps?: Step[] } };
+const workflow = readYaml(".github/workflows/release.yml");
+const checkJob = Object.entries(workflow.jobs).find(([, job]) => (job.steps ?? []).some((s) => s.run?.includes("check-self-update.mjs")));
+const PINNED = /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/;
 
 describe("the self-update check in the release workflow", () => {
   it("runs in a job of its own after the publish, with a read-only token and no secret (failure 1)", () => {
@@ -40,13 +48,40 @@ describe("the self-update check in the release workflow", () => {
     expect(text).not.toMatch(/NODE_AUTH_TOKEN|NPM_TOKEN|id-token|registry-url/);
     // The publishing job never waits on it.
     expect([workflow.jobs.release!.needs ?? []].flat()).not.toContain(name);
-    expect(workflow.jobs.release!.steps.some((s) => s.run?.includes("check-self-update.mjs"))).toBe(false);
+    expect((workflow.jobs.release!.steps ?? []).some((s) => s.run?.includes("check-self-update.mjs"))).toBe(false);
   });
 
   it("names every action by a full commit sha (failure 2)", () => {
     for (const [name, job] of Object.entries(workflow.jobs)) {
-      for (const s of job.steps.filter((x) => x.uses !== undefined)) expect(s.uses, name).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
+      for (const s of (job.steps ?? []).filter((x) => x.uses !== undefined)) expect(s.uses, name).toMatch(PINNED);
     }
+  });
+
+  it("calls only this repository's ci.yml, whose actions and local actions are pinned too (failure 2)", () => {
+    const called = Object.entries(workflow.jobs).filter(([, job]) => job.uses !== undefined);
+    expect(called.map(([name, job]) => [name, job.uses])).toEqual([["full-gate", "./.github/workflows/ci.yml"]]);
+    // Every action ci.yml names, and every action its local actions name,
+    // is a local action of this repository or pinned by a full commit sha.
+    const seen = new Set<string>();
+    const check = (where: string, steps: Step[]) => {
+      for (const s of steps.filter((x) => x.uses !== undefined)) {
+        if (s.uses!.startsWith("./")) {
+          if (seen.has(s.uses!)) continue;
+          seen.add(s.uses!);
+          check(s.uses!, readYaml(join(s.uses!, "action.yml")).runs?.steps ?? []);
+        } else expect(s.uses, where).toMatch(PINNED);
+      }
+    };
+    for (const [name, job] of Object.entries(readYaml(".github/workflows/ci.yml").jobs)) check(`ci.yml ${name}`, job.steps ?? []);
+    expect([...seen].sort()).toEqual(["./.github/actions/bench-setup", "./.github/actions/gate"]);
+  });
+
+  it("gives the full gate no secret and a token that can only read (failure 6)", () => {
+    const gate = workflow.jobs["full-gate"]!;
+    expect(gate.secrets).toBeUndefined();
+    expect(gate.with).toEqual({ full: true });
+    expect(Object.values(gate.permissions ?? {}).every((p) => p === "read")).toBe(true);
+    expect(JSON.stringify(gate)).not.toMatch(/secrets\./);
   });
 
   it("checks out only this repository's tag of the new version, without credentials (failure 3)", () => {

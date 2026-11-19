@@ -32,7 +32,7 @@
 // exception is an ancestor a reader reads through `up` that the walk did
 // not make (a type the reader did not name in `keep`): it is found from
 // the nearest node made below it, once, and kept on the path.
-import type { Language, Node } from "web-tree-sitter";
+import type { Language, Node, Tree } from "web-tree-sitter";
 
 // The node's ancestors: `up(1)` its parent, `up(2)` the one above.
 export type Up = (k: number) => Node | null;
@@ -80,6 +80,80 @@ type Plan = {
   enters: boolean[]; // by reader: entered here
   keep: boolean; // some reader reads it as an ancestor
 };
+
+// Valid TypeScript the pinned grammar reads with one missing node and no
+// other damage: the tree around the node has the shape the code has, so a
+// reader reads it as it reads any other code (the core always has).
+//  - A tagged template with type arguments, `sql<Row>`select``: a missing
+//    `!` between the type arguments and the template. In the last branch
+//    of a ternary or the right side of an operator, the template is put on
+//    the whole expression; every call, member and name inside keeps its
+//    own node.
+//  - A cast to an import type with an array suffix, `x as
+//    import('./t').Row[]`: the `[]` is read as a subscript whose index is
+//    missing.
+// A shape the grammar garbles further (`f<typeof import('./t')>()`, read
+// as two comparisons) is still a region the parser could not read.
+export function graceful(node: Node): boolean {
+  if (!node.isMissing) return false;
+  const parent = node.parent;
+  if (node.type === "!") {
+    if (parent?.type !== "non_null_expression" || parent.nextSibling?.type !== "template_string") return false;
+    // The type arguments end where the missing node starts: the expression's
+    // own, or those of its last branch or right side.
+    let tagged = parent.firstChild;
+    while (tagged && tagged.type !== "instantiation_expression" && tagged.endIndex === node.startIndex) tagged = tagged.lastChild;
+    return tagged?.type === "instantiation_expression" && tagged.endIndex === node.startIndex;
+  }
+  if (node.type !== "identifier" || parent?.type !== "subscript_expression") return false;
+  const open = node.previousSibling;
+  const close = node.nextSibling;
+  if (open?.type !== "[" || close?.type !== "]" || close.startIndex !== open.endIndex) return false;
+  const cast = parent.childForFieldName("object");
+  if (cast?.type !== "as_expression" && cast?.type !== "satisfies_expression") return false;
+  let type = cast.lastNamedChild;
+  while (type?.type === "member_expression") type = type.childForFieldName("object");
+  return type?.type === "call_expression" && type.childForFieldName("function")?.type === "import";
+}
+
+// The regions of a tree the parser could not read, found once per tree:
+// every ERROR node and every missing node that is not graceful. They never
+// overlap (an ERROR node is not searched inside, a missing node is empty),
+// so in order of their start they are in order of their end too.
+type Regions = { starts: number[]; ends: number[] };
+const regionsByTree = new WeakMap<Tree, Regions>();
+function regionsOf(tree: Tree): Regions {
+  let regions = regionsByTree.get(tree);
+  if (regions) return regions;
+  const found: [number, number][] = [];
+  const stack: Node[] = [tree.rootNode];
+  while (stack.length > 0) {
+    const n = stack.pop() as Node;
+    if (n.type === "ERROR" || (n.isMissing && !graceful(n))) found.push([n.startIndex, n.endIndex]);
+    else for (const c of n.children) if (c?.hasError) stack.push(c);
+  }
+  found.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  regions = { starts: found.map((r) => r[0]), ends: found.map((r) => r[1]) };
+  regionsByTree.set(tree, regions);
+  return regions;
+}
+
+// Whether a node holds a region the parser could not read: `hasError`,
+// less the graceful missing nodes. The readers test this, never `hasError`.
+// The first region that starts inside the node is the one that ends first,
+// so it alone decides; it is found by halving.
+export function hasError(node: Node): boolean {
+  if (!node.hasError) return false;
+  const { starts, ends } = regionsOf(node.tree);
+  let lo = 0;
+  let hi = starts.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((starts[mid] as number) < node.startIndex) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < starts.length && (ends[lo] as number) <= node.endIndex;
+}
 
 // A node type's name and whether it is named, by type id, per grammar: both
 // are properties of the type (the cursor's own `nodeType` is the name of
@@ -187,13 +261,16 @@ export function walkTree(root: Node, visitors: readonly TreeVisitor[], core: Cor
       }
       if (n > 0) {
         if (plan.error || (missing && cursor.nodeIsMissing)) {
-          let line = 0;
-          for (let i = 0; i < n; i++) {
-            // Entering a node, a reader is shown it exactly when it skips nothing.
-            if ((skipBelow[i] as number) >= 0) continue;
-            line ||= cursor.startPosition.row + 1;
-            visitors[i]?.broken?.(line);
-            skipBelow[i] = depth;
+          // A graceful missing node is empty: no reader is told of it or enters it.
+          if (plan.error || !graceful(make())) {
+            let line = 0;
+            for (let i = 0; i < n; i++) {
+              // Entering a node, a reader is shown it exactly when it skips nothing.
+              if ((skipBelow[i] as number) >= 0) continue;
+              line ||= cursor.startPosition.row + 1;
+              visitors[i]?.broken?.(line);
+              skipBelow[i] = depth;
+            }
           }
         } else if (plan.named) {
           fieldRead = false;
