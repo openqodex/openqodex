@@ -1,0 +1,39 @@
+{
+  "guards": "lists a changed interface named in an interface property, a type alias union and a generic argument as a certain type use, and links no same-named type of another folder and no type parameter",
+  "references": [
+    {
+      "to": "src/store.ts#ISessionStore",
+      "site": "src/deps.ts:4",
+      "kind": "uses_type",
+      "tier": "certain"
+    },
+    {
+      "to": "src/store.ts#ISessionStore",
+      "site": "src/input.ts:6",
+      "kind": "uses_type",
+      "tier": "certain"
+    },
+    {
+      "to": "src/store.ts#ISessionStore",
+      "site": "src/registry.ts:4",
+      "kind": "uses_type",
+      "tier": "certain"
+    },
+    {
+      "to": "src/other/store.ts#ISessionStore",
+      "site": "src/other/deps.ts:4",
+      "kind": "uses_type",
+      "tier": "certain"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/store.ts#ISessionStore",
+      "site": "src/other/deps.ts:4"
+    },
+    {
+      "to": "src/store.ts#ISessionStore",
+      "site": "src/input.ts:9"
+    }
+  ]
+}

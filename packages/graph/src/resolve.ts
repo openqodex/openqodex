@@ -67,8 +67,10 @@ export const DISPATCH_CAP = 32;
 // a class, an interface or an object type binds on the local's type, never
 // as a value alias of the property; one whose named type the graph cannot
 // read keeps its may_invoke edge beside the call's own binding; a local
-// given a member (TypeRef.member) dispatches as a field does.
-export const RESOLVER_VERSION = 28;
+// given a member (TypeRef.member) dispatches as a field does. 29: a
+// TypeScript file that imports a type and has no edge to it leaves an
+// unknown whose candidates are the type's definitions.
+export const RESOLVER_VERSION = 29;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -3436,6 +3438,54 @@ export function createWorld(input: ResolveInput): World {
           }
         }
       }
+    }
+
+    // ---------- imported types with no use read ----------
+    // A TypeScript file that imports a class, an interface or a type alias
+    // of the graph, and has no edge to it nor to a member of it: it may name
+    // the type where no rule reads it. One unknown per such import, its
+    // candidates the type's definitions, so `references` of the type says
+    // its list may be short and names the file. A re-export is no use.
+    const unread = new Map<string, Map<string, UnknownSite>>(); // file to class key to its unknown
+    const unresolved = new Set(budgetFiles); // already an unknown of its own
+    for (const { path, facts: f } of input.files) {
+      if (familyOf(f.lang) !== "js" || unresolved.has(path)) continue;
+      for (const imp of f.imports) {
+        if (imp.reexport || imp.scoped || imp.star) continue;
+        for (const n of imp.names) {
+          const k = typeKey(path, "js", { name: n.local, qualifier: null, line: imp.line, column: imp.column }, 0, true);
+          if (k === null || k === "ext") continue;
+          const ids = (classes.get(k.key)?.ids ?? []).filter((id) => {
+            const kind = defById.get(id)?.kind;
+            return kind === "class" || kind === "type";
+          });
+          if (ids.length === 0) continue;
+          let byKey = unread.get(path);
+          if (!byKey) unread.set(path, (byKey = new Map()));
+          if (byKey.has(k.key)) continue;
+          byKey.set(k.key, { file: path, line: imp.line, column: imp.column, name: "", cause: "unsupported-rule", shape: "other", caller: path, scope: "file", candidates: ids, note: `${n.local} is imported here, and no use of it in this file was read; a use in a place the graph does not read may be missing from its references` });
+        }
+      }
+    }
+    if (unread.size > 0) {
+      // The class key an edge reaches: the type itself, or the type that owns the member.
+      const keyOf = (id: string): string | undefined => {
+        const own = classOfId.get(id);
+        if (own !== undefined) return own;
+        const d = defById.get(id);
+        return d && d.owner !== null ? classKey(d.family, d.file, d.owner) : undefined;
+      };
+      for (const list of [callerEdges, refEdges]) {
+        for (const e of list) {
+          for (const s of e.sites) {
+            const byKey = unread.get(s.file);
+            if (!byKey) continue;
+            const key = keyOf(e.to);
+            if (key !== undefined) byKey.delete(key);
+          }
+        }
+      }
+      for (const byKey of unread.values()) unknowns.push(...byKey.values());
     }
 
     // ---------- importers ----------

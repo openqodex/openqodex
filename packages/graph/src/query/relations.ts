@@ -340,15 +340,29 @@ export function references(s: Session, req: Request, tiers: ReadonlySet<Tier>): 
       const o = point.outcome(s, "references");
       if (isAnswer(o)) return o;
       n = o;
-      walk = new Walk(g, n.id, "in", 1, tiers, new Set(kinds));
+      // A class that extends or implements a type names it too.
+      walk = new Walk(g, n.id, "in", 1, tiers, new Set([...kinds, ...(["inherits", "implements"] as const).filter((k) => rel.has(k))]));
     }
     const w = walk as Walk;
     const target = candidate(g, n, 1);
     if (!w.run(budget)) return stoppedAt({ ...base, target }, w.items, w.pending(), w.pending().length);
     const reasons: string[] = [];
+    const causes: Record<string, number | null> = {};
     const skipped = notReadIn(g, g.projectOf(n.file));
     if (skipped > 0) reasons.push(`${skipped} ${skipped === 1 ? "file" : "files"} of its project ${skipped === 1 ? "was" : "were"} not read`);
-    return listing({ ...base, target, counts: counts(w.items), unknown: withFloor(base, reasons) }, w.items);
+    // Files that import the type and have no edge to it (resolve.ts): each
+    // may name it where the graph does not read.
+    const id = n.id;
+    const unread = g.unknowns.filter((u) => u.cause === "unsupported-rule" && u.candidates?.includes(id) === true);
+    if (unread.length > 0) {
+      const files = [...new Set(unread.map((u) => u.file))];
+      const shown = files.slice(0, 3).join(", ");
+      reasons.push(`${files.length} ${files.length === 1 ? "file imports" : "files import"} ${n.name} and no use of it there was read (${shown}${files.length > 3 ? ", and more" : ""}); a use in a place the graph does not read may be missing`);
+      causes["unsupported-rule"] = unread.length;
+    }
+    const unknown = withFloor(base, reasons, causes);
+    if (unread.length > 0) unknown.examples = unread.slice(0, 5).map(toImpactUnknown);
+    return listing({ ...base, target, counts: counts(w.items), unknown }, w.items);
   };
 }
 
