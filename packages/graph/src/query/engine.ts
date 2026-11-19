@@ -420,12 +420,15 @@ const RUNTIME: Record<string, string> = { java: "jvm", kotlin: "jvm", scala: "jv
 const runtimeOf = (language: string | null): string => (language === null ? "" : (RUNTIME[language] ?? language));
 
 // The unread languages that can make this answer's list short. About one
-// or two symbols: the languages that can call theirs. Not found, a search
-// or a whole listing: every one, the code asked about may be there.
+// or two symbols: the languages that can call theirs. A name or a file
+// the graph does not hold (any question but `explain`, whose edge ids
+// are the graph's own), a search or a whole listing: every one, the code
+// asked about may be there.
 function unreadFor(s: Session, a: Answer): { language: string; files: number }[] {
   const unread = s.graph.status.unreadLanguages ?? [];
-  if (unread.length === 0 || !UNREAD_KINDS.has(a.kind)) return [];
-  if (a.error !== null && a.error.code !== "not-found") return [];
+  if (unread.length === 0) return [];
+  if (a.error?.code === "not-found") return a.kind === "explain" ? [] : unread;
+  if (a.error !== null || !UNREAD_KINDS.has(a.kind)) return [];
   const ends = a.error === null && a.kind !== "search" && a.target !== null ? (Array.isArray(a.target) ? a.target : [a.target]) : [];
   if (ends.length === 0) return unread;
   const runtimes = new Set(ends.map((c) => runtimeOf(langOf(c.file))));

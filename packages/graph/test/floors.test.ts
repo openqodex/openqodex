@@ -2,9 +2,11 @@
 // does not read, its gaps grouped by cause, and whether its list is whole.
 //
 // Ways it could fail, written before the code:
-//  1. A question about Rust code (a name defined only in a .rs file)
-//     answers not-found, or an empty search, with floor false: an agent
-//     reads "no such code" where the build never read the code.
+//  1. A question about Rust code (a name defined only in a .rs file, or
+//     the file itself) answers not-found, or an empty search, with floor
+//     false: an agent reads "no such code" where the build never read the
+//     code. Every question that takes a name or a file, `symbol` and
+//     `importers` included.
 //  2. A listing that is not about one symbol (search, routes) leaves the
 //     unread files out of its floor, though a hit or a route may be there.
 //  3. Every answer of a mixed repository carries the Rust files, so a
@@ -15,7 +17,8 @@
 //     answered as whole, though Kotlin code calls Java methods by name.
 //  5. A long list of gaps reaches the reader as ten sentences and "and N
 //     more", with no count per cause; or the grouping replaces the old
-//     fields, so a reader of `reasons` or `causes` breaks.
+//     fields, so a reader of `reasons` or `causes` breaks; or a group's
+//     count disagrees with `causes` for the same cause.
 //  6. A list on a floor gives no field that says the list is incomplete,
 //     so a reader of the counts takes "2 certain" as every caller.
 import { afterAll, describe, expect, it } from "vitest";
@@ -27,7 +30,7 @@ import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
 
-type Floored = Answer & { listIncomplete?: boolean; unknown: Answer["unknown"] & { groups?: { cause: string; count: number | null; examples: string[] }[] } };
+type Floored = Answer & { listIncomplete?: boolean; unknown: Answer["unknown"] & { groups?: { cause: string; count: number | null; places?: number; examples: string[] }[] } };
 
 const MIXED = {
   "package.json": JSON.stringify({ name: "mixed", private: true, type: "module", dependencies: { hono: "^4.6.0" }, devDependencies: { vitest: "^2.0.0" } }),
@@ -57,6 +60,9 @@ describe("files of a language the build does not read", () => {
       { kind: "implementers", target: { name: "get_user" } },
       { kind: "tests", target: { name: "get_user" } },
       { kind: "path", target: { name: "rust_helper" }, to: { name: "get_user" } },
+      { kind: "symbol", target: { name: "get_user" } },
+      { kind: "importers", target: { file: "core/src/lib.rs" } },
+      { kind: "outline", target: { file: "core/src" } },
       { kind: "search", text: "get_user" },
     ];
     for (const req of asked) {
@@ -120,14 +126,17 @@ describe("files of a language the build does not read", () => {
 describe("the gaps of an answer grouped by cause", () => {
   it("groups the gaps with one count and at most two examples each, and keeps reasons and causes (5)", async () => {
     // Three files with a region no parser can read: three gaps of one cause.
-    const broken = Object.fromEntries([1, 2, 3].map((i) => [`src/broken${i}.ts`, `export function b${i}( {\n  return ;\n`]));
+    const broken = Object.fromEntries([1, 2, 3].map((i) => [`src/broken${i}.ts`, `export function b${i}( {\n  return ;\n}\nexport const c${i} = f(;\nexport const d${i} = g(;\n`]));
     const s = await sessionOf({ ...MIXED, ...broken });
     const routes = ask(s, { kind: "routes" });
     expect(routes.unknown.reasons.length).toBeGreaterThan(0);
     expect(Object.keys(routes.unknown.causes)).toContain("file-not-parsed");
     const groups = routes.unknown.groups ?? [];
+    for (const g of groups) expect(g.count, g.cause).toBe(routes.unknown.causes[g.cause] ?? null);
     const parse = groups.find((g) => g.cause === "file-not-parsed");
     expect(parse?.count).toBeGreaterThanOrEqual(3);
+    // One place per broken file, whatever its regions.
+    expect(parse?.places).toBe(3);
     expect(parse?.examples.length).toBe(2);
     expect(parse?.examples[0]).toMatch(/src\/broken\d\.ts:\d+/);
     expect(groups.find((g) => g.cause === "language-not-read")).toEqual({ cause: "language-not-read", count: 2, examples: [RUST_REASON] });

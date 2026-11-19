@@ -13,11 +13,16 @@
 //  3. A route registered in a handler or a file that holds either shape is
 //     dropped (the reader skips any node with an error below it), now with
 //     no note at all.
+//  5. A node is said to hold a region it does not, or not to hold one it
+//     does, when a file has many regions (the lookup that finds them).
 //  4. A real syntax error, or a shape the grammar garbles beyond one
 //     missing node (`f<typeof import('x')>()`), stops being a gap: a route
 //     inside it would vanish with no floor.
 import { afterAll, describe, expect, it } from "vitest";
+import type { Node } from "web-tree-sitter";
 import { buildGraph } from "../src/index.js";
+import { parserFor } from "../src/parser.js";
+import { graceful, hasError } from "../src/walk.js";
 import type { Graph } from "../src/index.js";
 import { query } from "../src/query/engine.js";
 import type { Request } from "../src/query/answer.js";
@@ -79,4 +84,23 @@ describe("valid TypeScript the grammar reads with a missing node", () => {
     expect(a.unknown.floor).toBe(true);
     expect((a.items as Route[]).map((r) => r.pattern)).not.toContain("/d");
   }, 60_000);
+
+  it("says a node holds a region exactly when one lies inside it, in a file of many (5)", async () => {
+    const lines = Array.from({ length: 40 }, (_, i) => [`app.get("/a${i}", (c) => { f(; });`, `const q${i} = sql<number[]>\`x\`;`, `app.get("/b${i}", (c) => c.json(x as import('./t').T[]));`, `const r${i} = g(${i});`][i % 4]).join("\n");
+    const tree = (await parserFor("typescript")).parse(lines);
+    if (!tree) throw new Error("no tree");
+    // Every region, the slow way: any ERROR node, any missing node that is not graceful.
+    const holds = (n: Node): boolean => n.type === "ERROR" || (n.isMissing && !graceful(n)) || n.children.some((c) => c !== null && holds(c));
+    let checked = 0;
+    let real = 0;
+    const visit = (n: Node) => {
+      expect(hasError(n), `${n.type} at ${n.startIndex}`).toBe(holds(n));
+      checked++;
+      if (holds(n)) real++;
+      for (const c of n.children) if (c) visit(c);
+    };
+    visit(tree.rootNode);
+    expect(real).toBeGreaterThan(10);
+    expect(checked).toBeGreaterThan(real);
+  });
 });

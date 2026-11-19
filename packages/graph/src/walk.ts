@@ -116,31 +116,43 @@ export function graceful(node: Node): boolean {
   return type?.type === "call_expression" && type.childForFieldName("function")?.type === "import";
 }
 
-// The regions of a tree the parser could not read, as start and end
-// offsets, found once per tree: every ERROR node and every missing node
-// that is not graceful.
-const regionsByTree = new WeakMap<Tree, number[]>();
-function regionsOf(tree: Tree): number[] {
+// The regions of a tree the parser could not read, found once per tree:
+// every ERROR node and every missing node that is not graceful. They never
+// overlap (an ERROR node is not searched inside, a missing node is empty),
+// so in order of their start they are in order of their end too.
+type Regions = { starts: number[]; ends: number[] };
+const regionsByTree = new WeakMap<Tree, Regions>();
+function regionsOf(tree: Tree): Regions {
   let regions = regionsByTree.get(tree);
   if (regions) return regions;
-  regions = [];
+  const found: [number, number][] = [];
   const stack: Node[] = [tree.rootNode];
   while (stack.length > 0) {
     const n = stack.pop() as Node;
-    if (n.type === "ERROR" || (n.isMissing && !graceful(n))) regions.push(n.startIndex, n.endIndex);
+    if (n.type === "ERROR" || (n.isMissing && !graceful(n))) found.push([n.startIndex, n.endIndex]);
     else for (const c of n.children) if (c?.hasError) stack.push(c);
   }
+  found.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  regions = { starts: found.map((r) => r[0]), ends: found.map((r) => r[1]) };
   regionsByTree.set(tree, regions);
   return regions;
 }
 
 // Whether a node holds a region the parser could not read: `hasError`,
 // less the graceful missing nodes. The readers test this, never `hasError`.
+// The first region that starts inside the node is the one that ends first,
+// so it alone decides; it is found by halving.
 export function hasError(node: Node): boolean {
   if (!node.hasError) return false;
-  const regions = regionsOf(node.tree);
-  for (let i = 0; i < regions.length; i += 2) if ((regions[i] as number) >= node.startIndex && (regions[i + 1] as number) <= node.endIndex) return true;
-  return false;
+  const { starts, ends } = regionsOf(node.tree);
+  let lo = 0;
+  let hi = starts.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((starts[mid] as number) < node.startIndex) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < starts.length && (ends[lo] as number) <= node.endIndex;
 }
 
 // A node type's name and whether it is named, by type id, per grammar: both
