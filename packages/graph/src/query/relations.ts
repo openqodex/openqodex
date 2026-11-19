@@ -219,23 +219,34 @@ export function dynamicBases(g: Graph, family: Family): UnknownSite[] {
 }
 
 // `implementers` asked about a file (by path, by a file alone, or by a name
-// only a file has): the classes and interfaces it defines as the candidates
-// of an ambiguous answer, so the next question names one. Null when the
-// question is not about a file, or the file defines none.
+// only a file has: the end of its path, or its name without the extension,
+// `IMCPServer` for IMCPServer.ts): the classes and interfaces it defines as
+// the candidates of an ambiguous answer, so the next question names one.
+// A name that several files have gives as the candidates those that
+// define a class or an interface. A symbol of the name comes first: this
+// runs only when none was found. Null when the question is not about a
+// file, or the file defines none.
+const stemOf = (f: string): string => f.slice(f.lastIndexOf("/") + 1).replace(/\.[^.]*$/, "");
 function definedIn(s: Session, req: Request, o: GraphNode | Answer): Answer | null {
   const g = s.graph;
+  const typesIn = (f: string) => (g.defsByFile.get(f) ?? []).filter((d) => d.kind === "class" || d.kind === "type");
   let file: string | null = null;
   if (!isAnswer(o)) file = o.kind === "file" ? o.file : null;
   else if (o.error?.code === "not-found") {
     const name = req.target?.name ?? "";
     if (g.nodes.get(name)?.kind === "file") file = name;
-    else {
-      const same = [...g.defsByFile.keys()].filter((f) => f.endsWith(`/${name}`));
-      if (name !== "" && same.length === 1) file = same[0] as string;
+    else if (name !== "") {
+      const named = [...g.defsByFile.keys()].filter((f) => f.endsWith(`/${name}`) || (!name.includes("/") && stemOf(f) === name));
+      const same = named.length > 1 ? named.filter((f) => typesIn(f).length > 0) : named;
+      if (same.length === 1) file = same[0] as string;
+      else if (same.length > 1) {
+        const files = same.sort().flatMap((f) => (g.nodes.get(f) ? [candidate(g, g.nodes.get(f) as GraphNode, 1)] : []));
+        return { ...fail(s, "implementers", "ambiguous", `${same.length} files named ${name} define classes or interfaces; name one by its path`), target: files };
+      }
     }
   }
   if (file === null) return null;
-  const defs = (g.defsByFile.get(file) ?? []).filter((d) => d.kind === "class" || d.kind === "type").sort((a, b) => a.startLine - b.startLine);
+  const defs = typesIn(file).sort((a, b) => a.startLine - b.startLine);
   if (defs.length === 0) return null;
   return { ...fail(s, "implementers", "ambiguous", `${file} is a file; it defines ${defs.length} ${defs.length === 1 ? "class or interface" : "classes and interfaces"}: name one by its id or file and line`), target: defs.map((d) => candidate(g, d, 1)) };
 }
@@ -329,15 +340,29 @@ export function references(s: Session, req: Request, tiers: ReadonlySet<Tier>): 
       const o = point.outcome(s, "references");
       if (isAnswer(o)) return o;
       n = o;
-      walk = new Walk(g, n.id, "in", 1, tiers, new Set(kinds));
+      // A class that extends or implements a type names it too.
+      walk = new Walk(g, n.id, "in", 1, tiers, new Set([...kinds, ...(["inherits", "implements"] as const).filter((k) => rel.has(k))]));
     }
     const w = walk as Walk;
     const target = candidate(g, n, 1);
     if (!w.run(budget)) return stoppedAt({ ...base, target }, w.items, w.pending(), w.pending().length);
     const reasons: string[] = [];
+    const causes: Record<string, number | null> = {};
     const skipped = notReadIn(g, g.projectOf(n.file));
     if (skipped > 0) reasons.push(`${skipped} ${skipped === 1 ? "file" : "files"} of its project ${skipped === 1 ? "was" : "were"} not read`);
-    return listing({ ...base, target, counts: counts(w.items), unknown: withFloor(base, reasons) }, w.items);
+    // Files that import the type and have no edge to it (resolve.ts): each
+    // may name it where the graph does not read.
+    const id = n.id;
+    const unread = g.unknowns.filter((u) => u.cause === "unsupported-rule" && u.candidates?.includes(id) === true);
+    if (unread.length > 0) {
+      const files = [...new Set(unread.map((u) => u.file))];
+      const shown = files.slice(0, 3).join(", ");
+      reasons.push(`${files.length} ${files.length === 1 ? "file imports" : "files import"} ${n.name} and no use of it there was read (${shown}${files.length > 3 ? ", and more" : ""}); a use in a place the graph does not read may be missing`);
+      causes["unsupported-rule"] = unread.length;
+    }
+    const unknown = withFloor(base, reasons, causes);
+    if (unread.length > 0) unknown.examples = unread.slice(0, 5).map(toImpactUnknown);
+    return listing({ ...base, target, counts: counts(w.items), unknown }, w.items);
   };
 }
 

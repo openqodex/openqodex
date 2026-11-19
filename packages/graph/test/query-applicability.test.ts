@@ -110,13 +110,13 @@ describe("routes rest on the route readers alone", () => {
   it("names a Go server framework from go.mod that this build does not read (2)", async () => {
     const a = ask(
       await built({
-        "go.mod": "module example.com/svc\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.10.0\n",
-        "main.go": 'package main\n\nimport "github.com/gin-gonic/gin"\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET("/ping", func(c *gin.Context) {})\n\tr.Run()\n}\n',
+        "go.mod": "module example.com/svc\n\ngo 1.22\n\nrequire github.com/labstack/echo/v4 v4.12.0\n",
+        "main.go": 'package main\n\nimport "github.com/labstack/echo/v4"\n\nfunc main() {\n\te := echo.New()\n\te.GET("/ping", func(c echo.Context) error { return nil })\n\te.Start(":8080")\n}\n',
       }),
       { kind: "routes" },
     );
     expect(a.error?.code).toBe("unsupported");
-    expect(a.error?.message).toMatch(/github\.com\/gin-gonic\/gin/);
+    expect(a.error?.message).toMatch(/Echo \(github\.com\/labstack\/echo\)/);
   }, 60_000);
 
   it("lists the FastAPI routes of a repository with a Koa package too, as a floor that names Koa (3)", async () => {

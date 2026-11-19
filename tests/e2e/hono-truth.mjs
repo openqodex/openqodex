@@ -14,8 +14,9 @@
 // path })` constant, and joins the prefixes segment by segment, each
 // `/{name}` of an OpenAPI path served as `/:name`. A call chained on the
 // router's own calls (`app.get(...).post(...)`) is a call on the router.
-// Anything else it meets on
-// the way is listed under `unread` with its site, never guessed.
+// A handler written in place is the function at its own site. Anything
+// else it meets on the way is listed under `unread` with its site, never
+// guessed.
 //
 // Usage: node tests/e2e/hono-truth.mjs <repo> [<src folder> <root file> <root function>]
 import { readdirSync, statSync } from "node:fs";
@@ -147,7 +148,7 @@ export function honoTruth(repo, srcDir = "packages/trueforge/src", rootFile = "p
   };
   const handlerOf = (expr, env) => {
     const e = strip(expr);
-    if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) return "inline";
+    if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) return site(e);
     if (ts.isCallExpression(e)) return "call";
     if (ts.isIdentifier(e)) {
       const d = declOf(e);

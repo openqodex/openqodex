@@ -9,7 +9,8 @@ import { isReactFact, readFacts, reader, wants } from "./facts.js";
 import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 
 // 4: a cap counted across the build is a gap of the whole build.
-export const VERSION = 4;
+// 5: a tagged template with type arguments and a cast to an import type with an array suffix are read, not a region the parser could not read.
+export const VERSION = 5;
 const SUPPORTED = "React 16.8 to 19";
 
 const app = "react-app";

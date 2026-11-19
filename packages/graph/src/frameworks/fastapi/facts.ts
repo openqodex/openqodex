@@ -52,6 +52,10 @@ export type FastApiFact =
   // and "route", `cut` counts the arguments past MAX_ARGS: a keyword not
   // found may be among them.
   | (FrameworkFactBase & { kind: "call"; recv: Expr; prop: string; args: Expr[]; kw: Kw[]; scope: number; cut: number })
+  // A function whose parameters declare calls (`db=Depends(get_db)`), read
+  // so a dependency's own dependencies chain: `def` is the function's symbol
+  // line, `scope` the scope its parameters are evaluated in.
+  | (FrameworkFactBase & { kind: "deps"; fn: string; def: number; scope: number; params: ParamDep[]; omitted: number })
   // The file is larger than MAX_SOURCE_BYTES and was not read.
   | (FrameworkFactBase & { kind: "too-large"; bytes: number })
   // The file has a syntax error (the first one is at the fact's position);
@@ -164,6 +168,11 @@ export function readFacts(root: Node): FastApiFact[] {
         const own = frame(line, scope.line, node.type === "class_definition", parentType === "decorated_definition" ? decoratedAt : line);
         frames.set(line, own);
         bindTargets(f, node.childForFieldName("name"));
+        if (node.type === "function_definition" && !node.childForFieldName("parameters")?.hasError) {
+          const name = node.childForFieldName("name")?.text;
+          const deps = paramDeps(node);
+          if (name && deps.params.length > 0) out.push({ kind: "deps", ...pos(node), fn: name, def: own.at, scope: scope.line, params: deps.params, omitted: deps.omitted });
+        }
         if (node.type === "function_definition") {
           for (const p of node.childForFieldName("parameters")?.namedChildren ?? []) {
             if (p.type === "identifier") bind(own, p.text);
@@ -481,6 +490,8 @@ function keepRead(facts: FastApiFact[]): FastApiFact[] {
     switch (f.kind) {
       case "route":
         return { ...f, args: args(f.args, ["path"]), kw: kws(f.kw, ROUTE_KW), params: f.params.map((p) => ({ call: names(p.call), type: p.type && names(p.type) })) };
+      case "deps":
+        return { ...f, params: f.params.map((p) => ({ call: names(p.call), type: p.type && names(p.type) })) };
       case "call": {
         const recv = isClientCall(f.recv) ? client(f.recv) : names(f.recv);
         const isClient = isClientCall(f.recv) || (f.recv.t === "ref" && f.recv.path.length === 1 && clients.has(f.recv.path[0] as string));
@@ -539,6 +550,8 @@ function isFrame(v: unknown): v is ScopeFrame {
   );
 }
 
+const isParamDep = (p: unknown): boolean => typeof p === "object" && p !== null && isExpr((p as { call?: unknown }).call) && ((p as { type?: unknown }).type === null || isExpr((p as { type?: unknown }).type));
+
 export function isFastApiFact(v: unknown): v is FastApiFact {
   if (typeof v !== "object" || v === null) return false;
   const f = v as Record<string, unknown>;
@@ -559,7 +572,7 @@ export function isFastApiFact(v: unknown): v is FastApiFact {
         Number.isInteger(f.def) &&
         Number.isInteger(f.scope) &&
         Array.isArray(f.params) &&
-        f.params.every((p) => typeof p === "object" && p !== null && isExpr((p as { call?: unknown }).call) && ((p as { type?: unknown }).type === null || isExpr((p as { type?: unknown }).type))) &&
+        f.params.every(isParamDep) &&
         Number.isInteger(f.omitted) &&
         Array.isArray(f.below) &&
         f.below.every((d) => typeof d === "object" && d !== null && Number.isInteger((d as { line?: unknown }).line) && typeof (d as { text?: unknown }).text === "string" && typeof (d as { route?: unknown }).route === "boolean") &&
@@ -568,6 +581,8 @@ export function isFastApiFact(v: unknown): v is FastApiFact {
       );
     case "call":
       return isExpr(f.recv) && typeof f.prop === "string" && Array.isArray(f.args) && f.args.every((a) => isExpr(a)) && isKws(f.kw) && Number.isInteger(f.scope) && Number.isInteger(f.cut);
+    case "deps":
+      return typeof f.fn === "string" && Number.isInteger(f.def) && Number.isInteger(f.scope) && Array.isArray(f.params) && f.params.every(isParamDep) && Number.isInteger(f.omitted);
     case "too-large":
       return Number.isInteger(f.bytes);
     case "syntax-error":

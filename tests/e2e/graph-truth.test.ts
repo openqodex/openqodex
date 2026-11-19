@@ -50,16 +50,16 @@ const REPO = {
 const MAX_WRONG_CERTAIN = 0;
 // (c) Production truth sites found certain or likely, of all production
 // truth sites: 3617 on 0a67e51f (tf-graph before any fix), 3948 once the
-// TypeScript receiver, callback and `this` types landed.
-const BASELINE_PROD_RECALL = { found: 3948, of: 4021 };
+// TypeScript receiver, callback and `this` types landed, 3961 once a local
+// copied from a member took the member's type.
+const BASELINE_PROD_RECALL = { found: 3961, of: 4021 };
 // (c) Possible edges at production truth sites into a target the checker
-// does not name: 548 on 0a67e51f, 922 since. Those 922 are dispatch to a
-// class or object that declares the interface (dispatch-implements). 960
-// once a call through a TypeScript interface also reaches the classes that
-// match it by shape: the 38 more are by-shape possible targets, raised on
-// purpose, and the unsupported-rule gaps on this repository fell from 974
-// to 728 with them.
-const MAX_PROD_BURDEN = 960;
+// does not name: 548 on 0a67e51f, 922 since. All 922 are dispatch to a
+// class or object that declares the interface (dispatch-implements).
+// 929 once a local copied from an interface- or base-typed field kept its
+// dispatch (7 possible links at 5 sites).
+// 967 since TypeScript interface calls also reach classes matching by shape (38 by-shape targets; shape gaps 974 to 740).
+const MAX_PROD_BURDEN = 967;
 // (b) Owner's held-out sites: each must resolve, by the checker, to the named
 // declaration, and the graph must find it certain or likely.
 const HELD_OUT = [

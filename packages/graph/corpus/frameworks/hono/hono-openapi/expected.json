@@ -4,7 +4,7 @@
     "plugin": "hono",
     "apps": 1,
     "registrations": [
-      { "site": "src/app.ts:22", "methods": ["GET"], "pattern": "/healthz", "status": "unresolved", "mounted": true },
+      { "site": "src/app.ts:22", "methods": ["GET"], "pattern": "/healthz", "handler": "src/app.ts#createServerApp.<get /healthz>", "status": "bound", "mounted": true },
       { "site": "src/apis/users.ts:12", "methods": ["GET"], "pattern": "/api/v1/users", "handler": "src/apis/users.ts#listUsersHandler", "status": "bound", "mounted": true },
       { "site": "src/apis/users.ts:12", "methods": ["GET"], "pattern": "/api/v1/settings/members", "handler": "src/apis/users.ts#listUsersHandler", "status": "bound", "mounted": true },
       { "site": "src/apis/users.ts:13", "methods": ["GET"], "pattern": "/api/v1/users/:user_id", "handler": "src/apis/users.ts#createUsersRouter.getUserHandler", "status": "bound", "mounted": true },

@@ -12,6 +12,7 @@ import type { Node } from "web-tree-sitter";
 import type { FrameworkFactBase } from "../plugin.js";
 import { eitherSegmentText, keptText, routeSegmentText } from "../shared/kept.js";
 import { decodeEscape } from "../express/js.js";
+import { graceful } from "../../walk.js";
 
 // The most bytes of one file the plugin reads; a larger file gets one
 // "too-large" fact and nothing else, and resolve says so with an unknown.
@@ -606,7 +607,7 @@ export function readFacts(root: Node): NestFact[] {
     for (;;) {
       if (descend) {
         const type = cursor.nodeType;
-        if (type === "ERROR" || cursor.currentNode.isMissing) {
+        if (type === "ERROR" || (cursor.currentNode.isMissing && !graceful(cursor.currentNode))) {
           broken ??= { line: cursor.startPosition.row + 1, column: cursor.startPosition.column + 1 };
           descend = false;
           continue;

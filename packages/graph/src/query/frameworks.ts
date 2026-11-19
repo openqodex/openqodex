@@ -49,10 +49,11 @@ type FwRegistration = {
   mounted: boolean;
   handler: { written: string; status: string; targets: string[] };
 };
-type FwEdge = { from: string; to: string; kind: string; plugin: string; app: string | null; evidence: FwEvidence; category?: string };
+type FwEdge = { from: string; to: string; kind: string; plugin: string; app: string | null; evidence: FwEvidence; category?: string; order?: number };
 type FwUnknown = { plugin: string; site: FwSite | null; affects: string[]; cause: string; name: string | null; note: string; count: number | null; exact: boolean };
 type FwRun = { id: string; status: string; reason: string | null; apps?: number };
-type FwLayer = { registrations: FwRegistration[]; edges: FwEdge[]; unknowns: FwUnknown[]; runs: FwRun[] };
+type FwApp = { id: string; site: FwSite };
+type FwLayer = { registrations: FwRegistration[]; edges: FwEdge[]; unknowns: FwUnknown[]; runs: FwRun[]; apps: FwApp[] };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
@@ -68,10 +69,11 @@ export function frameworkLayer(g: Graph): FwLayer | null {
   const f = (g as unknown as { frameworks?: unknown }).frameworks;
   if (!isObj(f) || !Array.isArray(f.entities) || !Array.isArray(f.edges) || !Array.isArray(f.unknowns)) return null;
   const runs = runsOf(g);
+  const apps = Array.isArray(f.apps) ? f.apps.filter((a): a is FwApp => isObj(a) && typeof a.id === "string" && isObj(a.site) && typeof a.site.file === "string") : [];
   const registrations = f.entities.filter((e): e is FwRegistration => isObj(e) && e.kind === "registration" && isObj(e.site) && isObj(e.handler) && Array.isArray(e.methods));
   const edges = f.edges.filter((e): e is FwEdge => isObj(e) && typeof e.from === "string" && typeof e.to === "string" && typeof e.kind === "string" && isObj(e.evidence) && isObj(e.evidence.site));
   const unknowns = f.unknowns.filter((u): u is FwUnknown => isObj(u) && Array.isArray(u.affects) && typeof u.cause === "string");
-  return { registrations, edges, unknowns, runs };
+  return { registrations, edges, unknowns, runs, apps };
 }
 
 // The plugins of this build whose rules emit `kind` (a route
@@ -185,9 +187,20 @@ class Gaps {
       const prev = causes[u.cause];
       causes[u.cause] = prev === null || u.count === null ? null : (prev ?? 0) + u.count;
     }
-    const reasons = [...this.missing, ...this.hit.slice(0, 10).map((u) => `${u.plugin}: ${u.note}${u.site ? ` (${u.site.file}:${u.site.line})` : ""}`)];
+    const said = (u: FwUnknown) => `${u.plugin}: ${u.note}${u.site ? ` (${u.site.file}:${u.site.line})` : ""}`;
+    const reasons = [...this.missing, ...this.hit.slice(0, 10).map(said)];
     if (this.hit.length > 10) reasons.push(`and ${this.hit.length - 10} more gaps of the framework layer`);
-    return { ...base.unknown, floor: base.unknown.floor || reasons.length > 0, reasons: [...reasons, ...base.unknown.reasons], causes };
+    // The same gaps by cause: the count `causes` gives, the places that
+    // hold them, and the first two of each.
+    const byCause = new Map<string, { cause: string; places: number; examples: string[] }>();
+    for (const u of this.hit) {
+      let g = byCause.get(u.cause);
+      if (!g) byCause.set(u.cause, (g = { cause: u.cause, places: 0, examples: [] }));
+      g.places++;
+      if (g.examples.length < 2) g.examples.push(said(u));
+    }
+    const groups = [...byCause.values()].map((g) => ({ cause: g.cause, count: causes[g.cause] ?? null, places: g.places, examples: g.examples }));
+    return { ...base.unknown, floor: base.unknown.floor || reasons.length > 0, reasons: [...reasons, ...base.unknown.reasons], causes, groups };
   }
 }
 
@@ -202,6 +215,14 @@ type Route = {
   site: FwSite;
   handler: FwRegistration["handler"];
   handles: { to: string; site: GraphSite; premises: string[]; edge: string }[];
+  // What runs before the handler, in order (FastAPI's Depends and
+  // Security, a framework's middleware): the registration's
+  // applies_middleware edges.
+  dependencies: { to: string; order: number | null; site: GraphSite; premises: string[]; edge: string }[];
+  // The route belongs to an application a test file builds (or, with no
+  // application, is registered in a test file), by the graph's one rule
+  // for test files.
+  isTest: boolean;
 };
 
 // A target that names one point (an id, a name, a file and line), as
@@ -222,12 +243,14 @@ export function routes(s: Session, req: Request): Job | Answer {
   // The handles edges by the registration they leave, and the registrations
   // whose handler is the point.
   const handlesOf = new Map<string, FwEdge[]>();
+  const depsOf = new Map<string, FwEdge[]>();
   const handlesPoint = new Set<string>();
   let edges: Pass<FwEdge> | null = null;
   const items: Route[] = [];
   let regs: Pass<FwRegistration> | null = null;
   let sorted = false;
   const gaps = new Gaps(layer, "handles", readersOf("registration"));
+  const appFile = new Map(layer.apps.map((a) => [a.id, a.site.file]));
   return (budget) => {
     const base = empty(s, "routes");
     if (point && !n) {
@@ -239,6 +262,7 @@ export function routes(s: Session, req: Request): Job | Answer {
     const at = n;
     const target = at ? candidate(g, at, 1) : null;
     edges ??= new Pass(layer.edges, (e) => {
+      if (e.kind === "applies_middleware") (depsOf.get(e.from) ?? depsOf.set(e.from, []).get(e.from))?.push(e);
       if (e.kind !== "handles") return;
       (handlesOf.get(e.from) ?? handlesOf.set(e.from, []).get(e.from))?.push(e);
       if (at && e.to === at.id) handlesPoint.add(e.from);
@@ -247,8 +271,11 @@ export function routes(s: Session, req: Request): Job | Answer {
     regs ??= new Pass(layer.registrations, (r) => {
       if (at && !handlesPoint.has(r.id) && !r.handler.targets.includes(at.id)) return;
       if (text && !(r.pattern ?? r.written ?? "").includes(text) && r.name !== text) return;
+      const isTest = isTestPath((r.app !== null ? appFile.get(r.app) : undefined) ?? r.site.file);
+      if (isTest && req.excludeTests) return;
       const handles = (handlesOf.get(r.id) ?? []).map((e) => ({ to: e.to, site: fwSite(e.evidence), premises: e.evidence.premises, edge: edgeId(e, e.evidence.site) }));
-      items.push({ id: r.id, plugin: r.plugin, app: r.app, methods: r.methods, pattern: r.pattern, name: r.name, mounted: r.mounted, site: r.site, handler: r.handler, handles });
+      const dependencies = (depsOf.get(r.id) ?? []).map((e) => ({ to: e.to, order: e.order ?? null, site: fwSite(e.evidence), premises: e.evidence.premises, edge: edgeId(e, e.evidence.site) })).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      items.push({ id: r.id, plugin: r.plugin, app: r.app, methods: r.methods, pattern: r.pattern, name: r.name, mounted: r.mounted, site: r.site, handler: r.handler, handles, dependencies, isTest });
     });
     if (!regs.run(budget)) return stoppedAt({ ...base, target }, items, [], regs.left);
     if (!sorted) {

@@ -40,6 +40,7 @@ export type EvidenceKind =
   | "receiver-field" // a receiver reached through a typed field
   | "receiver-self" // this, self or cls in a method of the class
   | "autoload" // a Ruby constant found by the autoload convention
+  | "fastapi-depends" // a FastAPI Depends or Security dependency, run for the route or dependency that declares it
   // Possible only: the evidence names a set, never one definition.
   | "dispatch-implements" // a call through an interface to one of its implementations
   | "dispatch-override" // a call through a base type, or this or self, to an override in a subclass
@@ -67,6 +68,7 @@ export const CERTAIN_KINDS: ReadonlySet<EvidenceKind> = new Set<EvidenceKind>([
   "receiver-inferred",
   "receiver-field",
   "receiver-self",
+  "fastapi-depends",
 ]);
 
 // What proved a binding through a module: the import line and how its

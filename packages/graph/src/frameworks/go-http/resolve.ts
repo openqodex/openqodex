@@ -101,7 +101,7 @@ type FileIndex = {
 
 // The standard library's handler wrappers whose first argument is the handler they serve.
 const STDLIB_WRAPPERS = new Set(["TimeoutHandler", "MaxBytesHandler", "AllowQuerySemicolons"]);
-const METHOD_CONSTANTS: Record<string, string> = {
+export const METHOD_CONSTANTS: Record<string, string> = {
   MethodGet: "GET",
   MethodHead: "HEAD",
   MethodPost: "POST",

@@ -12,7 +12,7 @@
       { "site": "src/admin.ts:12", "methods": ["GET"], "pattern": "/a", "mounted": false },
       { "site": "src/admin.ts:14", "methods": ["GET"], "pattern": "/b", "mounted": false },
       { "site": "src/app.ts:13", "methods": ["POST"], "pattern": "/gone", "handler": null, "status": "missing" },
-      { "site": "src/app.ts:14", "methods": ["GET"], "pattern": "/inline", "handler": null, "status": "unresolved" },
+      { "site": "src/app.ts:14", "methods": ["GET"], "pattern": "/inline", "handler": "src/app.ts#<get /inline>", "status": "bound" },
       { "site": "src/app.ts:15", "methods": ["PUT", "PATCH"], "pattern": "/both", "handler": "src/handlers.ts#health" },
       { "site": "src/app.ts:16", "methods": ["*"], "pattern": "/any", "handler": "src/handlers.ts#health" },
       { "site": "src/status.ts:5", "methods": ["GET"], "pattern": "/health", "handler": "src/handlers.ts#health", "mounted": true }
@@ -32,10 +32,10 @@
     "unknowns": [
       { "file": "src/app.ts", "line": 12, "cause": "dynamic" },
       { "file": "src/app.ts", "line": 13, "cause": "miss" },
-      { "file": "src/app.ts", "line": 14, "cause": "unsupported-rule" },
       { "file": "src/app.ts", "line": 17, "cause": "dynamic" },
       { "file": "src/app.ts", "line": 18, "cause": "dynamic" }
     ],
+    "notUnknowns": [{ "file": "src/app.ts", "line": 14, "cause": "unsupported-rule" }],
     "notRegistrations": ["src/app.ts:17"],
     "noRegistrationsIn": ["src/cache.ts"],
     "notEdges": [

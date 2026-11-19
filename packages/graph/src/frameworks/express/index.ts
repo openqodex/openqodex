@@ -17,7 +17,9 @@ import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 // 9: an export written more than once is an unknown on the mount.
 // 10: exports.n written after module.exports is replaced is an unknown on the mount.
 // 11: an arrow function export is no router; a member of a require bound to a name is followed; a static method beside an exported member does not compete with it.
-export const VERSION = 11;
+// 12: a tagged template with type arguments and a cast to an import type with an array suffix are read, not a region the parser could not read.
+// 13: a handler written in place is bound to the definition the language extractor makes for it.
+export const VERSION = 13;
 
 const app = "express-app";
 

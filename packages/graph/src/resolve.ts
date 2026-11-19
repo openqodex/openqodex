@@ -71,6 +71,13 @@ export const SHAPE_CAP = 20;
 // the classes that match it by shape (by-shape). 27: a TypeScript call on
 // what a package returned is external at any depth, unless the repository
 // subclasses, implements or augments a package's type with that method.
+// 28: a method called on a local copied from a property typed by
+// a class, an interface or an object type binds on the local's type, never
+// as a value alias of the property; one whose named type the graph cannot
+// read keeps its may_invoke edge beside the call's own binding; a local
+// given a member (TypeRef.member) dispatches as a field does. 29: a
+// TypeScript file that imports a type and has no edge to it leaves an
+// unknown whose candidates are the type's definitions.
 // 30: a value given members in place (`f.get = g`, Object.assign) and a
 // literal with a computed key keep an interface call's gap (LiteralFact).
 export const RESOLVER_VERSION = 30;
@@ -1483,6 +1490,25 @@ export function createWorld(input: ResolveInput): World {
     }
     return null;
   };
+  // Whether a definition a value names holds a function: true for one
+  // that is not a property typed by a name, and for a property whose named
+  // type leads to a function type; false when it leads to a class, an
+  // interface or an object type; null when the graph cannot tell.
+  const holdsFunction = (id: string): boolean | null => {
+    const def = defById.get(id);
+    if (!def?.signature) return true;
+    let v = typeValue(def.file, def.signature);
+    for (let hops = 0; hops < MAX_DEPTH; hops++) {
+      const target = v?.v === "sym" && v.ids.length === 1 ? defById.get(v.ids[0] as string) : undefined;
+      if (!target) return null;
+      if (target.kind !== "type" || target.iface) return false;
+      if (target.results) return true;
+      if (!target.alias || target.alias.parts) return null;
+      if (target.alias.fields) return false;
+      v = typeValue(target.file, target.alias);
+    }
+    return null;
+  };
   // What `t` reads on a called definition: its declared result, or with
   // `callback` the declared type of a parameter of a function it takes.
   const declaredOn = (def: Def, t: TypeRef): { from: { file: string; family: Family; owner: string | null }; result: TypeRef | null | undefined } | null => {
@@ -2421,7 +2447,7 @@ export function createWorld(input: ResolveInput): World {
     | { unknown: Cause; shape: Shape; note?: string; candidates?: string[] | null; scope?: "file" | "project" };
 
   const receiverKind = (t: TypeRef, path: string[]): EvidenceKind => {
-    if (path.length > 0) return "receiver-field";
+    if (path.length > 0 || t.member) return "receiver-field";
     if (t.declared) return "receiver-annotation";
     if (t.result !== undefined) return "receiver-result";
     return "receiver-constructor";
@@ -3361,10 +3387,17 @@ export function createWorld(input: ResolveInput): World {
         if (call.alias !== undefined) {
           const v = valueOf(path, call.alias);
           const ref = f.values[call.alias];
-          if (v && ref) {
+          // A method called on a local copied from a property typed by a
+          // name (`repo: Repo`) runs that property only when the name is a
+          // function type; when it is a class or an object type the call
+          // binds on the local's type alone, and when the graph cannot tell
+          // (a type from outside the repository) it does both.
+          const held = v ? v.ids.map((id) => [id, call.recv.kind === "none" ? true : holdsFunction(id)] as const) : [];
+          const ids = held.filter(([, fn]) => fn !== false).map(([id]) => id);
+          if (ids.length > 0 && ref) {
             const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.aliasOf ?? call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
-            for (const t of v.ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
-            continue;
+            for (const t of ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
+            if (held.every(([, fn]) => fn === true)) continue;
           }
         }
         // What a call returned, called: the functions that callee returns by name.
@@ -3629,6 +3662,54 @@ export function createWorld(input: ResolveInput): World {
           }
         }
       }
+    }
+
+    // ---------- imported types with no use read ----------
+    // A TypeScript file that imports a class, an interface or a type alias
+    // of the graph, and has no edge to it nor to a member of it: it may name
+    // the type where no rule reads it. One unknown per such import, its
+    // candidates the type's definitions, so `references` of the type says
+    // its list may be short and names the file. A re-export is no use.
+    const unread = new Map<string, Map<string, UnknownSite>>(); // file to class key to its unknown
+    const unresolved = new Set(budgetFiles); // already an unknown of its own
+    for (const { path, facts: f } of input.files) {
+      if (familyOf(f.lang) !== "js" || unresolved.has(path)) continue;
+      for (const imp of f.imports) {
+        if (imp.reexport || imp.scoped || imp.star) continue;
+        for (const n of imp.names) {
+          const k = typeKey(path, "js", { name: n.local, qualifier: null, line: imp.line, column: imp.column }, 0, true);
+          if (k === null || k === "ext") continue;
+          const ids = (classes.get(k.key)?.ids ?? []).filter((id) => {
+            const kind = defById.get(id)?.kind;
+            return kind === "class" || kind === "type";
+          });
+          if (ids.length === 0) continue;
+          let byKey = unread.get(path);
+          if (!byKey) unread.set(path, (byKey = new Map()));
+          if (byKey.has(k.key)) continue;
+          byKey.set(k.key, { file: path, line: imp.line, column: imp.column, name: "", cause: "unsupported-rule", shape: "other", caller: path, scope: "file", candidates: ids, note: `${n.local} is imported here, and no use of it in this file was read; a use in a place the graph does not read may be missing from its references` });
+        }
+      }
+    }
+    if (unread.size > 0) {
+      // The class key an edge reaches: the type itself, or the type that owns the member.
+      const keyOf = (id: string): string | undefined => {
+        const own = classOfId.get(id);
+        if (own !== undefined) return own;
+        const d = defById.get(id);
+        return d && d.owner !== null ? classKey(d.family, d.file, d.owner) : undefined;
+      };
+      for (const list of [callerEdges, refEdges]) {
+        for (const e of list) {
+          for (const s of e.sites) {
+            const byKey = unread.get(s.file);
+            if (!byKey) continue;
+            const key = keyOf(e.to);
+            if (key !== undefined) byKey.delete(key);
+          }
+        }
+      }
+      for (const byKey of unread.values()) unknowns.push(...byKey.values());
     }
 
     // ---------- importers ----------

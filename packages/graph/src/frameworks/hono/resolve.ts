@@ -37,6 +37,7 @@
 // stops that work with one unknown.
 import type { Detection, Entity, FrameworkEdge, FrameworkEvidence, FrameworkEvidenceKind, FrameworkUnknown, HandlerStatus, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
 import { appId, entityId } from "../plugin.js";
+import { inlineHandler } from "../shared/inline.js";
 import type { Tier } from "../../model/records.js";
 import type { Expr } from "../express/js.js";
 import { evaluate, MAX_ITEMS, MAX_SOURCE_BYTES, show } from "../express/js.js";
@@ -692,7 +693,11 @@ function run(index: PluginIndex<HonoFact>): Analysis {
   const symbolAt = (file: string, line: number, name: string): string | null => index.symbols(file).find((n) => n.startLine === line && (n.name === name || n.name.endsWith(`.${name}`)))?.id ?? null;
   const bindFn = (w: Where, e: HExpr, role: "handler" | "middleware", depth = 0): Bound => {
     if (!take("steps")) return none("unresolved", "budget", `the Hono plugin follows at most ${MAX_STEPS} values in one build`, null);
-    if (e.t === "fn") return none("unresolved", "unsupported-rule", `the ${role} is an inline function, which has no symbol of its own; the calls it makes are counted under the code around it`, null);
+    if (e.t === "fn") {
+      const inline = role === "handler" ? inlineHandler(index, w.file, e) : null;
+      if (inline) return { status: "bound", targets: [inline], tier: "certain", kind: "route-call", via: null, note: null, why: null };
+      return none("unresolved", "unsupported-rule", `the ${role} is an inline function, which has no symbol of its own; the calls it makes are counted under the code around it`, null);
+    }
     if (e.t === "call") {
       const inner = e.args.find((a) => a.t === "ref");
       if (role === "middleware") {

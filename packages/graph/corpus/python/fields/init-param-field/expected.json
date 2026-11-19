@@ -1,0 +1,20 @@
+{
+  "guards": "types a Python field from the annotated parameter __init__ assigns to it, follows a chain of such fields one hop at a time, and makes no certain call through a field assigned two different types",
+  "callers": [
+    { "to": "pkg/store.py#Store.get", "site": "pkg/service.py:17", "tier": "certain", "kind": "calls" },
+    { "to": "pkg/http.py#Http.send", "site": "pkg/service.py:18", "tier": "certain", "kind": "calls" },
+    { "to": "pkg/store.py#Cache.get", "site": "pkg/service.py:21", "tier": "certain", "kind": "calls" }
+  ],
+  "notReached": [
+    { "to": "pkg/store.py#Store.get", "site": "pkg/service.py:19" },
+    { "to": "pkg/store.py#Cache.get", "site": "pkg/service.py:19" }
+  ],
+  "notCertain": [
+    { "to": "pkg/store.py#Store.get", "site": "pkg/service.py:20" },
+    { "to": "pkg/store.py#Cache.get", "site": "pkg/service.py:20" }
+  ],
+  "unknowns": [
+    { "file": "pkg/service.py", "line": 19, "cause": "no-receiver-type" },
+    { "file": "pkg/service.py", "line": 20, "cause": "no-receiver-type" }
+  ]
+}

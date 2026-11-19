@@ -16,6 +16,10 @@
 //     terminal.
 //  8. The `--context` snippets lose the indentation of the source lines, so
 //     nested code prints flat.
+//  9. A list on a floor prints its certain count as if it were every
+//     caller.
+// 10. `routes` mixes the small applications tests build with the real ones,
+//     and gives no way to tell them apart or leave them out.
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -111,6 +115,19 @@ describe("openqodex graph", () => {
     const missing = cli(root, "graph", "callers", "nothingByThisName");
     expect(missing.status).toBe(2);
     expect(missing.stdout).toMatch(/^not-found: /m);
+  });
+
+  it("says the certain callers of a floor are an incomplete list, in text and as a JSON field (9)", () => {
+    const whole = cli(repo(files), "graph", "callers", "core");
+    expect(whole.status, whole.stderr).toBe(0);
+    expect(whole.stdout).toMatch(/^counts: 2 certain, 0 likely, 0 possible$/m);
+    const root = repo({ ...files, "src/value.ts": "export function run(f: () => number): number {\n  return f();\n}\n" });
+    const floor = cli(root, "graph", "callers", "core");
+    expect(floor.stdout).toMatch(/^counts: 2 certain \(list incomplete\), 0 likely, 0 possible$/m);
+    const json = JSON.parse(cli(root, "graph", "callers", "core", "--json").stdout) as Answer & { listIncomplete?: boolean };
+    expect(json.unknown.floor).toBe(true);
+    expect(json.listIncomplete).toBe(true);
+    expect(json.counts).toEqual({ certain: 2, likely: 0, possible: 0 });
   });
 
   it("refuses a generation that is not a build id, reading nothing outside the folder (5)", () => {
@@ -219,5 +236,32 @@ describe("source lines around a place (8)", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout.split("\n")).toContain("  4|     return core();");
     expect(r.stdout.split("\n")).toContain("  3|   if (a) {");
+  });
+});
+
+describe("routes of applications built in tests (10)", () => {
+  const app = {
+    "package.json": '{ "name": "svc", "dependencies": { "hono": "4.6.0" } }\n',
+    "src/app.ts": 'import { Hono } from "hono";\nexport const app = new Hono();\napp.get("/health", health);\nfunction health(c: any) {\n  return c.text("ok");\n}\n',
+    "src/users.ts": 'import { Hono } from "hono";\nexport const users = new Hono();\nusers.get("/:id", show);\nfunction show(c: any) {\n  return c.text("u");\n}\n',
+    "src/main.ts": 'import { app } from "./app";\nimport { users } from "./users";\napp.route("/users", users);\n',
+    "test/users.test.ts": 'import { Hono } from "hono";\nimport { users } from "../src/users";\nconst t = new Hono();\nt.route("/u", users);\nt.get("/fake", fake);\nfunction fake(c: any) {\n  return c.text("f");\n}\n',
+  };
+  type RouteItem = { pattern: string | null; isTest: boolean; site: { file: string } };
+
+  it("marks each route whose application a test file builds, and leaves them out with --exclude-tests", () => {
+    const root = repo(app);
+    const all = cli(root, "graph", "routes", "--json", "--limit", "100");
+    expect(all.status, all.stderr).toBe(0);
+    const items = (JSON.parse(all.stdout) as Answer).items as RouteItem[];
+    const flagged = items.map((r) => `${r.pattern} ${r.isTest}`).sort();
+    // The users router is mounted twice: by the application, and by the test's own application.
+    expect(flagged).toEqual(["/fake true", "/health false", "/u/:id true", "/users/:id false"]);
+    const real = cli(root, "graph", "routes", "--json", "--limit", "100", "--exclude-tests");
+    expect(real.status, real.stderr).toBe(0);
+    expect(((JSON.parse(real.stdout) as Answer).items as RouteItem[]).map((r) => r.pattern).sort()).toEqual(["/health", "/users/:id"]);
+    const text = cli(root, "graph", "routes", "--exclude-tests");
+    expect(text.status, text.stderr).toBe(0);
+    expect(text.stdout).not.toContain("/fake");
   });
 });

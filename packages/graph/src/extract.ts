@@ -48,13 +48,28 @@ import type { TreeVisitor } from "./walk.js";
 // 31: Pick and Omit keep only the members they keep (TypeRef.only, omit), a
 // built-in generic the file declares or imports is the file's own type, and
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
-// 32: an interface member marked `?` is optional (DefFact.optional).
-// 33: an interface in `declare module "x"` or `declare global` augments a
-// type (DefFact.augments). 34: the object literals that may hold code
-// (FileFacts.literals). 37: a literal counts its computed keys that hold
-// code (LiteralFact.unread), and a value given members by assignment or
+// 32: a Python field assigned a local takes the local's type (a
+// parameter's annotation), and a field assigned two different types keeps
+// none.
+// 35: a local declared from a member (`const repo = this.deps.repo`) takes
+// that member's type as one that may be any class below it (TypeRef.member);
+// it and an unannotated destructured name are not declared, so assigned
+// again they lose the type; a function type alias whose result cannot be
+// read keeps a null result.
+// 36: a type named in an interface property, a type alias, a type argument
+// of a call, a `new`, an instantiation or a base, or the constraint or
+// default of a type parameter is a type use; a mapped type's key and an
+// `infer` name are not.
+// 38: a route handler written in place (`app.get("/x", (c) => ...)`, a gin
+// `r.GET("/x", func(c *gin.Context) {...})`) is a definition of its own,
+// with the definition it is written in (DefFact.inlineIn).
+// 39: an interface member marked `?` is optional (DefFact.optional); an
+// interface in `declare module "x"` or `declare global` augments a type
+// (DefFact.augments); the object literals that may hold code
+// (FileFacts.literals); a literal counts its computed keys that hold code
+// (LiteralFact.unread), and a value given members by assignment or
 // Object.assign is recorded as one (LiteralFact.by).
-export const EXTRACTOR_VERSION = 37;
+export const EXTRACTOR_VERSION = 39;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -194,6 +209,41 @@ function stringContent(node: Node): string {
   return node.text.replace(/^['"`]|['"`]$/g, "");
 }
 
+// The member calls whose last argument, a function written in place, is a
+// route handler: `app.get("/x", (c) => ...)`, `router.openapi(route, c =>
+// ...)`, `r.GET("/x", func(c *gin.Context) { ... })`. An `on` call is a
+// route only with a method, a path and a handler (an event listener has two
+// arguments).
+const JS_ROUTE_CALLS = new Set(["get", "post", "put", "patch", "delete", "options", "head", "all", "on", "openapi"]);
+const GO_ROUTE_CALLS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "Any", "Handle"]);
+const LABEL_MAX = 64;
+// A route label's characters: no space, dot, `#`, `@`, `<` or `>`, so the
+// name never reads as a qualified name or a symbol id.
+const labelChar = (c: number) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || "/_:{}*-$~+!".includes(String.fromCharCode(c));
+
+// The name of a function written in place as a route handler, or null when
+// it is not one: `<get /login>` from the call's method and its first
+// argument (a short plain string or a name), `<get>` when that argument is
+// anything else. The brackets keep the name apart from every source name,
+// so no call ever binds to it by name.
+function routeHandlerName(fn: Node, calls: ReadonlySet<string>): string | null {
+  let arg = fn;
+  while (arg.parent && ["parenthesized_expression", "as_expression", "satisfies_expression"].includes(arg.parent.type)) arg = arg.parent;
+  const list = arg.parent;
+  if (!list || (list.type !== "arguments" && list.type !== "argument_list")) return null;
+  const args = list.namedChildren.filter((c) => c.type !== "comment");
+  if (args.length < 2 || args[args.length - 1]?.id !== arg.id) return null;
+  const call = list.parent;
+  const callee = call?.type === "call_expression" ? call.childForFieldName("function") : null;
+  const prop = callee?.type === "member_expression" ? callee.childForFieldName("property") : callee?.type === "selector_expression" ? callee.childForFieldName("field") : null;
+  if (!prop || !calls.has(prop.text) || (prop.text === "on" && args.length < 3)) return null;
+  const first = args[0] as Node;
+  const text = first.type === "identifier" ? first.text : ["string", "interpreted_string_literal", "raw_string_literal"].includes(first.type) ? stringContent(first) : "";
+  let clean = text.length > 0 && text.length <= LABEL_MAX;
+  for (let i = 0; clean && i < text.length; i++) clean = labelChar(text.charCodeAt(i));
+  return clean ? `<${prop.text} ${text}>` : `<${prop.text}>`;
+}
+
 // A short hash of a definition's text without its own name, its comments
 // and its whitespace: the same body under another name or in another file
 // hashes the same, so a removal and an addition can be paired as a move.
@@ -300,6 +350,10 @@ class Ctx {
   // The class whose instance field initializer the walk is in, -1 for none:
   // a call there runs on the instance, though its caller is the class.
   instanceInit = -1;
+  // Python fields by class definition and name: those an annotation
+  // declared, and those given two different types, which keep none.
+  private declaredFields = new Set<string>();
+  private mixedFields = new Set<string>();
 
   constructor(readonly lang: Lang) {
     const root = { def: -1, cls: null, locals: new Map(), parent: null, depth: 0, caller: -1, clsScope: null, inFunction: false } as unknown as Scope;
@@ -373,6 +427,27 @@ class Ctx {
     const at = block ? this.top.decl : this.top.fnDecl;
     at.imports?.delete(name);
     at.locals?.set(name, type);
+  }
+
+  // A Python field assigned a type. A declared type stands. Otherwise the
+  // field keeps a type only while every assignment of a known type gives
+  // the same one, since either value may reach a later call.
+  setField(def: number, name: string, type: TypeRef | null, declared: boolean): void {
+    const d = this.defs[def];
+    const key = `${def}\0${name}`;
+    if (!d || !type || this.declaredFields.has(key)) return;
+    if (declared) {
+      this.declaredFields.add(key);
+      this.mixedFields.delete(key);
+      d.fields[name] = type;
+      return;
+    }
+    if (this.mixedFields.has(key)) return;
+    const old = d.fields[name];
+    if (old && !(sameType(old, type) && sameRead(old, type))) {
+      delete d.fields[name];
+      this.mixedFields.add(key);
+    } else if (!old) d.fields[name] = type;
   }
 
   // An import. At the top of the module its names are the file's; made
@@ -772,6 +847,7 @@ const JS_TYPES = new Set([
   "array",
   "as_expression",
   "satisfies_expression",
+  "instantiation_expression",
   "binary_expression",
   "jsx_expression",
   "arrow_function",
@@ -818,10 +894,18 @@ function jsTypeParams(node: Node): Map<string, TypeRef | null> | null {
 }
 
 // Every named type in an annotation (`Map<string, Repo[]>` names Repo);
-// type parameters and predefined types are not.
+// type parameters and predefined types are not, nor a name the annotation
+// binds itself: a mapped type's key (`[K in keyof T]`) or an `infer X`,
+// local to the whole annotation.
 function jsTypeNames(node: Node | null): TypeRef[] {
   const out: TypeRef[] = [];
+  const bound = new Set<string>();
   typeNodes(node, (n) => {
+    if (n.type === "mapped_type_clause" || n.type === "infer_type") {
+      const name = n.type === "mapped_type_clause" ? n.childForFieldName("name") : n.firstNamedChild;
+      if (name?.type === "type_identifier") bound.add(name.text);
+      return false;
+    }
     if (n.type === "type_identifier") {
       if (typeParam(n.text) === undefined) out.push(typeRef({ name: n.text, qualifier: null, ...pos(n) }));
       return true;
@@ -834,6 +918,27 @@ function jsTypeNames(node: Node | null): TypeRef[] {
     }
     return false;
   });
+  return bound.size === 0 ? out : out.filter((t) => t.qualifier !== null || !bound.has(t.name));
+}
+
+// The named types in the type arguments a base is written with
+// (`extends Holder<Repo>`, `implements Store<Row>`, `extends Base<Repo>`):
+// each a use of that type by the declaration.
+function jsBaseArgNames(node: Node): TypeRef[] {
+  if (node.type !== "generic_type" && node.type !== "extends_clause") return [];
+  return jsTypeNames(node.childForFieldName("type_arguments"));
+}
+
+// The named types in the constraints and defaults of the type parameters a
+// declaration lists (`<T extends Repo = Repo>`): each a use of that type.
+// Read while the declaration's own type parameters are entering, so one
+// parameter named in another's constraint is no type of the repository.
+function jsTypeParamNames(node: Node): TypeRef[] {
+  const out: TypeRef[] = [];
+  for (const tp of node.childForFieldName("type_parameters")?.namedChildren ?? []) {
+    if (tp.type !== "type_parameter") continue;
+    out.push(...jsTypeNames(tp.childForFieldName("constraint")), ...jsTypeNames(tp.childForFieldName("value")));
+  }
   return out;
 }
 
@@ -1651,6 +1756,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     const typeParams = jsTypeParams(node);
     enteringTypeParams = typeParams;
     jsSignature(ctx, node, def, locals);
+    for (const t of jsTypeParamNames(node)) ctx.addTypeUse(t, def >= 0 ? def : ctx.caller());
     enteringTypeParams = null;
     const untyped = jsUntypedParams(node);
     const first = untyped[0];
@@ -1818,15 +1924,18 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const dynamicBases: { line: number; column: number }[] = [];
         const typeParams = jsTypeParams(node);
         enteringTypeParams = typeParams;
+        const argUses: TypeRef[] = jsTypeParamNames(node);
         const heritage = node.namedChildren.find((c) => c.type === "class_heritage");
         for (const h of heritage?.namedChildren ?? []) {
           if (h.type === "implements_clause") {
             for (const t of h.namedChildren) {
               const ref = jsTypeRef(t);
               if (ref) implemented.push({ ...ref, rel: "implements" });
+              argUses.push(...jsBaseArgNames(t));
             }
             continue;
           }
+          argUses.push(...jsBaseArgNames(h));
           // TypeScript wraps the base in extends_clause; JavaScript does not.
           const value = h.type === "extends_clause" ? h.childForFieldName("value") : h;
           const ref = value ? jsTypeRef(value) : null;
@@ -1838,6 +1947,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // The superclass first: a member is looked up there before an interface.
         bases.push(...implemented);
         const def = ctx.addDef(node, name, "class", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node) && !isDefaultExport(node), bases, ...(dynamicBases.length > 0 ? { dynamicBases } : {}) });
+        for (const t of argUses) ctx.addTypeUse(t, def);
         const leave = ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
         (ctx.defs[def] as DefFact).fields = jsFields(node, typeParams ?? undefined);
         return leave;
@@ -1916,7 +2026,8 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           // `const { session } = params`: each name has the type of its member.
           const annotation = name.type === "object_pattern" ? declared(jsTypeRef(node.childForFieldName("type"))) : null;
           const from = name.type === "object_pattern" ? (annotation ?? jsValueType(ctx, value)) : null;
-          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, type, block);
+          // Unannotated, the names hold a member's type but are not declared: one assigned again loses its type.
+          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, annotation ? type : { ...type, declared: false, member: true }, block);
           return;
         }
         const isFn = value && ["arrow_function", "function_expression", "function", "generator_function"].includes(value.type);
@@ -1960,7 +2071,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           ctx.declareFn(name.text, def, block);
           return ctx.push({ def, cls: null, locals: null, fnAt: (value as Node).startIndex });
         }
-        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value), block);
+        // `const repo = this.deps.repo`: the local has the member's type, as
+        // `const { repo } = this.deps` gives it: a member's type (any class
+        // below it), never declared, so a local assigned again loses it.
+        const member = jsUnwrap(value)?.type === "member_expression" ? jsValueType(ctx, value) : null;
+        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value) ?? (member ? { ...member, declared: false, member: true } : null), block);
         return;
       }
       case "statement_block":
@@ -1978,10 +2093,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const typeParams = jsTypeParams(node);
         enteringTypeParams = typeParams;
         const bases: TypeRef[] = [];
+        const argUses: TypeRef[] = jsTypeParamNames(node);
         const ext = node.namedChildren.find((c) => c.type === "extends_type_clause");
         for (const t of ext?.namedChildren ?? []) {
           const ref = jsTypeRef(t);
           if (ref) bases.push(ref);
+          argUses.push(...jsBaseArgNames(t));
         }
         enteringTypeParams = null;
         // `declare module "x" { interface T { ... } }` and `declare global`: members added to a type of a package or of the runtime.
@@ -1989,6 +2106,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const holder = block?.type === "statement_block" ? block.parent : null;
         const augments = holder?.type === "ambient_declaration" || (holder?.type === "module" && holder.childForFieldName("name")?.type === "string" && holder.parent?.type === "ambient_declaration");
         const def = ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), bases, iface: true, ...(augments ? { augments: true } : {}) });
+        for (const t of argUses) ctx.addTypeUse(t, def);
         return ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
       }
       case "method_signature":
@@ -2005,6 +2123,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const optional = where === "interface_body" && node.children.some((c) => c.type === "?") ? { optional: true } : {};
         // An interface property whose type is not a function is a field, as a class's is.
         if (node.type === "property_signature" && where === "interface_body" && fnType?.type !== "function_type") {
+          for (const t of jsTypeNames(node.childForFieldName("type"))) ctx.addTypeUse(t, cls.def);
           const type = jsMemberType(node.childForFieldName("type"), cls.typeParams);
           if (type) (ctx.defs[cls.def] as DefFact).fields[name.text] = type;
           // Typed by a name, it may be a function type declared elsewhere
@@ -2036,10 +2155,17 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // parameter is marked, to take the argument a use of the alias gives.
         const own = value?.type === "object_type" && typeParams && alias?.fields ? jsObjectTypeFields(value, typeParams) : null;
         if (alias && own) alias = { ...alias, fields: own };
-        // A function type (`type ResolveFn = (t: string) => Store`): what a call of a value of it returns.
-        const result = value?.type === "function_type" ? declared(jsTypeRef(value.childForFieldName("return_type"))) : null;
+        // A function type (`type ResolveFn = (t: string) => Store`): what a call of a value of it returns,
+        // null when the result cannot be read; a function type either way.
+        const result = value?.type === "function_type" ? declared(jsTypeRef(value.childForFieldName("return_type"))) : undefined;
+        // Every type the alias names, in a union, an intersection or an
+        // object type of members, is a use of that type by the alias.
+        const uses = [...jsTypeParamNames(node), ...jsTypeNames(value)];
         enteringTypeParams = null;
-        if (name) ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}), ...(result ? { results: [result] } : {}) });
+        if (name) {
+          const def = ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}), ...(result !== undefined ? { results: [result] } : {}) });
+          for (const t of uses) ctx.addTypeUse(t, def);
+        }
         return false;
       }
       case "arrow_function":
@@ -2056,6 +2182,13 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           const def = ctx.addDef(pair, key, "method", { owner: cls.cls, exported: true, results: jsResults(node), static: true });
           return fnFrame(node, def);
         }
+        // A route handler written in place is a definition of its own, so
+        // the calls in it have it as their caller; one no framework plugin
+        // binds is folded back into the code around it (inline-fold.ts). An
+        // arrow inside a class stays the class's: `this` in it is the class's
+        // instance.
+        const route = node.type === "arrow_function" && cls ? null : routeHandlerName(node, JS_ROUTE_CALLS);
+        if (route) return fnFrame(node, ctx.addDef(node, node.firstChild ?? node, "function", { name: route, owner: ctx.ownerName(), inlineIn: ctx.caller() }, node));
         return fnFrame(node, -1);
       }
       case "call_expression": {
@@ -2067,6 +2200,8 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         else if (fn?.type === "subscript_expression") subscriptCall(fn);
         else jsCallee(ctx, fn);
         jsArgs(ctx, node.childForFieldName("arguments"), ctx.noteCall(node, before));
+        // `pick<Repo>(xs)`: each type argument is a use of that type.
+        for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
         // `Object.assign(f, { get }, other)`: `f` takes the members of each
         // source, and a source that is no object literal may bring others.
         if (fn?.type === "member_expression" && fn.text === "Object.assign") {
@@ -2083,6 +2218,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "new_expression": {
         jsCallee(ctx, node.childForFieldName("constructor"));
         jsArgs(ctx, node.childForFieldName("arguments"), undefined);
+        for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
         return;
       }
       case "return_statement":
@@ -2115,6 +2251,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "as_expression":
       case "satisfies_expression":
         for (const t of jsTypeNames(node.namedChildren[1] ?? null)) ctx.addTypeUse(t, ctx.caller());
+        return;
+      case "instantiation_expression":
+        // `make<Repo>` used as a value, or `sql<Row>` before a template the
+        // grammar reads this way: each type argument is a use of that type.
+        for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
         return;
       case "binary_expression": {
         if (node.childForFieldName("operator")?.type !== "instanceof") return;
@@ -2479,9 +2620,8 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           if (right?.type === "dictionary") ctx.pendingTables.set(right.startIndex, { name: left.text, line: node.startPosition.row + 1, scope: ctx.top.fnDecl });
         }
         if (left?.type === "identifier") {
-          if (inClassBody) {
-            if (type) (ctx.defs[inner.def] as DefFact).fields[left.text] = type;
-          } else if (annotation) ctx.setLocal(left.text, annotation);
+          if (inClassBody) ctx.setField(inner.def, left.text, type, annotation !== null);
+          else if (annotation) ctx.setLocal(left.text, annotation);
           else ctx.assign(left.text, type, true);
         } else if (left?.type === "pattern_list" || left?.type === "tuple_pattern" || left?.type === "list_pattern") {
           // `a, b = pair`: each name is assigned a value whose type is not known.
@@ -2493,7 +2633,10 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
         if (left?.type === "attribute" && left.childForFieldName("object")?.text === "self") {
           const attr = left.childForFieldName("attribute");
           const cls = ctx.cls();
-          if (attr && cls && type) (ctx.defs[cls.def] as DefFact).fields[attr.text] = type;
+          // `self.store = store`: the field takes the local's type, a
+          // parameter's annotation among them.
+          const value = type ?? (right?.type === "identifier" ? (ctx.local(right.text) ?? null) : null);
+          if (attr && cls) ctx.setField(cls.def, attr.text, value, annotation !== null);
         }
         return;
       }
@@ -2864,6 +3007,10 @@ function extractGo(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
       case "func_literal": {
         const locals = new Map<string, TypeRef | null>();
         goParams(node.childForFieldName("parameters"), locals);
+        // A route handler written in place is a definition of its own,
+        // folded back when no framework plugin binds it (inline-fold.ts).
+        const route = routeHandlerName(node, GO_ROUTE_CALLS);
+        if (route) return ctx.push({ def: ctx.addDef(node, node.firstChild ?? node, "function", { name: route, owner: ctx.ownerName(), inlineIn: ctx.caller() }, node), cls: null, locals });
         return ctx.push({ def: -1, cls: null, locals });
       }
       case "short_var_declaration": {

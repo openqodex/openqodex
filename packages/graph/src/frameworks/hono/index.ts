@@ -13,7 +13,9 @@ import type { HonoFact } from "./facts.js";
 import { isHonoFact, readFacts, reader, wants } from "./facts.js";
 import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 
-export const VERSION = 7;
+// 8: a tagged template with type arguments and a cast to an import type with an array suffix are read, not a region the parser could not read.
+// 9: a handler written in place is bound to the definition the language extractor makes for it.
+export const VERSION = 9;
 
 const SUPPORTED = "Hono 4 and @hono/zod-openapi";
 const app = "hono-app";

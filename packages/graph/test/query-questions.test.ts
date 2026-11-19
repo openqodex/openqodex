@@ -436,8 +436,10 @@ describe("implementers at the edge of what the graph reads", () => {
     // The same boundary holds for the overrides of a method.
     expect(q({ kind: "implementers", target: { name: "Base.run" } }).unknown.causes["dynamic-base"]).toBe(1);
     // The gap is recorded on the class, where the unknowns question finds it.
+    // Base, imported and passed only as a value, leaves the import's own gap:
+    // no use of it in the file is read.
     const u = q({ kind: "unknowns", target: { file: "src/mixed.ts" } });
-    expect((u.items as { cause: string; line: number | null }[]).map((x) => [x.cause, x.line])).toEqual([["dynamic-base", 5]]);
+    expect((u.items as { cause: string; line: number | null }[]).map((x) => [x.cause, x.line])).toEqual([["dynamic-base", 5], ["unsupported-rule", 1]]);
   });
 });
 
