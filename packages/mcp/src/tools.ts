@@ -42,6 +42,7 @@ const COMMON: Record<string, Schema> = {
   generation: { type: "string" },
   context: range(0, MAX_CONTEXT),
   compact: { type: "boolean" },
+  full: { type: "boolean" },
 };
 const TIERS: Schema = { type: "array", items: { type: "string", enum: ["certain", "likely", "possible"] } };
 const SYMBOL: Record<string, Schema> = {
@@ -53,7 +54,10 @@ const SYMBOL: Record<string, Schema> = {
 // What every result carries in structuredContent: the answer of the query
 // layer, or the envelope of a refusal or a failure (apiVersion, kind and
 // error alone). The rest is left open: the shape of the items is the
-// question's, and an answer only grows (docs/graph.md).
+// question's, and an answer only grows (docs/graph.md). That holds for both
+// forms of an item: short, with a short `edge` and the fields that repeat
+// left out, or whole with `full`; each tool's schema stays this one, as the
+// tool list is paid for on every turn.
 export const OUTPUT_SCHEMA: Schema = {
   type: "object",
   properties: { apiVersion: { type: "integer" }, kind: { type: "string" }, error: { type: ["object", "null"] }, items: { type: "array" } },
@@ -66,7 +70,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "graph_search",
     op: "search",
-    description: `Find definitions by name before asking about one. Hits are in \`leads\`, not \`items\`, best first, scored 1 for the exact name; never counted as callers. A unique exact match is also in \`target\`. ${DATA}`,
+    description: `Find definitions by name before asking about one: exact and prefix name matches in \`items\` (a prefix never certain), other hits in \`leads\`, best first, scored 1 for the exact name; never counted as callers. A unique exact match is also in \`target\`. ${DATA}`,
     properties: { text: str("A name or part of one.") },
     required: ["text"],
   },

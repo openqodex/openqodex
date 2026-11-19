@@ -24,7 +24,7 @@ import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Extra, Job, Listing, Request, Session } from "./answer.js";
 import { frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
-import { edgeId, readEdgeId } from "./ids.js";
+import { edgeId, isShortEdgeId, longEdgeId, readEdgeId } from "./ids.js";
 import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, pagingNote, readCursor } from "./page.js";
 import { Overrides, dynamicBases, implementers, importCycles, impact, methodsNamed, outline, packages, path, references, relationsOf } from "./relations.js";
 import { budgetOf, definesEdge, holderOf, prepareTraversal, sortWithin, spent, Walk } from "./traverse.js";
@@ -102,6 +102,10 @@ export function prepareIndexes(g: Graph): void {
   prepareTraversal(g);
 }
 
+// The score of a name that starts with the text searched; the exact name
+// scores 1 and the same name in another case 0.9.
+const PREFIX_SCORE = 0.7;
+
 function searchJob(s: Session, req: Request): Job | Answer {
   const g = s.graph;
   const text = (req.text ?? req.target?.name ?? "").trim();
@@ -127,15 +131,19 @@ function searchJob(s: Session, req: Request): Job | Answer {
         continue;
       }
       const q = qualified(n);
-      const score = n.name === text || q === text ? 1 : n.name.toLowerCase() === lower ? 0.9 : n.name.toLowerCase().startsWith(lower) ? 0.7 : n.name.toLowerCase().includes(lower) ? 0.5 : 0;
+      const score = n.name === text || q === text ? 1 : n.name.toLowerCase() === lower ? 0.9 : n.name.toLowerCase().startsWith(lower) ? PREFIX_SCORE : n.name.toLowerCase().includes(lower) ? 0.5 : 0;
       if (score > 0) scored.push(candidate(g, n, score));
     }
     if (!sortWithin(scored, (a, b) => b.score - a.score || a.file.localeCompare(b.file) || a.line - b.line || a.id.localeCompare(b.id), budget)) return stoppedAt(base, [], [], null, "leads");
-    // Search results are leads: never counted as callers or anything else.
-    // One definition with exactly the name searched is also named as the
+    // A definition named exactly as searched, or whose name starts with it,
+    // is an item: certain for the exact name, possible for the rest (another
+    // case, a prefix). A name that only holds the text and a file path hit
+    // are leads. Neither is counted as callers or anything else. One
+    // definition with exactly the name searched is also named as the
     // target; a prefix match, a file path hit or two exact names never is.
     const exact = scored.filter((c) => c.score === 1);
-    return listing(exact.length === 1 ? { ...base, target: exact[0] as Candidate } : base, scored, { into: "leads" });
+    const hits = scored.map((c) => (c.score >= PREFIX_SCORE ? { ...c, tier: c.score === 1 ? "certain" : "possible" } : c));
+    return listing(exact.length === 1 ? { ...base, target: exact[0] as Candidate } : base, hits, { into: "items", lead: (c) => (c as Candidate).score < PREFIX_SCORE });
   };
 }
 
@@ -167,7 +175,9 @@ function unknownsJob(s: Session, req: Request): Job {
 
 function explainJob(s: Session, req: Request): Job | Answer {
   const g = s.graph;
-  const id = req.target?.id ?? "";
+  const asked = req.target?.id ?? "";
+  const id = isShortEdgeId(asked) ? longEdgeId(g, asked) : asked;
+  if (id === null) return fail(s, "explain", "not-found", `this build gave no edge ${asked}; ask the question again for its short id, or with full for the long one`);
   const parsed = readEdgeId(id);
   if (!parsed) return fail(s, "explain", "bad-request", "explain takes an edge id as the items of an answer print it");
   const { kind, from, to, file, line, column } = parsed;

@@ -152,5 +152,7 @@ export function pageOf(generation: string | null, req: Bindable & { limit?: numb
     truncated = { by, omitted: rest, omittedExact: true, cursor, note: pagingNote(by, rest, cursor) };
   }
   else if (l.beyond) truncated = { by: "depth", omitted: null, omittedExact: false, cursor: null, frontier: l.beyond.frontier.slice(0, 50), frontierTotal: l.beyond.frontier.length };
+  const lead = l.lead;
+  if (lead) return { ...l.answer, items: items.filter((x) => !lead(x)), leads: items.filter(lead) as Answer["leads"], truncated };
   return { ...l.answer, [l.into]: items, truncated };
 }

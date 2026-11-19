@@ -219,9 +219,13 @@ export function dynamicBases(g: Graph, family: Family): UnknownSite[] {
 }
 
 // `implementers` asked about a file (by path, by a file alone, or by a name
-// only a file has): the classes and interfaces it defines as the candidates
-// of an ambiguous answer, so the next question names one. Null when the
-// question is not about a file, or the file defines none.
+// only a file has: the end of its path, or its name without the extension,
+// `IMCPServer` for IMCPServer.ts): the classes and interfaces it defines as
+// the candidates of an ambiguous answer, so the next question names one.
+// A name that several files have gives those files as the candidates. A
+// symbol of the name comes first: this runs only when none was found. Null
+// when the question is not about a file, or the file defines none.
+const stemOf = (f: string): string => f.slice(f.lastIndexOf("/") + 1).replace(/\.[^.]*$/, "");
 function definedIn(s: Session, req: Request, o: GraphNode | Answer): Answer | null {
   const g = s.graph;
   let file: string | null = null;
@@ -229,9 +233,13 @@ function definedIn(s: Session, req: Request, o: GraphNode | Answer): Answer | nu
   else if (o.error?.code === "not-found") {
     const name = req.target?.name ?? "";
     if (g.nodes.get(name)?.kind === "file") file = name;
-    else {
-      const same = [...g.defsByFile.keys()].filter((f) => f.endsWith(`/${name}`));
-      if (name !== "" && same.length === 1) file = same[0] as string;
+    else if (name !== "") {
+      const same = [...g.defsByFile.keys()].filter((f) => f.endsWith(`/${name}`) || (!name.includes("/") && stemOf(f) === name));
+      if (same.length === 1) file = same[0] as string;
+      else if (same.length > 1) {
+        const files = same.sort().flatMap((f) => (g.nodes.get(f) ? [candidate(g, g.nodes.get(f) as GraphNode, 1)] : []));
+        return { ...fail(s, "implementers", "ambiguous", `${same.length} files are named ${name}; name one by its path`), target: files };
+      }
     }
   }
   if (file === null) return null;
