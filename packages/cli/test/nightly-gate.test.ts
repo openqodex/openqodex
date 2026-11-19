@@ -16,7 +16,10 @@
 //     out, so the issue reads as if nothing failed.
 //  4. A green night leaves the issue open, or closes an issue with another
 //     title.
-//  5. A cancelled or skipped run opens, comments on or closes the issue.
+//  5. A run that did not pass (failed, cancelled, abandoned, skipped, no
+//     result) closes the issue, or leaves it silent: on 2026-11-19 the
+//     first dispatched run (44563238218) ended "abandoned" because GitHub
+//     gave the macOS job no runner, and the script changed nothing.
 //  6. The release publishes a commit whose full gate failed, was cancelled
 //     or never ran; or a push that publishes nothing waits on the full gate.
 //  7. A job other than the nightly report can write issues.
@@ -33,6 +36,9 @@
 //     request still says the gate passed.
 // 12. main's merge queue lookup counts a run that failed, or a run of
 //     another event, as the queue having tested the commit.
+// 13. A job that ended cancelled (no runner, a timeout) is left out of the
+//     issue, or listed without GitHub's own note on why; a job that passed,
+//     was skipped or is still running (the report job) is listed.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +62,9 @@ const ESC = "\u001b";
 const unitFail = `2026-11-18T21:24:12.8532455Z ${ESC}[41m${ESC}[1m FAIL ${ESC}[22m${ESC}[49m ${ESC}[30m${ESC}[42m unit ${ESC}[49m${ESC}[39m packages/graph/src/frameworks/nest/nest.test.ts${ESC}[2m > ${ESC}[22mthe Nest plugin (5)${ESC}[2m > ${ESC}[22mreads a route`;
 const e2eFail = `2026-11-19T20:41:00.0000000Z ${ESC}[41m${ESC}[1m FAIL ${ESC}[22m${ESC}[49m tests/e2e/graph-truth.test.ts${ESC}[2m > ${ESC}[22mtrueforge${ESC}[2m > ${ESC}[22mfinds every route`;
 
-type Job = { id: number; name: string; log: string | Error };
+// A job of the run; conclusion defaults to failure. annotations are the
+// notes GitHub keeps on the job's check run.
+type Job = { id: number; name: string; log: string | Error; conclusion?: string | null; annotations?: { annotation_level: string; message: string }[] };
 // An open issue; bot says the Actions bot opened it, not a person.
 type Issue = { number: number; title: string; bot?: boolean };
 
@@ -73,7 +81,11 @@ function fakeGh(openIssues: Issue[], failedJobs: Job[], ghVersion: "new" | "old"
       const listed = args.includes("--author") ? openIssues.filter((i) => author === "app/github-actions" && i.bot === true) : openIssues;
       return JSON.stringify(listed.map(({ number, title }) => ({ number, title })));
     }
-    if (args[0] === "api" && args[1] === "--paginate") return failedJobs.map(({ id, name }) => JSON.stringify({ id, name })).join("\n") + "\n";
+    if (args[0] === "api" && args[1] === "--paginate") return failedJobs.map(({ id, name, conclusion }) => JSON.stringify({ id, name, conclusion: conclusion === undefined ? "failure" : conclusion })).join("\n") + "\n";
+    if (args[0] === "api" && args[1].includes("/check-runs/")) {
+      const job = failedJobs.find((j) => args[1] === `repos/o/r/check-runs/${j.id}/annotations`);
+      return JSON.stringify(job?.annotations ?? []);
+    }
     if (args[0] === "api") {
       const flag = args.includes("--allow-escape-sequences");
       if (ghVersion === "new" && !flag) throw new Error("the response contains terminal escape sequences");
@@ -118,9 +130,9 @@ describe("the nightly issue", () => {
     const body = create[5];
     expect(body).toContain(sha);
     expect(body).toContain("https://github.com/o/r/actions/runs/99");
-    expect(body).toContain("**gate / Gate (ubuntu-latest)**\n```text\npackages/graph/src/frameworks/nest/nest.test.ts > the Nest plugin (5) > reads a route\ntests/e2e/graph-truth.test.ts > trueforge > finds every route\n```");
-    expect(body).toContain("**gate / Gate (macos-latest)**\n- no failing test in the log");
-    expect(body).toContain("**gate / Scanner-only benchmark**\n- the log could not be read");
+    expect(body).toContain("**gate / Gate (ubuntu-latest)** (failure)\n```text\npackages/graph/src/frameworks/nest/nest.test.ts > the Nest plugin (5) > reads a route\ntests/e2e/graph-truth.test.ts > trueforge > finds every route\n```");
+    expect(body).toContain("**gate / Gate (macos-latest)** (failure)\n- no failing test in the log");
+    expect(body).toContain("**gate / Scanner-only benchmark** (failure)\n- the log could not be read");
     expect(body).not.toContain(ESC);
   });
 
@@ -209,7 +221,7 @@ describe("the nightly issue", () => {
     run("failure", gh);
     const body = writes[0][5];
     expect(body).toContain("tests/e2e/many.test.ts > case 49");
-    expect(body).toContain("**gate / Gate (macos-latest)**\n- 3 more failing tests in this job; the run lists them");
+    expect(body).toContain("**gate / Gate (macos-latest)** (failure)\n- 3 more failing tests in this job; the run lists them");
   });
 
   it("puts test names in a code block that their backticks cannot close (failure 10)", () => {
@@ -225,15 +237,44 @@ describe("the nightly issue", () => {
     expect(lines.filter((l) => l.includes("@octocat"))).toEqual([name]);
   });
 
-  it("changes nothing on a cancelled, skipped or empty result (failure 5)", () => {
-    for (const result of ["cancelled", "skipped", ""]) {
-      const calls: string[][] = [];
-      run(result, (args) => {
-        calls.push(args);
-        return "[]";
-      });
-      expect(calls, result).toEqual([]);
+  it("never closes the issue on a run that did not pass, and opens or comments on it (failure 5)", () => {
+    for (const result of ["failure", "cancelled", "abandoned", "skipped", ""]) {
+      const open = fakeGh([{ number: 7, title: TITLE, bot: true }], []);
+      run(result, open.gh);
+      expect(open.writes.map((w) => w.slice(0, 3)), result).toEqual([["issue", "comment", "7"]]);
+      expect(open.writes[0][4], result).toContain(`ended ${result || "with no result"}`);
+      const none = fakeGh([], []);
+      run(result, none.gh);
+      expect(none.writes.map((w) => w.slice(0, 2)), result).toEqual([["issue", "create"]]);
     }
+  });
+
+  it("lists a job GitHub cancelled with its note, and leaves out jobs that passed, were skipped or still run (failure 13)", () => {
+    // The jobs of run 44563238218, as GitHub listed them.
+    const { gh, writes } = fakeGh(
+      [],
+      [
+        { id: 1, name: "Full gate / Scanner-only benchmark", log: "", conclusion: "success" },
+        { id: 2, name: "Full gate / Gate (ubuntu-latest)", log: "", conclusion: "success" },
+        {
+          id: 3,
+          name: "Full gate / Gate (macos-latest)",
+          log: new Error("HTTP 404: BlobNotFound"),
+          conclusion: "cancelled",
+          annotations: [
+            { annotation_level: "failure", message: "The job was not acquired by Runner of type hosted even after multiple attempts" },
+            { annotation_level: "notice", message: "Due to capacity constraints, jobs targeting macOS arm64 runners may experience longer queue times." },
+          ],
+        },
+        { id: 4, name: "Full gate / Merge queue tested this commit", log: "", conclusion: "skipped" },
+        { id: 5, name: "Open or close the nightly issue", log: "", conclusion: null },
+      ],
+    );
+    run("abandoned", gh);
+    const body = writes[0][5];
+    expect(body).toContain("**Full gate / Gate (macos-latest)** (cancelled)\n- the log could not be read; open the run\n```text\nThe job was not acquired by Runner of type hosted even after multiple attempts\n```");
+    expect(body).not.toContain("macOS arm64");
+    for (const name of ["Scanner-only benchmark", "Gate (ubuntu-latest)", "Merge queue tested", "Open or close"]) expect(body).not.toContain(name);
   });
 });
 

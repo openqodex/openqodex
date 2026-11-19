@@ -7,10 +7,15 @@ name: Nightly full gate
 # requests, the merge queue and pushes to main run the fast gate only, so a
 # break only the full gate catches shows here first.
 # After the gate, on main only, the report job keeps one issue in step with
-# the result (scripts/nightly-issue.mjs): a failure opens the issue "Nightly
-# full gate fails on main", or comments on the open one, with the failing
-# tests and the run link; the next green run closes it. That job alone can
-# write issues. A run started by hand on another branch tests that branch
+# the result (scripts/nightly-issue.mjs): any result but success (a failure,
+# or a gate that did not finish: cancelled, abandoned) opens the issue
+# "Nightly full gate fails on main", or comments on the open one, with each
+# job that did not pass, its failing tests and the run link; the next green
+# run closes it. A job GitHub never gives a runner ends cancelled after
+# about 15 minutes, with the note "The job was not acquired by Runner of
+# type hosted even after multiple attempts" (the macOS job of run
+# 44563238218); the issue quotes that note, and rerunning the failed jobs
+# is the fix. That job alone can write issues. A run started by hand on another branch tests that branch
 # and touches no issue.
 # The release does not read this workflow's runs: it runs the same full gate
 # on the commit it publishes (release.yml).
