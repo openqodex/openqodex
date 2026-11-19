@@ -160,11 +160,14 @@ describe("Pick and Omit keep only the members they keep (1)", () => {
   it("never reads a Pick or Omit the file declares or imports as the built-in", async () => {
     const g = await graphOf(files);
     const lib = (name: string, owner: string) => into(g, symbol(g, "src/lib.ts", name, owner));
-    for (const s of [...SITES("src/local.ts", "l1"), ...SITES("src/imported.ts", "i1")]) expect(lib("read", "Api").concat(lib("write", "Api")).filter((c) => c.startsWith(`${s} `))).toEqual([]);
+    for (const s of SITES("src/local.ts", "l1")) expect(lib("read", "Api").concat(lib("write", "Api")).filter((c) => c.startsWith(`${s} `))).toEqual([]);
     for (const s of SITES("src/local.ts", "l2")) expect(lib("write", "Api").some((c) => c.startsWith(`${s} `))).toBe(false);
-    // The imported Pick is the repository's own interface.
+    // The imported Pick is the repository's own interface. Api has its one
+    // member, write, so Api matches it by shape: possible, never certain.
     const [i1] = SITES("src/imported.ts", "i1");
     expect(into(g, symbol(g, "src/mine.ts", "write", "Pick"))).toContain(`${i1} certain`);
+    expect(lib("read", "Api").filter((c) => c.startsWith(`${i1} `))).toEqual([]);
+    expect(lib("write", "Api").filter((c) => c.startsWith(`${i1} `))).toEqual([`${i1} possible`]);
   });
 });
 
