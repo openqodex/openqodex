@@ -26,6 +26,7 @@ import { appId, entityId } from "../plugin.js";
 import type { Arg, Deco, Member, NestFact } from "./facts.js";
 import { MAX_CONSTANT_STEPS, ROUTE_DECORATORS } from "./facts.js";
 import { isTestFile } from "../express/js.js";
+import type { GraphNode } from "../../types.js";
 
 export const PLUGIN = "nest";
 export const RULE_VERSION = 1;
@@ -313,15 +314,36 @@ function run(index: PluginIndex<NestFact>): Analysis {
     if (found.kind === "gap") return { kind: "none", cause: found.cause, note: found.note };
     return { kind: "none", cause: "miss", note: `${path.join(".")} is not a class the graph can find` };
   };
+  // Each file's class and method symbols, grouped once by what the lookups
+  // below match on. A scan of the file's symbols per route would cost the
+  // file's routes times its symbols: sixteen times as much at four times
+  // a file of controllers.
+  type SymbolsOf = { classes: Map<string, GraphNode[]>; methods: Map<string, GraphNode[]>; methodNodes: GraphNode[] };
+  const symbolMemo = new Map<string, SymbolsOf>();
+  const symbolsOf = (file: string): SymbolsOf => {
+    let s = symbolMemo.get(file);
+    if (!s) {
+      s = { classes: new Map(), methods: new Map(), methodNodes: [] };
+      for (const n of index.symbols(file)) {
+        if (n.kind === "class") (s.classes.get(n.name) ?? s.classes.set(n.name, []).get(n.name))?.push(n);
+        if (n.kind !== "method") continue;
+        s.methodNodes.push(n);
+        const key = `${n.name}\0${n.startLine}`;
+        (s.methods.get(key) ?? s.methods.set(key, []).get(key))?.push(n);
+      }
+      symbolMemo.set(file, s);
+    }
+    return s;
+  };
   const classSymbol = (c: Cls): string | null => {
-    const nodes = index.symbols(c.file).filter((n) => n.kind === "class" && n.name === c.fact.name);
+    const nodes = c.fact.name === null ? [] : (symbolsOf(c.file).classes.get(c.fact.name) ?? []);
     return (nodes.find((n) => n.startLine === c.fact.line) ?? (nodes.length === 1 ? nodes[0] : undefined))?.id ?? null;
   };
   const methodSymbol = (c: Cls, m: Member): string | null => {
     if (m.name === null) return null;
-    const nodes = index.symbols(c.file).filter((n) => n.kind === "method" && n.name === m.name && n.startLine === m.line);
+    const nodes = symbolsOf(c.file).methods.get(`${m.name}\0${m.line}`) ?? [];
     if (nodes.length === 1) return (nodes[0] as { id: string }).id;
-    const owned = index.symbols(c.file).filter((n) => n.kind === "method" && n.id.includes(`#${c.fact.name}.${m.name}@`));
+    const owned = symbolsOf(c.file).methodNodes.filter((n) => n.id.includes(`#${c.fact.name}.${m.name}@`));
     return owned.length === 1 ? (owned[0] as { id: string }).id : null;
   };
   const decoOf = (c: Cls, name: string): Deco | null => c.fact.decorators.find((d) => decoName(c.file, d) === name) ?? null;
