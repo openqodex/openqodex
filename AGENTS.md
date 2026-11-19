@@ -27,7 +27,7 @@ OpenQodex is open source AI code review for Claude Code and Codex. It runs befor
 - A push to `main` whose commit passed the merge queue skips the gate: the queue ran it on that same commit. The job `Merge queue tested this commit` looks the run up; a direct push, or a lookup that fails, runs the gate.
 - CI runs the real-programs tier in three cases: the nightly run on `main` at 20:30 UTC and its Run workflow button (`.github/workflows/nightly.yml`); the release, on the commit it publishes (`.github/workflows/release.yml`); a pull request with the label `full-ci`. In CI it runs on Linux and macOS, with the scanner-only benchmark.
 - The macOS gate and the scanner-only benchmark run only in those three cases. On any other run they show as skipped, and a job skipped by its condition counts as passed.
-- When the nightly run fails, it opens the issue "Nightly full gate fails on main", or comments on the open one, with the failing tests and the run link. The next green nightly run closes it.
+- When the nightly run does not pass (it failed, or a job was cancelled, for example because GitHub gave it no runner), it opens the issue "Nightly full gate fails on main", or comments on the open one, with each job that did not pass, its failing tests or GitHub's note, and the run link. The next green nightly run closes it; a run that did not finish never does. After a cancelled job, rerun the run's failed jobs.
 - The three required checks are `Gate (ubuntu-latest)`, `Gate (macos-latest)` and `Scanner-only benchmark`. The ruleset on main requires them by these names, so the job names in `.github/workflows/ci.yml` never change.
 - `scripts/docs-facts.mjs` fails when this section and `ci.yml`, `nightly.yml` or `release.yml` disagree.
 
