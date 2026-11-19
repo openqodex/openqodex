@@ -50,8 +50,11 @@ jobs:
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # checks: read lets the report quote GitHub's note on a job that never
+    # got a runner (the check run's annotations).
     permissions:
       actions: read
+      checks: read
       contents: read
       issues: write
     steps:
