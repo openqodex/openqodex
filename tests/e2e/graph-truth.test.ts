@@ -56,7 +56,9 @@ const BASELINE_PROD_RECALL = { found: 3961, of: 4021 };
 // (c) Possible edges at production truth sites into a target the checker
 // does not name: 548 on 0a67e51f, 922 since. All 922 are dispatch to a
 // class or object that declares the interface (dispatch-implements).
-const MAX_PROD_BURDEN = 922;
+// 929 once a local copied from an interface- or base-typed field kept its
+// dispatch (7 possible links at 5 sites).
+const MAX_PROD_BURDEN = 929;
 // (b) Owner's held-out sites: each must resolve, by the checker, to the named
 // declaration, and the graph must find it certain or likely.
 const HELD_OUT = [
