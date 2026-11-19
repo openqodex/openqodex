@@ -42,8 +42,25 @@ function runGit(cwd: string, argv: string[], input?: string, env?: Record<string
     });
     child.stderr?.on("data", (b: Buffer) => err.push(b));
     child.on("error", (e) => fail(new OpenQodexError(`could not run git: ${e.message}`)));
-    child.on("close", (code) => overflow ? fail(new OpenQodexError(`git output is over ${maxBytes} bytes`)) : done({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") }));
-    if (input !== undefined) child.stdin?.end(input);
+    // Git can exit before it reads all of its input (EPIPE on the write):
+    // the error is caught here, never left to crash the process, and the
+    // call settles only once the input pipe has closed, so it is known.
+    let inputError: Error | null = null;
+    const inputClosed = input === undefined || !child.stdin ? Promise.resolve() : new Promise<void>((closed) => child.stdin?.once("close", () => closed()));
+    child.on("close", (code) => {
+      void inputClosed.then(() => {
+        if (overflow) fail(new OpenQodexError(`git output is over ${maxBytes} bytes`));
+        // A git that failed says why in its own exit code and message.
+        else if (inputError && code === 0) fail(new OpenQodexError(`git did not read all of its input: ${inputError.message}`));
+        else done({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") });
+      });
+    });
+    if (input !== undefined) {
+      child.stdin?.on("error", (e) => {
+        inputError = e;
+      });
+      child.stdin?.end(input);
+    }
   });
 }
 

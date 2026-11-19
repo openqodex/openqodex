@@ -75,7 +75,8 @@ describe("a hostile repo", () => {
       delete entry.facts.imports;
       writeFileSync(e, JSON.stringify(entry));
     }
-    const repaired = await build(root);
+    // Forced fresh: the tree is unchanged, and an unforced build would load the kept index, not the facts.
+    const repaired = await build(root, { mode: "fresh" });
     expect(repaired.status.parses).toBe(2);
     expect(callSites(repaired, symbol(repaired, "a.ts", "a"))).toEqual(["b.ts:3"]);
 
