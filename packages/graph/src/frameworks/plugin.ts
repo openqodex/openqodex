@@ -47,7 +47,7 @@
 // change bumps PLUGIN_API_VERSION.
 import type { Node } from "web-tree-sitter";
 import type { ProjectModel } from "../discovery/projects.js";
-import type { Cause, Tier } from "../model/records.js";
+import type { Cause, EvidenceKind, Tier } from "../model/records.js";
 import type { FileFacts, GraphEdge, GraphNode, Lang } from "../types.js";
 import type { TreeVisitor } from "../walk.js";
 
@@ -55,7 +55,9 @@ import type { TreeVisitor } from "../walk.js";
 // 3: FrameworkPlugin.reader (appended).
 // 4: TreeVisitor.types and TreeVisitor.keep (appended): a reader names the
 // node types it is entered for and the ancestors it reads as nodes.
-export const PLUGIN_API_VERSION = 4;
+// 5: PluginOutput.calls (appended): calls the framework makes on behalf of
+// a symbol, which the build adds to the code graph's calls edges.
+export const PLUGIN_API_VERSION = 5;
 
 // The most entities and edges one plugin keeps per application (null: the
 // registrations no application reaches). Past either cap the rest are left
@@ -414,11 +416,29 @@ export interface PluginIndex<F extends FrameworkFactBase = FrameworkFactBase> {
 
 // ---------- what resolve returns ----------
 
+// A call the framework makes on behalf of a symbol: FastAPI runs a route's
+// `Depends(get_db)` before the route on every request, so the route reaches
+// get_db as surely as if it called it. The build adds each one to the code
+// graph as a calls edge from `from` to `to` at `site`, so a caller list
+// finds it. `evidence` and `rule` are the site's, checked like any call
+// site's (model/records.ts, validateEvidence): one that fails is dropped.
+export type FrameworkCall = {
+  from: string; // symbol id
+  to: string; // symbol id
+  site: Site;
+  tier: Tier;
+  evidence: EvidenceKind;
+  via: { file: string; line: number; spec: string | null } | null;
+  note: string | null;
+  rule: string;
+};
+
 export type PluginOutput = {
   roles: RoleAssignment[];
   entities: Entity[];
   edges: FrameworkEdge[];
   unknowns: FrameworkUnknown[];
+  calls?: FrameworkCall[];
 };
 
 // ---------- what a plugin proves, and with which fixtures ----------

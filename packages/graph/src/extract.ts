@@ -47,12 +47,15 @@ import type { TreeVisitor } from "./walk.js";
 // default under an annotation takes the member's type.
 // 31: Pick and Omit keep only the members they keep (TypeRef.only, omit), a
 // built-in generic the file declares or imports is the file's own type, and
-// an annotation's types are read at most MAX_TYPE_DEPTH deep. 32: a type
-// named in an interface property, a type alias, a type argument of a
-// call, a `new`, an instantiation or a base, or the constraint or default
-// of a type parameter is a type use; a mapped type's key and an `infer`
-// name are not.
-export const EXTRACTOR_VERSION = 32;
+// an annotation's types are read at most MAX_TYPE_DEPTH deep.
+// 32: a Python field assigned a local takes the local's type (a
+// parameter's annotation), and a field assigned two different types keeps
+// none.
+// 36: a type named in an interface property, a type alias, a type argument
+// of a call, a `new`, an instantiation or a base, or the constraint or
+// default of a type parameter is a type use; a mapped type's key and an
+// `infer` name are not.
+export const EXTRACTOR_VERSION = 36;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -295,6 +298,10 @@ class Ctx {
   // The class whose instance field initializer the walk is in, -1 for none:
   // a call there runs on the instance, though its caller is the class.
   instanceInit = -1;
+  // Python fields by class definition and name: those an annotation
+  // declared, and those given two different types, which keep none.
+  private declaredFields = new Set<string>();
+  private mixedFields = new Set<string>();
 
   constructor(readonly lang: Lang) {
     const root = { def: -1, cls: null, locals: new Map(), parent: null, depth: 0, caller: -1, clsScope: null, inFunction: false } as unknown as Scope;
@@ -368,6 +375,27 @@ class Ctx {
     const at = block ? this.top.decl : this.top.fnDecl;
     at.imports?.delete(name);
     at.locals?.set(name, type);
+  }
+
+  // A Python field assigned a type. A declared type stands. Otherwise the
+  // field keeps a type only while every assignment of a known type gives
+  // the same one, since either value may reach a later call.
+  setField(def: number, name: string, type: TypeRef | null, declared: boolean): void {
+    const d = this.defs[def];
+    const key = `${def}\0${name}`;
+    if (!d || !type || this.declaredFields.has(key)) return;
+    if (declared) {
+      this.declaredFields.add(key);
+      this.mixedFields.delete(key);
+      d.fields[name] = type;
+      return;
+    }
+    if (this.mixedFields.has(key)) return;
+    const old = d.fields[name];
+    if (old && !(sameType(old, type) && sameRead(old, type))) {
+      delete d.fields[name];
+      this.mixedFields.add(key);
+    } else if (!old) d.fields[name] = type;
   }
 
   // An import. At the top of the module its names are the file's; made
@@ -2440,9 +2468,8 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           if (right?.type === "dictionary") ctx.pendingTables.set(right.startIndex, { name: left.text, line: node.startPosition.row + 1, scope: ctx.top.fnDecl });
         }
         if (left?.type === "identifier") {
-          if (inClassBody) {
-            if (type) (ctx.defs[inner.def] as DefFact).fields[left.text] = type;
-          } else if (annotation) ctx.setLocal(left.text, annotation);
+          if (inClassBody) ctx.setField(inner.def, left.text, type, annotation !== null);
+          else if (annotation) ctx.setLocal(left.text, annotation);
           else ctx.assign(left.text, type, true);
         } else if (left?.type === "pattern_list" || left?.type === "tuple_pattern" || left?.type === "list_pattern") {
           // `a, b = pair`: each name is assigned a value whose type is not known.
@@ -2454,7 +2481,10 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
         if (left?.type === "attribute" && left.childForFieldName("object")?.text === "self") {
           const attr = left.childForFieldName("attribute");
           const cls = ctx.cls();
-          if (attr && cls && type) (ctx.defs[cls.def] as DefFact).fields[attr.text] = type;
+          // `self.store = store`: the field takes the local's type, a
+          // parameter's annotation among them.
+          const value = type ?? (right?.type === "identifier" ? (ctx.local(right.text) ?? null) : null);
+          if (attr && cls) ctx.setField(cls.def, attr.text, value, annotation !== null);
         }
         return;
       }

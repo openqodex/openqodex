@@ -212,11 +212,14 @@ export function counts(items: readonly { site: { tier: Tier } }[]): Answer["coun
 // and how the work ended. `stopped`: the budget stopped it, `all` holds
 // what it had found, and running the same job again goes on from there.
 // `beyond`: the work is whole, and the depth asked left points with more
-// past them.
+// past them. `lead`: with `into` items, the entries of each page it is
+// true for go to `leads` instead (search: a hit that is not an exact or
+// prefix match).
 export type Listing = {
   answer: Answer;
   all: unknown[];
   into: "items" | "leads";
+  lead?: (entry: unknown) => boolean;
   beyond: { frontier: string[] } | null;
   stopped: { frontier: string[]; frontierTotal: number | null; note: string } | null;
 };
@@ -231,8 +234,8 @@ export function isAnswer<T>(v: T | Answer): v is Answer {
   return typeof v === "object" && v !== null && "apiVersion" in v;
 }
 
-export function listing(answer: Answer, all: unknown[], more: Partial<Pick<Listing, "into" | "beyond" | "stopped">> = {}): Listing {
-  return { answer, all, into: more.into ?? "items", beyond: more.beyond ?? null, stopped: more.stopped ?? null };
+export function listing(answer: Answer, all: unknown[], more: Partial<Pick<Listing, "into" | "lead" | "beyond" | "stopped">> = {}): Listing {
+  return { answer, all, into: more.into ?? "items", ...(more.lead ? { lead: more.lead } : {}), beyond: more.beyond ?? null, stopped: more.stopped ?? null };
 }
 
 export const STOPPED_NOTE = "the question stopped at its time budget; what lies past where it stopped is not counted, and its cursor goes on from there";

@@ -219,23 +219,34 @@ export function dynamicBases(g: Graph, family: Family): UnknownSite[] {
 }
 
 // `implementers` asked about a file (by path, by a file alone, or by a name
-// only a file has): the classes and interfaces it defines as the candidates
-// of an ambiguous answer, so the next question names one. Null when the
-// question is not about a file, or the file defines none.
+// only a file has: the end of its path, or its name without the extension,
+// `IMCPServer` for IMCPServer.ts): the classes and interfaces it defines as
+// the candidates of an ambiguous answer, so the next question names one.
+// A name that several files have gives as the candidates those that
+// define a class or an interface. A symbol of the name comes first: this
+// runs only when none was found. Null when the question is not about a
+// file, or the file defines none.
+const stemOf = (f: string): string => f.slice(f.lastIndexOf("/") + 1).replace(/\.[^.]*$/, "");
 function definedIn(s: Session, req: Request, o: GraphNode | Answer): Answer | null {
   const g = s.graph;
+  const typesIn = (f: string) => (g.defsByFile.get(f) ?? []).filter((d) => d.kind === "class" || d.kind === "type");
   let file: string | null = null;
   if (!isAnswer(o)) file = o.kind === "file" ? o.file : null;
   else if (o.error?.code === "not-found") {
     const name = req.target?.name ?? "";
     if (g.nodes.get(name)?.kind === "file") file = name;
-    else {
-      const same = [...g.defsByFile.keys()].filter((f) => f.endsWith(`/${name}`));
-      if (name !== "" && same.length === 1) file = same[0] as string;
+    else if (name !== "") {
+      const named = [...g.defsByFile.keys()].filter((f) => f.endsWith(`/${name}`) || (!name.includes("/") && stemOf(f) === name));
+      const same = named.length > 1 ? named.filter((f) => typesIn(f).length > 0) : named;
+      if (same.length === 1) file = same[0] as string;
+      else if (same.length > 1) {
+        const files = same.sort().flatMap((f) => (g.nodes.get(f) ? [candidate(g, g.nodes.get(f) as GraphNode, 1)] : []));
+        return { ...fail(s, "implementers", "ambiguous", `${same.length} files named ${name} define classes or interfaces; name one by its path`), target: files };
+      }
     }
   }
   if (file === null) return null;
-  const defs = (g.defsByFile.get(file) ?? []).filter((d) => d.kind === "class" || d.kind === "type").sort((a, b) => a.startLine - b.startLine);
+  const defs = typesIn(file).sort((a, b) => a.startLine - b.startLine);
   if (defs.length === 0) return null;
   return { ...fail(s, "implementers", "ambiguous", `${file} is a file; it defines ${defs.length} ${defs.length === 1 ? "class or interface" : "classes and interfaces"}: name one by its id or file and line`), target: defs.map((d) => candidate(g, d, 1)) };
 }

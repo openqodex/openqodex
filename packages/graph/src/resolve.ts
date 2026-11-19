@@ -63,9 +63,9 @@ export const DISPATCH_CAP = 32;
 // function type the called definition declares (TypeRef.callback).
 // 22: a member of a generic alias of an object type takes the argument
 // its use gives. 24: a member a Pick or an Omit leaves out is no member of
-// the type. 25: a TypeScript file that imports a type and has no edge to it
+// the type. 29: a TypeScript file that imports a type and has no edge to it
 // leaves an unknown whose candidates are the type's definitions.
-export const RESOLVER_VERSION = 25;
+export const RESOLVER_VERSION = 29;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
