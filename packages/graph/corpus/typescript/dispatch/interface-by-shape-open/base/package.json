@@ -1,0 +1,8 @@
+{
+  "name": "shape-open",
+  "version": "1.0.0",
+  "dependencies": {
+    "lru-cache": "^10.0.0",
+    "remote-api": "^1.0.0"
+  }
+}

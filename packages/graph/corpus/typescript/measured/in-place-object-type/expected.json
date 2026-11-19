@@ -23,9 +23,7 @@
       "file": "src/run.ts",
       "line": 4,
       "cause": "miss"
-    }
-  ],
-  "unknowns": [
+    },
     {
       "file": "src/run.ts",
       "line": 4,

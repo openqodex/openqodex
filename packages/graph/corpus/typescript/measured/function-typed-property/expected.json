@@ -29,9 +29,7 @@
       "file": "src/router.ts",
       "line": 11,
       "cause": "miss"
-    }
-  ],
-  "unknowns": [
+    },
     {
       "file": "src/router.ts",
       "line": 11,

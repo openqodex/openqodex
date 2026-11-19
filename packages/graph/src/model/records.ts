@@ -47,6 +47,7 @@ export type EvidenceKind =
   | "value-alias" // a local given one function, then called
   | "value-table" // a function in a literal table that a computed call on it may call
   | "returned-value" // a function a callee returns by name, called where it is returned
+  | "by-shape" // a TypeScript class that has every member of an interface by name, without declaring implements
   // Likely at most: a match of member names, the signatures not compared.
   | "method-set"; // a Go type or Python class that defines every member of an interface or Protocol
 
@@ -160,7 +161,7 @@ export type Cut = {
 // Checks a bound site before it is published: a certain tier needs a kind
 // in the certain set and, for a binding through a module, the import line
 // that proved it. Returns the reason it is invalid, or null.
-export const POSSIBLE_KINDS: ReadonlySet<EvidenceKind> = new Set<EvidenceKind>(["dispatch-implements", "dispatch-override", "invocation-summary", "value-alias", "value-table", "returned-value"]);
+export const POSSIBLE_KINDS: ReadonlySet<EvidenceKind> = new Set<EvidenceKind>(["dispatch-implements", "dispatch-override", "invocation-summary", "value-alias", "value-table", "returned-value", "by-shape"]);
 
 export function validateEvidence(e: Evidence): string | null {
   if (e.tier === "certain" && !CERTAIN_KINDS.has(e.kind)) return `a certain site cannot rest on ${e.kind}`;

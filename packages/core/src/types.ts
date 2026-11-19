@@ -362,7 +362,7 @@ export type ImpactSite = {
   // py-root, go-module, receiver-constructor, receiver-annotation,
   // receiver-result, receiver-field, receiver-self or autoload; for a
   // possible site, dispatch-implements, dispatch-override, method-set,
-  // invocation-summary, value-alias, value-table or returned-value.
+  // invocation-summary, value-alias, value-table, returned-value or by-shape.
   evidence: string;
   // The import line that proved a binding through a module.
   via: { file: string; line: number; spec: string | null } | null;

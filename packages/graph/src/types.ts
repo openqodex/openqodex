@@ -112,6 +112,9 @@ export type DefFact = {
   // never a dispatch target.
   abstract?: boolean;
   iface?: boolean; // a TypeScript interface or a Go interface type
+  // A TypeScript interface member marked `?` (`close?(): void`): a value of
+  // the interface need not have it, so a class matched by shape need not either.
+  optional?: boolean;
   anonymous?: boolean; // a Java object or enum constant body, never a source-level type name
   pointer?: boolean; // a Go method with a pointer receiver
   // A Java method whose last parameter is varargs (`Object... rest`): it
@@ -296,7 +299,7 @@ export type DispatchSite = {
   declared: string[]; // the definition the call binds to
   candidates: string[]; // ids of the implementations or overrides kept
   total: number;
-  rule: "dispatch-implements" | "dispatch-override";
+  rule: "dispatch-implements" | "dispatch-override" | "by-shape";
 };
 
 // What a function does with its parameters and what it returns, read from

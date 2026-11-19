@@ -48,7 +48,8 @@ import type { TreeVisitor } from "./walk.js";
 // 31: Pick and Omit keep only the members they keep (TypeRef.only, omit), a
 // built-in generic the file declares or imports is the file's own type, and
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
-export const EXTRACTOR_VERSION = 31;
+// 32: an interface member marked `?` is optional (DefFact.optional).
+export const EXTRACTOR_VERSION = 32;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -1926,6 +1927,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const name = node.childForFieldName("name");
         if (!name || name.type !== "property_identifier") return false;
         const fnType = node.type === "property_signature" ? node.childForFieldName("type")?.firstNamedChild : node;
+        const optional = where === "interface_body" && node.children.some((c) => c.type === "?") ? { optional: true } : {};
         // An interface property whose type is not a function is a field, as a class's is.
         if (node.type === "property_signature" && where === "interface_body" && fnType?.type !== "function_type") {
           const type = jsMemberType(node.childForFieldName("type"), cls.typeParams);
@@ -1934,14 +1936,14 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           // (`resolve: ResolveFn`): a member a call can name, as a property
           // spelled with a function type is. A call can name it only then.
           if (type && type.kind !== "param" && !type.elem && !type.promise && !type.parts && type.name !== "{}" && type.name !== "?" && (fnType?.type === "type_identifier" || fnType?.type === "nested_type_identifier" || fnType?.type === "generic_type")) {
-            ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, signature: type });
+            ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, signature: type, ...optional });
           }
           return false;
         }
         if (!fnType || (node.type === "property_signature" && fnType.type !== "function_type")) return false;
         const ret = fnType.childForFieldName("return_type");
         const result = node.type === "property_signature" ? jsTypeRef(ret) : jsTypeRef(ret);
-        const def = ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, ...(result ? { results: [result] } : {}) });
+        const def = ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, ...(result ? { results: [result] } : {}), ...optional });
         jsSignature(ctx, fnType, def, null);
         return false;
       }

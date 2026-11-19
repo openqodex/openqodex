@@ -41,6 +41,9 @@ export const HUB_FILES = 8; // a name defined in more files never binds without 
 // A call through an interface or a base type keeps at most this many
 // implementations or overrides as possible targets; the rest is a gap.
 export const DISPATCH_CAP = 32;
+// A call through a TypeScript interface keeps at most this many classes
+// that match the interface by shape alone; the rest is a gap.
+export const SHAPE_CAP = 20;
 // 8: dispatch through interfaces and base types, language lookup orders
 // (Python C3, Go embedding depth, Ruby mixins), value and type uses,
 // may_invoke, overrides and implements. 9: a dynamic-base gap on each class
@@ -64,8 +67,9 @@ export const DISPATCH_CAP = 32;
 // 22: a member of a generic alias of an object type takes the argument
 // its use gives. 24: a member a Pick or an Omit leaves out is no member of
 // the type. 25: a file that imports one module on several lines keeps an
-// import site for each.
-export const RESOLVER_VERSION = 25;
+// import site for each. 26: a call through a TypeScript interface reaches
+// the classes that match it by shape (by-shape).
+export const RESOLVER_VERSION = 26;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -2084,7 +2088,8 @@ export function createWorld(input: ResolveInput): World {
     if (kept !== undefined) return kept;
     if (depth > MAX_DEPTH) return null;
     const info = classes.get(key);
-    let out: Set<string> | null = new Set(methodsOn.i.get(key)?.keys() ?? []);
+    // A TypeScript member marked `?` is no part of the contract.
+    let out: Set<string> | null = new Set([...(methodsOn.i.get(key) ?? [])].filter(([, ids]) => !ids.every((id) => defById.get(id)?.optional === true)).map(([n]) => n));
     for (const b of info?.bases ?? []) {
       const k = typeKey(info?.file ?? "", info?.family ?? "go", b);
       if (k !== null && k !== "ext" && k.key !== key) {
@@ -2137,6 +2142,77 @@ export function createWorld(input: ResolveInput): World {
       out = typesNamed(info.family, first as string).filter((k) => k !== key && rest.every((n) => memberNames(k).has(n)));
     }
     methodSetMemo.set(key, out);
+    return out;
+  };
+
+  // TypeScript is structural: a class or a module-level object whose own
+  // and inherited members cover every required member of an interface, by
+  // name, may stand wherever the interface is asked for without declaring
+  // it. These are the ones that do not reach the interface through
+  // `implements` or `extends`; null when the interface's members are not
+  // all known (it extends a type outside the graph).
+  const classLike = (k: string): boolean => {
+    const ids = classes.get(k)?.ids ?? [];
+    return ids.length > 0 && ids.every((id) => defById.get(id)?.kind === "class" || defById.get(id)?.kind === "module");
+  };
+  const belowMemo = new Map<string, Set<string>>();
+  const declaredBelow = (key: string): Set<string> => {
+    let below = belowMemo.get(key);
+    if (below) return below;
+    below = new Set<string>();
+    const queue = subsOf(key).map((x) => x.key);
+    for (let i = 0; i < queue.length && below.size < 100_000; i++) {
+      const k = queue[i] as string;
+      if (below.has(k)) continue;
+      below.add(k);
+      for (const x of subsOf(k)) if (!below.has(x.key)) queue.push(x.key);
+    }
+    belowMemo.set(key, below);
+    return below;
+  };
+  const shapeMemo = new Map<string, string[] | null>();
+  const shapeMatches = (key: string): string[] | null => {
+    const kept = shapeMemo.get(key);
+    if (kept !== undefined) return kept;
+    let out: string[] | null = null;
+    const names = classes.get(key)?.family === "js" && isIface(key) ? contractNames(key) : null;
+    if (names) {
+      const below = declaredBelow(key);
+      const [first, ...rest] = [...names];
+      out = typesNamed("js", first as string).filter((k) => k !== key && classLike(k) && !below.has(k) && rest.every((n) => memberNames(k).has(n)));
+    }
+    shapeMemo.set(key, out);
+    return out;
+  };
+  // The methods a call of `name` through the interface may run in the
+  // classes that match it by shape, in path and line order, and the first
+  // class that may match it through a base outside the graph: it has the
+  // member called and may get the rest from there, so it is not listed and
+  // the call keeps its gap. Null when the interface's members are not all known.
+  const shapeTargetMemo = new Map<string, { ids: string[]; open: string | null } | null>();
+  const shapeTargets = (key: string, name: string, skip: ReadonlySet<string>): { ids: string[]; open: string | null } | null => {
+    const memoKey = `${key}\u0000${name}`;
+    const kept = shapeTargetMemo.get(memoKey);
+    if (kept !== undefined) return kept;
+    const matched = shapeMatches(key);
+    let out: { ids: string[]; open: string | null } | null = null;
+    if (matched !== null) {
+      const found = new Set<string>();
+      for (const k of matched) {
+        const hit = methodOn(k, name, "i", 0);
+        if (hit && "ids" in hit) for (const id of hit.ids) if (!skip.has(id) && defById.get(id)?.abstract !== true) found.add(id);
+      }
+      const ids = [...found].sort((a, b) => {
+        const x = defById.get(a);
+        const y = defById.get(b);
+        return (x?.file ?? a).localeCompare(y?.file ?? b) || (x?.line ?? 0) - (y?.line ?? 0) || a.localeCompare(b);
+      });
+      const listed = new Set(matched);
+      const below = declaredBelow(key);
+      const open = typesNamed("js", name).find((k) => k !== key && classLike(k) && !below.has(k) && !listed.has(k) && outsideBase(k)) ?? null;
+      out = { ids, open };
+    }
+    shapeTargetMemo.set(memoKey, out);
     return out;
   };
 
@@ -3112,6 +3188,15 @@ export function createWorld(input: ResolveInput): World {
       if (v === undefined) tsIface.set(key, (v = classes.get(key)?.family === "js" && classes.get(key)?.ids.some((id) => defById.get(id)?.iface === true) === true));
       return v;
     };
+    const shapeEv = (declared: string, iface: string, count: number): Ev => {
+      const k = `${declared} shape ${count}`;
+      let ev = evMemo.get(k);
+      if (!ev) {
+        ev = { kind: "by-shape", tier: "possible", via: null, note: `Its class matches ${iface} by shape: it has every member of ${iface} by name without declaring implements, and the signatures are not compared. A call to ${declared} may run it, one of ${count}.`, rule: "by-shape" };
+        evMemo.set(k, ev);
+      }
+      return ev;
+    };
     const openNotes = new Map<string, string>();
     const openShapeNote = (key: string): string => {
       let note = openNotes.get(key);
@@ -3272,9 +3357,29 @@ export function createWorld(input: ResolveInput): World {
               unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `the call may run ${targets.length} implementations or overrides of ${declared}; the ${targets.length - DISPATCH_CAP} past the first ${DISPATCH_CAP} in path order are not listed` });
             }
           }
-          // A TypeScript interface admits any value of its shape, declared or not.
+          // A TypeScript interface admits any value of its shape, declared or
+          // not: the classes that have every member by name are possible
+          // targets too, capped. The gap stays when the interface's members
+          // are not all known, or a class may get them from outside the graph.
           if (family === "js" && isTsInterface(d.key)) {
-            unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: openShapeNote(d.key) });
+            const shaped = shapeTargets(d.key, call.name, new Set([...out.ids, ...targets]));
+            if (shaped === null) {
+              unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: openShapeNote(d.key) });
+            } else {
+              const iface = shortKey(d.key);
+              if (shaped.ids.length > 0) {
+                const kept = shaped.ids.slice(0, SHAPE_CAP);
+                dispatch.push({ file: path, line: call.line, column: call.column, caller: callerId, name: call.name, declared: out.ids, candidates: kept, total: shaped.ids.length, rule: "by-shape" });
+                const site = siteOf(path, call.line, call.column, shapeEv(declared, iface, shaped.ids.length));
+                for (const t of kept) addEdge(callerId, t, "dispatches_to", site);
+                if (shaped.ids.length > SHAPE_CAP) {
+                  unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${shaped.ids.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.ids.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` });
+                }
+              }
+              if (shaped.open !== null) {
+                unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: `a value of the interface ${iface} may be any object of that shape; ${shortKey(shaped.open)} has ${call.name} and extends a class outside the graph, which may give it the other members of ${iface}, so it is not listed` });
+              }
+            }
           }
         }
         // A function passed to a callee whose body calls that parameter.

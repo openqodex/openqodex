@@ -6,7 +6,8 @@
 // 2. A method called on a value whose type the repository defines but no
 //    rule can see into stays a gap (never turned into an external call). A
 //    TypeScript interface's member now binds as declared, and the call
-//    keeps a gap for the values of its shape that declare nothing.
+//    keeps a gap for the values of its shape that declare nothing when the
+//    graph cannot list them: the interface extends a type outside it.
 // 3. A method called on what a call returns is named in the brief as if the
 //    call were a type ("the type Buffer.concat"), which misleads the reader.
 import { afterAll, describe, expect, it } from "vitest";
@@ -31,9 +32,10 @@ describe("unknown records", () => {
     expect(floorReasons(g, { id: trim!.id, name: "trim", file: "src/text.ts" }, new Set())).toEqual([]);
   });
 
-  it("keeps a call on a repository interface a gap (2)", async () => {
+  it("keeps a call on a repository interface a gap when its shape is not all known (2)", async () => {
     const root = makeRepo({
-      "src/repo.ts": "export interface Repo {\n  find(): number;\n}\n",
+      "package.json": JSON.stringify({ name: "x", dependencies: { "base-api": "1.0.0" } }),
+      "src/repo.ts": 'import type { Base } from "base-api";\nexport interface Repo extends Base {\n  find(): number;\n}\n',
       "src/use.ts": 'import type { Repo } from "./repo";\nexport function use(r: Repo) {\n  return r.find();\n}\n',
     });
     const g = await buildGraph({ repoRoot: root, store: null });
