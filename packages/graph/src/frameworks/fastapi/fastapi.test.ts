@@ -11,8 +11,8 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildGraph, frameworkLayer } from "../../index.js";
-import type { FrameworkLayer, Graph, Registration } from "../../index.js";
+import { buildGraph, frameworkLayer, query } from "../../index.js";
+import type { FrameworkLayer, Graph, Registration, Request } from "../../index.js";
 import { cpuMs, expectLinear, growthTests, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
 import { MAX_SOURCE_BYTES, readFacts } from "./facts.js";
 import { matches, MAX_APPS, MAX_MIDDLEWARE_CHAIN, MAX_MOUNTS, MAX_REGISTRATIONS, MAX_ROLES } from "./resolve.js";
@@ -70,6 +70,33 @@ describe("the FastAPI plugin on a small real application", () => {
   it("makes no route of a decorator on a registry of the repository's own, though it is called app and its method get", () => {
     expect(layer(changed).registrationsIn("app/cache.py")).toEqual([]);
     expect(layer(changed).routesReaching(sym(changed, "app/cache.py", "cached")).routes).toEqual([]);
+  });
+});
+
+describe("the FastAPI plugin's dependencies as calls, through the query answers", () => {
+  let graph: Graph;
+  let root: string;
+  const ask = (req: Record<string, unknown>) => query({ graph, generation: "g", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, ...req } as Request);
+
+  beforeAll(async () => {
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "corpus", "frameworks", "fastapi", "fastapi-depends-calls");
+    root = mkdtempSync(join(tmpdir(), "oq-fastapi-deps-"));
+    cpSync(join(corpus, "base"), root, { recursive: true });
+    commitAll(root);
+    graph = await buildGraph({ repoRoot: root, store: null });
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it("lists every route and dependency that depends on get_db as its callers, so get_db is never taken for unused", () => {
+    const a = ask({ kind: "callers", target: { name: "get_db" } });
+    const from = (a.items as { from: string; site: { evidence: string; tier: string } }[]).map((i) => `${graph.nodes.get(i.from)?.name} ${i.site.evidence} ${i.site.tier}`);
+    expect(from.sort()).toEqual(["get_current_user fastapi-depends certain", "read_item fastapi-depends certain"]);
+  });
+
+  it("lists each route's dependencies in the order FastAPI runs them", () => {
+    const a = ask({ kind: "routes", limit: 50 });
+    const deps = Object.fromEntries((a.items as { pattern: string; dependencies: { to: string }[] }[]).map((r) => [r.pattern, r.dependencies.map((d) => graph.nodes.get(d.to)?.name)]));
+    expect(deps).toEqual({ "/items/{item_id}": ["audit", "auth_user", "get_db"], "/items/me": ["audit", "auth_user", "get_current_user"], "/secure": ["audit", "get_current_user"], "/x": [] });
   });
 });
 

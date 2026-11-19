@@ -1,0 +1,35 @@
+{
+  "guards": "makes each FastAPI Depends and Security dependency a certain call from every route it runs for (parameter, Annotated, router and application dependencies) and from a dependency that depends on it, and never from a lookalike Depends or a function no route uses",
+  "callers": [
+    { "to": "app/deps.py#get_db", "site": "app/main.py:12", "tier": "certain", "kind": "calls" },
+    { "to": "app/deps.py#get_db", "site": "app/deps.py:8", "tier": "certain", "kind": "calls" },
+    { "to": "app/deps.py#get_current_user", "site": "app/main.py:17", "tier": "certain", "kind": "calls" },
+    { "to": "app/deps.py#get_current_user", "site": "app/main.py:22", "tier": "certain", "kind": "calls" },
+    { "to": "app/deps.py#auth_user", "site": "app/main.py:8", "tier": "certain", "kind": "calls" },
+    { "to": "app/deps.py#audit", "site": "app/main.py:7", "tier": "certain", "kind": "calls" }
+  ],
+  "notReached": [
+    { "to": "app/deps.py#get_db", "site": "app/other.py:10", "kind": "calls" },
+    { "to": "app/deps.py#get_db", "site": "app/deps.py:20", "kind": "calls" }
+  ],
+  "frameworks": {
+    "plugin": "fastapi",
+    "apps": 2,
+    "registrations": [
+      { "site": "app/main.py:11", "methods": ["GET"], "pattern": "/items/{item_id}", "handler": "app/main.py#read_item", "status": "bound", "mounted": true },
+      { "site": "app/main.py:16", "methods": ["GET"], "pattern": "/items/me", "handler": "app/main.py#me", "status": "bound", "mounted": true },
+      { "site": "app/main.py:21", "methods": ["GET"], "pattern": "/secure", "handler": "app/main.py#secure", "status": "bound", "mounted": true },
+      { "site": "app/other.py:9", "methods": ["GET"], "pattern": "/x", "handler": "app/other.py#x", "status": "bound", "mounted": true }
+    ],
+    "edges": [
+      { "kind": "applies_middleware", "from": "registration:app/main.py:11", "to": "app/deps.py#audit", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:app/main.py:11", "to": "app/deps.py#auth_user", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:app/main.py:11", "to": "app/deps.py#get_db", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:app/main.py:16", "to": "app/deps.py#get_current_user", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:app/main.py:21", "to": "app/deps.py#get_current_user", "tier": "certain" }
+    ],
+    "notEdges": [
+      { "kind": "applies_middleware", "from": "registration:app/other.py:9" }
+    ]
+  }
+}
