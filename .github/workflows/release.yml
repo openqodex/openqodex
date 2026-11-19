@@ -7,11 +7,19 @@ name: Release
 #   the new version to npm with provenance, tags it and makes a GitHub release.
 #   Once the version is on the registry, the last step tags it v<version> and
 #   moves the v0 tag the GitHub Action is used by.
-# Before either, the release-check job compares the build about to be
-# published with the published package (benchmark/release-check.mjs); on a
-# push that publishes, a loss, or a check that could not run, stops the
-# publish. The ci-passed job waits for this commit's own CI run on main and
-# stops the release unless that run passed.
+# The plan job decides once whether this push publishes; the jobs below read
+# its answer. Before the release job, the release-check job compares the
+# build about to be published with the published package
+# (benchmark/release-check.mjs); on a push that publishes, a loss, or a
+# check that could not run, stops the publish. The ci-passed job waits for
+# this commit's own CI run on main and stops the release unless that run
+# passed. On a push that publishes, the full-gate job runs ci.yml's full
+# gate on this commit (the end-to-end tests, the golden run, macOS and the
+# scanner-only benchmark, which pull requests, the merge queue and pushes to
+# main no longer run), and the release job refuses to publish unless it
+# passed: the job's condition requires it, and the publish command is
+# empty, so changesets/action publishes nothing, unless the plan said this
+# push publishes.
 # The release job pushes the version branch and the tags with the release
 # token (secret RELEASE_TOKEN: a fine-grained personal access token limited
 # to this repository, with Contents and Pull requests read and write), not
@@ -39,32 +47,18 @@ permissions:
   contents: read
 
 jobs:
-  release-check:
-    name: Published package against this build
-    # The benchmark's release check (docs/benchmark.md, "The release
-    # check"): the published openqodex and this build scan the planted
-    # cases, each twice, with every scanner installed and no model, and are
-    # compared case by case; a planted bug the published package found and
-    # this build misses is a loss. It works only when this push publishes:
-    # no changeset waits and the version in packages/cli is not on npm yet.
-    # On any other push it ends at once, so the version pull request is
-    # never held. A job of its own, with no secret, no id-token and a token
-    # that can only read, because it runs the published package's code and
-    # every scanner on the repository; and no Actions cache, so nothing it
-    # runs can reach a cache a later job restores. Any exit but 0 fails it,
-    # and the release job then does not run: a loss refuses the publish, and
-    # so does a check that could not run, which shows nothing either way.
-    # Run the workflow again when the report says the Semgrep rule packs
-    # moved between the two runs. Before the comparison, it preinstalls
-    # every scanner of this build into a clean install root and runs each
-    # on its check case (the clean-root preinstall test), so a failure
-    # there stops the publish instead of following it (issue 224).
+  plan:
+    name: Does this push publish
+    # It publishes when no changeset waits and the version in packages/cli
+    # is not on npm yet: the case changesets/action publishes in. openqodex
+    # is the one package it publishes; every other one is private.
     if: github.repository == 'openqodex/openqodex'
     runs-on: ubuntu-latest
-    # The clean-root preinstall takes up to 30 minutes of the total.
-    timeout-minutes: 75
+    timeout-minutes: 5
     permissions:
       contents: read
+    outputs:
+      publish: ${{ steps.publish.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,14 +75,45 @@ jobs:
             echo "openqodex@$version is on npm already, so this push publishes nothing."
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
-            echo "This push publishes openqodex@$version, so the release check runs."
+            echo "This push publishes openqodex@$version, so the release check and the full gate run."
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
+
+  release-check:
+    name: Published package against this build
+    # The benchmark's release check (docs/benchmark.md, "The release
+    # check"): the published openqodex and this build scan the planted
+    # cases, each twice, with every scanner installed and no model, and are
+    # compared case by case; a planted bug the published package found and
+    # this build misses is a loss. It works only when the plan job says this
+    # push publishes. On any other push it ends at once, so the version
+    # pull request is never held. A job of its own, with no secret, no id-token and a token
+    # that can only read, because it runs the published package's code and
+    # every scanner on the repository; and no Actions cache, so nothing it
+    # runs can reach a cache a later job restores. Any exit but 0 fails it,
+    # and the release job then does not run: a loss refuses the publish, and
+    # so does a check that could not run, which shows nothing either way.
+    # Run the workflow again when the report says the Semgrep rule packs
+    # moved between the two runs. Before the comparison, it preinstalls
+    # every scanner of this build into a clean install root and runs each
+    # on its check case (the clean-root preinstall test), so a failure
+    # there stops the publish instead of following it (issue 224).
+    needs: plan
+    if: github.repository == 'openqodex/openqodex'
+    runs-on: ubuntu-latest
+    # The clean-root preinstall takes up to 30 minutes of the total.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The scanners' install root, the package cache and the check's folder.
       # The runs lie inside the checkout (benchmark/results is ignored by
       # git), as in the bench-scan job.
       - name: Name the folders
-        if: steps.publish.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true'
         run: |
           {
             echo "OPENQODEX_HOME=$RUNNER_TEMP/openqodex-bench-home"
@@ -100,40 +125,40 @@ jobs:
       # golangci-lint, this build with its commit recorded, and every
       # scanner it pins, installed cold.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        if: steps.publish.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: steps.publish.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true'
         with:
           node-version: 22
       - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
-        if: steps.publish.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true'
         with:
           ruby-version: "3.3"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: steps.publish.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true'
         with:
           # golangci-lint 2.12.2 is built with Go 1.26 and cannot check a newer Go.
           go-version: "1.26"
           cache: false
       - name: Build and install every scanner this build pins
-        if: steps.publish.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true'
         run: |
           pnpm install --frozen-lockfile
           node benchmark/build-cli.mjs
           node packages/cli/dist/bin.js doctor --install --all-scanners --require-all
       # The same test check-self-update runs after the publish, on this build.
       - name: Preinstall every scanner into a clean install root
-        if: steps.publish.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true'
         env:
           OPENQODEX_PREINSTALL_FULL: "1"
         run: pnpm exec vitest run --config vitest.e2e.config.ts tests/e2e/preinstall-full.test.ts
       # --install-scanners adds every scanner the published package pins at
       # another version, so both builds run the same scanners.
       - name: Compare this build with the published package
-        if: steps.publish.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true'
         run: node benchmark/release-check.mjs --suites planted --install-scanners --out "$CHECK" --summary "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() && steps.publish.outputs.publish == 'true' }}
+        if: ${{ !cancelled() && needs.plan.outputs.publish == 'true' }}
         with:
           name: release-check-${{ github.sha }}
           path: benchmark/results/release-check
@@ -164,10 +189,28 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: node scripts/release-ci-check.mjs "$GITHUB_SHA"
 
+  full-gate:
+    name: Full gate on this commit
+    # ci.yml's full gate on the commit this push publishes, only then: a push
+    # that versions or publishes nothing does not wait on it. The nightly
+    # workflow runs the same gate on main every night. No secret reaches it,
+    # and its token can only read; ci.yml's queue-tested job asks for
+    # actions: read, so the call grants it.
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      full: true
+
   release:
     name: Version or publish
-    needs: [release-check, ci-passed]
-    if: github.repository == 'openqodex/openqodex'
+    needs: [plan, release-check, ci-passed, full-gate]
+    # A push that publishes needs the full gate green on this commit; any
+    # other push needs it skipped, and its publish command below is empty.
+    if: ${{ !cancelled() && github.repository == 'openqodex/openqodex' && needs.plan.result == 'success' && needs.release-check.result == 'success' && needs.ci-passed.result == 'success' && ((needs.plan.outputs.publish == 'true' && needs.full-gate.result == 'success') || (needs.plan.outputs.publish == 'false' && needs.full-gate.result == 'skipped')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -213,8 +256,9 @@ jobs:
           # pre-commit hook, so the gate's version check passes.
           version: pnpm version-packages
           # Publishes the build made above. pnpm release would build again
-          # here, with the token readable.
-          publish: pnpm exec changeset publish
+          # here, with the token readable. Empty unless the plan said this
+          # push publishes, so no publish can pass the full gate by.
+          publish: ${{ needs.plan.outputs.publish == 'true' && 'pnpm exec changeset publish' || '' }}
           commit: Version packages
           title: Version packages
         env:
