@@ -1,0 +1,106 @@
+{
+  "guards": "binds a call on a const local copied from a member typed by a class, and keeps may_invoke only for a member typed by a function",
+  "callers": [
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/svc.ts:18",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/svc.ts:23",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/svc.ts:28",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/svc.ts:33",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/svc.ts#Deps.run",
+      "site": "src/svc.ts:44",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/svc.ts#Deps.run",
+      "site": "src/svc.ts:49",
+      "tier": "possible",
+      "kind": "may_invoke"
+    }
+  ],
+  "notCertain": [
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/svc.ts:39"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/svc.ts#Deps.handle",
+      "site": "src/svc.ts:18"
+    },
+    {
+      "to": "src/svc.ts#Service.own",
+      "site": "src/svc.ts:23"
+    },
+    {
+      "to": "src/svc.ts#Deps.maybe",
+      "site": "src/svc.ts:33"
+    },
+    {
+      "to": "src/svc.ts#Deps.handle",
+      "site": "src/svc.ts:39"
+    },
+    {
+      "to": "src/session.ts#Other.createTurn",
+      "site": "src/svc.ts:18"
+    },
+    {
+      "to": "src/session.ts#Other.createTurn",
+      "site": "src/svc.ts:23"
+    },
+    {
+      "to": "src/session.ts#Other.createTurn",
+      "site": "src/svc.ts:28"
+    },
+    {
+      "to": "src/session.ts#Other.createTurn",
+      "site": "src/svc.ts:33"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/svc.ts",
+      "line": 18
+    },
+    {
+      "file": "src/svc.ts",
+      "line": 23
+    },
+    {
+      "file": "src/svc.ts",
+      "line": 28
+    },
+    {
+      "file": "src/svc.ts",
+      "line": 33
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/svc.ts",
+      "line": 39,
+      "cause": "no-receiver-type"
+    }
+  ]
+}

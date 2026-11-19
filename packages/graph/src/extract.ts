@@ -48,7 +48,9 @@ import type { TreeVisitor } from "./walk.js";
 // 31: Pick and Omit keep only the members they keep (TypeRef.only, omit), a
 // built-in generic the file declares or imports is the file's own type, and
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
-export const EXTRACTOR_VERSION = 31;
+// 32: a local declared from a member (`const repo = this.deps.repo`) takes
+// that member's type.
+export const EXTRACTOR_VERSION = 32;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -1888,7 +1890,10 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           ctx.declareFn(name.text, def, block);
           return ctx.push({ def, cls: null, locals: null, fnAt: (value as Node).startIndex });
         }
-        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value), block);
+        // `const repo = this.deps.repo`: the local has the member's type, as
+        // `const { repo } = this.deps` gives it.
+        const member = jsUnwrap(value)?.type === "member_expression" ? jsValueType(ctx, value) : null;
+        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value) ?? member, block);
         return;
       }
       case "statement_block":

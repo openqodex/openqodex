@@ -63,8 +63,10 @@ export const DISPATCH_CAP = 32;
 // function type the called definition declares (TypeRef.callback).
 // 22: a member of a generic alias of an object type takes the argument
 // its use gives. 24: a member a Pick or an Omit leaves out is no member of
-// the type.
-export const RESOLVER_VERSION = 24;
+// the type. 25: a method called on a local copied from a property typed by
+// a name that is no function type binds on the local's type, never as a
+// value alias of the property.
+export const RESOLVER_VERSION = 25;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -3162,9 +3164,16 @@ export function createWorld(input: ResolveInput): World {
         if (call.alias !== undefined) {
           const v = valueOf(path, call.alias);
           const ref = f.values[call.alias];
-          if (v && ref) {
+          // A method called on a local copied from a property typed by a
+          // name (`repo: Repo`) runs that property only when the name is a
+          // function type; else the call binds on the local's type.
+          const ids = call.recv.kind === "none" ? v?.ids : v?.ids.filter((id) => {
+            const d = defById.get(id);
+            return !d?.signature || resultsOf(d) !== null;
+          });
+          if (ids && ids.length > 0 && ref) {
             const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.aliasOf ?? call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
-            for (const t of v.ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
+            for (const t of ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
             continue;
           }
         }
