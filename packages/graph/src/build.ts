@@ -4,7 +4,8 @@
 // (runtime/predict.ts) decides the mode: under the line the graph is built
 // fresh from facts; over it the retained index of the same capture is
 // loaded when one exists, else the build runs under the budget and keeps an
-// index for next time.
+// index for next time. Before either, a question on a work tree the folder
+// already holds a complete build of, with its index, loads that index.
 //
 // Every stage checks the budget between files, so a 1 ms budget stops a
 // cached vscode build within moments, partial and saying so. Facts come in
@@ -279,15 +280,40 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
   const goModules = readGoModules(traced.reader, inv.all);
   stage("projects");
 
-  // ---------- the mode ----------
   const meta = store ? asPredictMeta(store.readMeta()?.predict ?? null) : null;
-  const cached = store ? order.reduce((n, e) => n + Number(store.hasFacts(factsKey(e.lang, e.blob))), 0) : 0;
-  const predicted = predictMs(meta, { eligible, cached });
-  const decided = args.mode ? { mode: args.mode, streak: 0 } : decideMode(meta, predicted);
   const config = { budgetMs, maxFiles, maxFileBytes, maxHeapMb: Math.round(maxHeap / 1024 / 1024) };
   const versions = { model: MODEL_VERSION, extractor: EXTRACTOR_VERSION, resolver: RESOLVER_VERSION, policy: POLICY_VERSION };
   // What a kept index was resolved from (captureDigest above).
   const digest = captureDigest({ inv, only: args.only ?? null, maxFileBytes, reads: traced.entries(), model });
+
+  // ---------- the kept index of this very capture ----------
+  // A question on a work tree the folder already holds a complete build
+  // of, with its index, loads that index whatever the mode: the same graph
+  // (retained equals fresh), with nothing to parse, read or resolve. The
+  // five-second rule decides how to build only when there is something to
+  // build, so nothing is predicted or recorded here, and the answer names
+  // the mode the rule holds (with no mode recorded yet, it builds). A
+  // forced mode (tests, `graph build --full`) and a comparison with a base
+  // always build. The store checks every file
+  // of the index against its build's manifest: a file cut short, changed or
+  // gone makes the build unusable, and the graph is built as if it were
+  // not there.
+  if (!args.mode && !args.base && store && meta) {
+    const kept = store.list().find((m) => m.capture.digest === digest && m.complete && m.hasIndex);
+    const opened = kept ? store.open({ id: kept.id }) : null;
+    const loaded = opened ? readIndex(opened) : null;
+    if (kept && loaded) {
+      stage("load-index");
+      const durationMs = Math.round(performance.now() - started);
+      args.onProgress?.(`Code graph: ${plural(loaded.status.filesParsed, "file")} from the kept index in ${(durationMs / 1000).toFixed(1)} s`);
+      return { ...loaded, repoRoot: args.repoRoot, digest, status: { ...loaded.status, durationMs, parses: 0, cacheHits: 0, mode: meta.mode, generation: kept.id, predictedMs: null, stages } };
+    }
+  }
+
+  // ---------- the mode ----------
+  const cached = store ? order.reduce((n, e) => n + Number(store.hasFacts(factsKey(e.lang, e.blob))), 0) : 0;
+  const predicted = predictMs(meta, { eligible, cached });
+  const decided = args.mode ? { mode: args.mode, streak: 0 } : decideMode(meta, predicted);
   stage("predict");
 
   // Retained: the same capture's index, when a complete one is kept.
@@ -306,7 +332,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
         // the record is lost; the next build decides again
       }
       args.onProgress?.(`Code graph: ${plural(loaded.status.filesParsed, "file")} from the retained index in ${(durationMs / 1000).toFixed(1)} s`);
-      return { ...loaded, repoRoot: args.repoRoot, status: { ...loaded.status, durationMs, parses: 0, cacheHits: 0, mode: "retained", generation: reused.id, predictedMs: predicted, stages } };
+      return { ...loaded, repoRoot: args.repoRoot, digest, status: { ...loaded.status, durationMs, parses: 0, cacheHits: 0, mode: "retained", generation: reused.id, predictedMs: predicted, stages } };
     }
   }
 
@@ -556,6 +582,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       projectOf,
       exportChanges: exportsDiff,
       frameworks,
+      digest,
       status: {
         status: skipped > 0 || removalUnchecked > 0 || resolved.budgetFiles.length > 0 || hidingGaps.length > 0 ? "partial" : "ok",
         reason: reasons[0] ?? null,
@@ -587,7 +614,13 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // a relation: its index is never loaded as if nothing were missing.
     const later = new Set<NotRead["reason"]>(["budget", "parse-cap", "memory", "slow-parse", "unreadable"]);
     const complete = !notRead.some((n) => later.has(n.reason)) && resolved.budgetFiles.length === 0 && hidingGaps.length === 0;
-    const withIndex = decided.mode === "retained" && complete;
+    // Under the five-second line too, a complete build of the work tree keeps
+    // its index, so the next question on the same tree loads it (the kept
+    // index above), but only when what it says is what any build of these
+    // files would say: no file changed while it was read, and no facts file
+    // was refused or left unsaved, whose reasons belong to this build alone.
+    const steady = changedDuringBuild === 0 && untrusted === 0 && changed === 0 && storageRefused === 0;
+    const withIndex = complete && (decided.mode === "retained" || (!args.mode && !args.base && steady));
     // A kept build of the same capture and configuration is the same graph:
     // it is named, and nothing new is written.
     const same = store && complete ? store.list().find((m) => m.capture.digest === digest && m.complete && (m.hasIndex || !withIndex)) : undefined;
