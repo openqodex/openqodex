@@ -51,8 +51,10 @@ import type { TreeVisitor } from "./walk.js";
 // 32: an interface member marked `?` is optional (DefFact.optional).
 // 33: an interface in `declare module "x"` or `declare global` augments a
 // type (DefFact.augments). 34: the object literals that may hold code
-// (FileFacts.literals).
-export const EXTRACTOR_VERSION = 34;
+// (FileFacts.literals). 37: a literal counts its computed keys that hold
+// code (LiteralFact.unread), and a value given members by assignment or
+// Object.assign is recorded as one (LiteralFact.by).
+export const EXTRACTOR_VERSION = 37;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -267,6 +269,7 @@ class Ctx {
   tables: TableFact[] = [];
   literals: LiteralFact[] = [];
   literalsCut = false;
+  assignedMembers = new Map<string, LiteralKeys & { line: number }>();
   imports: ImportFact[] = [];
   exportsLocal: { local: string; exported: string; line?: number }[] = [];
   defaultExport: string | null = null;
@@ -726,6 +729,7 @@ class Ctx {
     for (const c of this.calls) if (c.recv.kind === "type") bindType(c.recv.type);
     for (const v of values) if (v.recv.kind === "type") bindType(v.recv.type);
     for (const t of this.types) bindType(t.ref);
+    for (const [by, found] of this.assignedMembers) jsAddLiteral(this, found.line, found, by.startsWith("Object.assign@") ? "Object.assign" : by);
     return {
       lang: this.lang,
       defs: this.defs,
@@ -1017,33 +1021,62 @@ function jsMemberType(annotation: Node | null, params: Map<string, TypeRef | nul
 
 // The object literals a file records, and the member names one keeps.
 const MAX_LITERALS = 4096;
-const MAX_LITERAL_KEYS = 64;
+const MAX_LITERAL_KEYS = 1024;
 // A value that never holds code: a string, a number, a boolean, null, an array or an object.
 const DATA_VALUES = new Set(["string", "template_string", "number", "true", "false", "null", "undefined", "array", "object", "regex"]);
 // The members of an object literal that may hold code (a method, a
-// function, a name or any other expression), recorded when it has one.
-function jsLiteral(ctx: Ctx, node: Node): void {
-  const keys: string[] = [];
-  let spread = false;
+// function, a name or any other expression), into `into`: a spread may
+// bring other members, and a computed key that holds code (`[k]: fn`) is
+// a member whose name is not read.
+type LiteralKeys = { keys: Set<string>; open: boolean; unread: number };
+function jsLiteralKeys(node: Node, into: LiteralKeys): void {
   for (const c of node.namedChildren) {
-    if (c.type === "spread_element") spread = true;
-    else if (c.type === "shorthand_property_identifier") keys.push(c.text);
+    if (c.type === "spread_element") into.open = true;
+    else if (c.type === "shorthand_property_identifier") into.keys.add(c.text);
     else if (c.type === "method_definition" || c.type === "pair") {
       const key = c.childForFieldName(c.type === "pair" ? "key" : "name");
       const value = c.type === "pair" ? jsUnwrap(c.childForFieldName("value")) : null;
       if (c.type === "pair" && (!value || DATA_VALUES.has(value.type))) continue;
       const name = key?.type === "property_identifier" ? key.text : key?.type === "string" ? key.namedChildren.find((x) => x.type === "string_fragment")?.text : undefined;
-      if (name) keys.push(name);
+      if (name) into.keys.add(name);
+      else if (key?.type === "computed_property_name") into.unread++;
     }
   }
-  if (keys.length === 0) return;
+}
+// Records a value that may hold code under the names `found` gives it.
+// The keys past the cap are members whose names are not kept.
+function jsAddLiteral(ctx: Ctx, line: number, found: LiteralKeys, by?: string): void {
+  if (found.keys.size === 0 && found.unread === 0) return;
   if (ctx.literals.length >= MAX_LITERALS) {
     ctx.literalsCut = true;
     return;
   }
-  // A spread may bring any member, and so may the keys past the cap.
-  const open = spread || keys.length > MAX_LITERAL_KEYS;
-  ctx.literals.push({ line: node.startPosition.row + 1, keys: keys.slice(0, MAX_LITERAL_KEYS), ...(open ? { open: true } : {}) });
+  const keys = [...found.keys];
+  const unread = found.unread + Math.max(0, keys.length - MAX_LITERAL_KEYS);
+  ctx.literals.push({ line, keys: keys.slice(0, MAX_LITERAL_KEYS), ...(found.open ? { open: true } : {}), ...(unread > 0 ? { unread } : {}), ...(by !== undefined ? { by } : {}) });
+}
+function jsLiteral(ctx: Ctx, node: Node): void {
+  const found: LiteralKeys = { keys: new Set(), open: false, unread: 0 };
+  jsLiteralKeys(node, found);
+  jsAddLiteral(ctx, node.startPosition.row + 1, found);
+}
+// A value given members in place: `f.get = fn` and `Object.assign(f, { get })`
+// give `f` a member that may hold code, so `f` may fill an interface no
+// definition of the graph declares. The members are kept by the text of
+// the value (`f`, `deps.store`) for the whole file and recorded when the
+// walk ends. Any other target of Object.assign (`Object.assign({}, a, b)`)
+// is a value of its own; `this` is left out, as its members are the
+// class's fields.
+function jsAssignedMembers(ctx: Ctx, target: Node, line: number, objectAssign: boolean): LiteralKeys | null {
+  const t = jsUnwrap(target);
+  const by = t?.type === "identifier" || t?.type === "member_expression" ? t.text : t && t.type !== "this" && objectAssign ? `Object.assign@${t.startIndex}` : null;
+  if (by === null) return null;
+  let found = ctx.assignedMembers.get(by);
+  if (!found) {
+    found = { line, keys: new Set(), open: false, unread: 0 };
+    ctx.assignedMembers.set(by, found);
+  }
+  return found;
 }
 
 // An expression read for its value: `(x)`, `x!` and `x satisfies T` are x.
@@ -2034,6 +2067,17 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         else if (fn?.type === "subscript_expression") subscriptCall(fn);
         else jsCallee(ctx, fn);
         jsArgs(ctx, node.childForFieldName("arguments"), ctx.noteCall(node, before));
+        // `Object.assign(f, { get }, other)`: `f` takes the members of each
+        // source, and a source that is no object literal may bring others.
+        if (fn?.type === "member_expression" && fn.text === "Object.assign") {
+          const [target, ...sources] = node.childForFieldName("arguments")?.namedChildren ?? [];
+          const found = target ? jsAssignedMembers(ctx, target, node.startPosition.row + 1, true) : null;
+          if (found) for (const src of sources) {
+            const o = jsUnwrap(src);
+            if (o?.type === "object") jsLiteralKeys(o, found);
+            else found.open = true;
+          }
+        }
         return;
       }
       case "new_expression": {
@@ -2113,6 +2157,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // `handlers.b = g`, `handlers[k] = g`: what a table bound to the name holds changes.
         const target = left?.type === "member_expression" || left?.type === "subscript_expression" ? left.childForFieldName("object") : null;
         if (target?.type === "identifier") ctx.tableUse(target.text);
+        // `f.get = g`: `f` takes a member that may hold code.
+        const value = jsUnwrap(right);
+        const prop = left?.type === "member_expression" ? left.childForFieldName("property") : null;
+        if (target && prop?.type === "property_identifier" && value && !DATA_VALUES.has(value.type) && target.type !== "this") {
+          jsAssignedMembers(ctx, target, node.startPosition.row + 1, false)?.keys.add(prop.text);
+        }
         const cls = ctx.cls();
         if (type && cls && ctx.top.thisKnown !== false && left?.type === "member_expression" && left.childForFieldName("object")?.type === "this") {
           const prop = left.childForFieldName("property");

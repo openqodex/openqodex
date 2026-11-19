@@ -71,7 +71,9 @@ export const SHAPE_CAP = 20;
 // the classes that match it by shape (by-shape). 27: a TypeScript call on
 // what a package returned is external at any depth, unless the repository
 // subclasses, implements or augments a package's type with that method.
-export const RESOLVER_VERSION = 27;
+// 30: a value given members in place (`f.get = g`, Object.assign) and a
+// literal with a computed key keep an interface call's gap (LiteralFact).
+export const RESOLVER_VERSION = 30;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -2240,33 +2242,40 @@ export function createWorld(input: ResolveInput): World {
     shapeMemo.set(key, out);
     return out;
   };
-  // The object literals of the repository that may hold code, by each
-  // member name they write, and the files that hold more than are recorded.
-  let literalIndex: { byName: Map<string, { file: string; line: number; keys: Set<string>; open: boolean }[]>; cut: string[] } | null = null;
+  // The object literals and the values given members in place that may
+  // hold code, by each member name they write, then those with members
+  // whose names are not read (`unread`), and the files that hold more than
+  // are recorded.
+  type Literal = { file: string; line: number; keys: Set<string>; open: boolean; unread: number; by: string | undefined };
+  let literalIndex: { byName: Map<string, Literal[]>; unread: Literal[]; cut: string[] } | null = null;
   const literalsNamed = (name: string) => {
     if (literalIndex === null) {
-      const byName = new Map<string, { file: string; line: number; keys: Set<string>; open: boolean }[]>();
+      const byName = new Map<string, Literal[]>();
+      const unread: Literal[] = [];
       const cut: string[] = [];
       for (const [file, f] of facts) {
         if (f.literalsCut) cut.push(file);
         for (const l of f.literals ?? []) {
-          const entry = { file, line: l.line, keys: new Set(l.keys), open: l.open === true };
+          const entry = { file, line: l.line, keys: new Set(l.keys), open: l.open === true, unread: l.unread ?? 0, by: l.by };
           for (const k of entry.keys) push(byName, k, entry);
+          if (entry.unread > 0) unread.push(entry);
         }
       }
       cut.sort();
-      literalIndex = { byName, cut };
+      literalIndex = { byName, unread, cut };
     }
-    return { literals: literalIndex.byName.get(name) ?? [], cut: literalIndex.cut };
+    return { literals: [...(literalIndex.byName.get(name) ?? []), ...literalIndex.unread.filter((l) => !l.keys.has(name))], cut: literalIndex.cut };
   };
   // What a call of `name` through the interface may run in the classes
   // that match it by shape: each class, in path and line order, with the
   // methods its own lookup finds. `open` says why a value that is not
   // listed may answer the call too, so the call keeps its gap: a class that
   // has the member and extends a class outside the graph, which may give it
-  // the rest, or an object literal that has the member and every other
-  // method of the interface, or spreads another object into itself (it is
-  // no definition of the graph, so what it runs cannot be listed). Null
+  // the rest, or an object literal or a value given members in place
+  // (`f.get = g`, Object.assign) that has the member and every other
+  // method of the interface, spreads another object into itself, or has a
+  // computed key (it is no definition of the graph, so what it runs cannot
+  // be listed). Null
   // when the interface's members are not all known.
   type Shaped = { classes: { key: string; ids: string[] }[]; open: string | null };
   const shapeTargetMemo = new Map<string, Shaped | null>();
@@ -2294,10 +2303,16 @@ export function createWorld(input: ResolveInput): World {
       const below = declaredBelow(key);
       const outsideClass = typesNamed("js", name).find((k) => k !== key && classLike(k) && !below.has(k) && !listed.has(k) && outsideBase(k));
       const { literals, cut } = literalsNamed(name);
-      const literal = literals.find((l) => l.open || [...names].every((n) => l.keys.has(n)));
+      // A literal may fill the interface when it has the member called, or
+      // spreads, and its unread members may be the methods it lacks.
+      const literal = literals.find((l) => (l.open && l.keys.has(name)) || [...names].filter((n) => !l.keys.has(n)).length <= l.unread);
       let open: string | null = null;
       if (outsideClass !== undefined) open = `${shortKey(outsideClass)} has ${name} and extends a class outside the graph, which may give it the other methods of ${iface}, so it is not listed`;
-      else if (literal !== undefined) open = `the object literal at ${literal.file}:${literal.line} has ${name}${literal.open ? " and may have more members" : ` and every other method of ${iface}`}, so it may be a ${iface}; an object written in place is no definition of the graph, so what it runs is not listed`;
+      else if (literal !== undefined) {
+        const what = literal.by === undefined ? `the object literal at ${literal.file}:${literal.line}` : `\`${literal.by}\` at ${literal.file}:${literal.line}, given members in place,`;
+        const has = !literal.keys.has(name) ? `has a key the graph cannot read, which may be ${name}` : literal.open ? `has ${name} and may have more members` : `has ${name} and${literal.unread > 0 ? ", by name or by a key the graph cannot read," : ""} every other method of ${iface}`;
+        open = `${what} ${has}, so it may be a ${iface}; a value written in place is no definition of the graph, so what it runs is not listed`;
+      }
       else if (cut.length > 0) open = `${cut[0] as string} holds more object literals than the graph records, so one of them may be a ${iface}`;
       out = { classes: found, open };
     }

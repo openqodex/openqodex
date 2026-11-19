@@ -58,7 +58,7 @@ const BASELINE_PROD_RECALL = { found: 3948, of: 4021 };
 // once a call through a TypeScript interface also reaches the classes that
 // match it by shape: the 38 more are by-shape possible targets, raised on
 // purpose, and the unsupported-rule gaps on this repository fell from 974
-// to 719 with them.
+// to 728 with them.
 const MAX_PROD_BURDEN = 960;
 // (b) Owner's held-out sites: each must resolve, by the checker, to the named
 // declaration, and the graph must find it certain or likely.

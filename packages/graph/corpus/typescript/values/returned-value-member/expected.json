@@ -29,11 +29,12 @@
       "kind": "may_invoke"
     }
   ],
-  "noUnknown": [
+  "unknowns": [
     {
       "file": "src/run.ts",
       "line": 5,
-      "cause": "unsupported-rule"
+      "cause": "unsupported-rule",
+      "scope": "file"
     }
   ]
 }
