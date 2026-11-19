@@ -10,6 +10,9 @@
 // 5. The compact form changes the list a cursor pages (the kept items are
 //    the same objects), or drops what names a site: its file, line and tier.
 // 6. `context: 0` or no shape changes the answer at all.
+// 7. The short form (the MCP default) drops what names a site or the floor,
+//    keeps a row of `unknown.examples` that no item shows, or keeps one an
+//    item already shows at the same line; or its edge id does not explain.
 import { afterAll, describe, expect, it } from "vitest";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -115,6 +118,40 @@ describe("the compact form", () => {
     const a = query(s, { apiVersion: 1, kind: "callers", target: { name: "core" } });
     expect(JSON.stringify(await shapeAnswer(a, s, { repoRoot: root }))).toBe(JSON.stringify(a));
     expect(JSON.stringify(await shapeAnswer(a, s, { repoRoot: root, context: 0, compact: false }))).toBe(JSON.stringify(a));
+  });
+});
+
+describe("the short form", () => {
+  const dispatch = {
+    "i.ts": "export interface Runner {\n  run(): void;\n}\nexport class A implements Runner {\n  run() {}\n}\n",
+    "use.ts": 'import type { Runner } from "./i";\nexport function go(r: Runner) {\n  r.run();\n}\n',
+    "other.ts": "export function f(x: any) {\n  x.run();\n}\n",
+    "direct.ts": 'import { A } from "./i";\nexport function d() {\n  new A().run();\n}\n',
+  };
+
+  it("keeps sites, the floor and the examples no item shows, and gives an edge id explain takes (7)", async () => {
+    const root = makeRepo(dispatch);
+    const graph = await buildGraph({ repoRoot: root, store: null });
+    const s: Session = { graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false };
+    const a = query(s, { apiVersion: 1, kind: "callers", target: { name: "A.run" } });
+    const kept = JSON.stringify(a);
+    const sites = (a.items as Item[]).map((i) => `${i.site.file}:${i.site.line} ${i.site.tier}`).sort();
+    expect(sites).toEqual(["direct.ts:3 certain", "use.ts:3 possible"]);
+    const where = (rows: { file: string; line: number | null }[]) => rows.map((e) => `${e.file}:${e.line}`).sort();
+    expect(where(a.unknown.examples)).toEqual(["other.ts:2", "use.ts:3"]);
+    const short = await shapeAnswer(a, s, { repoRoot: root, short: true });
+    expect(JSON.stringify(a)).toBe(kept);
+    expect((short.items as Item[]).map((i) => `${i.site.file}:${i.site.line} ${i.site.tier}`).sort()).toEqual(sites);
+    for (const i of short.items as Record<string, unknown>[]) {
+      expect(i).not.toHaveProperty("to");
+      expect(i.edge).toMatch(/^e:[A-Za-z0-9_-]{12}$/);
+      const why = query(s, { apiVersion: 1, kind: "explain", target: { id: i.edge as string } });
+      expect(why.error).toBeNull();
+    }
+    // The row use.ts:3 shows is left out of the examples; the floor stays whole.
+    expect(where(short.unknown.examples)).toEqual(["other.ts:2"]);
+    expect({ ...short.unknown, examples: [] }).toEqual({ ...a.unknown, examples: [] });
+    expect(short.counts).toEqual(a.counts);
   });
 });
 

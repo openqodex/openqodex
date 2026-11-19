@@ -6,7 +6,7 @@
 # origin/main and prints what it picked and why. A change outside the
 # packages, a missing origin/main or an empty change runs every unit test;
 # --all runs every unit test whatever changed.
-# The three tiers: this one; the real programs (pnpm gate, every step,
+# The three tiers: this one; the real programs (pnpm gate --full, every step,
 # without the cases that call a real model); the real model (pnpm gate:model).
 set -euo pipefail
 cd "$(dirname "$0")/.."

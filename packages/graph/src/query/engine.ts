@@ -16,22 +16,23 @@
 // its cursor goes on from there (page.ts). `querySliced` gives the same
 // answer in slices with a turn of the event loop between them, so a
 // cancellation that arrives while the work runs is seen (the MCP server).
+import { langOf, unreadNote } from "../capture/inventory.js";
 import { floorReasons, toImpactUnknown } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
 import { CALLER_KINDS } from "../types.js";
 import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
-import type { Answer, Candidate, Extra, Job, Listing, Request, Session } from "./answer.js";
+import type { Answer, Candidate, Extra, FloorGroup, Job, Listing, Request, Session } from "./answer.js";
 import { frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
-import { edgeId, readEdgeId } from "./ids.js";
+import { edgeId, isShortEdgeId, longEdgeId, readEdgeId } from "./ids.js";
 import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, pagingNote, readCursor } from "./page.js";
 import { Overrides, dynamicBases, implementers, importCycles, impact, methodsNamed, outline, packages, path, references, relationsOf } from "./relations.js";
 import { budgetOf, definesEdge, holderOf, prepareTraversal, sortWithin, spent, Walk } from "./traverse.js";
 import type { Budget } from "./traverse.js";
 
 export { OPERATIONS, parseTarget, resolveTarget } from "./answer.js";
-export type { Answer, Candidate, ChangesExtra, ErrorCode, Extra, Operation, Request, Session, Target } from "./answer.js";
+export type { Answer, Candidate, ChangesExtra, ErrorCode, Extra, FloorGroup, Operation, Request, Session, Target } from "./answer.js";
 export type { Budget, Item } from "./traverse.js";
 export { budgetOf, checksBudget } from "./traverse.js";
 export { edgeId } from "./ids.js";
@@ -102,6 +103,10 @@ export function prepareIndexes(g: Graph): void {
   prepareTraversal(g);
 }
 
+// The score of a name that starts with the text searched; the exact name
+// scores 1 and the same name in another case 0.9.
+const PREFIX_SCORE = 0.7;
+
 function searchJob(s: Session, req: Request): Job | Answer {
   const g = s.graph;
   const text = (req.text ?? req.target?.name ?? "").trim();
@@ -127,15 +132,19 @@ function searchJob(s: Session, req: Request): Job | Answer {
         continue;
       }
       const q = qualified(n);
-      const score = n.name === text || q === text ? 1 : n.name.toLowerCase() === lower ? 0.9 : n.name.toLowerCase().startsWith(lower) ? 0.7 : n.name.toLowerCase().includes(lower) ? 0.5 : 0;
+      const score = n.name === text || q === text ? 1 : n.name.toLowerCase() === lower ? 0.9 : n.name.toLowerCase().startsWith(lower) ? PREFIX_SCORE : n.name.toLowerCase().includes(lower) ? 0.5 : 0;
       if (score > 0) scored.push(candidate(g, n, score));
     }
     if (!sortWithin(scored, (a, b) => b.score - a.score || a.file.localeCompare(b.file) || a.line - b.line || a.id.localeCompare(b.id), budget)) return stoppedAt(base, [], [], null, "leads");
-    // Search results are leads: never counted as callers or anything else.
-    // One definition with exactly the name searched is also named as the
+    // A definition named exactly as searched, or whose name starts with it,
+    // is an item: likely for the exact name (a name match alone is never
+    // certain), possible for the rest (another case, a prefix). A name that only holds the text and a file path hit
+    // are leads. Neither is counted as callers or anything else. One
+    // definition with exactly the name searched is also named as the
     // target; a prefix match, a file path hit or two exact names never is.
     const exact = scored.filter((c) => c.score === 1);
-    return listing(exact.length === 1 ? { ...base, target: exact[0] as Candidate } : base, scored, { into: "leads" });
+    const hits = scored.map((c) => (c.score >= PREFIX_SCORE ? { ...c, tier: c.score === 1 ? "likely" : "possible" } : c));
+    return listing(exact.length === 1 ? { ...base, target: exact[0] as Candidate } : base, hits, { into: "items", lead: (c) => (c as Candidate).score < PREFIX_SCORE });
   };
 }
 
@@ -167,7 +176,9 @@ function unknownsJob(s: Session, req: Request): Job {
 
 function explainJob(s: Session, req: Request): Job | Answer {
   const g = s.graph;
-  const id = req.target?.id ?? "";
+  const asked = req.target?.id ?? "";
+  const id = isShortEdgeId(asked) ? longEdgeId(g, asked) : asked;
+  if (id === null) return fail(s, "explain", "not-found", `this build gave no edge ${asked}; ask the question again for its short id, or with full for the long one`);
   const parsed = readEdgeId(id);
   if (!parsed) return fail(s, "explain", "bad-request", "explain takes an edge id as the items of an answer print it");
   const { kind, from, to, file, line, column } = parsed;
@@ -403,8 +414,56 @@ function bound(req: Request, extra: { scope?: string }): Request {
 export function query(s: Session, asked: Request, extra: Extra = {}): Answer {
   const req = bound(asked, extra);
   const st = start(s, req, extra);
-  if (isAnswer(st)) return st;
-  return settle(s, req, st.job, st.job(st.budget), st.offset);
+  if (isAnswer(st)) return finish(s, st);
+  return finish(s, settle(s, req, st.job, st.job(st.budget), st.offset));
+}
+
+// The answers whose list code in a language the build does not read can
+// leave short: a call, a use, a test or a route may be in it.
+const UNREAD_KINDS: ReadonlySet<string> = new Set(["callers", "callees", "search", "impact", "references", "implementers", "path", "routes", "tests"]);
+// Languages whose code calls one another by name in one process: Kotlin
+// and Scala call Java methods, and Java calls theirs. Any other unread
+// language reaches a read one only through a binding layer (a native
+// module, WebAssembly, a foreign function interface) that no build reads,
+// the same as a call from another repository.
+const RUNTIME: Record<string, string> = { java: "jvm", kotlin: "jvm", scala: "jvm" };
+const runtimeOf = (language: string | null): string => (language === null ? "" : (RUNTIME[language] ?? language));
+
+// The unread languages that can make this answer's list short. About one
+// or two symbols: the languages that can call theirs. A name or a file
+// the graph does not hold (any question but `explain`, whose edge ids
+// are the graph's own), a search or a whole listing: every one, the code
+// asked about may be there.
+function unreadFor(s: Session, a: Answer): { language: string; files: number }[] {
+  const unread = s.graph.status.unreadLanguages ?? [];
+  if (unread.length === 0) return [];
+  if (a.error?.code === "not-found") return a.kind === "explain" ? [] : unread;
+  if (a.error !== null || !UNREAD_KINDS.has(a.kind)) return [];
+  const ends = a.error === null && a.kind !== "search" && a.target !== null ? (Array.isArray(a.target) ? a.target : [a.target]) : [];
+  if (ends.length === 0) return unread;
+  const runtimes = new Set(ends.map((c) => runtimeOf(langOf(c.file))));
+  return unread.filter((u) => runtimes.has(runtimeOf(u.language)));
+}
+
+const exampleLine = (e: Answer["unknown"]["examples"][number]): string => `${e.file}${e.line !== null ? `:${e.line}` : ""}: ${e.note ?? e.name ?? e.cause}`;
+
+// Every answer as it leaves the engine: the unread languages that can make
+// it short, its gaps grouped by cause (kept when a question grouped its
+// own), and whether its list is complete.
+function finish(s: Session, a: Answer): Answer {
+  const langs = unreadFor(s, a);
+  let unknown = a.unknown;
+  const files = langs.reduce((k, u) => k + u.files, 0);
+  if (langs.length > 0) {
+    const notes = langs.map(unreadNote).filter((r) => !unknown.reasons.includes(r));
+    unknown = { ...unknown, floor: true, reasons: [...unknown.reasons, ...notes], causes: { ...unknown.causes, "language-not-read": files } };
+  }
+  const groups: FloorGroup[] = unknown.groups
+    ? [...unknown.groups]
+    : Object.entries(unknown.causes).map(([cause, count]) => ({ cause, count, examples: unknown.examples.filter((e) => e.cause === cause).slice(0, 2).map(exampleLine) }));
+  const at = groups.findIndex((g) => g.cause === "language-not-read");
+  if (langs.length > 0) groups.splice(at < 0 ? groups.length : at, at < 0 ? 0 : 1, { cause: "language-not-read", count: files, examples: langs.slice(0, 2).map(unreadNote) });
+  return { ...a, unknown: { ...unknown, groups }, listIncomplete: unknown.floor };
 }
 
 // Budget checks in one slice of a question's work.
@@ -418,12 +477,12 @@ export const SLICE_CHECKS = 2048;
 export async function querySliced(s: Session, asked: Request, extra: Omit<Extra, "budget"> = {}, slice = SLICE_CHECKS): Promise<Answer> {
   const req = bound(asked, extra);
   const st = start(s, req, extra);
-  if (isAnswer(st)) return st;
+  if (isAnswer(st)) return finish(s, st);
   const { job, budget, offset } = st;
   for (;;) {
     const part: Budget = { deadline: budget.deadline, signal: budget.signal, stopped: false, checks: 0, limit: slice };
     const out = job(part);
-    if (isAnswer(out) || !out.stopped || spent(budget)) return settle(s, req, job, out, offset);
+    if (isAnswer(out) || !out.stopped || spent(budget)) return finish(s, settle(s, req, job, out, offset));
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 }

@@ -52,6 +52,10 @@ export type TypeRef = {
   // (`span("x", (s) => ...)` with `span(name, fn: (s: Span) => T)`).
   callback?: { arg: number; param: number };
   declared?: boolean;
+  // A TypeScript local given a member without an annotation: the member's
+  // type, so the value may be of any class below it, as a field's is; unlike
+  // `declared`, an assignment to the local ends it.
+  member?: boolean;
   bound?: BoundImport;
   rel?: "implements" | "include" | "prepend" | "extend";
   args?: TypeRef[]; // Java and TypeScript type arguments, in declaration order.
@@ -392,6 +396,9 @@ export type Graph = {
   projectOf(file: string): string;
   exportChanges: ImpactExportChange[]; // set when the build compared a base; every consumer, never cut
   status: GraphStatus;
+  // The graph input digest of what the build read (build.ts, captureDigest):
+  // set by a build of a work tree, absent on a graph read back from a kept build.
+  digest?: string;
   // What the framework plugins found (frameworks/stage.ts); absent when the
   // framework stage did not run. Read through frameworks/layer.ts.
   frameworks?: FrameworkData;

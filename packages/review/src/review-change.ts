@@ -946,8 +946,11 @@ function refuseUnsupported(input: ReviewChangeInput, reviewer: Reviewer, options
   }
 }
 
-// The most the owners' instructions may hold, as on the laptop.
-const INSTRUCTIONS_MAX_BYTES = 32 * 1024;
+// The most the owners' instructions a host gives may hold. The laptop's
+// instructions file stays at 32 KB; a host keeps longer notes. Every finder
+// brief still holds to MAX_BRIEF_BYTES (units.ts): long instructions leave
+// less of it for the diff, and a part that cannot fit is named as unread.
+const INSTRUCTIONS_MAX_BYTES = 128 * 1024;
 
 // The second reviewer obeys the primary's rules: a model, in this profile.
 function refuseSecond(second: Reviewer | undefined): void {

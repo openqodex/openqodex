@@ -8,7 +8,7 @@ import type { Node } from "web-tree-sitter";
 import type { FactReader, FrameworkFactBase } from "../plugin.js";
 import { keptText } from "../shared/kept.js";
 import { identifierName, MAX_SOURCE_BYTES, pos, readExpr, scopedVisitor, stringValue } from "../express/js.js";
-import { readAlone } from "../../walk.js";
+import { hasError, readAlone } from "../../walk.js";
 
 export type NextFact =
   // A directive of the file's prologue.
@@ -42,7 +42,7 @@ function prologue(list: Node | null): { value: string; node: Node }[] {
   // Sibling by sibling, so a long body is not listed to find its first statement.
   for (let s = list.firstNamedChild; s; s = s.nextNamedSibling) {
     if (s.type === "comment") continue;
-    if (s.type !== "expression_statement" || s.hasError) break;
+    if (s.type !== "expression_statement" || hasError(s)) break;
     const v = stringValue(s.firstNamedChild);
     if (v === null || s.firstNamedChild?.type !== "string") break;
     out.push({ value: v, node: s });
@@ -71,7 +71,7 @@ export function reader(root: Node): FactReader<NextFact> {
         case "function_expression":
         case "function": {
           const body = node.childForFieldName("body");
-          if (body?.type !== "statement_block" || node.hasError) return;
+          if (body?.type !== "statement_block" || hasError(node)) return;
           if (!prologue(body).some((d) => d.value === "use server")) return;
           let name: string | null = null;
           const own = node.childForFieldName("name");
@@ -85,7 +85,7 @@ export function reader(root: Node): FactReader<NextFact> {
         }
         case "variable_declarator": {
           const n = node.childForFieldName("name");
-          if (n?.type !== "identifier" || identifierName(n.text) !== "config" || node.hasError) return;
+          if (n?.type !== "identifier" || identifierName(n.text) !== "config" || hasError(node)) return;
           if (upType(2) !== "export_statement") return;
           const value = readExpr(node.childForFieldName("value"));
           if (value.t !== "object") return;

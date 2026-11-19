@@ -48,8 +48,21 @@ import type { TreeVisitor } from "./walk.js";
 // 31: Pick and Omit keep only the members they keep (TypeRef.only, omit), a
 // built-in generic the file declares or imports is the file's own type, and
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
-// 32: a route handler written in place (`app.get("/x", (c) => ...)`, a gin
-// `r.GET("/x", func(c *gin.Context) {...})`) is a definition of its own.
+// 32: a Python field assigned a local takes the local's type (a
+// parameter's annotation), and a field assigned two different types keeps
+// none.
+// 35: a local declared from a member (`const repo = this.deps.repo`) takes
+// that member's type as one that may be any class below it (TypeRef.member);
+// it and an unannotated destructured name are not declared, so assigned
+// again they lose the type; a function type alias whose result cannot be
+// read keeps a null result.
+// 36: a type named in an interface property, a type alias, a type argument
+// of a call, a `new`, an instantiation or a base, or the constraint or
+// default of a type parameter is a type use; a mapped type's key and an
+// `infer` name are not.
+// 38: a route handler written in place (`app.get("/x", (c) => ...)`, a gin
+// `r.GET("/x", func(c *gin.Context) {...})`) is a definition of its own,
+// with the definition it is written in (DefFact.inlineIn).
 export const EXTRACTOR_VERSION = 38;
 
 type Frame = {
@@ -328,6 +341,10 @@ class Ctx {
   // The class whose instance field initializer the walk is in, -1 for none:
   // a call there runs on the instance, though its caller is the class.
   instanceInit = -1;
+  // Python fields by class definition and name: those an annotation
+  // declared, and those given two different types, which keep none.
+  private declaredFields = new Set<string>();
+  private mixedFields = new Set<string>();
 
   constructor(readonly lang: Lang) {
     const root = { def: -1, cls: null, locals: new Map(), parent: null, depth: 0, caller: -1, clsScope: null, inFunction: false } as unknown as Scope;
@@ -401,6 +418,27 @@ class Ctx {
     const at = block ? this.top.decl : this.top.fnDecl;
     at.imports?.delete(name);
     at.locals?.set(name, type);
+  }
+
+  // A Python field assigned a type. A declared type stands. Otherwise the
+  // field keeps a type only while every assignment of a known type gives
+  // the same one, since either value may reach a later call.
+  setField(def: number, name: string, type: TypeRef | null, declared: boolean): void {
+    const d = this.defs[def];
+    const key = `${def}\0${name}`;
+    if (!d || !type || this.declaredFields.has(key)) return;
+    if (declared) {
+      this.declaredFields.add(key);
+      this.mixedFields.delete(key);
+      d.fields[name] = type;
+      return;
+    }
+    if (this.mixedFields.has(key)) return;
+    const old = d.fields[name];
+    if (old && !(sameType(old, type) && sameRead(old, type))) {
+      delete d.fields[name];
+      this.mixedFields.add(key);
+    } else if (!old) d.fields[name] = type;
   }
 
   // An import. At the top of the module its names are the file's; made
@@ -797,6 +835,7 @@ const JS_TYPES = new Set([
   "array",
   "as_expression",
   "satisfies_expression",
+  "instantiation_expression",
   "binary_expression",
   "jsx_expression",
   "arrow_function",
@@ -843,10 +882,18 @@ function jsTypeParams(node: Node): Map<string, TypeRef | null> | null {
 }
 
 // Every named type in an annotation (`Map<string, Repo[]>` names Repo);
-// type parameters and predefined types are not.
+// type parameters and predefined types are not, nor a name the annotation
+// binds itself: a mapped type's key (`[K in keyof T]`) or an `infer X`,
+// local to the whole annotation.
 function jsTypeNames(node: Node | null): TypeRef[] {
   const out: TypeRef[] = [];
+  const bound = new Set<string>();
   typeNodes(node, (n) => {
+    if (n.type === "mapped_type_clause" || n.type === "infer_type") {
+      const name = n.type === "mapped_type_clause" ? n.childForFieldName("name") : n.firstNamedChild;
+      if (name?.type === "type_identifier") bound.add(name.text);
+      return false;
+    }
     if (n.type === "type_identifier") {
       if (typeParam(n.text) === undefined) out.push(typeRef({ name: n.text, qualifier: null, ...pos(n) }));
       return true;
@@ -859,6 +906,27 @@ function jsTypeNames(node: Node | null): TypeRef[] {
     }
     return false;
   });
+  return bound.size === 0 ? out : out.filter((t) => t.qualifier !== null || !bound.has(t.name));
+}
+
+// The named types in the type arguments a base is written with
+// (`extends Holder<Repo>`, `implements Store<Row>`, `extends Base<Repo>`):
+// each a use of that type by the declaration.
+function jsBaseArgNames(node: Node): TypeRef[] {
+  if (node.type !== "generic_type" && node.type !== "extends_clause") return [];
+  return jsTypeNames(node.childForFieldName("type_arguments"));
+}
+
+// The named types in the constraints and defaults of the type parameters a
+// declaration lists (`<T extends Repo = Repo>`): each a use of that type.
+// Read while the declaration's own type parameters are entering, so one
+// parameter named in another's constraint is no type of the repository.
+function jsTypeParamNames(node: Node): TypeRef[] {
+  const out: TypeRef[] = [];
+  for (const tp of node.childForFieldName("type_parameters")?.namedChildren ?? []) {
+    if (tp.type !== "type_parameter") continue;
+    out.push(...jsTypeNames(tp.childForFieldName("constraint")), ...jsTypeNames(tp.childForFieldName("value")));
+  }
   return out;
 }
 
@@ -1616,6 +1684,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     const typeParams = jsTypeParams(node);
     enteringTypeParams = typeParams;
     jsSignature(ctx, node, def, locals);
+    for (const t of jsTypeParamNames(node)) ctx.addTypeUse(t, def >= 0 ? def : ctx.caller());
     enteringTypeParams = null;
     const untyped = jsUntypedParams(node);
     const first = untyped[0];
@@ -1783,15 +1852,18 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const dynamicBases: { line: number; column: number }[] = [];
         const typeParams = jsTypeParams(node);
         enteringTypeParams = typeParams;
+        const argUses: TypeRef[] = jsTypeParamNames(node);
         const heritage = node.namedChildren.find((c) => c.type === "class_heritage");
         for (const h of heritage?.namedChildren ?? []) {
           if (h.type === "implements_clause") {
             for (const t of h.namedChildren) {
               const ref = jsTypeRef(t);
               if (ref) implemented.push({ ...ref, rel: "implements" });
+              argUses.push(...jsBaseArgNames(t));
             }
             continue;
           }
+          argUses.push(...jsBaseArgNames(h));
           // TypeScript wraps the base in extends_clause; JavaScript does not.
           const value = h.type === "extends_clause" ? h.childForFieldName("value") : h;
           const ref = value ? jsTypeRef(value) : null;
@@ -1803,6 +1875,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // The superclass first: a member is looked up there before an interface.
         bases.push(...implemented);
         const def = ctx.addDef(node, name, "class", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node) && !isDefaultExport(node), bases, ...(dynamicBases.length > 0 ? { dynamicBases } : {}) });
+        for (const t of argUses) ctx.addTypeUse(t, def);
         const leave = ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
         (ctx.defs[def] as DefFact).fields = jsFields(node, typeParams ?? undefined);
         return leave;
@@ -1881,7 +1954,8 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           // `const { session } = params`: each name has the type of its member.
           const annotation = name.type === "object_pattern" ? declared(jsTypeRef(node.childForFieldName("type"))) : null;
           const from = name.type === "object_pattern" ? (annotation ?? jsValueType(ctx, value)) : null;
-          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, type, block);
+          // Unannotated, the names hold a member's type but are not declared: one assigned again loses its type.
+          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, annotation ? type : { ...type, declared: false, member: true }, block);
           return;
         }
         const isFn = value && ["arrow_function", "function_expression", "function", "generator_function"].includes(value.type);
@@ -1925,7 +1999,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           ctx.declareFn(name.text, def, block);
           return ctx.push({ def, cls: null, locals: null, fnAt: (value as Node).startIndex });
         }
-        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value), block);
+        // `const repo = this.deps.repo`: the local has the member's type, as
+        // `const { repo } = this.deps` gives it: a member's type (any class
+        // below it), never declared, so a local assigned again loses it.
+        const member = jsUnwrap(value)?.type === "member_expression" ? jsValueType(ctx, value) : null;
+        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value) ?? (member ? { ...member, declared: false, member: true } : null), block);
         return;
       }
       case "statement_block":
@@ -1943,13 +2021,16 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const typeParams = jsTypeParams(node);
         enteringTypeParams = typeParams;
         const bases: TypeRef[] = [];
+        const argUses: TypeRef[] = jsTypeParamNames(node);
         const ext = node.namedChildren.find((c) => c.type === "extends_type_clause");
         for (const t of ext?.namedChildren ?? []) {
           const ref = jsTypeRef(t);
           if (ref) bases.push(ref);
+          argUses.push(...jsBaseArgNames(t));
         }
         enteringTypeParams = null;
         const def = ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), bases, iface: true });
+        for (const t of argUses) ctx.addTypeUse(t, def);
         return ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
       }
       case "method_signature":
@@ -1965,6 +2046,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const fnType = node.type === "property_signature" ? node.childForFieldName("type")?.firstNamedChild : node;
         // An interface property whose type is not a function is a field, as a class's is.
         if (node.type === "property_signature" && where === "interface_body" && fnType?.type !== "function_type") {
+          for (const t of jsTypeNames(node.childForFieldName("type"))) ctx.addTypeUse(t, cls.def);
           const type = jsMemberType(node.childForFieldName("type"), cls.typeParams);
           if (type) (ctx.defs[cls.def] as DefFact).fields[name.text] = type;
           // Typed by a name, it may be a function type declared elsewhere
@@ -1996,10 +2078,17 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // parameter is marked, to take the argument a use of the alias gives.
         const own = value?.type === "object_type" && typeParams && alias?.fields ? jsObjectTypeFields(value, typeParams) : null;
         if (alias && own) alias = { ...alias, fields: own };
-        // A function type (`type ResolveFn = (t: string) => Store`): what a call of a value of it returns.
-        const result = value?.type === "function_type" ? declared(jsTypeRef(value.childForFieldName("return_type"))) : null;
+        // A function type (`type ResolveFn = (t: string) => Store`): what a call of a value of it returns,
+        // null when the result cannot be read; a function type either way.
+        const result = value?.type === "function_type" ? declared(jsTypeRef(value.childForFieldName("return_type"))) : undefined;
+        // Every type the alias names, in a union, an intersection or an
+        // object type of members, is a use of that type by the alias.
+        const uses = [...jsTypeParamNames(node), ...jsTypeNames(value)];
         enteringTypeParams = null;
-        if (name) ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}), ...(result ? { results: [result] } : {}) });
+        if (name) {
+          const def = ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}), ...(result !== undefined ? { results: [result] } : {}) });
+          for (const t of uses) ctx.addTypeUse(t, def);
+        }
         return false;
       }
       case "arrow_function":
@@ -2034,11 +2123,14 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         else if (fn?.type === "subscript_expression") subscriptCall(fn);
         else jsCallee(ctx, fn);
         jsArgs(ctx, node.childForFieldName("arguments"), ctx.noteCall(node, before));
+        // `pick<Repo>(xs)`: each type argument is a use of that type.
+        for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
         return;
       }
       case "new_expression": {
         jsCallee(ctx, node.childForFieldName("constructor"));
         jsArgs(ctx, node.childForFieldName("arguments"), undefined);
+        for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
         return;
       }
       case "return_statement":
@@ -2069,6 +2161,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "as_expression":
       case "satisfies_expression":
         for (const t of jsTypeNames(node.namedChildren[1] ?? null)) ctx.addTypeUse(t, ctx.caller());
+        return;
+      case "instantiation_expression":
+        // `make<Repo>` used as a value, or `sql<Row>` before a template the
+        // grammar reads this way: each type argument is a use of that type.
+        for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
         return;
       case "binary_expression": {
         if (node.childForFieldName("operator")?.type !== "instanceof") return;
@@ -2427,9 +2524,8 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           if (right?.type === "dictionary") ctx.pendingTables.set(right.startIndex, { name: left.text, line: node.startPosition.row + 1, scope: ctx.top.fnDecl });
         }
         if (left?.type === "identifier") {
-          if (inClassBody) {
-            if (type) (ctx.defs[inner.def] as DefFact).fields[left.text] = type;
-          } else if (annotation) ctx.setLocal(left.text, annotation);
+          if (inClassBody) ctx.setField(inner.def, left.text, type, annotation !== null);
+          else if (annotation) ctx.setLocal(left.text, annotation);
           else ctx.assign(left.text, type, true);
         } else if (left?.type === "pattern_list" || left?.type === "tuple_pattern" || left?.type === "list_pattern") {
           // `a, b = pair`: each name is assigned a value whose type is not known.
@@ -2441,7 +2537,10 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
         if (left?.type === "attribute" && left.childForFieldName("object")?.text === "self") {
           const attr = left.childForFieldName("attribute");
           const cls = ctx.cls();
-          if (attr && cls && type) (ctx.defs[cls.def] as DefFact).fields[attr.text] = type;
+          // `self.store = store`: the field takes the local's type, a
+          // parameter's annotation among them.
+          const value = type ?? (right?.type === "identifier" ? (ctx.local(right.text) ?? null) : null);
+          if (attr && cls) ctx.setField(cls.def, attr.text, value, annotation !== null);
         }
         return;
       }

@@ -18,7 +18,7 @@ import { eitherPathText, eitherSegmentText, keepParts, ledForm } from "../shared
 import type { Expr } from "./js.js";
 import type { ScopedVisit } from "./js.js";
 import { exported, FN_TYPES, identifierName, isExpr, MAX_ITEMS, MAX_SOURCE_BYTES, namePath, paramCount, patternNames, pos, readExpr, scopedVisitor, stringValue } from "./js.js";
-import { readAlone } from "../../walk.js";
+import { hasError, readAlone } from "../../walk.js";
 
 // The member calls watched: the routing methods of an application and a
 // router, `use`, `route`, `listen`, and the requests of a test agent.
@@ -211,7 +211,7 @@ export function reader(root: Node): FactReader<ExpressFact> {
         return;
       case "call_expression": {
         // A call the parser had to repair (a missing parenthesis) is no fact.
-        if (node.hasError) return;
+        if (hasError(node)) return;
         const fn = node.childForFieldName("function");
         // The arguments, read only for a call the reader keeps a fact of.
         let list: Node[] | null = null;
@@ -243,7 +243,7 @@ export function reader(root: Node): FactReader<ExpressFact> {
         declare(scope, declared);
         const id = name?.type === "identifier" ? identifierName(name.text) : null;
         const required = name?.type === "object_pattern" && value?.type === "call_expression" && value.childForFieldName("function")?.text === "require";
-        if ((id === null && !required) || !value || node.hasError) return;
+        if ((id === null && !required) || !value || hasError(node)) return;
         const holder = up(1);
         const decl = holder?.type === "variable_declaration" ? "var" : holder?.childForFieldName("kind")?.text === "let" ? "let" : "const";
         const top = scope === 0 && upType(2) !== "for_statement";
@@ -265,7 +265,7 @@ export function reader(root: Node): FactReader<ExpressFact> {
       case "assignment_expression": {
         const left = node.childForFieldName("left");
         const right = node.childForFieldName("right");
-        if (!left || !right || node.hasError) return;
+        if (!left || !right || hasError(node)) return;
         const path = namePath(left);
         if (!path) return;
         if (path[0] === "module" && path[1] === "exports") {

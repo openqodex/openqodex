@@ -8,8 +8,9 @@
 //     vendored folders (target, node_modules) inflate the count.
 //  4. The count goes stale: a .rs file added after a build leaves the kept
 //     build looking current, so the count never changes.
-//  5. The count leaks into the answers' reasons (a floor on every answer)
-//     or into the review packet's build block.
+//  5. The count leaks into the build's status, the review packet's build
+//     block, or the answers about a TypeScript symbol, which Rust code
+//     cannot call by name (floors.test.ts owns the answers it does reach).
 //  6. A link, or a path git or the caller lists that is gone from disk, is
 //     counted as a file: only regular files are.
 import { rmSync, symlinkSync } from "node:fs";

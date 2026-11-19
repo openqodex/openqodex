@@ -11,7 +11,7 @@
 // answered (not found, a capability this build lacks, a bad request) or
 // the build failed.
 import { display, findRepoRoot, loadConfig, OpenQodexError } from "@openqodex/core";
-import { laterEdits, openStore, OPERATIONS, parseTarget, pinGeneration, pinWorkTree, query, shapeAnswer } from "@openqodex/graph";
+import { laterEdits, openStore, OPERATIONS, parseTarget, pinGeneration, pinWorkTree, query, shapeAnswer, unreadNote } from "@openqodex/graph";
 import { openqodexHome } from "@openqodex/scanners";
 import type { Answer, GraphStore, Item, Operation, Pinned, Request, Shaped } from "@openqodex/graph";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
@@ -83,13 +83,6 @@ function itemLine(i: Item, op: Operation): string {
 }
 
 // One fact per line: sites as file:line, tiers spelled out.
-const LANGUAGE_NAMES: Record<string, string> = { rust: "Rust", c: "C", "c++": "C++", "c#": "C#", kotlin: "Kotlin", swift: "Swift", php: "PHP", scala: "Scala" };
-
-// "412 Rust files not read: Rust is not supported by this build"
-function unreadLine(u: { language: string; files: number }): string {
-  const name = LANGUAGE_NAMES[u.language] ?? u.language;
-  return `${u.files} ${name} ${u.files === 1 ? "file" : "files"} not read: ${name} is not supported by this build`;
-}
 
 function printText(a: Shaped, op: Operation): void {
   if (a.warning) line(`warning: ${a.warning}`);
@@ -107,9 +100,10 @@ function printText(a: Shaped, op: Operation): void {
     else if (i.site && i.edge) line(itemLine(i, op));
     else if (Array.isArray(i.hops)) line(`${String(i.type)}: ${(i.hops as Item[]).map((h) => `${siteLine(h)} ${h.fromName ?? h.from} ${VERB[h.kind] ?? h.kind} ${h.toName ?? h.to} (${h.site.tier})`).join(" < ")}`);
     else if (op === "cycles" && Array.isArray(i.members)) line(`cycle of ${String(i.size)}: ${(i.members as string[]).join(", ")}`);
+    else if (op === "search") line(`match ${String(i.file)}:${String(i.line)} ${String(i.kind)} ${String(i.name)}, ${String(i.tier)} (${String(i.id)})`);
     else if (op === "outline") line(`${String(i.file)}:${String(i.line)} ${String(i.kind)} ${String(i.qualified)}${i.exported ? ", exported" : ""}, ${String(i.callerSites)} call sites in, ${String(i.calleeSites)} out`);
     else line(JSON.stringify(raw));
-    if (op === "status" || op === "capabilities") for (const u of (i.unreadLanguages ?? []) as { language: string; files: number }[]) line(unreadLine(u));
+    if (op === "status" || op === "capabilities") for (const u of (i.unreadLanguages ?? []) as { language: string; files: number }[]) line(unreadNote(u));
   });
   for (const c of a.context?.snippets ?? []) {
     line(`lines around ${c.file}:${c.line}${c.from === null ? ": not readable" : c.changedSince ? ", as this build read them; the file changed since" : ""}`);
@@ -119,7 +113,8 @@ function printText(a: Shaped, op: Operation): void {
       out(`  ${c.start + k}| ${lead.replace(/\t/g, "    ")}${display(l.slice(lead.length))}`);
     });
   }
-  if (a.counts.certain !== null) line(`counts: ${a.counts.certain} certain, ${a.counts.likely} likely, ${a.counts.possible} possible`);
+  // On a floor each certain row is certain, but rows may be missing.
+  if (a.counts.certain !== null) line(`counts: ${a.counts.certain} certain${a.unknown.floor ? " (list incomplete)" : ""}, ${a.counts.likely} likely, ${a.counts.possible} possible`);
   const tr = a.truncated;
   if (tr.by === "limit" || (tr.by === "budget" && tr.cursor)) line(tr.note ?? `truncated by ${tr.by}: ${tr.omitted ?? "an unknown number of"} more; --cursor ${tr.cursor}`);
   else if (tr.by === "budget") line(`stopped at the time budget: what lies past ${tr.frontierTotal ?? "the"} unexpanded ${tr.frontierTotal === 1 ? "point" : "points"} is not counted; ask again with a larger --budget-ms`);
@@ -198,7 +193,7 @@ export async function run(args: string[]): Promise<number> {
       else {
         line(`Built ${s.filesParsed} of ${s.eligibleFiles} files in ${(s.durationMs / 1000).toFixed(1)} s: ${s.parses} parsed, ${s.cacheHits} from cache, mode ${s.mode} (predicted ${s.predictedMs ?? "?"} ms).`);
         line(`build ${s.generation ?? "not saved"}, ${s.status}${s.reasons.length > 0 ? `: ${s.reasons.join("; ")}` : ""}`);
-        for (const u of s.unreadLanguages ?? []) line(unreadLine(u));
+        for (const u of s.unreadLanguages ?? []) line(unreadNote(u));
       }
       return s.generation === null && store !== null ? EXIT_TOOL_FAILED : EXIT_OK;
     }
