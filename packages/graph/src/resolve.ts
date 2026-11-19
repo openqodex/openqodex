@@ -63,12 +63,12 @@ export const DISPATCH_CAP = 32;
 // function type the called definition declares (TypeRef.callback).
 // 22: a member of a generic alias of an object type takes the argument
 // its use gives. 24: a member a Pick or an Omit leaves out is no member of
-// the type. 25: a method called on a local copied from a property typed by
-// a name that is no function type binds on the local's type, never as a
-// value alias of the property. 26: a local given a member (TypeRef.member)
-// dispatches as a field does, and a copy of a property whose named type the
-// graph cannot read keeps its may_invoke edge beside the call's own binding.
-export const RESOLVER_VERSION = 26;
+// the type. 28: a method called on a local copied from a property typed by
+// a class, an interface or an object type binds on the local's type, never
+// as a value alias of the property; one whose named type the graph cannot
+// read keeps its may_invoke edge beside the call's own binding; a local
+// given a member (TypeRef.member) dispatches as a field does.
+export const RESOLVER_VERSION = 28;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
