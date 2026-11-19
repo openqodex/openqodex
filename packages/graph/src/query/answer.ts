@@ -60,6 +60,12 @@ export type Request = {
 
 export type Candidate = { id: string; name: string; kind: string; file: string; line: number; project: string; score: number };
 
+// The gaps of one cause. `count`: the answer's `causes` value for it, null
+// when it cannot be counted. `places`: how many places (a file, a call)
+// hold gaps of the cause, where the question knows them one by one; a
+// place may stand for several (a file with three regions it could not read).
+export type FloorGroup = { cause: string; count: number | null; places?: number; examples: string[] };
+
 export type ErrorCode = "ambiguous" | "not-found" | "bad-request" | "generation-unavailable" | "unsupported" | "refused";
 
 export type Answer = {
@@ -70,8 +76,13 @@ export type Answer = {
   items: unknown[];
   counts: { certain: number | null; likely: number | null; possible: number | null };
   leads: Candidate[];
-  unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[] };
+  // `groups`: the gaps by cause, each with how many there are and at most
+  // two examples, beside the reasons and causes it sums up.
+  unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[]; groups?: FloorGroup[] };
   truncated: Truncated;
+  // True on a floor: each row holds its tier, but rows may be missing, so
+  // the counts are at least, never exactly. Set on every answer `query` gives.
+  listIncomplete?: boolean;
   // Set when the rows alone could mislead: said first by every reader of the answer.
   warning?: string;
   graph: { generation: string | null; treeSha: string | null; builtAt: string | null; status: "ok" | "partial"; reasons: string[]; mode: "fresh" | "retained"; freshness: { laterEditsKnown: boolean } };

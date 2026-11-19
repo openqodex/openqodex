@@ -5,8 +5,8 @@ description: >-
   and the macOS gate jobs in ci.yml. The calling job checks the repository
   out first. With full set to "true" it is the real-programs tier, pnpm gate:
   every step, the growth tests, and the required scanners checked before the
-  unit tests. With full set to "false" (the fast gate an ordinary pull
-  request and its merge queue run get) the scanner check, the end-to-end
+  unit tests. With full set to "false" (the fast gate pull requests, the
+  merge queue and pushes to main get) the scanner check, the end-to-end
   tests, the golden run, the growth tests, the scanner cache and the Rust
   install are left out, and every unit test still runs; ci.yml says where
   each gate runs. Neither runs the cases that call a real model: that is
@@ -56,7 +56,7 @@ runs:
         path: ${{ runner.temp }}/openqodex-e2e-home
         key: scanners-${{ runner.os }}-${{ runner.arch }}-ruby${{ steps.ruby.outputs.key }}-${{ hashFiles('packages/scanners/toolchain.json', 'packages/scanners/locks/**') }}
     # The steps below mirror scripts/gate.sh one for one; the fast gate
-    # skips the three steps marked full.
+    # skips the three steps gate.sh marks full_step.
     - name: Shipped instruction templates
       shell: bash
       run: node scripts/instruction-sections.mjs --check
