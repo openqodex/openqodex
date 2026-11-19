@@ -15,8 +15,18 @@
 //     counted under the code around it, which is no longer true.
 //  7. An inline gin handler (a Go function literal) stays unbound, and its
 //     calls are counted under the function that registers it.
+//  8. An ordinary callback shaped like a route (`cache.get(key, () => ...)`,
+//     `store.delete(id, function () {...})`, a Go `m.GET(k, func() {...})`)
+//     becomes a definition no route binds: the calls in it get a caller
+//     that nothing calls, and a walk of callers stops there instead of
+//     reaching the function around it and that function's callers.
+//  9. A changed file with such a callback reports the callback's
+//     definition as a removed symbol.
 import { afterAll, describe, expect, it } from "vitest";
-import { buildGraph } from "../src/index.js";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { getChange } from "@openqodex/core";
+import { buildGraph, detectImpact } from "../src/index.js";
 import type { Graph, GraphNode, Registration } from "../src/index.js";
 import { query } from "../src/query/engine.js";
 import type { Request } from "../src/query/engine.js";
@@ -164,4 +174,59 @@ describe("inline gin handlers", () => {
     expect(handlesOf(g, reg).map((n) => `${n.kind} ${n.file}:${n.startLine}`)).toEqual(["function main.go:7"]);
     expect(callersOf(g, "audit")).toEqual([`${(handlesOf(g, reg)[0] as GraphNode).name} main.go:7`]);
   });
+});
+
+describe("callbacks no route binds", () => {
+  it("leaves the calls of an ordinary callback to the function around it, and a depth-2 walk reaches that function's callers (8)", async () => {
+    const g = await build({
+      "package.json": '{ "name": "lib" }\n',
+      "src/cache.ts": [
+        "export function audit(): void {}",
+        "export function work(): number {",
+        "  return 1;",
+        "}",
+        "export function refill(cache: Map<string, number>, store: { delete(id: string, cb: () => void): void; get(k: string, f: () => number): number }) {",
+        '  store.get("key", () => work());',
+        '  store.delete("id", function () {',
+        "    audit();",
+        "  });",
+        "}",
+        "export function run(): void {",
+        "  refill(new Map(), { delete() {}, get: () => 0 });",
+        "}",
+        'const bus = { on(a: string, b: string, f: () => void) {} };',
+        'bus.on("a", "b", () => audit());',
+        "",
+      ].join("\n"),
+    });
+    expect(callersOf(g, "work")).toEqual(["refill src/cache.ts:5"]);
+    expect(callersOf(g, "audit").sort()).toEqual(["cache.ts src/cache.ts:1", "refill src/cache.ts:5"]);
+    const deep = ask(g, { kind: "callers", target: { name: "work" }, depth: 2 });
+    expect(deep.error).toBeNull();
+    expect((deep.items as { from: string; depth: number }[]).map((i) => `${g.nodes.get(i.from)?.name ?? i.from} ${i.depth}`)).toEqual(["refill 1", "run 2"]);
+    expect([...g.nodes.values()].filter((n) => n.name.startsWith("<"))).toEqual([]);
+  }, 60_000);
+
+  it("leaves the calls of a Go function literal no route binds to the function around it (8)", async () => {
+    const g = await build({
+      "go.mod": "module example.com/lib\n\ngo 1.22\n",
+      "main.go": ["package main", "", "type table struct{}", "", "func (t table) GET(k string, f func()) {}", "", "func audit() {}", "", "func fill(t table) {", '\tt.GET("k", func() {', "\t\taudit()", "\t})", "}", ""].join("\n"),
+    });
+    expect(callersOf(g, "audit")).toEqual(["fill main.go:9"]);
+    expect([...g.nodes.values()].filter((n) => n.name.startsWith("<"))).toEqual([]);
+  }, 60_000);
+
+  it("reports no removed symbol for a callback in a changed file (9)", async () => {
+    const files = {
+      "package.json": '{ "name": "lib" }\n',
+      "src/a.ts": ["export function audit(): void {}", "export function fill(store: { get(k: string, f: () => void): void }) {", '  store.get("k", () => audit());', "}", ""].join("\n"),
+    };
+    const root = makeRepo(files);
+    commitAll(root);
+    writeFileSync(join(root, "src/a.ts"), files["src/a.ts"].replace("audit());", "audit());\n  audit();"));
+    const change = await getChange({ repoRoot: root, scope: { uncommitted: true }, exclude: [] });
+    const g = await buildGraph({ repoRoot: root, store: null, files: change.changedPaths, base: { sha: change.baseSha, files: change.files } });
+    const impact = detectImpact(g, change);
+    expect(impact.symbols.filter((s) => impact.removed.includes(s.id)).map((s) => s.name)).toEqual([]);
+  }, 60_000);
 });

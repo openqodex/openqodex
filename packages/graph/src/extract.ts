@@ -50,7 +50,7 @@ import type { TreeVisitor } from "./walk.js";
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
 // 32: a route handler written in place (`app.get("/x", (c) => ...)`, a gin
 // `r.GET("/x", func(c *gin.Context) {...})`) is a definition of its own.
-export const EXTRACTOR_VERSION = 32;
+export const EXTRACTOR_VERSION = 33;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -2017,10 +2017,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           return fnFrame(node, def);
         }
         // A route handler written in place is a definition of its own, so
-        // the calls in it have it as their caller. An arrow inside a class
-        // stays the class's: `this` in it is the class's instance.
+        // the calls in it have it as their caller; one no framework plugin
+        // binds is folded back into the code around it (inline-fold.ts). An
+        // arrow inside a class stays the class's: `this` in it is the class's
+        // instance.
         const route = node.type === "arrow_function" && cls ? null : routeHandlerName(node, JS_ROUTE_CALLS);
-        if (route) return fnFrame(node, ctx.addDef(node, node.firstChild ?? node, "function", { name: route, owner: ctx.ownerName() }, node));
+        if (route) return fnFrame(node, ctx.addDef(node, node.firstChild ?? node, "function", { name: route, owner: ctx.ownerName(), inlineIn: ctx.caller() }, node));
         return fnFrame(node, -1);
       }
       case "call_expression": {
@@ -2810,9 +2812,10 @@ function extractGo(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
       case "func_literal": {
         const locals = new Map<string, TypeRef | null>();
         goParams(node.childForFieldName("parameters"), locals);
-        // A route handler written in place is a definition of its own.
+        // A route handler written in place is a definition of its own,
+        // folded back when no framework plugin binds it (inline-fold.ts).
         const route = routeHandlerName(node, GO_ROUTE_CALLS);
-        if (route) return ctx.push({ def: ctx.addDef(node, node.firstChild ?? node, "function", { name: route, owner: ctx.ownerName() }, node), cls: null, locals });
+        if (route) return ctx.push({ def: ctx.addDef(node, node.firstChild ?? node, "function", { name: route, owner: ctx.ownerName(), inlineIn: ctx.caller() }, node), cls: null, locals });
         return ctx.push({ def: -1, cls: null, locals });
       }
       case "short_var_declaration": {

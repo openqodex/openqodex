@@ -6,8 +6,9 @@
 // it under that name, the import resolves outside the repository, the
 // project declares the module, and no declaration inside the function
 // shadows the name where it is used. An engine is a value made by
-// `gin.Default()` or `gin.New()`; a group is a value made by `Group` on an
-// engine or a group. A method named GET on any other value is no route.
+// `gin.Default()` or `gin.New()`, with or without options; a group is a
+// value made by `Group` on an engine or a group. A method named GET on any
+// other value is no route.
 //
 // Every engine is an application of its own. A route on a group carries
 // the prefixes of every group between it and its engine, outermost first.
@@ -282,7 +283,8 @@ function run(index: PluginIndex<GinFact>): Analysis {
     engines.set(id, e);
     return e;
   };
-  const makesEngine = (file: string, e: Expr): boolean => e.t === "call" && e.args.length === 0 && (isGin(file, e.fn, "Default") || isGin(file, e.fn, "New"));
+  // Options (`gin.New(opt)`, `gin.Default(opt)`) change no route the plugin reads: the engine is the same.
+  const makesEngine = (file: string, e: Expr): boolean => e.t === "call" && (isGin(file, e.fn, "Default") || isGin(file, e.fn, "New"));
   // Every engine made anywhere is an application, registered on or not.
   for (const file of files) for (const v of of(file, "value")) if (makesEngine(file, v.value)) engineAt(file, v.value, v.name);
 
@@ -305,7 +307,9 @@ function run(index: PluginIndex<GinFact>): Analysis {
           stop("depth", "fan-out-capped", { file, line: call.line, column: call.column }, ["handles", "applies_middleware"], `groups nested more than ${MAX_GROUP_DEPTH} levels deep are not followed`);
           return null;
         }
-        const parent = routerOf(file, call.recv, call.line, false, 0, null, depth + 1);
+        // A group made in a value (`g = g.Group("/x")`) is made from what
+        // the name held before that line: never from the value itself.
+        const parent = routerOf(file, call.recv, call.line, strict, 0, null, depth + 1);
         if (parent === null || parent === "other") return parent;
         return { t: "group", key: `group:${file}:${call.line}:${call.column}`, parent, file, call, depth: parent.t === "group" ? parent.depth + 1 : 1 };
       }

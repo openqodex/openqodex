@@ -14,6 +14,10 @@
 //  4. A crafted repository (thousands of routes, a group chain deeper than
 //     the cap, thousands of Use calls, a file over the byte cap) hangs the
 //     build or stops with no unknown.
+//  5. An engine made with options (`gin.New(opt)`, `gin.Default(opt)`) is
+//     no engine, and its routes vanish with no unknown.
+//  6. A group given back to the name it was made from (`g = g.Group("/x")`)
+//     resolves to itself, and the routes on it vanish.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -164,6 +168,39 @@ describe("the gin plugin on small repositories", () => {
     expect(reg?.pattern).toBe("/a");
     const mw = (graph.frameworks?.edges ?? []).filter((e) => e.kind === "applies_middleware" && e.from === reg?.id).map((e) => `${graph.nodes.get(e.to)?.name} ${e.evidence.tier}`);
     expect(mw.sort()).toEqual(["early certain", "elsewhere possible"]);
+  }, 60_000);
+
+  it("reads an engine made with options, and a group given back to the name it was made from (5, 6)", async () => {
+    const main = [
+          head.trimEnd(),
+          "",
+          "func h(c *gin.Context) {}",
+          "func tune(e *gin.Engine) {}",
+          "",
+          "func main() {",
+          "\tr := gin.New(tune)",
+          '\tr.GET("/opt", h)',
+          "\td := gin.Default(tune, tune)",
+          '\td.GET("/dopt", h)',
+          '\tg := r.Group("/api")',
+          '\tg = g.Group("/v1")',
+          '\tg.GET("/users", h)',
+          '\tg = g.Group("/admin")',
+          '\tg.GET("/keys", h)',
+          "}",
+          "",
+        ].join("\n");
+    const graph = await buildGraph({ repoRoot: commitRepo({ "go.mod": mod, "main.go": main }), store: null });
+    const at = (marker: string) => regs(graph).find((r) => r.site.file === "main.go" && r.site.line === lineOf(main, marker));
+    expect(at('"/opt"')?.pattern).toBe("/opt");
+    expect(at('"/opt"')?.app).not.toBeNull();
+    expect(at('"/dopt"')?.pattern).toBe("/dopt");
+    expect(at('"/dopt"')?.app).not.toBeNull();
+    expect(at('"/dopt"')?.app).not.toBe(at('"/opt"')?.app);
+    expect(at('"/users"')?.pattern).toBe("/api/v1/users");
+    expect(at('"/users"')?.app).toBe(at('"/opt"')?.app);
+    expect(at('"/keys"')?.pattern).toBe("/api/v1/admin/keys");
+    expect(gaps(graph).filter((u) => u.cause === "fan-out-capped")).toEqual([]);
   }, 60_000);
 });
 
