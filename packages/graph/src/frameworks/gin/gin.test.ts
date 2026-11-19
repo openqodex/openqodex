@@ -18,6 +18,11 @@
 //     no engine, and its routes vanish with no unknown.
 //  6. A group given back to the name it was made from (`g = g.Group("/x")`)
 //     resolves to itself, and the routes on it vanish.
+//  7. A net/http method constant given to Handle (`http.MethodGet`) reads
+//     as a computed method, and a common route becomes an unknown; or a
+//     constant of another package named `http` passes for net/http's.
+//  8. A lower-case method given to Handle, which gin refuses with a panic,
+//     is upper-cased into a route that is never served.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -201,6 +206,59 @@ describe("the gin plugin on small repositories", () => {
     expect(at('"/users"')?.app).toBe(at('"/opt"')?.app);
     expect(at('"/keys"')?.pattern).toBe("/api/v1/admin/keys");
     expect(gaps(graph).filter((u) => u.cause === "fan-out-capped")).toEqual([]);
+  }, 60_000);
+
+  it("reads a net/http method constant given to Handle, and never a look-alike or a lower-case method (7, 8)", async () => {
+    const main = [
+          "package main",
+          "",
+          "import (",
+          '\t"net/http"',
+          "",
+          '\t"github.com/gin-gonic/gin"',
+          ")",
+          "",
+          "func h(c *gin.Context) {}",
+          "",
+          "func main() {",
+          "\tr := gin.New()",
+          '\tr.Handle(http.MethodGet, "/get", h)',
+          '\tr.Handle(http.MethodDelete, "/del", h)',
+          '\tr.Handle("get", "/lower", h)',
+          '\tr.Handle("PURGE", "/purge", h)',
+          "}",
+          "",
+        ].join("\n");
+    const fake = [
+          "package main",
+          "",
+          "import (",
+          '\thttp "example.com/svc/verbs"',
+          "",
+          '\t"github.com/gin-gonic/gin"',
+          ")",
+          "",
+          "func other() {",
+          "\tr := gin.New()",
+          '\tr.Handle(http.MethodGet, "/fake", h)',
+          "}",
+          "",
+        ].join("\n");
+    const verbs = 'package verbs\n\nconst MethodGet = "PATCH"\n';
+    const graph = await buildGraph({ repoRoot: commitRepo({ "go.mod": mod, "main.go": main, "fake.go": fake, "verbs/verbs.go": verbs }), store: null });
+    const at = (file: string, source: string, marker: string) => regs(graph).find((r) => r.site.file === file && r.site.line === lineOf(source, marker));
+    const gapAt = (file: string, source: string, marker: string) => gaps(graph).filter((u) => u.site?.file === file && u.site.line === lineOf(source, marker)).map((u) => u.cause);
+    expect(at("main.go", main, '"/get"')?.methods).toEqual(["GET"]);
+    expect(at("main.go", main, '"/get"')?.pattern).toBe("/get");
+    expect(at("main.go", main, '"/del"')?.methods).toEqual(["DELETE"]);
+    expect(gapAt("main.go", main, '"/get"')).toEqual([]);
+    // gin accepts any method of upper-case letters, and panics on any other.
+    expect(at("main.go", main, '"/purge"')?.methods).toEqual(["PURGE"]);
+    expect(at("main.go", main, '"/lower"')).toBeUndefined();
+    expect(gapAt("main.go", main, '"/lower"')).toEqual(["unsupported-rule"]);
+    // A package of the repository imported as `http` is not net/http.
+    expect(at("fake.go", fake, '"/fake"')).toBeUndefined();
+    expect(gapAt("fake.go", fake, '"/fake"')).toEqual(["dynamic"]);
   }, 60_000);
 });
 

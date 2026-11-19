@@ -50,7 +50,7 @@ import type { TreeVisitor } from "./walk.js";
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
 // 32: a route handler written in place (`app.get("/x", (c) => ...)`, a gin
 // `r.GET("/x", func(c *gin.Context) {...})`) is a definition of its own.
-export const EXTRACTOR_VERSION = 33;
+export const EXTRACTOR_VERSION = 38;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none

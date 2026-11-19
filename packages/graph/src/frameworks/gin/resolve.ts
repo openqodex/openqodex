@@ -39,6 +39,7 @@ import { appId, entityId } from "../plugin.js";
 import { inlineHandler } from "../shared/inline.js";
 import type { Expr } from "../go-http/facts.js";
 import { evaluate, isCut, MAX_ARGS, MAX_SOURCE_BYTES, show } from "../go-http/facts.js";
+import { METHOD_CONSTANTS } from "../go-http/resolve.js";
 import type { GinFact } from "./facts.js";
 import { VERBS } from "./facts.js";
 
@@ -209,6 +210,27 @@ function run(index: PluginIndex<GinFact>): Analysis {
     for (const d of lf.defs) if (d.topLevel) id.delete(d.name);
     return id;
   };
+  // The local names of net/http in a file, by the same rule: its method
+  // constants (`http.MethodGet`) are the only names Handle's method is read from.
+  const httpNames = new Map<string, Set<string>>();
+  const netHttp = (file: string): Set<string> => {
+    let id = httpNames.get(file);
+    if (id) return id;
+    id = new Set();
+    httpNames.set(file, id);
+    const lf = index.languageFacts(file);
+    if (!lf || lf.lang !== "go") return id;
+    for (const imp of lf.imports) {
+      if (imp.scoped || imp.star || imp.spec !== "net/http" || index.module(file, imp.spec).kind !== "external") continue;
+      const local = imp.namespace ?? "http";
+      if (local !== "_" && local !== "") id.add(local);
+    }
+    for (const d of lf.defs) if (d.topLevel) id.delete(d.name);
+    return id;
+  };
+  // A method given to Handle: a literal or a constant of the file, or a net/http method constant.
+  const methodOf = (file: string, e: Expr): string | null =>
+    e.t === "ref" && !e.local && e.path.length === 2 && netHttp(file).has(e.path[0] as string) ? (METHOD_CONSTANTS[e.path[1] as string] ?? null) : evaluate(e, constantOf(file));
   const isGin = (file: string, e: Expr, member: string | null): boolean =>
     e.t === "ref" && !e.local && e.path.length === (member === null ? 1 : 2) && identity(file).has(e.path[0] as string) && (member === null || e.path[1] === member);
   const ginPkg = (file: string, e: Expr): boolean => e.t === "ref" && !e.local && e.path.length === 2 && identity(file).has(e.path[0] as string);
@@ -555,12 +577,17 @@ function run(index: PluginIndex<GinFact>): Analysis {
       let methods: string[];
       let at = 1;
       if (f.prop === "Handle") {
-        const m = f.args[0] ? evaluate(f.args[0], constantOf(file)) : null;
+        const m = f.args[0] ? methodOf(file, f.args[0]) : null;
         if (m === null) {
           gap({ plugin: PLUGIN, site, scope: { file }, affects: ["handles"], cause: "dynamic", name: null, note: "the method Handle is given is computed at run time, so this call is not listed as a registration", count: null, exact: false });
           continue;
         }
-        methods = [m.toUpperCase()];
+        // gin takes a method of upper-case letters only, and panics on any other.
+        if (!/^[A-Z]+$/.test(m)) {
+          gap({ plugin: PLUGIN, site, scope: { file }, affects: ["handles"], cause: "unsupported-rule", name: null, note: `gin refuses the method ${JSON.stringify(m)} (it takes upper-case letters only) and panics at this call, so it registers no route`, count: null, exact: false });
+          continue;
+        }
+        methods = [m];
         at = 2;
       } else methods = f.prop === "Any" ? ["*"] : [f.prop];
       const pathArg = f.args[at - 1];
