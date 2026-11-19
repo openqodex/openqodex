@@ -16,6 +16,8 @@
 //     terminal.
 //  8. The `--context` snippets lose the indentation of the source lines, so
 //     nested code prints flat.
+//  9. A list on a floor prints its certain count as if it were every
+//     caller.
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -111,6 +113,19 @@ describe("openqodex graph", () => {
     const missing = cli(root, "graph", "callers", "nothingByThisName");
     expect(missing.status).toBe(2);
     expect(missing.stdout).toMatch(/^not-found: /m);
+  });
+
+  it("says the certain callers of a floor are an incomplete list, in text and as a JSON field (9)", () => {
+    const whole = cli(repo(files), "graph", "callers", "core");
+    expect(whole.status, whole.stderr).toBe(0);
+    expect(whole.stdout).toMatch(/^counts: 2 certain, 0 likely, 0 possible$/m);
+    const root = repo({ ...files, "src/value.ts": "export function run(f: () => number): number {\n  return f();\n}\n" });
+    const floor = cli(root, "graph", "callers", "core");
+    expect(floor.stdout).toMatch(/^counts: 2 certain \(list incomplete\), 0 likely, 0 possible$/m);
+    const json = JSON.parse(cli(root, "graph", "callers", "core", "--json").stdout) as Answer & { listIncomplete?: boolean };
+    expect(json.unknown.floor).toBe(true);
+    expect(json.listIncomplete).toBe(true);
+    expect(json.counts).toEqual({ certain: 2, likely: 0, possible: 0 });
   });
 
   it("refuses a generation that is not a build id, reading nothing outside the folder (5)", () => {

@@ -185,9 +185,18 @@ class Gaps {
       const prev = causes[u.cause];
       causes[u.cause] = prev === null || u.count === null ? null : (prev ?? 0) + u.count;
     }
-    const reasons = [...this.missing, ...this.hit.slice(0, 10).map((u) => `${u.plugin}: ${u.note}${u.site ? ` (${u.site.file}:${u.site.line})` : ""}`)];
+    const said = (u: FwUnknown) => `${u.plugin}: ${u.note}${u.site ? ` (${u.site.file}:${u.site.line})` : ""}`;
+    const reasons = [...this.missing, ...this.hit.slice(0, 10).map(said)];
     if (this.hit.length > 10) reasons.push(`and ${this.hit.length - 10} more gaps of the framework layer`);
-    return { ...base.unknown, floor: base.unknown.floor || reasons.length > 0, reasons: [...reasons, ...base.unknown.reasons], causes };
+    // The same gaps by cause: how many, and the first two of each.
+    const byCause = new Map<string, { cause: string; count: number; examples: string[] }>();
+    for (const u of this.hit) {
+      let g = byCause.get(u.cause);
+      if (!g) byCause.set(u.cause, (g = { cause: u.cause, count: 0, examples: [] }));
+      g.count++;
+      if (g.examples.length < 2) g.examples.push(said(u));
+    }
+    return { ...base.unknown, floor: base.unknown.floor || reasons.length > 0, reasons: [...reasons, ...base.unknown.reasons], causes, groups: [...byCause.values()] };
   }
 }
 

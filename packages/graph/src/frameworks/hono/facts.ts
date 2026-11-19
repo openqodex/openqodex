@@ -22,7 +22,7 @@ import type { FactReader, FrameworkFactBase } from "../plugin.js";
 import { eitherPathText, eitherSegmentText, keepParts, ledForm, methodText } from "../shared/kept.js";
 import type { Expr, Pos, ScopedVisit } from "../express/js.js";
 import { exported, FN_TYPES, identifierName, isExpr, MAX_ITEMS, MAX_SOURCE_BYTES, namePath, patternNames, pos, readExpr, scopedVisitor } from "../express/js.js";
-import { readAlone } from "../../walk.js";
+import { hasError, readAlone } from "../../walk.js";
 import type { TreeVisitor } from "../../walk.js";
 
 // The routing methods of a Hono value. Hono has no `head` method.
@@ -114,7 +114,7 @@ export function readH(node: Node | null): HExpr {
   const bases: Node[] = [];
   let cur: Node = start;
   let chained = false;
-  for (let steps = 0; steps < MAX_CHAIN && cur.type === "call_expression" && !cur.hasError; steps++) {
+  for (let steps = 0; steps < MAX_CHAIN && cur.type === "call_expression" && !hasError(cur); steps++) {
     const fn = cur.childForFieldName("function");
     if (fn?.type !== "member_expression") break;
     const prop = fn.childForFieldName("property");
@@ -127,7 +127,7 @@ export function readH(node: Node | null): HExpr {
     cur = obj;
   }
   const read = bases.map((b) => readExpr(b ?? null));
-  if (cur.type === "new_expression" && !cur.hasError) return { t: "new", ctor: namePath(cur.childForFieldName("constructor")), bases: read, ...pos(cur) };
+  if (cur.type === "new_expression" && !hasError(cur)) return { t: "new", ctor: namePath(cur.childForFieldName("constructor")), bases: read, ...pos(cur) };
   if (!chained) return readExpr(start);
   return { t: "via", base: readExpr(cur), bases: read, ...pos(start) };
 }
@@ -202,7 +202,7 @@ export function reader(root: Node): FactReader<HonoFact> {
         const id = up(1)?.childForFieldName("name");
         name = id?.type === "identifier" ? identifierName(id.text) : null;
       }
-      if (name !== null && !node.hasError) out.push({ kind: "fn", ...pos(node), key: own, name, params: paramNames(node), scope });
+      if (name !== null && !hasError(node)) out.push({ kind: "fn", ...pos(node), key: own, name, params: paramNames(node), scope });
       // An arrow function's expression body is the value it returns.
       if (type === "arrow_function") {
         const body = node.childForFieldName("body");
@@ -254,7 +254,7 @@ export function reader(root: Node): FactReader<HonoFact> {
         return;
       }
       case "call_expression": {
-        if (node.hasError) return;
+        if (hasError(node)) return;
         const fn = node.childForFieldName("function");
         if (fn?.type !== "member_expression") return;
         const prop = fn.childForFieldName("property");
@@ -273,7 +273,7 @@ export function reader(root: Node): FactReader<HonoFact> {
         patternNames(name, declared);
         declare(scope, declared);
         const id = name?.type === "identifier" ? identifierName(name.text) : null;
-        if (id === null || !value || node.hasError) return;
+        if (id === null || !value || hasError(node)) return;
         const holder = up(1);
         const decl = holder?.type === "variable_declaration" ? "var" : holder?.childForFieldName("kind")?.text === "let" ? "let" : "const";
         out.push({ kind: "value", ...pos(node), name: id, value: readH(value), scope, top: scope === 0 && upType(2) !== "for_statement", exported: exported(upType), decl });
@@ -282,7 +282,7 @@ export function reader(root: Node): FactReader<HonoFact> {
       case "assignment_expression": {
         const left = node.childForFieldName("left");
         const right = node.childForFieldName("right");
-        if (!left || !right || node.hasError) return;
+        if (!left || !right || hasError(node)) return;
         const path = namePath(left);
         if (path && path.length === 1) out.push({ kind: "value", ...pos(node), name: path[0] as string, value: readH(right), scope, top: scope === 0, exported: false, decl: "assign" });
         return;
