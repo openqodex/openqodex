@@ -33,7 +33,8 @@ import { EXTRACTOR_VERSION, extract } from "./extract.js";
 import { frameworkReaders } from "./frameworks/facts.js";
 import { contextFingerprint, runFrameworks } from "./frameworks/stage.js";
 import { pluginsKey } from "./frameworks/registry.js";
-import { MODEL_VERSION } from "./model/records.js";
+import type { FrameworkCall } from "./frameworks/plugin.js";
+import { MODEL_VERSION, TIER_RANK } from "./model/records.js";
 import type { Cut } from "./model/records.js";
 import { grammarVersion, parserFor } from "./parser.js";
 import { RESOLVER_VERSION, createWorld, projectFolder, stableKey, symbolId } from "./resolve.js";
@@ -431,7 +432,9 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // ---------- frameworks ----------
     // After symbol resolution, on every build: a file whose content did not
     // change is re-read when a framework is newly detected around it.
-    const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop: overBudget });
+    const frameworkCalls: FrameworkCall[] = [];
+    const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop: overBudget, calls: frameworkCalls });
+    addFrameworkCalls(resolved.edges, frameworkCalls);
     for (const p of frameworks.plugins) if (p.status === "failed" || (p.status === "stopped" && inputs.some((i) => i.facts.frameworks?.[p.id]))) reasons.push(p.reason ?? `the ${p.id} plugin did not run`);
     stage("frameworks");
 
@@ -727,6 +730,29 @@ function removedSymbols(files: ChangedFile[], baseDefs: Map<string, { file: stri
 }
 
 // A world's walk cuts, each kind once whichever version of the code made it.
+// The calls a framework makes on behalf of a symbol (a FastAPI route's
+// dependencies) join the calls edges: one more site on the edge between
+// the two symbols, or a new edge.
+function addFrameworkCalls(edges: GraphEdge[], calls: readonly FrameworkCall[]): void {
+  if (calls.length === 0) return;
+  const byPair = new Map<string, GraphEdge>();
+  for (const e of edges) if (e.kind === "calls") byPair.set(`${e.from}\0${e.to}`, e);
+  for (const c of calls) {
+    const site = { file: c.site.file, line: c.site.line, column: c.site.column, tier: c.tier, evidence: c.evidence, via: c.via, note: c.note, rule: c.rule };
+    const key = `${c.from}\0${c.to}`;
+    const e = byPair.get(key);
+    if (!e) {
+      const made: GraphEdge = { from: c.from, to: c.to, kind: "calls", tier: c.tier, sites: [site] };
+      edges.push(made);
+      byPair.set(key, made);
+      continue;
+    }
+    if (e.sites.some((s) => s.file === site.file && s.line === site.line && s.column === site.column && s.evidence === site.evidence)) continue;
+    e.sites.push(site);
+    e.tier = TIER_RANK[site.tier] > TIER_RANK[e.tier] ? site.tier : e.tier;
+  }
+}
+
 function addWalkCuts(cuts: Cut[], world: World): void {
   for (const cut of world.walkCuts()) if (!cuts.some((x) => x.by === cut.by && x.note === cut.note)) cuts.push(cut);
 }

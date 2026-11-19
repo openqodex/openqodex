@@ -54,9 +54,10 @@ const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !
 const placeOf = (v: unknown): { file: string; line: number } | null =>
   isRec(v) && typeof v.file === "string" && Number.isInteger(v.line) && (v.line as number) > 0 ? { file: v.file, line: v.line as number } : null;
 
-// The lists inside an item whose entries are items too: an impact's hops and
-// a route's handles. Compacting and the lines around places both walk them.
-const NESTED = ["hops", "handles"] as const;
+// The lists inside an item whose entries are items too: an impact's hops,
+// a route's handles and its dependencies. Compacting and the lines around
+// places both walk them.
+const NESTED = ["hops", "handles", "dependencies"] as const;
 
 // The sites one item names, in order: its own site (or, with no site and no
 // hops, its own file and line), the site of each nested entry, and the site
