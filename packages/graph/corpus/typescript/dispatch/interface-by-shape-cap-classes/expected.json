@@ -1,0 +1,42 @@
+{
+  "guards": "caps the classes that match an interface by shape at 20 classes, not 20 methods, and counts classes in the gap",
+  "callers": [
+    {
+      "to": "src/handler.ts#Handler.handle",
+      "site": "src/run.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/base.ts#Base.handle",
+      "site": "src/run.ts:4",
+      "tier": "possible",
+      "kind": "dispatches_to",
+      "note": "by shape"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/impl/s20.ts#S20.handle",
+      "site": "src/run.ts:4"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/run.ts:4",
+      "count": 20,
+      "omitted": 1
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/run.ts",
+      "line": 4,
+      "cause": "fan-out-capped",
+      "note": "22 classes match Handler by shape and may run Handler.handle; the 2 past the first 20 in path order are not listed"
+    }
+  ],
+  "floor": {
+    "src/base.ts#Base.handle": true
+  }
+}

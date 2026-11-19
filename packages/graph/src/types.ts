@@ -174,6 +174,8 @@ export type TypeUse = { ref: TypeRef; caller: number };
 // a method called on it.
 export type TableFact = { name: string; line: number; values: number[]; open?: boolean };
 
+export type LiteralFact = { line: number; keys: string[]; open?: boolean };
+
 // A name bound by an import made inside a function or a block, in that
 // scope only: the import (an index into FileFacts.imports) and the name it
 // imports, "*" for the whole module.
@@ -256,6 +258,15 @@ export type FileFacts = {
   types: TypeUse[];
   typeCuts?: number; // annotations too large to read whole: their types past the cut are not type uses
   tables: TableFact[];
+  // TypeScript and JavaScript: each object literal that is no definition of
+  // the graph (an argument, a returned object, a local) and names a member
+  // that may hold code (a method, a function, a name), with those member
+  // names, and `open` when it may have others (a spread, keys past the
+  // cap). A call through an interface may run such an object's code.
+  // `literalsCut`: the file holds more literals than the cap, so any
+  // interface call may reach one not listed.
+  literals?: LiteralFact[];
+  literalsCut?: boolean;
   imports: ImportFact[];
   exportsLocal: { local: string; exported: string; line?: number }[]; // `export { a as b }` without a source
   defaultExport: string | null; // the local name `export default` names

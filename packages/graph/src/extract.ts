@@ -7,7 +7,7 @@
 // patterns were written here against the pinned grammar files.
 import { createHash } from "node:crypto";
 import type { Node, Tree } from "web-tree-sitter";
-import type { BoundImport, CallFact, DefFact, FileFacts, ImportFact, Lang, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
+import type { BoundImport, CallFact, DefFact, FileFacts, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
 import { MAX_TYPE_DEPTH } from "./types.js";
 import { walkTree } from "./walk.js";
 import type { TreeVisitor } from "./walk.js";
@@ -50,8 +50,9 @@ import type { TreeVisitor } from "./walk.js";
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
 // 32: an interface member marked `?` is optional (DefFact.optional).
 // 33: an interface in `declare module "x"` or `declare global` augments a
-// type (DefFact.augments).
-export const EXTRACTOR_VERSION = 33;
+// type (DefFact.augments). 34: the object literals that may hold code
+// (FileFacts.literals).
+export const EXTRACTOR_VERSION = 34;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -264,6 +265,8 @@ class Ctx {
   values: ValueRef[] = [];
   types: TypeUse[] = [];
   tables: TableFact[] = [];
+  literals: LiteralFact[] = [];
+  literalsCut = false;
   imports: ImportFact[] = [];
   exportsLocal: { local: string; exported: string; line?: number }[] = [];
   defaultExport: string | null = null;
@@ -731,6 +734,8 @@ class Ctx {
       types: this.types,
       ...(typeCuts > 0 ? { typeCuts } : {}),
       tables,
+      ...(this.literals.length > 0 ? { literals: this.literals } : {}),
+      ...(this.literalsCut ? { literalsCut: true } : {}),
       imports: this.imports,
       exportsLocal: this.exportsLocal,
       defaultExport: this.defaultExport,
@@ -1008,6 +1013,37 @@ function jsMemberType(annotation: Node | null, params: Map<string, TypeRef | nul
     return { name: t.text, qualifier: null, ...pos(t), kind: "param", param: [...params.keys()].indexOf(t.text) };
   }
   return jsTypeRef(annotation);
+}
+
+// The object literals a file records, and the member names one keeps.
+const MAX_LITERALS = 4096;
+const MAX_LITERAL_KEYS = 64;
+// A value that never holds code: a string, a number, a boolean, null, an array or an object.
+const DATA_VALUES = new Set(["string", "template_string", "number", "true", "false", "null", "undefined", "array", "object", "regex"]);
+// The members of an object literal that may hold code (a method, a
+// function, a name or any other expression), recorded when it has one.
+function jsLiteral(ctx: Ctx, node: Node): void {
+  const keys: string[] = [];
+  let spread = false;
+  for (const c of node.namedChildren) {
+    if (c.type === "spread_element") spread = true;
+    else if (c.type === "shorthand_property_identifier") keys.push(c.text);
+    else if (c.type === "method_definition" || c.type === "pair") {
+      const key = c.childForFieldName(c.type === "pair" ? "key" : "name");
+      const value = c.type === "pair" ? jsUnwrap(c.childForFieldName("value")) : null;
+      if (c.type === "pair" && (!value || DATA_VALUES.has(value.type))) continue;
+      const name = key?.type === "property_identifier" ? key.text : key?.type === "string" ? key.namedChildren.find((x) => x.type === "string_fragment")?.text : undefined;
+      if (name) keys.push(name);
+    }
+  }
+  if (keys.length === 0) return;
+  if (ctx.literals.length >= MAX_LITERALS) {
+    ctx.literalsCut = true;
+    return;
+  }
+  // A spread may bring any member, and so may the keys past the cap.
+  const open = spread || keys.length > MAX_LITERAL_KEYS;
+  ctx.literals.push({ line: node.startPosition.row + 1, keys: keys.slice(0, MAX_LITERAL_KEYS), ...(open ? { open: true } : {}) });
 }
 
 // An expression read for its value: `(x)`, `x!` and `x satisfies T` are x.
@@ -2022,6 +2058,8 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           ctx.pendingTables.delete(node.startIndex);
           ctx.bindTable(pending.name, pending.line, refs, pending.scope, pending.open === true);
         }
+        // An object that is no module of the graph: the members that may hold code.
+        if (ctx.top.objectAt !== node.startIndex) jsLiteral(ctx, node);
         return;
       }
       case "array":

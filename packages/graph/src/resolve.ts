@@ -2240,33 +2240,66 @@ export function createWorld(input: ResolveInput): World {
     shapeMemo.set(key, out);
     return out;
   };
-  // The methods a call of `name` through the interface may run in the
-  // classes that match it by shape, in path and line order, and the first
-  // class that may match it through a base outside the graph: it has the
-  // member called and may get the rest from there, so it is not listed and
-  // the call keeps its gap. Null when the interface's members are not all known.
-  const shapeTargetMemo = new Map<string, { ids: string[]; open: string | null } | null>();
-  const shapeTargets = (key: string, name: string, skip: ReadonlySet<string>): { ids: string[]; open: string | null } | null => {
+  // The object literals of the repository that may hold code, by each
+  // member name they write, and the files that hold more than are recorded.
+  let literalIndex: { byName: Map<string, { file: string; line: number; keys: Set<string>; open: boolean }[]>; cut: string[] } | null = null;
+  const literalsNamed = (name: string) => {
+    if (literalIndex === null) {
+      const byName = new Map<string, { file: string; line: number; keys: Set<string>; open: boolean }[]>();
+      const cut: string[] = [];
+      for (const [file, f] of facts) {
+        if (f.literalsCut) cut.push(file);
+        for (const l of f.literals ?? []) {
+          const entry = { file, line: l.line, keys: new Set(l.keys), open: l.open === true };
+          for (const k of entry.keys) push(byName, k, entry);
+        }
+      }
+      cut.sort();
+      literalIndex = { byName, cut };
+    }
+    return { literals: literalIndex.byName.get(name) ?? [], cut: literalIndex.cut };
+  };
+  // What a call of `name` through the interface may run in the classes
+  // that match it by shape: each class, in path and line order, with the
+  // methods its own lookup finds. `open` says why a value that is not
+  // listed may answer the call too, so the call keeps its gap: a class that
+  // has the member and extends a class outside the graph, which may give it
+  // the rest, or an object literal that has the member and every other
+  // method of the interface, or spreads another object into itself (it is
+  // no definition of the graph, so what it runs cannot be listed). Null
+  // when the interface's members are not all known.
+  type Shaped = { classes: { key: string; ids: string[] }[]; open: string | null };
+  const shapeTargetMemo = new Map<string, Shaped | null>();
+  const shapeTargets = (key: string, name: string, skip: ReadonlySet<string>): Shaped | null => {
     const memoKey = `${key}\u0000${name}`;
     const kept = shapeTargetMemo.get(memoKey);
     if (kept !== undefined) return kept;
     const matched = shapeMatches(key);
-    let out: { ids: string[]; open: string | null } | null = null;
-    if (matched !== null) {
-      const found = new Set<string>();
+    const names = matched === null ? null : contractNames(key);
+    let out: Shaped | null = null;
+    if (matched !== null && names !== null) {
+      const at = (k: string) => {
+        const id = classes.get(k)?.ids[0];
+        return { file: classes.get(k)?.file ?? k, line: (id ? defById.get(id)?.line : 0) ?? 0 };
+      };
+      const found: { key: string; ids: string[] }[] = [];
       for (const k of matched) {
         const hit = methodOn(k, name, "i", 0);
-        if (hit && "ids" in hit) for (const id of hit.ids) if (!skip.has(id) && defById.get(id)?.abstract !== true) found.add(id);
+        const ids = hit && "ids" in hit ? hit.ids.filter((id) => !skip.has(id) && defById.get(id)?.abstract !== true) : [];
+        if (ids.length > 0) found.push({ key: k, ids });
       }
-      const ids = [...found].sort((a, b) => {
-        const x = defById.get(a);
-        const y = defById.get(b);
-        return (x?.file ?? a).localeCompare(y?.file ?? b) || (x?.line ?? 0) - (y?.line ?? 0) || a.localeCompare(b);
-      });
+      found.sort((a, b) => at(a.key).file.localeCompare(at(b.key).file) || at(a.key).line - at(b.key).line || a.key.localeCompare(b.key));
+      const iface = shortKey(key);
       const listed = new Set(matched);
       const below = declaredBelow(key);
-      const open = typesNamed("js", name).find((k) => k !== key && classLike(k) && !below.has(k) && !listed.has(k) && outsideBase(k)) ?? null;
-      out = { ids, open };
+      const outsideClass = typesNamed("js", name).find((k) => k !== key && classLike(k) && !below.has(k) && !listed.has(k) && outsideBase(k));
+      const { literals, cut } = literalsNamed(name);
+      const literal = literals.find((l) => l.open || [...names].every((n) => l.keys.has(n)));
+      let open: string | null = null;
+      if (outsideClass !== undefined) open = `${shortKey(outsideClass)} has ${name} and extends a class outside the graph, which may give it the other methods of ${iface}, so it is not listed`;
+      else if (literal !== undefined) open = `the object literal at ${literal.file}:${literal.line} has ${name}${literal.open ? " and may have more members" : ` and every other method of ${iface}`}, so it may be a ${iface}; an object written in place is no definition of the graph, so what it runs is not listed`;
+      else if (cut.length > 0) open = `${cut[0] as string} holds more object literals than the graph records, so one of them may be a ${iface}`;
+      out = { classes: found, open };
     }
     shapeTargetMemo.set(memoKey, out);
     return out;
@@ -3257,7 +3290,7 @@ export function createWorld(input: ResolveInput): World {
       const k = `${declared} shape ${count}`;
       let ev = evMemo.get(k);
       if (!ev) {
-        ev = { kind: "by-shape", tier: "possible", via: null, note: `Its class matches ${iface} by shape: it has every member of ${iface} by name without declaring implements, and the signatures are not compared. A call to ${declared} may run it, one of ${count}.`, rule: "by-shape" };
+        ev = { kind: "by-shape", tier: "possible", via: null, note: `Its class matches ${iface} by shape: it has every method of ${iface} by name without declaring implements; its other members and the signatures are not compared. A call to ${declared} may run it, in one of ${count} classes.`, rule: "by-shape" };
         evMemo.set(k, ev);
       }
       return ev;
@@ -3432,17 +3465,21 @@ export function createWorld(input: ResolveInput): World {
               unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: openShapeNote(d.key) });
             } else {
               const iface = shortKey(d.key);
-              if (shaped.ids.length > 0) {
-                const kept = shaped.ids.slice(0, SHAPE_CAP);
-                dispatch.push({ file: path, line: call.line, column: call.column, caller: callerId, name: call.name, declared: out.ids, candidates: kept, total: shaped.ids.length, rule: "by-shape" });
-                const site = siteOf(path, call.line, call.column, shapeEv(declared, iface, shaped.ids.length));
-                for (const t of kept) addEdge(callerId, t, "dispatches_to", site);
-                if (shaped.ids.length > SHAPE_CAP) {
-                  unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${shaped.ids.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.ids.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` });
+              if (shaped.classes.length > 0) {
+                // The cap counts classes; a method two classes share (one inherits it) is listed once.
+                const keptIds = [...new Set(shaped.classes.slice(0, SHAPE_CAP).flatMap((c) => c.ids))];
+                const leftIds = new Set(shaped.classes.slice(SHAPE_CAP).flatMap((c) => c.ids).filter((id) => !keptIds.includes(id)));
+                const total = keptIds.length + leftIds.size;
+                dispatch.push({ file: path, line: call.line, column: call.column, caller: callerId, name: call.name, declared: out.ids, candidates: keptIds, total, rule: "by-shape" });
+                const site = siteOf(path, call.line, call.column, shapeEv(declared, iface, shaped.classes.length));
+                for (const t of keptIds) addEdge(callerId, t, "dispatches_to", site);
+                // Classes past the cap that run only methods already listed hide nothing.
+                if (leftIds.size > 0) {
+                  unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${shaped.classes.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.classes.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` });
                 }
               }
               if (shaped.open !== null) {
-                unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: `a value of the interface ${iface} may be any object of that shape; ${shortKey(shaped.open)} has ${call.name} and extends a class outside the graph, which may give it the other members of ${iface}, so it is not listed` });
+                unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: `a value of the interface ${iface} may be any object of that shape; ${shaped.open}` });
               }
             }
           }
