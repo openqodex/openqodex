@@ -295,7 +295,7 @@ class Ctx {
   // a call there runs on the instance, though its caller is the class.
   instanceInit = -1;
   // Python fields by class definition and name: those an annotation
-  // declared, and those given two different types, which keep none.
+  // declared, and those given conflicting or unknown types, which keep none.
   private declaredFields = new Set<string>();
   private mixedFields = new Set<string>();
 
@@ -373,17 +373,22 @@ class Ctx {
     at.locals?.set(name, type);
   }
 
-  // A Python field assigned a type. A declared type stands. Otherwise the
-  // field keeps a type only while every assignment of a known type gives
-  // the same one, since either value may reach a later call.
+  // A Python field assigned a value. A declared type stands. Otherwise the
+  // field keeps a type only while every assignment gives the same known
+  // type, since any other value may reach a later call.
   setField(def: number, name: string, type: TypeRef | null, declared: boolean): void {
     const d = this.defs[def];
     const key = `${def}\0${name}`;
-    if (!d || !type || this.declaredFields.has(key)) return;
-    if (declared) {
+    if (!d || this.declaredFields.has(key)) return;
+    if (declared && type) {
       this.declaredFields.add(key);
       this.mixedFields.delete(key);
       d.fields[name] = type;
+      return;
+    }
+    if (!type) {
+      delete d.fields[name];
+      this.mixedFields.add(key);
       return;
     }
     if (this.mixedFields.has(key)) return;
