@@ -1,4 +1,4 @@
-import { Other, SessionHandle, TurnFn } from "./session";
+import { DoneFn, Other, SessionHandle, TurnFn } from "./session";
 
 export interface Deps {
   handle: SessionHandle;
@@ -47,5 +47,30 @@ export class Service {
   viaFnCall(): string {
     const run = this.deps.run;
     return run.call(null, "g");
+  }
+
+  reassignedParam(deps: Deps, other: Other): string {
+    let handle = deps.handle;
+    handle = other;
+    return handle.createTurn("h");
+  }
+
+  reassignedPattern(deps: Deps, other: Other): string {
+    let { handle } = deps;
+    handle = other;
+    return handle.createTurn("i");
+  }
+}
+
+export interface Hooks {
+  done: DoneFn;
+}
+
+export class Hooked {
+  constructor(private readonly hooks: Hooks) {}
+
+  viaUnreadFnCall(): void {
+    const done = this.hooks.done;
+    done.call(null, "j");
   }
 }

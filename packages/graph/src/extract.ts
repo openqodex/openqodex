@@ -49,8 +49,10 @@ import type { TreeVisitor } from "./walk.js";
 // built-in generic the file declares or imports is the file's own type, and
 // an annotation's types are read at most MAX_TYPE_DEPTH deep.
 // 32: a local declared from a member (`const repo = this.deps.repo`) takes
-// that member's type.
-export const EXTRACTOR_VERSION = 32;
+// that member's type. 33: such a local and an unannotated destructured name
+// are not declared (assigned again, they lose the type), and a function type
+// alias whose result cannot be read keeps a null result.
+export const EXTRACTOR_VERSION = 33;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -1846,7 +1848,8 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           // `const { session } = params`: each name has the type of its member.
           const annotation = name.type === "object_pattern" ? declared(jsTypeRef(node.childForFieldName("type"))) : null;
           const from = name.type === "object_pattern" ? (annotation ?? jsValueType(ctx, value)) : null;
-          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, type, block);
+          // Unannotated, the names are not declared: one assigned again loses its type.
+          if (from) for (const [n, type] of jsPatternTypes(name, from, annotation !== null)) ctx.setLocal(n, annotation ? type : { ...type, declared: false }, block);
           return;
         }
         const isFn = value && ["arrow_function", "function_expression", "function", "generator_function"].includes(value.type);
@@ -1891,9 +1894,10 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           return ctx.push({ def, cls: null, locals: null, fnAt: (value as Node).startIndex });
         }
         // `const repo = this.deps.repo`: the local has the member's type, as
-        // `const { repo } = this.deps` gives it.
+        // `const { repo } = this.deps` gives it, never as declared, so a
+        // local assigned again loses it.
         const member = jsUnwrap(value)?.type === "member_expression" ? jsValueType(ctx, value) : null;
-        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value) ?? member, block);
+        ctx.setLocal(name.text, declared(jsTypeRef(node.childForFieldName("type"))) ?? newType(value) ?? callType(ctx, value) ?? (member ? { ...member, declared: false } : null), block);
         return;
       }
       case "statement_block":
@@ -1964,10 +1968,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // parameter is marked, to take the argument a use of the alias gives.
         const own = value?.type === "object_type" && typeParams && alias?.fields ? jsObjectTypeFields(value, typeParams) : null;
         if (alias && own) alias = { ...alias, fields: own };
-        // A function type (`type ResolveFn = (t: string) => Store`): what a call of a value of it returns.
-        const result = value?.type === "function_type" ? declared(jsTypeRef(value.childForFieldName("return_type"))) : null;
+        // A function type (`type ResolveFn = (t: string) => Store`): what a call of a value of it returns,
+        // null when the result cannot be read; a function type either way.
+        const result = value?.type === "function_type" ? declared(jsTypeRef(value.childForFieldName("return_type"))) : undefined;
         enteringTypeParams = null;
-        if (name) ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}), ...(result ? { results: [result] } : {}) });
+        if (name) ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), ...(alias ? { alias } : {}), ...(alias?.fields ? { fields: { ...alias.fields } } : {}), ...(result !== undefined ? { results: [result] } : {}) });
         return false;
       }
       case "arrow_function":

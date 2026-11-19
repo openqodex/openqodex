@@ -12,3 +12,4 @@ export class Other {
 }
 
 export type TurnFn = (x: string) => string;
+export type DoneFn = (x: string) => string | number;

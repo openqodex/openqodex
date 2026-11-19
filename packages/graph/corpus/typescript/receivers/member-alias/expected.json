@@ -36,12 +36,34 @@
       "site": "src/svc.ts:49",
       "tier": "possible",
       "kind": "may_invoke"
+    },
+    {
+      "to": "src/svc.ts#Hooks.done",
+      "site": "src/svc.ts:74",
+      "tier": "possible",
+      "kind": "may_invoke"
     }
   ],
   "notCertain": [
     {
       "to": "src/session.ts#SessionHandle.createTurn",
       "site": "src/svc.ts:39"
+    },
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/svc.ts:55"
+    },
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/svc.ts:61"
+    },
+    {
+      "to": "src/session.ts#Other.createTurn",
+      "site": "src/svc.ts:55"
+    },
+    {
+      "to": "src/session.ts#Other.createTurn",
+      "site": "src/svc.ts:61"
     }
   ],
   "notReached": [
@@ -100,6 +122,16 @@
     {
       "file": "src/svc.ts",
       "line": 39,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/svc.ts",
+      "line": 55,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/svc.ts",
+      "line": 61,
       "cause": "no-receiver-type"
     }
   ]
