@@ -63,8 +63,9 @@ export const DISPATCH_CAP = 32;
 // function type the called definition declares (TypeRef.callback).
 // 22: a member of a generic alias of an object type takes the argument
 // its use gives. 24: a member a Pick or an Omit leaves out is no member of
-// the type.
-export const RESOLVER_VERSION = 24;
+// the type. 25: a file that imports one module on several lines keeps an
+// import site for each.
+export const RESOLVER_VERSION = 25;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -3413,14 +3414,27 @@ export function createWorld(input: ResolveInput): World {
     for (const { path, facts: f } of input.files) {
       index.bindings(path);
       const family = familyOf(f.lang);
-      const seen = new Set<string>();
+      // One edge per importing file and target, with a site for each line
+      // that imports it: a type import and a value import of one module are two.
+      const seen = new Map<string, GraphEdge>();
+      const sites = new Set<string>();
       for (const t of importTargets.get(path) ?? []) {
         // Go: the target is a package folder; files of one package do not import each other.
         const key = family === "go" ? `go:${t.target}` : t.target;
-        if (seen.has(key) || (family === "go" && t.target === dirOf(path))) continue;
-        seen.add(key);
+        if (family === "go" && t.target === dirOf(path)) continue;
+        const at = `${key}\u0000${t.line}:${t.column}`;
+        if (sites.has(at)) continue;
+        sites.add(at);
         const site = siteOf(path, t.line, t.column, t.ev);
-        push(importers, key, { from: path, to: key, kind: "imports", tier: site.tier, sites: [site] } as GraphEdge);
+        const kept = seen.get(key);
+        if (kept) {
+          kept.sites.push(site);
+          kept.tier = weakest(kept.tier, site.tier);
+          continue;
+        }
+        const e = { from: path, to: key, kind: "imports", tier: site.tier, sites: [site] } as GraphEdge;
+        seen.set(key, e);
+        push(importers, key, e);
       }
     }
 
