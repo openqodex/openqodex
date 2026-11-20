@@ -42,6 +42,9 @@ export type ExecResult = {
   exitCode: number | null;
   // Set when the process could not start, timed out or overflowed its buffer.
   failure: "not_found" | "timeout" | "overflow" | "killed" | null;
+  // The signal that ended a "killed" process, such as SIGSEGV for a crash or
+  // SIGKILL from outside: the one clue to which it was.
+  signal?: string;
 };
 
 type ExecError = Error & { code?: unknown; killed?: boolean; signal?: unknown };
@@ -104,7 +107,7 @@ export function execTool(
             return;
           }
           if (typeof e.signal === "string") {
-            settle({ stdout: out, stderr: errText, exitCode: null, failure: "killed" });
+            settle({ stdout: out, stderr: errText, exitCode: null, failure: "killed", signal: e.signal });
             return;
           }
           // ENOENT, EACCES and the like: the process never started.
@@ -134,8 +137,11 @@ export function describeFailure(name: string, result: ExecResult, timeoutMs: num
       return `${name} timed out after ${Math.round(timeoutMs / 1000)}s`;
     case "overflow":
       return `${name} printed more output than the limit allows`;
-    case "killed":
-      return `${name} was killed`;
+    case "killed": {
+      // The signal and the end of stderr tell a crash from an outside kill.
+      const tail = stderrTail(result);
+      return `${name} was killed by ${result.signal ?? "a signal"}${tail ? `: ${tail}` : ""}`;
+    }
     default:
       return null;
   }

@@ -15,6 +15,8 @@
 //      reported as "timeout".
 //   7. Output past the cap is not reported as "overflow".
 //   8. Arguments go through a shell, so a ";" or "$(...)" in one runs.
+//   9. A process ended by a signal execTool did not send is reported without
+//      the signal and its stderr, so a crash and an outside kill read alike.
 //  10. A child that ignores SIGTERM keeps execTool pending past its deadline.
 //  11. A whole-repo file list is passed to one process, which fails with
 //      E2BIG and loses every finding; or the chunks drop, repeat or reorder
@@ -23,7 +25,7 @@
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ARG_BUDGET_BYTES, execTool, runInChunks, scannerEnv, stderrTail } from "./exec.js";
+import { ARG_BUDGET_BYTES, describeFailure, execTool, runInChunks, scannerEnv, stderrTail } from "./exec.js";
 
 const NODE = process.execPath;
 const opts = (over: Partial<{ timeoutMs: number; maxBytes: number; env: Record<string, string> }> = {}) => ({
@@ -99,6 +101,14 @@ describe("execTool", () => {
     expect(out.argv).toEqual(["a; echo hi", "$(id)"]);
     expect(out.env.OPENQODEX_TEST_TOKEN).toBeUndefined();
     expect(out.env.EXTRA_ONE).toBe("1");
+  });
+
+  it("names the signal that ended a process and its last stderr (9)", async () => {
+    const outside = await execTool(NODE, ["-e", "process.kill(process.pid, 'SIGKILL')"], opts());
+    expect(outside).toMatchObject({ failure: "killed", signal: "SIGKILL", exitCode: null });
+    expect(describeFailure("tool", outside, 10_000)).toBe("tool was killed by SIGKILL");
+    const crash = await execTool(NODE, ["-e", "require('fs').writeSync(2, 'Fatal error: segmentation fault'); process.kill(process.pid, 'SIGSEGV')"], opts());
+    expect(describeFailure("tool", crash, 10_000)).toBe("tool was killed by SIGSEGV: Fatal error: segmentation fault");
   });
 
   it("stops a child that ignores SIGTERM at the deadline (10)", async () => {
