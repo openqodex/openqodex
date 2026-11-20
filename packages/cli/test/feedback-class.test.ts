@@ -68,4 +68,8 @@ describe("failureClass on golangci reasons", () => {
   it("keeps another scanner's reason whole, so a semicolon in its tool text adds no class", () => {
     expect(failureClass("cargo-deny exit 2: error; see the log", "cargo-deny")).toBe("exited with code 2");
   });
+
+  it("classes a killed scanner by its fixed prefix, whatever its stderr tail quotes", () => {
+    expect(failureClass("sqlfluff was killed by SIGSEGV: worker timed out after 5 s, exit 2", "sqlfluff")).toBe("was killed");
+  });
 });

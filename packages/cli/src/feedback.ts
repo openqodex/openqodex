@@ -86,6 +86,8 @@ const GOLANGCI_CLASSES: [RegExp, string][] = [
 ];
 
 function partClass(r: string): string {
+  // A killed reason ends with the tool's stderr, which may quote any text; its fixed prefix decides.
+  if (/^[^\s:]+ was killed by /.test(r)) return "was killed";
   const owned = GOLANGCI_CLASSES.find(([re]) => re.test(r));
   if (owned) return owned[1];
   const timeout = /timed out after (\d+)\s*s/.exec(r);
