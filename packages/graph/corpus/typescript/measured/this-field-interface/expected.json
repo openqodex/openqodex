@@ -1,5 +1,5 @@
 {
-  "guards": "binds a call through a class field or a parameter typed by an interface certain to the interface member, possible to its implementation, and leaves the interface note as an unknown row at the same site (a counting script that reads every unknown row as unbound miscounts these calls)",
+  "guards": "binds a call through a class field or a parameter typed by an interface certain to the interface member, possible to its implementation, and leaves no unknown row at the same site once every class of that shape is listed",
   "callers": [
     {
       "to": "src/store.ts#Store.get",
@@ -26,7 +26,7 @@
       "kind": "dispatches_to"
     }
   ],
-  "unknowns": [
+  "noUnknown": [
     {
       "file": "src/service.ts",
       "line": 6,

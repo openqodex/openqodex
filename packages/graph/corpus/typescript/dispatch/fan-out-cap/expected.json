@@ -20,7 +20,9 @@
       "file": "src/run.ts",
       "line": 4,
       "cause": "fan-out-capped"
-    },
+    }
+  ],
+  "noUnknown": [
     {
       "file": "src/run.ts",
       "line": 4,

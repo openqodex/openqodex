@@ -58,7 +58,8 @@ const BASELINE_PROD_RECALL = { found: 3961, of: 4021 };
 // class or object that declares the interface (dispatch-implements).
 // 929 once a local copied from an interface- or base-typed field kept its
 // dispatch (7 possible links at 5 sites).
-const MAX_PROD_BURDEN = 929;
+// 967 since TypeScript interface calls also reach classes matching by shape (38 by-shape targets; shape gaps 974 to 740).
+const MAX_PROD_BURDEN = 967;
 // (b) Owner's held-out sites: each must resolve, by the checker, to the named
 // declaration, and the graph must find it certain or likely.
 const HELD_OUT = [

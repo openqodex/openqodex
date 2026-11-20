@@ -127,6 +127,8 @@ describe("the short form", () => {
     "use.ts": 'import type { Runner } from "./i";\nexport function go(r: Runner) {\n  r.run();\n}\n',
     "other.ts": "export function f(x: any) {\n  x.run();\n}\n",
     "direct.ts": 'import { A } from "./i";\nexport function d() {\n  new A().run();\n}\n',
+    // An object written in place that may be a Runner keeps the gap at use.ts:3, which A alone, matched by shape, now closes.
+    "lit.ts": "export function mk() {\n  return { run() {} };\n}\n",
   };
 
   it("keeps sites, the floor and the examples no item shows, and gives an edge id explain takes (7)", async () => {

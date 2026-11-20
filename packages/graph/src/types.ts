@@ -121,6 +121,12 @@ export type DefFact = {
   // never a dispatch target.
   abstract?: boolean;
   iface?: boolean; // a TypeScript interface or a Go interface type
+  // A TypeScript interface member marked `?` (`close?(): void`): a value of
+  // the interface need not have it, so a class matched by shape need not either.
+  optional?: boolean;
+  // A TypeScript interface declared in `declare module "x"` or `declare
+  // global`: it adds members to a type that may come from outside the repository.
+  augments?: boolean;
   anonymous?: boolean; // a Java object or enum constant body, never a source-level type name
   pointer?: boolean; // a Go method with a pointer receiver
   // A Java method whose last parameter is varargs (`Object... rest`): it
@@ -176,6 +182,8 @@ export type TypeUse = { ref: TypeRef; caller: number };
 // can write it), written through a member or an index, passed on, or has
 // a method called on it.
 export type TableFact = { name: string; line: number; values: number[]; open?: boolean };
+
+export type LiteralFact = { line: number; keys: string[]; open?: boolean; unread?: number; by?: string };
 
 // A name bound by an import made inside a function or a block, in that
 // scope only: the import (an index into FileFacts.imports) and the name it
@@ -259,6 +267,18 @@ export type FileFacts = {
   types: TypeUse[];
   typeCuts?: number; // annotations too large to read whole: their types past the cut are not type uses
   tables: TableFact[];
+  // TypeScript and JavaScript: each object literal that is no definition of
+  // the graph (an argument, a returned object, a local) and names a member
+  // that may hold code (a method, a function, a name), with those member
+  // names, and `open` when it may have others (a spread or a source of
+  // Object.assign that is no literal), `unread` the members whose names
+  // are not read (computed keys, keys past the cap). `by` names a value
+  // given its members in place (`f.get = g`, `Object.assign(f, { get })`).
+  // A call through an interface may run such an object's code.
+  // `literalsCut`: the file holds more literals than the cap, so any
+  // interface call may reach one not listed.
+  literals?: LiteralFact[];
+  literalsCut?: boolean;
   imports: ImportFact[];
   exportsLocal: { local: string; exported: string; line?: number }[]; // `export { a as b }` without a source
   defaultExport: string | null; // the local name `export default` names
@@ -305,7 +325,7 @@ export type DispatchSite = {
   declared: string[]; // the definition the call binds to
   candidates: string[]; // ids of the implementations or overrides kept
   total: number;
-  rule: "dispatch-implements" | "dispatch-override";
+  rule: "dispatch-implements" | "dispatch-override" | "by-shape";
 };
 
 // What a function does with its parameters and what it returns, read from

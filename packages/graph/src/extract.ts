@@ -7,7 +7,7 @@
 // patterns were written here against the pinned grammar files.
 import { createHash } from "node:crypto";
 import type { Node, Tree } from "web-tree-sitter";
-import type { BoundImport, CallFact, DefFact, FileFacts, ImportFact, Lang, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
+import type { BoundImport, CallFact, DefFact, FileFacts, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
 import { MAX_TYPE_DEPTH } from "./types.js";
 import { walkTree } from "./walk.js";
 import type { TreeVisitor } from "./walk.js";
@@ -63,7 +63,13 @@ import type { TreeVisitor } from "./walk.js";
 // 38: a route handler written in place (`app.get("/x", (c) => ...)`, a gin
 // `r.GET("/x", func(c *gin.Context) {...})`) is a definition of its own,
 // with the definition it is written in (DefFact.inlineIn).
-export const EXTRACTOR_VERSION = 38;
+// 39: an interface member marked `?` is optional (DefFact.optional); an
+// interface in `declare module "x"` or `declare global` augments a type
+// (DefFact.augments); the object literals that may hold code
+// (FileFacts.literals); a literal counts its computed keys that hold code
+// (LiteralFact.unread), and a value given members by assignment or
+// Object.assign is recorded as one (LiteralFact.by).
+export const EXTRACTOR_VERSION = 39;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -311,6 +317,9 @@ class Ctx {
   values: ValueRef[] = [];
   types: TypeUse[] = [];
   tables: TableFact[] = [];
+  literals: LiteralFact[] = [];
+  literalsCut = false;
+  assignedMembers = new Map<string, LiteralKeys & { line: number }>();
   imports: ImportFact[] = [];
   exportsLocal: { local: string; exported: string; line?: number }[] = [];
   defaultExport: string | null = null;
@@ -795,6 +804,7 @@ class Ctx {
     for (const c of this.calls) if (c.recv.kind === "type") bindType(c.recv.type);
     for (const v of values) if (v.recv.kind === "type") bindType(v.recv.type);
     for (const t of this.types) bindType(t.ref);
+    for (const [by, found] of this.assignedMembers) jsAddLiteral(this, found.line, found, by.startsWith("Object.assign@") ? "Object.assign" : by);
     return {
       lang: this.lang,
       defs: this.defs,
@@ -803,6 +813,8 @@ class Ctx {
       types: this.types,
       ...(typeCuts > 0 ? { typeCuts } : {}),
       tables,
+      ...(this.literals.length > 0 ? { literals: this.literals } : {}),
+      ...(this.literalsCut ? { literalsCut: true } : {}),
       imports: this.imports,
       exportsLocal: this.exportsLocal,
       defaultExport: this.defaultExport,
@@ -1110,6 +1122,66 @@ function jsMemberType(annotation: Node | null, params: Map<string, TypeRef | nul
     return { name: t.text, qualifier: null, ...pos(t), kind: "param", param: [...params.keys()].indexOf(t.text) };
   }
   return jsTypeRef(annotation);
+}
+
+// The object literals a file records, and the member names one keeps.
+const MAX_LITERALS = 4096;
+const MAX_LITERAL_KEYS = 1024;
+// A value that never holds code: a string, a number, a boolean, null, an array or an object.
+const DATA_VALUES = new Set(["string", "template_string", "number", "true", "false", "null", "undefined", "array", "object", "regex"]);
+// The members of an object literal that may hold code (a method, a
+// function, a name or any other expression), into `into`: a spread may
+// bring other members, and a computed key that holds code (`[k]: fn`) is
+// a member whose name is not read.
+type LiteralKeys = { keys: Set<string>; open: boolean; unread: number };
+function jsLiteralKeys(node: Node, into: LiteralKeys): void {
+  for (const c of node.namedChildren) {
+    if (c.type === "spread_element") into.open = true;
+    else if (c.type === "shorthand_property_identifier") into.keys.add(c.text);
+    else if (c.type === "method_definition" || c.type === "pair") {
+      const key = c.childForFieldName(c.type === "pair" ? "key" : "name");
+      const value = c.type === "pair" ? jsUnwrap(c.childForFieldName("value")) : null;
+      if (c.type === "pair" && (!value || DATA_VALUES.has(value.type))) continue;
+      const name = key?.type === "property_identifier" ? key.text : key?.type === "string" ? key.namedChildren.find((x) => x.type === "string_fragment")?.text : undefined;
+      if (name) into.keys.add(name);
+      else if (key?.type === "computed_property_name") into.unread++;
+    }
+  }
+}
+// Records a value that may hold code under the names `found` gives it.
+// The keys past the cap are members whose names are not kept.
+function jsAddLiteral(ctx: Ctx, line: number, found: LiteralKeys, by?: string): void {
+  if (found.keys.size === 0 && found.unread === 0) return;
+  if (ctx.literals.length >= MAX_LITERALS) {
+    ctx.literalsCut = true;
+    return;
+  }
+  const keys = [...found.keys];
+  const unread = found.unread + Math.max(0, keys.length - MAX_LITERAL_KEYS);
+  ctx.literals.push({ line, keys: keys.slice(0, MAX_LITERAL_KEYS), ...(found.open ? { open: true } : {}), ...(unread > 0 ? { unread } : {}), ...(by !== undefined ? { by } : {}) });
+}
+function jsLiteral(ctx: Ctx, node: Node): void {
+  const found: LiteralKeys = { keys: new Set(), open: false, unread: 0 };
+  jsLiteralKeys(node, found);
+  jsAddLiteral(ctx, node.startPosition.row + 1, found);
+}
+// A value given members in place: `f.get = fn` and `Object.assign(f, { get })`
+// give `f` a member that may hold code, so `f` may fill an interface no
+// definition of the graph declares. The members are kept by the text of
+// the value (`f`, `deps.store`) for the whole file and recorded when the
+// walk ends. Any other target of Object.assign (`Object.assign({}, a, b)`)
+// is a value of its own; `this` is left out, as its members are the
+// class's fields.
+function jsAssignedMembers(ctx: Ctx, target: Node, line: number, objectAssign: boolean): LiteralKeys | null {
+  const t = jsUnwrap(target);
+  const by = t?.type === "identifier" || t?.type === "member_expression" ? t.text : t && t.type !== "this" && objectAssign ? `Object.assign@${t.startIndex}` : null;
+  if (by === null) return null;
+  let found = ctx.assignedMembers.get(by);
+  if (!found) {
+    found = { line, keys: new Set(), open: false, unread: 0 };
+    ctx.assignedMembers.set(by, found);
+  }
+  return found;
 }
 
 // An expression read for its value: `(x)`, `x!` and `x satisfies T` are x.
@@ -2029,7 +2101,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           argUses.push(...jsBaseArgNames(t));
         }
         enteringTypeParams = null;
-        const def = ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), bases, iface: true });
+        // `declare module "x" { interface T { ... } }` and `declare global`: members added to a type of a package or of the runtime.
+        const block = (node.parent?.type === "export_statement" ? node.parent : node).parent;
+        const holder = block?.type === "statement_block" ? block.parent : null;
+        const augments = holder?.type === "ambient_declaration" || (holder?.type === "module" && holder.childForFieldName("name")?.type === "string" && holder.parent?.type === "ambient_declaration");
+        const def = ctx.addDef(node, name, "type", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node), bases, iface: true, ...(augments ? { augments: true } : {}) });
         for (const t of argUses) ctx.addTypeUse(t, def);
         return ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
       }
@@ -2044,6 +2120,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const name = node.childForFieldName("name");
         if (!name || name.type !== "property_identifier") return false;
         const fnType = node.type === "property_signature" ? node.childForFieldName("type")?.firstNamedChild : node;
+        const optional = where === "interface_body" && node.children.some((c) => c.type === "?") ? { optional: true } : {};
         // An interface property whose type is not a function is a field, as a class's is.
         if (node.type === "property_signature" && where === "interface_body" && fnType?.type !== "function_type") {
           for (const t of jsTypeNames(node.childForFieldName("type"))) ctx.addTypeUse(t, cls.def);
@@ -2053,14 +2130,14 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           // (`resolve: ResolveFn`): a member a call can name, as a property
           // spelled with a function type is. A call can name it only then.
           if (type && type.kind !== "param" && !type.elem && !type.promise && !type.parts && type.name !== "{}" && type.name !== "?" && (fnType?.type === "type_identifier" || fnType?.type === "nested_type_identifier" || fnType?.type === "generic_type")) {
-            ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, signature: type });
+            ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, signature: type, ...optional });
           }
           return false;
         }
         if (!fnType || (node.type === "property_signature" && fnType.type !== "function_type")) return false;
         const ret = fnType.childForFieldName("return_type");
         const result = node.type === "property_signature" ? jsTypeRef(ret) : jsTypeRef(ret);
-        const def = ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, ...(result ? { results: [result] } : {}) });
+        const def = ctx.addDef(node, name, "method", { owner: cls.cls, exported: true, abstract: true, ...(result ? { results: [result] } : {}), ...optional });
         jsSignature(ctx, fnType, def, null);
         return false;
       }
@@ -2125,6 +2202,17 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         jsArgs(ctx, node.childForFieldName("arguments"), ctx.noteCall(node, before));
         // `pick<Repo>(xs)`: each type argument is a use of that type.
         for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
+        // `Object.assign(f, { get }, other)`: `f` takes the members of each
+        // source, and a source that is no object literal may bring others.
+        if (fn?.type === "member_expression" && fn.text === "Object.assign") {
+          const [target, ...sources] = node.childForFieldName("arguments")?.namedChildren ?? [];
+          const found = target ? jsAssignedMembers(ctx, target, node.startPosition.row + 1, true) : null;
+          if (found) for (const src of sources) {
+            const o = jsUnwrap(src);
+            if (o?.type === "object") jsLiteralKeys(o, found);
+            else found.open = true;
+          }
+        }
         return;
       }
       case "new_expression": {
@@ -2150,6 +2238,8 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           ctx.pendingTables.delete(node.startIndex);
           ctx.bindTable(pending.name, pending.line, refs, pending.scope, pending.open === true);
         }
+        // An object that is no module of the graph: the members that may hold code.
+        if (ctx.top.objectAt !== node.startIndex) jsLiteral(ctx, node);
         return;
       }
       case "array":
@@ -2208,6 +2298,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // `handlers.b = g`, `handlers[k] = g`: what a table bound to the name holds changes.
         const target = left?.type === "member_expression" || left?.type === "subscript_expression" ? left.childForFieldName("object") : null;
         if (target?.type === "identifier") ctx.tableUse(target.text);
+        // `f.get = g`: `f` takes a member that may hold code.
+        const value = jsUnwrap(right);
+        const prop = left?.type === "member_expression" ? left.childForFieldName("property") : null;
+        if (target && prop?.type === "property_identifier" && value && !DATA_VALUES.has(value.type) && target.type !== "this") {
+          jsAssignedMembers(ctx, target, node.startPosition.row + 1, false)?.keys.add(prop.text);
+        }
         const cls = ctx.cls();
         if (type && cls && ctx.top.thisKnown !== false && left?.type === "member_expression" && left.childForFieldName("object")?.type === "this") {
           const prop = left.childForFieldName("property");

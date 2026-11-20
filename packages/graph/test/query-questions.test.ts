@@ -57,6 +57,9 @@
 //     are missing from the blast radius. Or they come back as callers of
 //     the handler, which never runs from there. Or `callees` of the factory
 //     walks into the handler when nobody asked, or calls the hop a call.
+// 20. `packages` counts one import site per importing file and module, so a
+//     file that imports a package twice (a type import and a value import,
+//     or an import and a re-export) loses every line after the first.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -719,5 +722,42 @@ describe("impact of a change inside a definition a function holds (19)", () => {
       "createSessionHandler calls saveSession at src/factory.ts:5",
     ]);
     expect(q({ kind: "callees", target: { name: "createSessionsRouter" }, edges: ["imports"] }).error?.code).toBe("bad-request");
+  });
+});
+
+describe("packages, one import site per import line (20)", () => {
+  let s: Session;
+  const manifest = (name: string, deps: Record<string, string>) => JSON.stringify({ name, version: "1.0.0", type: "module", ...(Object.keys(deps).length > 0 ? { dependencies: deps } : {}), exports: { ".": "./src/index.ts" } });
+  const files: Record<string, string> = {
+    "package.json": JSON.stringify({ name: "acme", private: true }),
+    "pnpm-workspace.yaml": 'packages:\n  - "packages/*"\n',
+    "packages/core/package.json": manifest("@acme/core", {}),
+    "packages/core/src/index.ts": "export type Name = string;\nexport function greet(name: Name): string {\n  return name;\n}\nexport function bye(): string {\n  return \"bye\";\n}\n",
+    "packages/app/package.json": manifest("@acme/app", { "@acme/core": "workspace:*" }),
+    // Three lines name the package: a type import, a value import and a re-export.
+    "packages/app/src/twice.ts": 'import type { Name } from "@acme/core";\nimport { greet } from "@acme/core";\nexport { bye } from "@acme/core";\nexport function hi(n: Name): string {\n  return greet(n);\n}\n',
+    // One import of two names, written over four lines: one site.
+    "packages/app/src/once.ts": 'import {\n  greet,\n  bye,\n} from "@acme/core";\nexport function both(): string {\n  return greet("a") + bye();\n}\n',
+    // A file of core itself imports nothing from another package.
+    "packages/core/src/self.ts": 'import { greet } from "./index";\nexport function me(): string {\n  return greet("me");\n}\n',
+  };
+  beforeAll(async () => {
+    const repo = makeRepo(files);
+    const graph = await buildGraph({ repoRoot: repo, store: null });
+    s = { graph, generation: "packages-build", treeSha: null, builtAt: null, laterEditsKnown: false };
+  });
+  const q = (req: Omit<Request, "apiVersion">) => query(s, { apiVersion: 1, ...req } as Request);
+
+  it("lists every line of a file that imports the package, and one site for one import of several names", () => {
+    const a = q({ kind: "packages", target: { project: "packages/core" } });
+    expect(a.error).toBeNull();
+    expect(a.items).toEqual([expect.objectContaining({ project: "packages/app", importSites: 4 })]);
+    expect((a.items[0] as { sites: string[] }).sites.sort()).toEqual(["packages/app/src/once.ts:1", "packages/app/src/twice.ts:1", "packages/app/src/twice.ts:2", "packages/app/src/twice.ts:3"]);
+  });
+
+  it("still lists a file once among the importers of the module it imports twice", () => {
+    const a = q({ kind: "importers", target: { file: "packages/core/src/index.ts" } });
+    expect(a.error).toBeNull();
+    expect((a.items as Item[]).map((i) => i.from).sort()).toEqual(["packages/app/src/once.ts", "packages/app/src/twice.ts", "packages/core/src/self.ts"]);
   });
 });

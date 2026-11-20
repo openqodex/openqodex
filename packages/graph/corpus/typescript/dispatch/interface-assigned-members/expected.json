@@ -1,0 +1,52 @@
+{
+  "guards": "keeps the gap of a call through an interface when a function given the interface's methods by assignment or Object.assign may fill it",
+  "callers": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/mem.ts#MemStore.get",
+      "site": "src/use.ts:4",
+      "tier": "possible",
+      "kind": "dispatches_to",
+      "note": "every method of Store by name"
+    },
+    {
+      "to": "src/store.ts#Cache.read",
+      "site": "src/use.ts:13",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#Lone.find",
+      "site": "src/use.ts:22",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 4,
+      "cause": "unsupported-rule"
+    },
+    {
+      "file": "src/use.ts",
+      "line": 13,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/use.ts",
+      "line": 22,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "floor": {
+    "src/mem.ts#MemStore.get": true
+  }
+}

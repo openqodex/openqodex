@@ -41,6 +41,9 @@ export const HUB_FILES = 8; // a name defined in more files never binds without 
 // A call through an interface or a base type keeps at most this many
 // implementations or overrides as possible targets; the rest is a gap.
 export const DISPATCH_CAP = 32;
+// A call through a TypeScript interface keeps at most this many classes
+// that match the interface by shape alone; the rest is a gap.
+export const SHAPE_CAP = 20;
 // 8: dispatch through interfaces and base types, language lookup orders
 // (Python C3, Go embedding depth, Ruby mixins), value and type uses,
 // may_invoke, overrides and implements. 9: a dynamic-base gap on each class
@@ -63,14 +66,21 @@ export const DISPATCH_CAP = 32;
 // function type the called definition declares (TypeRef.callback).
 // 22: a member of a generic alias of an object type takes the argument
 // its use gives. 24: a member a Pick or an Omit leaves out is no member of
-// the type. 28: a method called on a local copied from a property typed by
+// the type. 25: a file that imports one module on several lines keeps an
+// import site for each. 26: a call through a TypeScript interface reaches
+// the classes that match it by shape (by-shape). 27: a TypeScript call on
+// what a package returned is external at any depth, unless the repository
+// subclasses, implements or augments a package's type with that method.
+// 28: a method called on a local copied from a property typed by
 // a class, an interface or an object type binds on the local's type, never
 // as a value alias of the property; one whose named type the graph cannot
 // read keeps its may_invoke edge beside the call's own binding; a local
 // given a member (TypeRef.member) dispatches as a field does. 29: a
 // TypeScript file that imports a type and has no edge to it leaves an
 // unknown whose candidates are the type's definitions.
-export const RESOLVER_VERSION = 29;
+// 30: a value given members in place (`f.get = g`, Object.assign) and a
+// literal with a computed key keep an interface call's gap (LiteralFact).
+export const RESOLVER_VERSION = 30;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -1540,6 +1550,56 @@ export function createWorld(input: ResolveInput): World {
     });
   };
 
+  // Whether a class is a subtype of a type outside the graph: it, or a
+  // class or interface above it, extends or implements one, or names a
+  // base with an expression.
+  const subtypeMemo = new Map<string, boolean>();
+  const subtypeOfOutside = (key: string, depth = 0): boolean => {
+    const kept = subtypeMemo.get(key);
+    if (kept !== undefined) return kept;
+    subtypeMemo.set(key, false);
+    const info = classes.get(key);
+    const b = basesOf(key);
+    let out =
+      b.outside ||
+      (info?.bases.some((r) => {
+        if (r.rel !== "implements") return false;
+        const k = typeKey(info.file, info.family, r, 0, false, info.nesting);
+        return k === null || k === "ext";
+      }) ??
+        false);
+    if (!out && depth <= MAX_DEPTH) out = b.keys.some((k) => k !== key && subtypeOfOutside(k, depth + 1));
+    subtypeMemo.set(key, out);
+    return out;
+  };
+  // The method names by which a value a package's own function or method
+  // hands back may run the repository's code: the methods of a class or a
+  // module-level object that is a subtype of a type outside the graph (a
+  // subclass of the package's class, an implementation of its interface),
+  // and the members an interface in `declare module` or `declare global`
+  // adds to a package's type. A call of another name on such a value runs
+  // the package's code.
+  let packageMemberNames: Set<string> | null = null;
+  const packageMemberNamed = (name: string): boolean => {
+    if (packageMemberNames === null) {
+      packageMemberNames = new Set();
+      for (const [k, info] of classes) {
+        if (info.family !== "js") continue;
+        const augments = info.ids.some((id) => defById.get(id)?.augments === true);
+        if (!augments && !(classLike(k) && subtypeOfOutside(k))) continue;
+        for (const n of methodsOn.i.get(k)?.keys() ?? []) packageMemberNames.add(n);
+      }
+    }
+    return packageMemberNames.has(name);
+  };
+  // Whether `t` is what a package's own function or method returned: a call
+  // of a name a package exports, or of a method on a value of a package's type.
+  const packageResult = (file: string, family: Family, t: TypeRef, depth: number): boolean => {
+    if (family !== "js" || t.result === undefined || t.callback || t.localDef !== undefined || depth > MAX_TYPE_DEPTH) return false;
+    if (t.on) return typeKey(file, family, t.on, depth + 1) === "ext";
+    return namedResultTarget(file, t) === "ext";
+  };
+
   // Every candidate must declare the same result type. Receiver lookup follows the family's method rules.
   const resultType = (file: string, family: Family, t: TypeRef, depth: number, nesting: string | null): TypeHit => {
     let found: ResultTarget;
@@ -1547,7 +1607,11 @@ export function createWorld(input: ResolveInput): World {
     if (t.on) {
       // A receiver typed by an intersection (`Pick<T, K>` is one): the side that declares the method.
       const on = (family === "js" ? intersectionCall({ file, family, t: t.on, ev: null }, t.name) : null) ?? typeKey(file, family, t.on, depth + 1, false, nesting);
-      // An external receiver has no readable method declaration.
+      // An external receiver has no readable method declaration. In
+      // TypeScript what its method returns is the package's too, unless the
+      // receiver is itself what a package returned and the repository adds
+      // a method of that name to a package's type, which may be what runs.
+      if (on === "ext" && family === "js") return packageResult(file, family, t.on, depth) && packageMemberNamed(t.name) ? null : "ext";
       if (on === null || on === "ext") return null;
       receiver = on;
       const hit = methodOn(on.key, t.name, "i", 0);
@@ -2108,7 +2172,8 @@ export function createWorld(input: ResolveInput): World {
     if (kept !== undefined) return kept;
     if (depth > MAX_DEPTH) return null;
     const info = classes.get(key);
-    let out: Set<string> | null = new Set(methodsOn.i.get(key)?.keys() ?? []);
+    // A TypeScript member marked `?` is no part of the contract.
+    let out: Set<string> | null = new Set([...(methodsOn.i.get(key) ?? [])].filter(([, ids]) => !ids.every((id) => defById.get(id)?.optional === true)).map(([n]) => n));
     for (const b of info?.bases ?? []) {
       const k = typeKey(info?.file ?? "", info?.family ?? "go", b);
       if (k !== null && k !== "ext" && k.key !== key) {
@@ -2161,6 +2226,123 @@ export function createWorld(input: ResolveInput): World {
       out = typesNamed(info.family, first as string).filter((k) => k !== key && rest.every((n) => memberNames(k).has(n)));
     }
     methodSetMemo.set(key, out);
+    return out;
+  };
+
+  // TypeScript is structural: a class or a module-level object whose own
+  // and inherited members cover every required member of an interface, by
+  // name, may stand wherever the interface is asked for without declaring
+  // it. These are the ones that do not reach the interface through
+  // `implements` or `extends`; null when the interface's members are not
+  // all known (it extends a type outside the graph).
+  const classLike = (k: string): boolean => {
+    const ids = classes.get(k)?.ids ?? [];
+    return ids.length > 0 && ids.every((id) => defById.get(id)?.kind === "class" || defById.get(id)?.kind === "module");
+  };
+  const belowMemo = new Map<string, Set<string>>();
+  const declaredBelow = (key: string): Set<string> => {
+    let below = belowMemo.get(key);
+    if (below) return below;
+    below = new Set<string>();
+    const queue = subsOf(key).map((x) => x.key);
+    for (let i = 0; i < queue.length && below.size < 100_000; i++) {
+      const k = queue[i] as string;
+      if (below.has(k)) continue;
+      below.add(k);
+      for (const x of subsOf(k)) if (!below.has(x.key)) queue.push(x.key);
+    }
+    belowMemo.set(key, below);
+    return below;
+  };
+  const shapeMemo = new Map<string, string[] | null>();
+  const shapeMatches = (key: string): string[] | null => {
+    const kept = shapeMemo.get(key);
+    if (kept !== undefined) return kept;
+    let out: string[] | null = null;
+    const names = classes.get(key)?.family === "js" && isIface(key) ? contractNames(key) : null;
+    if (names) {
+      const below = declaredBelow(key);
+      const [first, ...rest] = [...names];
+      out = typesNamed("js", first as string).filter((k) => k !== key && classLike(k) && !below.has(k) && rest.every((n) => memberNames(k).has(n)));
+    }
+    shapeMemo.set(key, out);
+    return out;
+  };
+  // The object literals and the values given members in place that may
+  // hold code, by each member name they write, then those with members
+  // whose names are not read (`unread`), and the files that hold more than
+  // are recorded.
+  type Literal = { file: string; line: number; keys: Set<string>; open: boolean; unread: number; by: string | undefined };
+  let literalIndex: { byName: Map<string, Literal[]>; unread: Literal[]; cut: string[] } | null = null;
+  const literalsNamed = (name: string) => {
+    if (literalIndex === null) {
+      const byName = new Map<string, Literal[]>();
+      const unread: Literal[] = [];
+      const cut: string[] = [];
+      for (const [file, f] of facts) {
+        if (f.literalsCut) cut.push(file);
+        for (const l of f.literals ?? []) {
+          const entry = { file, line: l.line, keys: new Set(l.keys), open: l.open === true, unread: l.unread ?? 0, by: l.by };
+          for (const k of entry.keys) push(byName, k, entry);
+          if (entry.unread > 0) unread.push(entry);
+        }
+      }
+      cut.sort();
+      literalIndex = { byName, unread, cut };
+    }
+    return { literals: [...(literalIndex.byName.get(name) ?? []), ...literalIndex.unread.filter((l) => !l.keys.has(name))], cut: literalIndex.cut };
+  };
+  // What a call of `name` through the interface may run in the classes
+  // that match it by shape: each class, in path and line order, with the
+  // methods its own lookup finds. `open` says why a value that is not
+  // listed may answer the call too, so the call keeps its gap: a class that
+  // has the member and extends a class outside the graph, which may give it
+  // the rest, or an object literal or a value given members in place
+  // (`f.get = g`, Object.assign) that has the member and every other
+  // method of the interface, spreads another object into itself, or has a
+  // computed key (it is no definition of the graph, so what it runs cannot
+  // be listed). Null
+  // when the interface's members are not all known.
+  type Shaped = { classes: { key: string; ids: string[] }[]; open: string | null };
+  const shapeTargetMemo = new Map<string, Shaped | null>();
+  const shapeTargets = (key: string, name: string, skip: ReadonlySet<string>): Shaped | null => {
+    const memoKey = `${key}\u0000${name}`;
+    const kept = shapeTargetMemo.get(memoKey);
+    if (kept !== undefined) return kept;
+    const matched = shapeMatches(key);
+    const names = matched === null ? null : contractNames(key);
+    let out: Shaped | null = null;
+    if (matched !== null && names !== null) {
+      const at = (k: string) => {
+        const id = classes.get(k)?.ids[0];
+        return { file: classes.get(k)?.file ?? k, line: (id ? defById.get(id)?.line : 0) ?? 0 };
+      };
+      const found: { key: string; ids: string[] }[] = [];
+      for (const k of matched) {
+        const hit = methodOn(k, name, "i", 0);
+        const ids = hit && "ids" in hit ? hit.ids.filter((id) => !skip.has(id) && defById.get(id)?.abstract !== true) : [];
+        if (ids.length > 0) found.push({ key: k, ids });
+      }
+      found.sort((a, b) => at(a.key).file.localeCompare(at(b.key).file) || at(a.key).line - at(b.key).line || a.key.localeCompare(b.key));
+      const iface = shortKey(key);
+      const listed = new Set(matched);
+      const below = declaredBelow(key);
+      const outsideClass = typesNamed("js", name).find((k) => k !== key && classLike(k) && !below.has(k) && !listed.has(k) && outsideBase(k));
+      const { literals, cut } = literalsNamed(name);
+      // A literal may fill the interface when it has the member called, or
+      // spreads, and its unread members may be the methods it lacks.
+      const literal = literals.find((l) => (l.open && l.keys.has(name)) || [...names].filter((n) => !l.keys.has(n)).length <= l.unread);
+      let open: string | null = null;
+      if (outsideClass !== undefined) open = `${shortKey(outsideClass)} has ${name} and extends a class outside the graph, which may give it the other methods of ${iface}, so it is not listed`;
+      else if (literal !== undefined) {
+        const what = literal.by === undefined ? `the object literal at ${literal.file}:${literal.line}` : `\`${literal.by}\` at ${literal.file}:${literal.line}, given members in place,`;
+        const has = !literal.keys.has(name) ? `has a key the graph cannot read, which may be ${name}` : literal.open ? `has ${name} and may have more members` : `has ${name} and${literal.unread > 0 ? ", by name or by a key the graph cannot read," : ""} every other method of ${iface}`;
+        open = `${what} ${has}, so it may be a ${iface}; a value written in place is no definition of the graph, so what it runs is not listed`;
+      }
+      else if (cut.length > 0) open = `${cut[0] as string} holds more object literals than the graph records, so one of them may be a ${iface}`;
+      out = { classes: found, open };
+    }
+    shapeTargetMemo.set(memoKey, out);
     return out;
   };
 
@@ -2377,7 +2559,8 @@ export function createWorld(input: ResolveInput): World {
     let found: { ids: string[]; ev: Ev } | "ext" | null;
     if (t.on) {
       const on = typeKey(s.file, s.family, t.on, depth + 1);
-      if (on === null || on === "ext") return on;
+      if (on === "ext") return packageResult(s.file, s.family, t.on, depth) && packageMemberNamed(t.name) ? null : "ext";
+      if (on === null) return null;
       const hit = methodOn(on.key, t.name, "i", 0);
       if (!hit || !("ids" in hit)) return null;
       found = { ids: hit.ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
@@ -2955,7 +3138,15 @@ export function createWorld(input: ResolveInput): World {
           return { unknown: "untyped-receiver", shape: "typed", note: `a value typed ${spelled} may be anything with a method of this name` };
         }
         const t = typeKey(file, family, r.type);
-        if (t === "ext") return { ext: true };
+        // What a package's function or method returned: its methods are the
+        // package's, unless the repository adds a method of that name to a
+        // package's type (a subclass, an implementation, `declare module`),
+        // which the value may be.
+        const fromPackage = (): Outcome =>
+          family === "js" && packageMemberNamed(call.name) && packageResult(file, family, r.type, 0)
+            ? { unknown: "no-receiver-type", shape: "typed", note: `what ${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name} returns comes from a package, and the repository adds a method ${call.name} to a package's type, by a subclass, an implementation or \`declare module\`, which the value may be` }
+            : { ext: true };
+        if (t === "ext") return fromPackage();
         // A collection itself (an array, a list, a slice) or a value of a
         // built-in type the file does not redefine: the method is the
         // language's own.
@@ -2977,7 +3168,7 @@ export function createWorld(input: ResolveInput): World {
           return { unknown: "no-receiver-type", shape: "typed", note };
         }
         const key = typed ?? followPath(t, r.path);
-        if (key === "ext") return { ext: true };
+        if (key === "ext") return fromPackage();
         if (key === null && builtinEnd()) return { ext: true };
         if (key === null) return { unknown: "no-receiver-type", shape: "typed", note: "a field whose type no rule knows" };
         const kind = key.ev.kind === "receiver-inferred" ? "receiver-inferred" : receiverKind(r.type, r.path);
@@ -3135,6 +3326,15 @@ export function createWorld(input: ResolveInput): World {
       let v = tsIface.get(key);
       if (v === undefined) tsIface.set(key, (v = classes.get(key)?.family === "js" && classes.get(key)?.ids.some((id) => defById.get(id)?.iface === true) === true));
       return v;
+    };
+    const shapeEv = (declared: string, iface: string, count: number): Ev => {
+      const k = `${declared} shape ${count}`;
+      let ev = evMemo.get(k);
+      if (!ev) {
+        ev = { kind: "by-shape", tier: "possible", via: null, note: `Its class matches ${iface} by shape: it has every method of ${iface} by name without declaring implements; its other members and the signatures are not compared. A call to ${declared} may run it, in one of ${count} classes.`, rule: "by-shape" };
+        evMemo.set(k, ev);
+      }
+      return ev;
     };
     const openNotes = new Map<string, string>();
     const openShapeNote = (key: string): string => {
@@ -3303,9 +3503,33 @@ export function createWorld(input: ResolveInput): World {
               unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `the call may run ${targets.length} implementations or overrides of ${declared}; the ${targets.length - DISPATCH_CAP} past the first ${DISPATCH_CAP} in path order are not listed` });
             }
           }
-          // A TypeScript interface admits any value of its shape, declared or not.
+          // A TypeScript interface admits any value of its shape, declared or
+          // not: the classes that have every member by name are possible
+          // targets too, capped. The gap stays when the interface's members
+          // are not all known, or a class may get them from outside the graph.
           if (family === "js" && isTsInterface(d.key)) {
-            unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: openShapeNote(d.key) });
+            const shaped = shapeTargets(d.key, call.name, new Set([...out.ids, ...targets]));
+            if (shaped === null) {
+              unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: openShapeNote(d.key) });
+            } else {
+              const iface = shortKey(d.key);
+              if (shaped.classes.length > 0) {
+                // The cap counts classes; a method two classes share (one inherits it) is listed once.
+                const keptIds = [...new Set(shaped.classes.slice(0, SHAPE_CAP).flatMap((c) => c.ids))];
+                const leftIds = new Set(shaped.classes.slice(SHAPE_CAP).flatMap((c) => c.ids).filter((id) => !keptIds.includes(id)));
+                const total = keptIds.length + leftIds.size;
+                dispatch.push({ file: path, line: call.line, column: call.column, caller: callerId, name: call.name, declared: out.ids, candidates: keptIds, total, rule: "by-shape" });
+                const site = siteOf(path, call.line, call.column, shapeEv(declared, iface, shaped.classes.length));
+                for (const t of keptIds) addEdge(callerId, t, "dispatches_to", site);
+                // Classes past the cap that run only methods already listed hide nothing.
+                if (leftIds.size > 0) {
+                  unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${shaped.classes.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.classes.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` });
+                }
+              }
+              if (shaped.open !== null) {
+                unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: `a value of the interface ${iface} may be any object of that shape; ${shaped.open}` });
+              }
+            }
           }
         }
         // A function passed to a callee whose body calls that parameter.
@@ -3493,14 +3717,27 @@ export function createWorld(input: ResolveInput): World {
     for (const { path, facts: f } of input.files) {
       index.bindings(path);
       const family = familyOf(f.lang);
-      const seen = new Set<string>();
+      // One edge per importing file and target, with a site for each line
+      // that imports it: a type import and a value import of one module are two.
+      const seen = new Map<string, GraphEdge>();
+      const sites = new Set<string>();
       for (const t of importTargets.get(path) ?? []) {
         // Go: the target is a package folder; files of one package do not import each other.
         const key = family === "go" ? `go:${t.target}` : t.target;
-        if (seen.has(key) || (family === "go" && t.target === dirOf(path))) continue;
-        seen.add(key);
+        if (family === "go" && t.target === dirOf(path)) continue;
+        const at = `${key}\u0000${t.line}:${t.column}`;
+        if (sites.has(at)) continue;
+        sites.add(at);
         const site = siteOf(path, t.line, t.column, t.ev);
-        push(importers, key, { from: path, to: key, kind: "imports", tier: site.tier, sites: [site] } as GraphEdge);
+        const kept = seen.get(key);
+        if (kept) {
+          kept.sites.push(site);
+          kept.tier = weakest(kept.tier, site.tier);
+          continue;
+        }
+        const e = { from: path, to: key, kind: "imports", tier: site.tier, sites: [site] } as GraphEdge;
+        seen.set(key, e);
+        push(importers, key, e);
       }
     }
 
