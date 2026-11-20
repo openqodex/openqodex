@@ -64,11 +64,22 @@ export function failureClass(reason: string | null): string {
     [/could not start/, "could not start"],
     [/more output than the limit/, "printed more output than the limit"],
     [/was killed/, "was killed"],
-    [/wrote no report|no report/, "printed no report"],
-    [/^parse:|read report|report too large/, "its report could not be read"],
+    [/wrote no report|no report|printed no result/, "printed no report"],
+    [/(^| )parse:|read report|report too large/, "its report could not be read"],
     [/not a regular file/, "not a regular file"],
     [/outside the repo/, "a file was outside the repo"],
     [/larger than/, "a file was too large to read"],
+    // Reasons OpenQodex phrases itself when a language scanner cannot run on
+    // the developer's machine. These name a cause a reader can act on, so the
+    // issue is not grouped under the catch-all below. The reason text is only
+    // matched here, never kept.
+    [/needs Cargo\b/, "the Cargo toolchain was missing"],
+    [/could not fetch the RustSec advisory database/, "could not fetch the advisory database"],
+    [/cannot make the advisory database folder/, "could not make the advisory database folder"],
+    [/not all in your Cargo cache/, "a crate was missing from the Cargo cache"],
+    [/cargo metadata failed/, "cargo metadata could not read the project"],
+    [/could not type-check/, "a package could not be type checked"],
+    [/no go\.mod found/, "a changed file had no Go module"],
   ];
   return classes.find(([re]) => re.test(r))?.[1] ?? "failed for a reason not listed";
 }
