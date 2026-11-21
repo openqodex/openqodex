@@ -382,8 +382,6 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     if (evaluated) why(`${at(evaluated)} runs code by a name built at run time, and it can see this function`, null);
     const global = reach.find((r) => r.why === "global");
     if (global) why(`${at(global)} reaches the global scope by a name built at run time, and it can see this function`, null);
-    // The build keeps only the first place each name is loaded at.
-    for (const r of reach) if (r.why === "load") why(`a module loaded by a computed path at ${at(r)} may offer \`${r.name ?? seed.name}\``, null);
     const any = x.loadAny[0];
     if (any && family === "js" && (x.offered.has(seed.id) || removed)) {
       const more = x.loadAny.length > 1 ? ` (and ${x.loadAny.length - 1} more ${x.loadAny.length === 2 ? "place" : "places"})` : "";

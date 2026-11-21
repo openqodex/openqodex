@@ -17,7 +17,7 @@
     {
       "target": "src/a.cjs#f",
       "reason": "may be any module of the repository",
-      "at": "src/use.mjs:3"
+      "at": "src/use.mjs:2"
     }
   ]
 }

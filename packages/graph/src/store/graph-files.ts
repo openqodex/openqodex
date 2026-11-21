@@ -129,7 +129,7 @@ export function writeIndex(g: Graph): Record<string, string> {
   const escapes = {
     uses: [...x.uses].map(([id, u]) => [e.s(id), ...place(u), u.count]),
     unbound: [...x.unbound].map(([k, u]) => [e.s(k), ...place(u), u.count]),
-    reach: [...x.reach].map(([id, rs]) => [e.s(id), rs.map((r) => [e.s(r.why), ...place(r), e.s(r.name)])]),
+    reach: [...x.reach].map(([id, rs]) => [e.s(id), rs.map((r) => [e.s(r.why), ...place(r)])]),
     modules: [...x.modules].map(([file, p]) => [e.s(file), ...place(p)]),
     loadAny: x.loadAny.map((p) => [...place(p), e.s(p.why)]),
     offered: [...x.offered].map(e.s),
@@ -231,10 +231,7 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
     const escapes: Escapes = {
       uses: new Map(x.uses.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
       unbound: new Map(x.unbound.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
-      reach: new Map(x.reach.map(([id, rs]) => [d.s(id), rs.map((r): Reach => {
-        const name = d.n(r[3] as N);
-        return { why: d.s(r[0] as N) as Reach["why"], ...placeOf(r, 1), ...(name !== null ? { name } : {}) };
-      })])),
+      reach: new Map(x.reach.map(([id, rs]) => [d.s(id), rs.map((r): Reach => ({ why: d.s(r[0] as N) as Reach["why"], ...placeOf(r, 1) }))])),
       modules: new Map(x.modules.map((r) => [d.s(r[0] as N), placeOf(r, 1)])),
       loadAny: x.loadAny.map((r) => ({ ...placeOf(r, 0), why: d.s(r[2] as N) as Escapes["loadAny"][number]["why"] })),
       offered: new Set(x.offered.map(d.s)),

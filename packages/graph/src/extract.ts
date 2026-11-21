@@ -98,7 +98,15 @@ import type { TreeVisitor } from "./walk.js";
 // member `createRequire` counts only on it; a read by a computed key is
 // judged plain once every scope is known and keeps its places; a key a
 // pattern takes apart is a member read.
-export const EXTRACTOR_VERSION = 48;
+// 49: any use of Node's module library past `isBuiltin`, `builtinModules`,
+// `findSourceMap` and `SourceMap` is a load by a computed path, its path
+// read with string escapes decoded and its names bound by scope; a load by a
+// computed path that is used is read for any name (a load fact holds no
+// names); a member `createRequire` or `_load` on any value is a loader; a
+// read by a computed key on a value of a plain type keeps the names a type
+// of the repository would have to take to make it not plain (OpaqueFact.plain);
+// and a read followed by a member or a call whose value is passed on is passed.
+export const EXTRACTOR_VERSION = 49;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -386,13 +394,12 @@ class Ctx {
   // callKey, so no call reads its own `parent`: tree-sitter finds a parent
   // by walking down from the root, and a read per call made a deeply nested
   // file quadratic. A call whose value is given to the name `require`
-  // (jsMarkRequireBinders), one whose value is called (`f()(x)`), and one
-  // whose value is thrown away (`f();`, `await f();`).
+  // (jsMarkRequireBinders), and one whose value is thrown away (`f();`,
+  // `await f();`).
   bindsRequire = new Set<string>();
-  calledCalls = new Set<string>();
   discardedCalls = new Set<string>();
-  // The member read after a name with role `object` (`m.run`): what a
-  // module loaded by a computed path is read for.
+  // The member read after a name with role `object` (`m.run`): what the
+  // module library bound to a name is read for.
   propOf = new Map<ValueRef, string>();
   // An escape that holds only when its name is not a local, a nested
   // definition, an import or a top-level definition of the file
@@ -401,22 +408,19 @@ class Ctx {
   // A `require` declared from `createRequire(...)`: a read of it is a
   // loader read, though the name is a local.
   madeRequire = false;
-  // The file names `module` or `node:module` in a string, so an import may
-  // give the loader factory or the module object any local name. Imports
-  // are hoisted, so the names read are decided once every import is known.
-  loaderSpec = false;
-  // Escapes that hold only when `name` is the loader factory or the module
-  // object, and the names read, other than by a call, that may be either.
-  pendingLoaders: { name: string; of: "factory" | "module"; fact: EscapeFact }[] = [];
-  loaderReads: { name: string; role: ValueRef["role"]; prop: string | null; line: number }[] = [];
   // Reads by a computed key (`c[k]`): whether the value is of a plain type
   // is decided once every scope is known, as a member read's receiver is.
   // `stays`: the read's value is used where it is read (called, operated
   // on, read further), never passed on.
   keyReads: { recv: Receiver; scope: Scope; line: number; stays: boolean }[] = [];
-  // Names bound to a module loaded by a computed path: each read of one as
-  // `m.name` or `m.name()` adds that name; any other read means any name.
-  private loadBindings: { name: string; scope: Scope; fact: { kind: "load"; line: number; names?: string[] }; names: Set<string>; any: boolean }[] = [];
+  // Names bound to Node's module library (`member` false: the module
+  // object, read only for the members LIB_SAFE names) or to one of its
+  // other members (`member`: any read is a load), in the scope that binds
+  // them (null: the module's own scope, where an import binds). Imports are
+  // hoisted, so the reads are decided once every scope is known. And the
+  // names called past the depth bound, where no scope is read.
+  private libBindings: { name: string; scope: Scope | null; member: boolean }[] = [];
+  deepCalls: { name: string; line: number }[] = [];
   top: Scope;
   // Calls whose names are bound when the walk ends, each with a reference to
   // its scope: a scope's names are known only once all of it has been read
@@ -554,6 +558,7 @@ class Ctx {
     const at = block ? this.top.decl : this.top.fnDecl;
     const index = this.imports.length;
     this.imports.push(fact);
+    this.libImport(fact, at.depth === 0 ? null : at);
     if (at.depth === 0) return;
     fact.scoped = true;
     at.imports ??= new Map();
@@ -669,6 +674,7 @@ class Ctx {
     if (this.top.depth > MAX_SCOPE_DEPTH) {
       call.recv = { kind: "other" };
       if (recv.kind === "none") call.shadowed = true;
+      if (recv.kind === "none" && JS_LANGS.has(this.lang)) this.deepCalls.push({ name: call.name, line });
       return index;
     }
     // A Go receiver name is decided where it is read (identReceiver is not
@@ -778,11 +784,15 @@ class Ctx {
     } else this.opaque.set(why, { why, line, count: 1, ...(reach ? { reach } : {}), ...(name !== undefined ? { name } : {}) });
   }
 
-  // A name given a module loaded by a computed path, in the scope that declares it.
-  bindLoad(name: string, line: number, block: boolean): void {
-    const fact: { kind: "load"; line: number; names?: string[] } = { kind: "load", line };
-    this.escapes.push(fact);
-    this.loadBindings.push({ name, scope: block ? this.top.decl : this.top.fnDecl, fact, names: new Set(), any: false });
+  // The names an import of Node's module library binds, in `scope` (null
+  // for the module's own): the module object, or a member LIB_SAFE does not name.
+  libImport(fact: ImportFact, scope: Scope | null): void {
+    if (fact.typeOnly || fact.reexport || !jsLoaderSpec(fact.spec)) return;
+    if (fact.namespace !== null) this.libBindings.push({ name: fact.namespace, scope, member: false });
+    for (const n of fact.names) {
+      if (n.imported === "default") this.libBindings.push({ name: n.local, scope, member: false });
+      else if (!LIB_SAFE.has(n.imported)) this.libBindings.push({ name: n.local, scope, member: true });
+    }
   }
 
   // A table that something outside this file may change from the start.
@@ -804,13 +814,12 @@ class Ctx {
     readingScope = null;
     readingImportType = null;
     const topNames = new Set(this.defs.filter((d) => d.topLevel).map((d) => d.name));
-    // A read of a name bound to a module loaded by a computed path: `m.name`
-    // adds the name, a call of it the module's default, anything else any name.
-    const loadRead = (scope: Scope, name: string, prop: string | null) => {
-      for (const b of this.loadBindings) {
+    // A read of a name bound to Node's module library where it is read:
+    // anything but a member LIB_SAFE names (`m.isBuiltin`) is a load.
+    const libRead = (scope: Scope, name: string, prop: string | null, line: number) => {
+      for (const b of this.libBindings) {
         if (b.name !== name || this.lookup(scope, name) !== b.scope) continue;
-        if (prop === null) b.any = true;
-        else b.names.add(prop);
+        if (b.member || prop === null || !LIB_SAFE.has(prop)) this.escapes.push({ kind: "load", line });
       }
     };
     // A local alias's call node, made into the call it names.
@@ -838,7 +847,7 @@ class Ctx {
         if (!ident || ident.path.length === 0) bindAlias(call, at, name, true);
         continue;
       }
-      if (this.loadBindings.length > 0) loadRead(scope, call.name, "default");
+      if (this.libBindings.length > 0) libRead(scope, call.name, null, call.line);
       const at = this.lookup(scope, call.name);
       if (!at) continue;
       const fn = at.fns?.get(call.name);
@@ -879,7 +888,7 @@ class Ctx {
     // The names an import binds, a namespace among them, for the free-name check.
     const importLocals = new Set(this.imports.flatMap((i) => [...i.names.map((n) => n.local), ...(i.namespace ? [i.namespace] : [])]));
     for (const { ref, scope, ident } of this.pendingValues) {
-      if (!ident && ref.recv.kind === "none" && this.loadBindings.length > 0) loadRead(scope, ref.name, ref.role === "object" ? (this.propOf.get(ref) ?? null) : null);
+      if (!ident && ref.recv.kind === "none" && this.libBindings.length > 0) libRead(scope, ref.name, ref.role === "object" ? (this.propOf.get(ref) ?? null) : null, ref.line);
       // The name of a table passed on, assigned or returned: what it holds
       // may change elsewhere. A read of its member or by a computed key does not.
       if (!ident && ref.recv.kind === "none" && ref.role !== "object" && ref.role !== "index") {
@@ -906,43 +915,34 @@ class Ctx {
     this.pendingValues = [];
     for (const { fact, scope, name } of this.pendingEscapes) if ((name === "require" && this.madeRequire) || (!this.lookup(scope, name) && !topNames.has(name))) this.escapes.push(fact);
     this.pendingEscapes = [];
-    // The loader factory and the module object under each local name the
-    // imports of `module` give them. A re-export, an export or a load the
-    // reader does not read whole hands them on: what an importer makes with
-    // them is not followed, so each is a load by a computed path.
-    const factories = new Set(["createRequire"]);
-    const moduleObjects = new Set<string>();
-    for (const i of this.imports) {
-      if (i.typeOnly || !LOADER_MODULES.has(i.spec)) continue;
-      if (i.reexport) {
-        if (i.star || i.namespace !== null || i.names.some((n) => n.imported === "createRequire" || n.imported === "default")) this.escapes.push({ kind: "load", line: i.line });
-        continue;
-      }
-      if (i.namespace !== null) moduleObjects.add(i.namespace);
-      for (const n of i.names) {
-        if (n.imported === "createRequire") factories.add(n.local);
-        else if (n.imported === "default") moduleObjects.add(n.local);
-      }
-    }
-    for (const e of [...this.escapes]) if (e.kind === "module" && LOADER_MODULES.has(e.spec)) this.escapes.push({ kind: "load", line: e.line });
-    for (const e of this.exportsLocal) if (factories.has(e.local) || moduleObjects.has(e.local)) this.escapes.push({ kind: "load", line: e.line ?? 1 });
-    for (const p of this.pendingLoaders) if ((p.of === "factory" ? factories : moduleObjects).has(p.name)) this.escapes.push(p.fact);
-    // A factory read other than by a call; the module object read other than
-    // for a named member (`nm[k]`, `const { createRequire: cr } = nm`, passed on).
-    for (const r of this.loaderReads) if (factories.has(r.name) || (moduleObjects.has(r.name) && (r.role !== "object" || r.prop === null))) this.escapes.push({ kind: "load", line: r.line });
-    this.pendingLoaders = [];
-    this.loaderReads = [];
+    // Node's module library handed on: a re-export of anything LIB_SAFE
+    // does not name, an export of a name bound to it, or a call of such a
+    // name past the depth bound. What an importer makes of it is not
+    // followed, so each is a load by a computed path.
+    for (const i of this.imports) if (i.reexport && !i.typeOnly && jsLoaderSpec(i.spec) && (i.star || i.namespace !== null || i.names.some((n) => !LIB_SAFE.has(n.imported)))) this.escapes.push({ kind: "load", line: i.line });
+    const libTop = new Set(this.libBindings.filter((b) => b.scope === null || b.scope.depth === 0).map((b) => b.name));
+    for (const e of this.exportsLocal) if (libTop.has(e.local)) this.escapes.push({ kind: "load", line: e.line ?? 1 });
+    if (this.defaultExport !== null && libTop.has(this.defaultExport)) this.escapes.push({ kind: "load", line: 1 });
+    for (const c of this.deepCalls) if (this.libBindings.some((b) => b.name === c.name)) this.escapes.push({ kind: "load", line: c.line });
+    this.libBindings = [];
+    this.deepCalls = [];
     // A read by a computed key on a value not proved plain (an array, a
     // string, a number, a record) may run any getter, or take any method.
+    // A plain type named by a definition or an import of the file is the
+    // file's own; one named only by its name holds while the repository
+    // declares none of the names it lists (`plain`), decided in resolve.ts.
+    const ownNames = new Set([...this.defs.map((d) => d.name), ...importLocals]);
     for (const k of this.keyReads) {
       const ident = (k.recv as Tagged)[IDENT];
       const recv = ident ? receiverIn(this.lookup(k.scope, ident.name), ident.name, ident.path, topNames) : k.recv;
-      if (jsPlainType(recv)) continue;
-      const kept = this.looseMembers.get("*");
+      const plain = jsPlainNames(recv);
+      const own = plain !== null && plain.some((n) => ownNames.has(n));
+      const key = plain === null || own ? "*" : `*:${plain.join(",")}`;
+      const kept = this.looseMembers.get(key);
       if (kept) {
         kept.count++;
         if (!k.stays) kept.passed = true;
-      } else this.looseMembers.set("*", { why: "*", line: k.line, count: 1, ...(k.stays ? {} : { passed: true }) });
+      } else this.looseMembers.set(key, { why: "*", line: k.line, count: 1, ...(k.stays ? {} : { passed: true }), ...(key === "*" ? {} : { plain: plain as string[] }) });
     }
     this.keyReads = [];
     for (const t of this.pendingTimers) {
@@ -956,7 +956,6 @@ class Ctx {
       this.escapes.push({ kind: "global", line: t.line });
     }
     this.pendingTimers = [];
-    for (const b of this.loadBindings) if (!b.any) b.fact.names = [...b.names].sort();
     for (const ref of this.values) {
       const untyped = ref.recv.kind === "type" && (ref.recv.type.name === "any" || ref.recv.type.name === "unknown") && !ref.recv.type.qualifier;
       if (ref.recv.kind !== "other" && !untyped) continue;
@@ -1705,7 +1704,11 @@ function jsImport(ctx: Ctx, node: Node): void {
     ctx.addOpaque("uses `import x = require(...)` that the reader does not read whole", node.startPosition.row + 1);
     const name = required.namedChildren.find((c) => c.type === "identifier");
     const spec = required.namedChildren.find((c) => c.type === "string");
-    if (name && spec) ctx.imports.push({ spec: stringContent(spec), ...pos(node), names: [], namespace: name.text, star: false, reexport: false, typeOnly: false });
+    if (name && spec) {
+      const fact: ImportFact = { spec: stringContent(spec), ...pos(node), names: [], namespace: name.text, star: false, reexport: false, typeOnly: false };
+      ctx.imports.push(fact);
+      ctx.libImport(fact, null);
+    }
     return;
   }
   for (const part of clause?.namedChildren ?? []) {
@@ -1721,6 +1724,7 @@ function jsImport(ctx: Ctx, node: Node): void {
     }
   }
   ctx.imports.push(fact);
+  ctx.libImport(fact, null);
 }
 
 function jsExport(ctx: Ctx, node: Node): void {
@@ -1811,8 +1815,10 @@ function jsCommonExport(ctx: Ctx, node: Node, left: Node, right: Node | null): L
 // reader does not read whole (a default value, a rest, a nested part, an
 // array, a computed key) keeps the names it does read and marks the module:
 // any of its names may be reached. A computed path is a load of a module the
-// graph cannot name: the names a pattern reads, or what a name bound to it
-// is read for (Ctx.bindLoad).
+// graph cannot name, read for any name: it may be Node's module library,
+// whose loader then loads anything. Node's module library itself binds as
+// an import does (Ctx.libImport), unless it is exported or taken apart by a
+// pattern the reader does not read whole.
 function jsRequire(ctx: Ctx, node: Node, nameNode: Node, value: Node, block: boolean): boolean {
   const awaited = value.type === "await_expression";
   const call = awaited ? value.firstNamedChild : value;
@@ -1825,22 +1831,18 @@ function jsRequire(ctx: Ctx, node: Node, nameNode: Node, value: Node, block: boo
   // Exported as a variable, the module goes wherever an importer takes it.
   if (arg?.type === "string" && isExportedDecl(node)) ctx.addEscape({ kind: "module", spec: stringContent(arg), line });
   if (arg?.type !== "string") {
-    if (nameNode.type === "identifier") {
-      ctx.setLocal(nameNode.text, null, block);
-      ctx.bindLoad(nameNode.text, line, block);
-      return true;
-    }
-    const keys = jsPatternKeys(nameNode);
-    ctx.addEscape(keys && keys.full ? { kind: "load", line, names: keys.names.map((n) => n.imported) } : { kind: "load", line });
+    ctx.addEscape({ kind: "load", line });
     for (const name of patternNames(nameNode)) ctx.setLocal(name, null, block);
     return true;
   }
   const fact: ImportFact = { spec: stringContent(arg), ...pos(node), names: [], namespace: null, star: false, reexport: false, typeOnly: false };
+  if (jsLoaderSpec(fact.spec) && isExportedDecl(node)) ctx.addEscape({ kind: "load", line });
   if (nameNode.type === "identifier") fact.namespace = nameNode.text;
   else {
     const keys = jsPatternKeys(nameNode);
     if (keys) fact.names.push(...keys.names);
     if (!keys || !keys.full) {
+      if (jsLoaderSpec(fact.spec)) ctx.addEscape({ kind: "load", line });
       ctx.addEscape({ kind: "module", spec: fact.spec, line });
       // A default value, a rest or a nested pattern: a local whose value is not known.
       const read = new Set(fact.names.map((n) => n.local));
@@ -1875,60 +1877,67 @@ function jsConstructorRead(ctx: Ctx, line: number): void {
   ctx.addEscape({ kind: "global", line });
 }
 
-// The escapes a call may open: a load the reader did not read as a binding,
-// a direct eval, `Function`, a string run as code by a timer, a call that
-// makes or uses a loader (`createRequire`, `module.require`), an eval
-// through the global object.
-// The modules that hold the loader factory `createRequire`.
+// Node's module library under the paths that name it. The members LIB_SAFE
+// names load nothing: `isBuiltin` and `builtinModules` name the built-in
+// modules, `findSourceMap` and `SourceMap` read source maps (Node's module
+// docs). Any other use of it may make a loader (`createRequire`, `Module`,
+// `_load`, its default export), so it is a load by a computed path.
 const LOADER_MODULES = new Set(["module", "node:module"]);
-// A use of a callee that may be the loader factory, with the escape it
-// opens (`fact`, null for none): `createRequire`; a name an import of
-// `module` gives it (`import { createRequire as cr }`, the same destructured
-// from `require("module")`); or `x.createRequire` where x is the module
-// object (a namespace or default import of `module`, `require("module")`).
-// A member of that name on any other value is no factory. A name is decided
-// once every import is known (Ctx.facts), since imports are hoisted.
-function jsFactoryUse(ctx: Ctx, callee: Node | null, fact: EscapeFact | null): void {
-  const f = jsHeld(callee);
-  if (!fact || !f) return;
-  if (f.type === "identifier") {
-    if (f.text === "createRequire") ctx.addEscape(fact);
-    else if (ctx.loaderSpec) ctx.pendingLoaders.push({ name: f.text, of: "factory", fact });
-    return;
-  }
-  if (f.type !== "member_expression" || f.childForFieldName("property")?.text !== "createRequire") return;
-  const object = jsHeld(f.childForFieldName("object"));
-  if (object?.type === "identifier" && ctx.loaderSpec) ctx.pendingLoaders.push({ name: object.text, of: "module", fact });
-  const call = object?.type === "await_expression" ? jsHeld(object.firstNamedChild) : object;
-  if (call?.type === "call_expression" && jsLoaderModule(call) !== null) ctx.addEscape(fact);
+const LIB_SAFE = new Set(["isBuiltin", "builtinModules", "findSourceMap", "SourceMap"]);
+// Members that make a loader or are one, on any value: a call or a read of
+// one is a load by a computed path, a method of that name of the
+// repository too.
+const LOADER_MEMBERS = new Set(["createRequire", "_load"]);
+// Whether a path written as a string names Node's module library, its
+// escapes decoded (`"node:\u006dodule"`).
+function jsLoaderSpec(raw: string): boolean {
+  return LOADER_MODULES.has(jsUnescape(raw));
 }
-// A `require("module")` or `import("node:module")` call: the node that
-// holds the module object (the call, or the `await` around an import), or
-// "promise" for an import not awaited. Null for a load of another module.
-function jsLoaderModule(call: Node): Node | "promise" | null {
-  const fn = call.childForFieldName("function");
-  const first = call.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment");
-  if (first?.type !== "string" || !LOADER_MODULES.has(stringContent(first))) return null;
-  if (fn?.type === "identifier" && fn.text === "require") return call;
-  if (fn?.type !== "import") return null;
-  return call.parent?.type === "await_expression" ? call.parent : "promise";
+const SIMPLE_ESCAPES: Record<string, string> = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v" };
+// The value of the text between a JavaScript string's quotes, each escape
+// decoded: `\u006d`, `\u{6d}`, `\x6d`, `\155`, a line continuation, `\n`.
+function jsUnescape(raw: string): string {
+  if (!raw.includes("\\")) return raw;
+  return raw.replace(/\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|([0-3][0-7]{0,2}|[4-7][0-7]?)|(\r\n|[\n\r\u2028\u2029])|([\s\S]))/g, (_m, cp, u4, x2, oct, eol, ch) => {
+    if (cp !== undefined) return parseInt(cp, 16) <= 0x10ffff ? String.fromCodePoint(parseInt(cp, 16)) : "";
+    if (u4 !== undefined) return String.fromCharCode(parseInt(u4, 16));
+    if (x2 !== undefined) return String.fromCharCode(parseInt(x2, 16));
+    if (oct !== undefined) return String.fromCharCode(parseInt(oct, 8));
+    if (eol !== undefined) return "";
+    return SIMPLE_ESCAPES[ch] ?? ch;
+  });
+}
+// A load of Node's module library by a written path that the reader did
+// not read as a binding (`require("module")`, `import("node:module")`,
+// `process.getBuiltinModule("module")`): thrown away, or read for a member
+// LIB_SAFE names (`require("module").isBuiltin`), it loads nothing; any
+// other use (another member, an index, passed on, a promise not awaited) is
+// a load by a computed path. Only such a load reads its parents.
+function jsLibUse(ctx: Ctx, call: Node, line: number): void {
+  if (ctx.discardedCalls.has(callKey(call))) return;
+  let at = call;
+  let up = call.parent;
+  const climb = () => {
+    while (up && JS_WRAPPERS.has(up.type)) {
+      at = up;
+      up = up.parent;
+    }
+  };
+  if (call.childForFieldName("function")?.type === "import") {
+    climb();
+    if (up?.type !== "await_expression") return void ctx.addEscape({ kind: "load", line });
+    at = up;
+    up = up.parent;
+  }
+  climb();
+  const prop = up?.type === "member_expression" && sameNode(up.childForFieldName("object"), at) ? up.childForFieldName("property") : null;
+  if (prop?.type !== "property_identifier" || !LIB_SAFE.has(prop.text)) ctx.addEscape({ kind: "load", line });
 }
 // The value a node holds, through the wrappers that keep it (a cast too).
 function jsHeld(node: Node | null): Node | null {
   let n = node;
   while (n && JS_WRAPPERS.has(n.type)) n = n.type === "type_assertion" ? n.lastNamedChild : n.firstNamedChild;
   return n;
-}
-// Whether a value is the object of a member read by name (`v.x`), through
-// the wrappers that keep it.
-function jsNamedMemberOf(value: Node): boolean {
-  let at = value;
-  let up = value.parent;
-  while (up && JS_WRAPPERS.has(up.type)) {
-    at = up;
-    up = up.parent;
-  }
-  return up?.type === "member_expression" && sameNode(up.childForFieldName("object"), at) && up.childForFieldName("property")?.type === "property_identifier";
 }
 // A call by its start and end, the two sameNode compares for nodes of one type.
 const callKey = (call: Node): string => `${call.startIndex}:${call.endIndex}`;
@@ -1946,12 +1955,15 @@ function jsMarkRequireBinders(ctx: Ctx, value: Node | null): void {
   }
 }
 
+// The escapes a call may open: a load the reader did not read as a binding,
+// a direct eval, `Function`, a string run as code by a timer, a call that
+// makes or uses a loader (`createRequire`, `module.require`, Node's module
+// library), an eval through the global object.
 function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
   if (!fn) return;
   const line = node.startPosition.row + 1;
   const key = callKey(node);
-  const binds = ctx.bindsRequire.has(key);
-  if (binds) ctx.madeRequire = true;
+  if (ctx.bindsRequire.has(key)) ctx.madeRequire = true;
   const first = node.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment") ?? null;
   const literal = first?.type === "string";
   // A load whose value is thrown away runs the module and reads none of its names.
@@ -1960,20 +1972,13 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
   const load = () => {
     if (loaded) ctx.addEscape(loaded);
   };
+  const lib = literal && jsLoaderSpec(stringContent(first as Node));
   if (fn.type === "import" || (fn.type === "identifier" && fn.text === "require")) {
     if (ctx.consumedLoads.has(node.startIndex)) return;
     load();
-    // The module object of `module` passed on, indexed or not awaited: what
-    // is taken from it may be the factory, under any name.
-    const held = jsLoaderModule(node);
-    if (held === "promise" || (held !== null && !jsNamedMemberOf(held))) ctx.addEscape({ kind: "load", line });
+    if (lib) jsLibUse(ctx, node, line);
     return;
   }
-  // `const require = createRequire(...)`: its uses are read as require's
-  // are (jsMarkRequireBinders); `createRequire(...)("x")` as a load of x; any
-  // other use of what it makes, as a load by a computed path.
-  const called = ctx.calledCalls.has(key);
-  const made: EscapeFact | null = !called && !binds ? { kind: "load", line } : null;
   if (fn.type === "identifier") {
     if (fn.text === "eval") ctx.addEscape({ kind: "eval", line }, "eval");
     else if (fn.text === "Function") {
@@ -1985,20 +1990,26 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
       // written in place, or a name proved a function, is safe.
       ctx.pendingTimers.push({ scope: ctx.top, timer: fn.text, arg: first.type === "identifier" ? first.text : null, proof: first.type === "identifier" ? jsFunctionProof(first, first.text) : null, line });
     }
-    else jsFactoryUse(ctx, fn, made);
-    return;
-  }
-  if (fn.type === "call_expression") {
-    jsFactoryUse(ctx, fn.childForFieldName("function"), loaded);
+    // What `createRequire(...)` makes loads any module.
+    else if (fn.text === "createRequire") ctx.addEscape({ kind: "load", line });
     return;
   }
   if (fn.type === "member_expression") {
-    jsFactoryUse(ctx, fn, made);
     const prop = fn.childForFieldName("property")?.text;
     const object = jsUnwrap(fn.childForFieldName("object"));
     // `f.constructor("code")`: the constructor of a function is `Function`.
     if (prop === "constructor") jsConstructorRead(ctx, line);
-    if (prop === "require" && loaderOwner(object)) load();
+    if (prop !== undefined && LOADER_MEMBERS.has(prop)) ctx.addEscape({ kind: "load", line });
+    if (prop === "require" && loaderOwner(object)) {
+      load();
+      if (lib) jsLibUse(ctx, node, line);
+    }
+    // `process.getBuiltinModule(...)`, on any value: a built-in module, so
+    // Node's module library when the path is computed.
+    else if (prop === "getBuiltinModule") {
+      if (lib) jsLibUse(ctx, node, line);
+      else if (!literal && !discarded) ctx.addEscape({ kind: "load", line });
+    }
     else if (prop === "eval" && object?.type === "identifier" && GLOBAL_OBJECTS.has(object.text)) ctx.addEscape({ kind: "global", line }, object.text);
     // `window.setTimeout(x)`: a timer, read as one when the global object's name is free.
     else if (prop !== undefined && TIMERS.has(prop) && object?.type === "identifier" && GLOBAL_NAMES.has(object.text) && first && !JS_FN_LITERALS.has(first.type)) {
@@ -2349,39 +2360,57 @@ function jsLiteralKey(index: Node | null): Node | null {
 }
 // A value indexed by a key that runs no getter of the repository: one
 // declared as an array, a string, a number, a boolean, a typed array or a
-// record.
-const PLAIN_INDEXED = new Set([
-  "Array", "ReadonlyArray", "Record", "string", "String", "number", "Number", "boolean", "Boolean", "bigint", "Buffer",
-  "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
-  "Float16Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
+// record, by the names the types of the repository would have to take to
+// change that (the type's own, the global whose prototype it reads, and
+// `Object`). Whether the repository declares one is known only once every
+// file is read (resolve.ts). `string` and its like are keywords no type
+// takes.
+const PLAIN_INDEXED = new Map<string, string[]>([
+  ["Array", ["Array"]], ["ReadonlyArray", ["ReadonlyArray", "Array"]], ["Record", ["Record"]],
+  ["string", ["String"]], ["String", ["String"]], ["number", ["Number"]], ["Number", ["Number"]],
+  ["boolean", ["Boolean"]], ["Boolean", ["Boolean"]], ["bigint", ["BigInt"]], ["Buffer", ["Buffer", "Uint8Array"]],
+  ...["Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
+    "Float16Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array"].map((n): [string, string[]] => [n, [n]]),
 ]);
-function jsPlainType(recv: Receiver): boolean {
-  return recv.kind === "type" && recv.path.length === 0 && (recv.type.elem === true || (recv.type.qualifier === null && PLAIN_INDEXED.has(recv.type.name)));
+// The names that would make a value's declared type not plain, or null for
+// a type that is not plain whatever the repository declares.
+function jsPlainNames(recv: Receiver): string[] | null {
+  if (recv.kind !== "type" || recv.path.length > 0) return null;
+  const names = recv.type.elem === true ? ["Array"] : recv.type.qualifier === null ? PLAIN_INDEXED.get(recv.type.name) : undefined;
+  return names ? [...names, "Object"] : null;
 }
 // Whether the value of a read is used where it is read and never passed
-// on: called, read further, operated on, tested, written or thrown away.
-// A method taken by such a read can run only there.
+// on: called, operated on, tested, written or thrown away. A member read
+// or a call through a member of it (`c[k].valueOf()`, `c[k]["bind"](c)`,
+// `c[k][b](c)`) may give the same function back, so the value is followed
+// through each and must stay at the end of them. A method taken by such a
+// read can run only there.
 function jsValueStays(node: Node): boolean {
   let at = node;
   let up = node.parent;
-  while (up && JS_WRAPPERS.has(up.type)) {
+  let member = false;
+  const is = (field: string) => sameNode(up?.childForFieldName(field) ?? null, at);
+  for (;;) {
+    while (up && JS_WRAPPERS.has(up.type)) {
+      at = up;
+      up = up.parent;
+    }
+    if (!up) return false;
+    const read = (up.type === "member_expression" || up.type === "subscript_expression") && is("object");
+    const called = up.type === "call_expression" && is("function");
+    // `c[k]()` runs what it read there; `c[k].x`, `c[k].x()` hand on a value.
+    if (called && !member) return true;
+    if (!read && !called) break;
+    member ||= read;
     at = up;
     up = up.parent;
   }
-  const is = (field: string) => sameNode(up?.childForFieldName(field) ?? null, at);
-  switch (up?.type) {
+  switch (up.type) {
     case "expression_statement":
     case "unary_expression":
     case "update_expression":
     case "template_substitution":
       return true;
-    case "call_expression":
-      return is("function");
-    case "subscript_expression":
-      return is("object");
-    // `c[k].bind(o)` makes a function that may run anywhere.
-    case "member_expression":
-      return is("object") && up.childForFieldName("property")?.text !== "bind";
     // `a || c[k]` gives the value on.
     case "binary_expression":
       return !["&&", "||", "??"].includes(up.childForFieldName("operator")?.text ?? "");
@@ -2577,9 +2606,6 @@ function jsNameEscapes(ctx: Ctx, name: string, role: ValueRef["role"], prop: str
       if (role !== "object" || prop === "parent" || prop === "children" || prop === "constructor") ctx.addEscape({ kind: "load", line }, name);
       return;
   }
-  // A name that may be the loader factory or the module object, decided
-  // once every import is known.
-  if (ctx.loaderSpec) ctx.loaderReads.push({ name, role, prop, line });
   if (GLOBAL_OBJECTS.has(name) && (role !== "object" || prop === "eval")) ctx.addEscape({ kind: "global", line }, name);
 }
 
@@ -2590,7 +2616,6 @@ function jsResults(fn: Node): TypeRef[] | undefined {
 
 function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): FileFacts {
   const ctx = new Ctx(lang);
-  ctx.loaderSpec = /["'`](?:node:)?module["'`]/.test(tree.rootNode.text);
   const fnFrame = (node: Node, def: number): Leave => {
     const locals = new Map<string, TypeRef | null>();
     const typeParams = jsTypeParams(node);
@@ -3060,7 +3085,6 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       }
       case "call_expression": {
         const fn = node.childForFieldName("function");
-        if (fn?.type === "call_expression") ctx.calledCalls.add(callKey(fn));
         jsCallEscapes(ctx, node, jsUnwrap(fn));
         if (fn?.type === "import") return;
         const before = ctx.calls.length;
@@ -3235,8 +3259,8 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (prop.text === "eval" && object?.type === "identifier" && GLOBAL_OBJECTS.has(object.text)) ctx.addEscape({ kind: "global", line }, object.text);
         if (role !== "object" && object?.type === "identifier" && object.text === "module" && prop.text === "exports") ctx.addEscape({ kind: "own", line }, "module");
         if (prop.text === "constructor") jsConstructorRead(ctx, line);
-        // `m.createRequire` taken as a value: what it makes is not followed.
-        if (prop.text === "createRequire" && !(node.parent?.type === "call_expression" && sameNode(node.parent.childForFieldName("function"), node))) jsFactoryUse(ctx, node, { kind: "load", line });
+        // `m.createRequire` or `m._load` taken as a value, on any value: a loader.
+        if (LOADER_MEMBERS.has(prop.text)) ctx.addEscape({ kind: "load", line });
         if (ctx.readAt.has(prop.startIndex) || (prop.type !== "property_identifier" && prop.type !== "private_property_identifier")) return;
         jsMemberRead(ctx, object ? jsReceiver(ctx, object) : null, prop, prop.text, role, line);
         return;
@@ -3252,6 +3276,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           const { role } = jsReadRole(node, upType(1), field);
           const target = jsUnwrap(node.childForFieldName("object"));
           const key = jsLiteralKey(index);
+          if (key && LOADER_MEMBERS.has(key.text)) ctx.addEscape({ kind: "load", line });
           if (key) jsMemberRead(ctx, target ? jsReceiver(ctx, target) : null, key, key.text, role, line);
           else if (index && index.type !== "number" && target) {
             const recv: Receiver = ctx.top.depth > MAX_SCOPE_DEPTH ? { kind: "other" } : jsReceiver(ctx, target);

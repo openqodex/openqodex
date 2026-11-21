@@ -1,0 +1,13 @@
+{
+  "covers": "an arrow parameter named like the namespace of `node:module` is another value: the repository stays whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.mjs": "import * as m from \"node:module\";\nexport const b = m.builtinModules;\nexport function g(xs) {\n  return xs.map((m) => [m]);\n}\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/a.cjs#f"
+  ],
+  "floored": []
+}

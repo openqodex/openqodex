@@ -3895,14 +3895,13 @@ export function createWorld(input: ResolveInput): World {
   // definitions and imports; `eval` and the global ones reach every
   // definition of a script (a file with no import and no export) and, as
   // they can load a module, every definition a module offers; a load by a
-  // computed path reaches the names it is read for in every module, or
-  // every definition a module offers.
+  // computed path reaches every definition a module offers.
   const escapePaths = (uses: Escapes["uses"], unbound: Escapes["unbound"], marks: Map<string, Place>): Escapes => {
     const reach = new Map<string, Reach[]>();
     const addReach = (id: string, r: Reach) => {
       const list = reach.get(id);
       if (!list) reach.set(id, [r]);
-      else if (!list.some((x) => x.why === r.why && x.file === r.file && x.line === r.line && x.name === r.name)) list.push(r);
+      else if (!list.some((x) => x.why === r.why && x.file === r.file && x.line === r.line)) list.push(r);
     };
     const jsFiles = input.files.filter((x) => familyOf(x.facts.lang) === "js");
     // Every definition a module offers, and the modules whole namespaces of it name.
@@ -3955,7 +3954,6 @@ export function createWorld(input: ResolveInput): World {
     for (const [file, place] of marks) walk(file, place);
 
     // Names built at run time, from the facts of each file.
-    const loadNames = new Map<string, Place>();
     const loadAny: Escapes["loadAny"] = [];
     const runtime: { why: "eval" | "global"; place: Place }[] = [];
     for (const { path, facts: f } of jsFiles) {
@@ -3973,8 +3971,7 @@ export function createWorld(input: ResolveInput): World {
             walk(path, place);
           }
         } else if (e.kind === "load") {
-          if (e.names) for (const n of e.names) if (!loadNames.has(n)) loadNames.set(n, place);
-          if (!e.names) loadAny.push({ ...place, why: "load" });
+          loadAny.push({ ...place, why: "load" });
         } else {
           runtime.push({ why: e.kind, place });
           if (e.kind === "eval") {
@@ -4003,14 +4000,6 @@ export function createWorld(input: ResolveInput): World {
     }
     // Code built at run time can load any module: each eval or global site is a load by a computed path too.
     for (const r of runtime) loadAny.push({ ...r.place, why: r.why });
-    if (loadNames.size > 0) {
-      for (const { path } of jsFiles) {
-        for (const [name, place] of loadNames) {
-          const v = exportedJsNames(path).has(name) ? index.exports(path, name, 0) : null;
-          if (v?.v === "sym") for (const id of v.ids) addReach(id, { why: "load", name, ...place });
-        }
-      }
-    }
     if (loadAny.length > 0) for (const { path } of jsFiles) for (const id of offers(path).ids) offered.add(id);
     // What an opaque file reaches: its own definitions, the modules it
     // imports (a named import, the module the name comes from through
@@ -4034,7 +4023,7 @@ export function createWorld(input: ResolveInput): World {
       const all = (f.opaque ?? []).filter((o) => !(o.name !== undefined && o.reach === "global" && own?.has(o.name)));
       if (all.length === 0) continue;
       // A load-any place is shown first: the reason says why it reaches every function.
-      const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || (e.kind === "load" && !e.names));
+      const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || e.kind === "load");
       const loose = runs.map((e): OpaqueFact => ({ why: e.kind === "load" ? "loads a module by a computed path" : e.kind === "eval" ? "runs `eval`" : "builds code or a name at run time on the global scope", line: e.line, count: 1, reach: "any" }));
       const shown = [...all, ...loose].filter((o) => o.reach === "any");
       const any = shown.length > 0;
@@ -4071,8 +4060,16 @@ export function createWorld(input: ResolveInput): World {
       });
     }
     const members: Escapes["members"] = new Map();
+    // A type the repository declares under a name is never plain, though
+    // the name is one of a plain type (`class Record`, `interface Buffer`).
+    let declared: Set<string> | null = null;
+    const ownType = (names: readonly string[]): boolean => {
+      declared ??= new Set(jsFiles.flatMap(({ facts: f }) => [...f.defs.map((d) => d.name), ...(f.variables ?? [])]));
+      return names.some((n) => (declared as Set<string>).has(n));
+    };
     for (const { path, facts: f } of jsFiles) {
       for (const m of f.looseMembers ?? []) {
+        if (m.plain && !ownType(m.plain)) continue;
         const kept = members.get(`js:${m.why}`);
         if (kept) kept.count += m.count;
         else members.set(`js:${m.why}`, { file: path, line: m.line, count: m.count, ...(m.why === "*" ? { places: [] } : {}) });

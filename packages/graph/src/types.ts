@@ -271,12 +271,11 @@ export type ImportFact = {
 // does not read whole. `eval`: a direct `eval(...)` or a `with` statement.
 // `global`: code or a name built at run time on the global scope
 // (`Function`, an indirect eval, `globalThis[k]`). `load`: a module loaded
-// by a computed path, or `require` used other than as a direct call with a
-// written path; `names` when only those names of it are read.
+// by a computed path, `require` used other than as a direct call with a
+// written path, or a use of Node's module library that may make a loader.
 export type EscapeFact =
   | { kind: "module"; spec: string; line: number }
-  | { kind: "own" | "eval" | "global"; line: number }
-  | { kind: "load"; line: number; names?: string[] };
+  | { kind: "own" | "eval" | "global" | "load"; line: number };
 
 // `reach`: how far the place may reach past the file's own definitions and
 // the modules it imports. `global`: the global scope, so a script's
@@ -285,7 +284,10 @@ export type EscapeFact =
 // `name`: the free name read, for a free name.
 // `passed`: a read by a computed key (`why` "*") whose value may be passed
 // on, so a method it takes may be called anywhere.
-export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any"; name?: string; passed?: boolean };
+// `plain`: a read by a computed key on a value whose declared type is plain
+// by its name alone; it counts only when the repository declares one of
+// these names.
+export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any"; name?: string; passed?: boolean; plain?: string[] };
 
 export type FileFacts = {
   lang: Lang;
@@ -418,13 +420,12 @@ export type Place = { file: string; line: number };
 // symbol id, its uses as a value under any of its names, its own body
 // included. `unbound`: value uses no rule could bind, by family and name
 // (`js:save`). `reach`: per symbol id, each place its module escapes
-// (`module`), or a name built at run time may reach it (`eval`, `global`,
-// `load` with the name a load by a computed path may read). `modules`:
-// every module found escaping, with its place, for the definitions a
-// change removed. `loadAny`: the places that may load any module
-// (a load by a computed path read for any name, code built at run time),
-// and `offered`, then, every definition a module offers.
-export type Reach = Place & { why: "module" | "eval" | "global" | "load"; name?: string };
+// (`module`), or a name built at run time may reach it (`eval`, `global`).
+// `modules`: every module found escaping, with its place, for the
+// definitions a change removed. `loadAny`: the places that may load any
+// module (a load by a computed path, code built at run time), and
+// `offered`, then, every definition a module offers.
+export type Reach = Place & { why: "module" | "eval" | "global" };
 export type Escapes = {
   uses: Map<string, Place & { count: number }>;
   unbound: Map<string, Place & { count: number }>;

@@ -1,0 +1,17 @@
+{
+  "covers": "a class of the repository named `Record` is no plain record: a read of it by a computed key may run its getter",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/rec.ts": "export class Record {\n  get total(): number {\n    return 1;\n  }\n}\n",
+    "src/use.ts": "import { Record } from \"./rec\";\nexport function read(r: Record, k: string): unknown {\n  return r[k];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/rec.ts#Record.total",
+      "reason": "by a computed key",
+      "at": "src/use.ts:3"
+    }
+  ]
+}
