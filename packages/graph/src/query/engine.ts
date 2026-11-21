@@ -271,12 +271,12 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
   };
 }
 
-// A floor whose every place is a test, fixture or benchmark file, said in one sentence.
+// A floor whose every place is outside product code, said in one sentence.
 const TESTS_SHOWN = 3;
 function testsNote(places: { file: string; line: number | null }[]): string {
   const at = [...new Set(places.map((p) => (p.line === null ? p.file : `${p.file}:${p.line}`)))];
   const more = at.length > TESTS_SHOWN ? ` and ${at.length - TESTS_SHOWN} more` : "";
-  return `Complete in product code. Only test or benchmark files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
+  return `Complete in product code. Only test, benchmark or script files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
 }
 
 function changesJob(s: Session, extra: Extra): Job | Answer {

@@ -83,7 +83,9 @@ import type { TreeVisitor } from "./walk.js";
 // named through an import type (`import("./m").Row`) binds through a scoped
 // import of the module it names; a Python `typing.cast` and a Go type
 // assertion are type uses.
-export const EXTRACTOR_VERSION = 44;
+// 45: a read of a local named `require` (a parameter, a let or const, a
+// destructured name) is no load, unless `createRequire(...)` made it.
+export const EXTRACTOR_VERSION = 45;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -374,6 +376,9 @@ class Ctx {
   // definition, an import or a top-level definition of the file
   // (`eval`, `window`, `exports`), decided once every scope is known.
   private pendingEscapes: { fact: EscapeFact; scope: Scope; name: string }[] = [];
+  // A `require` declared from `createRequire(...)`: a read of it is a
+  // loader read, though the name is a local.
+  madeRequire = false;
   // Names bound to a module loaded by a computed path: each read of one as
   // `m.name` or `m.name()` adds that name; any other read means any name.
   private loadBindings: { name: string; scope: Scope; fact: { kind: "load"; line: number; names?: string[] }; names: Set<string>; any: boolean }[] = [];
@@ -864,7 +869,7 @@ class Ctx {
       else if (at.depth > 0 || !topNames.has(ref.name)) drop.add(ref);
     }
     this.pendingValues = [];
-    for (const { fact, scope, name } of this.pendingEscapes) if (!this.lookup(scope, name) && !topNames.has(name)) this.escapes.push(fact);
+    for (const { fact, scope, name } of this.pendingEscapes) if ((name === "require" && this.madeRequire) || (!this.lookup(scope, name) && !topNames.has(name))) this.escapes.push(fact);
     this.pendingEscapes = [];
     for (const t of this.pendingTimers) {
       if (this.lookup(t.scope, t.timer) || topNames.has(t.timer)) continue;
@@ -1829,6 +1834,7 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
       const name = node.parent?.type === "variable_declarator" ? node.parent.childForFieldName("name") : null;
       const called = node.parent?.type === "call_expression" && sameNode(node.parent.childForFieldName("function"), node);
       if (!called && (name?.type !== "identifier" || name.text !== "require")) ctx.addEscape({ kind: "load", line });
+      else if (!called) ctx.madeRequire = true;
     }
     return;
   }
@@ -2274,8 +2280,10 @@ function jsLooseThis(ctx: Ctx): boolean {
 // module's own `exports` or `module` read as a value.
 function jsNameEscapes(ctx: Ctx, name: string, role: ValueRef["role"], prop: string | null, line: number): void {
   switch (name) {
+    // A parameter, a local or a destructured name `require` holds what was
+    // given to it: where the real one is passed, that read is the load.
     case "require":
-      if (role !== "object" || prop !== "resolve") ctx.addEscape({ kind: "load", line });
+      if (role !== "object" || prop !== "resolve") ctx.addEscape({ kind: "load", line }, name);
       return;
     case "createRequire":
       ctx.addEscape({ kind: "load", line });

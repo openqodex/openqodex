@@ -39,11 +39,13 @@ export function isTestPath(path: string): boolean {
   return TEST_PATH.test(path);
 }
 
-// Code that is not the product: a test, a fixture, or a benchmark script,
-// which measures the product and is never shipped or imported by it.
-const BENCHMARK_PATH = /(^|\/)benchmarks?\//;
+// Code that is not the product: a test or a fixture; a package's corpus
+// (the cases its tests read); a benchmark, which measures the product; and
+// the repository's own scripts (build, release, checks). None of them is
+// shipped with the product or imported by it.
+const OUTSIDE_PRODUCT = /(^|\/)benchmarks?\/|^packages\/[^/]+\/corpus\/|^scripts\//;
 export function isOutsideProduct(path: string): boolean {
-  return isTestPath(path) || BENCHMARK_PATH.test(path);
+  return isTestPath(path) || OUTSIDE_PRODUCT.test(path);
 }
 
 // Folders between two files: 0 for the same folder.

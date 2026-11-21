@@ -1,0 +1,23 @@
+{
+  "covers": "a `require` made by `createRequire` and given to another name is still a loader, though it is a local",
+  "files": {
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nconst require = createRequire(\"/repo/src/use.mjs\");\nconst load = require;\nload(\"./a.cjs\").f();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.mjs",
+      "file": "src/use.mjs",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": "src/use.mjs:3"
+    }
+  ]
+}
