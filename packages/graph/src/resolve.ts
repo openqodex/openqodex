@@ -4070,12 +4070,18 @@ export function createWorld(input: ResolveInput): World {
         any, global: scripts.has(path) || all.some((o) => o.reach === "global"), unbound, reach: [...seen].sort(),
       });
     }
-    const members = new Map<string, Place & { count: number }>();
+    const members: Escapes["members"] = new Map();
     for (const { path, facts: f } of jsFiles) {
       for (const m of f.looseMembers ?? []) {
         const kept = members.get(`js:${m.why}`);
         if (kept) kept.count += m.count;
-        else members.set(`js:${m.why}`, { file: path, line: m.line, count: m.count });
+        else members.set(`js:${m.why}`, { file: path, line: m.line, count: m.count, ...(m.why === "*" ? { places: [] } : {}) });
+        // A read by a computed key: the first place in each file, and whether any passes its value on.
+        const all = members.get(`js:${m.why}`);
+        if (all?.places) {
+          all.places.push({ file: path, line: m.line });
+          if (m.passed) all.passed = true;
+        }
       }
     }
     return { uses, unbound, reach, modules, loadAny, offered, opaque, scripts, members };

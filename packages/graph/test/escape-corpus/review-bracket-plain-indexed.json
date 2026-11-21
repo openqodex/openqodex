@@ -2,7 +2,7 @@
   "covers": "a bracket read on an array or a record runs no getter of the repository: the getter stays whole",
   "files": {
     "src/cart.ts": "export class Cart {\n  get total(): number {\n    return 1;\n  }\n}\n",
-    "src/rows.ts": "import { Cart } from \"./cart\";\nexport function first(rows: Cart[], counts: Record<string, number>, k: string): number {\n  const row = rows[0];\n  return counts[k] + (row ? 1 : 0);\n}\nfirst([new Cart()], {}, \"a\");\n"
+    "src/rows.ts": "import { Cart } from \"./cart\";\nexport function first(rows: Cart[], counts: Record<string, number>, k: string, i: number): number {\n  const row = rows[i];\n  return counts[k] + (row ? 1 : 0);\n}\nfirst([new Cart()], {}, \"a\", 0);\n"
   },
   "mustReach": [],
   "whole": [

@@ -234,7 +234,7 @@ export function isFileFacts(v: unknown): v is FileFacts {
   );
 }
 
-const isCounted = (o: unknown): boolean => isObj(o) && isStr(o.why) && isInt(o.line) && isInt(o.count) && (o.reach === undefined || o.reach === "global" || o.reach === "any") && (o.name === undefined || isStr(o.name));
+const isCounted = (o: unknown): boolean => isObj(o) && isStr(o.why) && isInt(o.line) && isInt(o.count) && (o.reach === undefined || o.reach === "global" || o.reach === "any") && (o.name === undefined || isStr(o.name)) && optBool(o.passed);
 const ESCAPES = new Set(["own", "eval", "global"]);
 function isEscape(e: unknown): boolean {
   if (!isObj(e) || !isInt(e.line)) return false;

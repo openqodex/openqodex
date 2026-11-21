@@ -93,7 +93,12 @@ import type { TreeVisitor } from "./walk.js";
 // `require` made by any call is a loader; `new.target` is no
 // `import.meta`; `queueMicrotask` is no timer; `typeof import("./m").a.b`
 // records no type use.
-export const EXTRACTOR_VERSION = 47;
+// 48: imports of `module` are read before the names they bind (they are
+// hoisted), the module object passed on or re-exported is a load, and a
+// member `createRequire` counts only on it; a read by a computed key is
+// judged plain once every scope is known and keeps its places; a key a
+// pattern takes apart is a member read.
+export const EXTRACTOR_VERSION = 48;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -387,6 +392,19 @@ class Ctx {
   // A `require` declared from `createRequire(...)`: a read of it is a
   // loader read, though the name is a local.
   madeRequire = false;
+  // The file names `module` or `node:module` in a string, so an import may
+  // give the loader factory or the module object any local name. Imports
+  // are hoisted, so the names read are decided once every import is known.
+  loaderSpec = false;
+  // Escapes that hold only when `name` is the loader factory or the module
+  // object, and the names read, other than by a call, that may be either.
+  pendingLoaders: { name: string; of: "factory" | "module"; fact: EscapeFact }[] = [];
+  loaderReads: { name: string; role: ValueRef["role"]; prop: string | null; line: number }[] = [];
+  // Reads by a computed key (`c[k]`): whether the value is of a plain type
+  // is decided once every scope is known, as a member read's receiver is.
+  // `stays`: the read's value is used where it is read (called, operated
+  // on, read further), never passed on.
+  keyReads: { recv: Receiver; scope: Scope; line: number; stays: boolean }[] = [];
   // Names bound to a module loaded by a computed path: each read of one as
   // `m.name` or `m.name()` adds that name; any other read means any name.
   private loadBindings: { name: string; scope: Scope; fact: { kind: "load"; line: number; names?: string[] }; names: Set<string>; any: boolean }[] = [];
@@ -879,6 +897,45 @@ class Ctx {
     this.pendingValues = [];
     for (const { fact, scope, name } of this.pendingEscapes) if ((name === "require" && this.madeRequire) || (!this.lookup(scope, name) && !topNames.has(name))) this.escapes.push(fact);
     this.pendingEscapes = [];
+    // The loader factory and the module object under each local name the
+    // imports of `module` give them. A re-export, an export or a load the
+    // reader does not read whole hands them on: what an importer makes with
+    // them is not followed, so each is a load by a computed path.
+    const factories = new Set(["createRequire"]);
+    const moduleObjects = new Set<string>();
+    for (const i of this.imports) {
+      if (i.typeOnly || !LOADER_MODULES.has(i.spec)) continue;
+      if (i.reexport) {
+        if (i.star || i.namespace !== null || i.names.some((n) => n.imported === "createRequire" || n.imported === "default")) this.escapes.push({ kind: "load", line: i.line });
+        continue;
+      }
+      if (i.namespace !== null) moduleObjects.add(i.namespace);
+      for (const n of i.names) {
+        if (n.imported === "createRequire") factories.add(n.local);
+        else if (n.imported === "default") moduleObjects.add(n.local);
+      }
+    }
+    for (const e of [...this.escapes]) if (e.kind === "module" && LOADER_MODULES.has(e.spec)) this.escapes.push({ kind: "load", line: e.line });
+    for (const e of this.exportsLocal) if (factories.has(e.local) || moduleObjects.has(e.local)) this.escapes.push({ kind: "load", line: e.line ?? 1 });
+    for (const p of this.pendingLoaders) if ((p.of === "factory" ? factories : moduleObjects).has(p.name)) this.escapes.push(p.fact);
+    // A factory read other than by a call; the module object read other than
+    // for a named member (`nm[k]`, `const { createRequire: cr } = nm`, passed on).
+    for (const r of this.loaderReads) if (factories.has(r.name) || (moduleObjects.has(r.name) && (r.role !== "object" || r.prop === null))) this.escapes.push({ kind: "load", line: r.line });
+    this.pendingLoaders = [];
+    this.loaderReads = [];
+    // A read by a computed key on a value not proved plain (an array, a
+    // string, a number, a record) may run any getter, or take any method.
+    for (const k of this.keyReads) {
+      const ident = (k.recv as Tagged)[IDENT];
+      const recv = ident ? receiverIn(this.lookup(k.scope, ident.name), ident.name, ident.path, topNames) : k.recv;
+      if (jsPlainType(recv)) continue;
+      const kept = this.looseMembers.get("*");
+      if (kept) {
+        kept.count++;
+        if (!k.stays) kept.passed = true;
+      } else this.looseMembers.set("*", { why: "*", line: k.line, count: 1, ...(k.stays ? {} : { passed: true }) });
+    }
+    this.keyReads = [];
     for (const t of this.pendingTimers) {
       if (this.lookup(t.scope, t.timer) || topNames.has(t.timer)) continue;
       const at = t.arg === null ? null : this.lookup(t.scope, t.arg);
@@ -1812,18 +1869,56 @@ function jsConstructorRead(ctx: Ctx, line: number): void {
 // a direct eval, `Function`, a string run as code by a timer, a call that
 // makes or uses a loader (`createRequire`, `module.require`), an eval
 // through the global object.
-// A callee that makes a loader: `createRequire`, a name imported as it from
-// `module` or `node:module` (`import { createRequire as cr }`, or the same
-// destructured from `require("module")`), or any member of that name
-// (`m.createRequire`, `require("module").createRequire`).
+// The modules that hold the loader factory `createRequire`.
 const LOADER_MODULES = new Set(["module", "node:module"]);
-function jsLoaderFactory(ctx: Ctx, fn: Node | null): boolean {
-  const f = jsUnwrap(fn);
-  if (f?.type === "member_expression") return f.childForFieldName("property")?.text === "createRequire";
-  return f?.type === "identifier" && jsFactoryName(ctx, f.text);
+// A use of a callee that may be the loader factory, with the escape it
+// opens (`fact`, null for none): `createRequire`; a name an import of
+// `module` gives it (`import { createRequire as cr }`, the same destructured
+// from `require("module")`); or `x.createRequire` where x is the module
+// object (a namespace or default import of `module`, `require("module")`).
+// A member of that name on any other value is no factory. A name is decided
+// once every import is known (Ctx.facts), since imports are hoisted.
+function jsFactoryUse(ctx: Ctx, callee: Node | null, fact: EscapeFact | null): void {
+  const f = jsHeld(callee);
+  if (!fact || !f) return;
+  if (f.type === "identifier") {
+    if (f.text === "createRequire") ctx.addEscape(fact);
+    else if (ctx.loaderSpec) ctx.pendingLoaders.push({ name: f.text, of: "factory", fact });
+    return;
+  }
+  if (f.type !== "member_expression" || f.childForFieldName("property")?.text !== "createRequire") return;
+  const object = jsHeld(f.childForFieldName("object"));
+  if (object?.type === "identifier" && ctx.loaderSpec) ctx.pendingLoaders.push({ name: object.text, of: "module", fact });
+  const call = object?.type === "await_expression" ? jsHeld(object.firstNamedChild) : object;
+  if (call?.type === "call_expression" && jsLoaderModule(call) !== null) ctx.addEscape(fact);
 }
-function jsFactoryName(ctx: Ctx, name: string): boolean {
-  return name === "createRequire" || ctx.imports.some((i) => LOADER_MODULES.has(i.spec) && i.names.some((n) => n.imported === "createRequire" && n.local === name));
+// A `require("module")` or `import("node:module")` call: the node that
+// holds the module object (the call, or the `await` around an import), or
+// "promise" for an import not awaited. Null for a load of another module.
+function jsLoaderModule(call: Node): Node | "promise" | null {
+  const fn = call.childForFieldName("function");
+  const first = call.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment");
+  if (first?.type !== "string" || !LOADER_MODULES.has(stringContent(first))) return null;
+  if (fn?.type === "identifier" && fn.text === "require") return call;
+  if (fn?.type !== "import") return null;
+  return call.parent?.type === "await_expression" ? call.parent : "promise";
+}
+// The value a node holds, through the wrappers that keep it (a cast too).
+function jsHeld(node: Node | null): Node | null {
+  let n = node;
+  while (n && JS_WRAPPERS.has(n.type)) n = n.type === "type_assertion" ? n.lastNamedChild : n.firstNamedChild;
+  return n;
+}
+// Whether a value is the object of a member read by name (`v.x`), through
+// the wrappers that keep it.
+function jsNamedMemberOf(value: Node): boolean {
+  let at = value;
+  let up = value.parent;
+  while (up && JS_WRAPPERS.has(up.type)) {
+    at = up;
+    up = up.parent;
+  }
+  return up?.type === "member_expression" && sameNode(up.childForFieldName("object"), at) && up.childForFieldName("property")?.type === "property_identifier";
 }
 // A call whose value is given to the name `require` (`const require = f()`,
 // `let { require } = f()`, `require = f()`): what it returns may be a
@@ -1843,28 +1938,32 @@ function jsBindsRequire(node: Node): boolean {
 function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
   if (!fn) return;
   const line = node.startPosition.row + 1;
-  if (jsBindsRequire(node)) ctx.madeRequire = true;
+  const binds = jsBindsRequire(node);
+  if (binds) ctx.madeRequire = true;
   const first = node.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment") ?? null;
   const literal = first?.type === "string";
   // A load whose value is thrown away runs the module and reads none of its names.
   let up = node.parent;
   if (up?.type === "await_expression") up = up.parent;
   const discarded = up?.type === "expression_statement";
+  const loaded: EscapeFact | null = !literal ? { kind: "load", line } : !discarded ? { kind: "module", spec: stringContent(first as Node), line } : null;
   const load = () => {
-    if (!literal) ctx.addEscape({ kind: "load", line });
-    else if (!discarded) ctx.addEscape({ kind: "module", spec: stringContent(first as Node), line });
+    if (loaded) ctx.addEscape(loaded);
   };
   if (fn.type === "import" || (fn.type === "identifier" && fn.text === "require")) {
-    if (!ctx.consumedLoads.has(node.startIndex)) load();
+    if (ctx.consumedLoads.has(node.startIndex)) return;
+    load();
+    // The module object of `module` passed on, indexed or not awaited: what
+    // is taken from it may be the factory, under any name.
+    const held = jsLoaderModule(node);
+    if (held === "promise" || (held !== null && !jsNamedMemberOf(held))) ctx.addEscape({ kind: "load", line });
     return;
   }
   // `const require = createRequire(...)`: its uses are read as require's
   // are (jsBindsRequire); `createRequire(...)("x")` as a load of x; any
   // other use of what it makes, as a load by a computed path.
-  const loaderMade = () => {
-    const called = node.parent?.type === "call_expression" && sameNode(node.parent.childForFieldName("function"), node);
-    if (!called && !jsBindsRequire(node)) ctx.addEscape({ kind: "load", line });
-  };
+  const called = node.parent?.type === "call_expression" && sameNode(node.parent.childForFieldName("function"), node);
+  const made: EscapeFact | null = !called && !binds ? { kind: "load", line } : null;
   if (fn.type === "identifier") {
     if (fn.text === "eval") ctx.addEscape({ kind: "eval", line }, "eval");
     else if (fn.text === "Function") {
@@ -1876,18 +1975,15 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
       // written in place, or a name proved a function, is safe.
       ctx.pendingTimers.push({ scope: ctx.top, timer: fn.text, arg: first.type === "identifier" ? first.text : null, proof: first.type === "identifier" ? jsFunctionProof(first, first.text) : null, line });
     }
-    else if (jsLoaderFactory(ctx, fn)) loaderMade();
+    else jsFactoryUse(ctx, fn, made);
     return;
   }
   if (fn.type === "call_expression") {
-    if (jsLoaderFactory(ctx, fn.childForFieldName("function"))) load();
-    return;
-  }
-  if (jsLoaderFactory(ctx, fn)) {
-    loaderMade();
+    jsFactoryUse(ctx, fn.childForFieldName("function"), loaded);
     return;
   }
   if (fn.type === "member_expression") {
+    jsFactoryUse(ctx, fn, made);
     const prop = fn.childForFieldName("property")?.text;
     const object = jsUnwrap(fn.childForFieldName("object"));
     // `f.constructor("code")`: the constructor of a function is `Function`.
@@ -2184,9 +2280,8 @@ function jsValueType(ctx: Ctx, value: Node | null): TypeRef | null {
 // A member read, not called, by name: on a value of a known kind, a value
 // reference the resolver binds (a getter, a method taken); on any other,
 // a read of the name on a value of unknown type. `*` is any member.
-function jsMemberRead(ctx: Ctx, object: Node | null, name: Node | null, text: string, role: ValueRef["role"], line: number): void {
-  const recv = object && name ? jsReceiver(ctx, object) : null;
-  if (recv && name && recv.kind !== "other") {
+function jsMemberRead(ctx: Ctx, recv: Receiver | null, name: Node, text: string, role: ValueRef["role"], line: number): void {
+  if (recv && recv.kind !== "other") {
     ctx.addValue({ name, recv }, role);
     return;
   }
@@ -2194,6 +2289,46 @@ function jsMemberRead(ctx: Ctx, object: Node | null, name: Node | null, text: st
   const kept = ctx.looseMembers.get(text);
   if (kept) kept.count++;
   else ctx.looseMembers.set(text, { why: text, line, count: 1 });
+}
+// A key a pattern takes apart reads that member of the value, as a dot
+// does (`const { total } = c` as `c.total`): a getter runs there. A key
+// that is not written out (`{ [k]: v }`, `key` null) reads any member.
+function jsPatternRead(ctx: Ctx, pattern: Node, key: Node | null, line: number): void {
+  const recv = jsPatternSource(ctx, pattern);
+  if (recv === undefined) return;
+  if (key) jsMemberRead(ctx, recv, key, key.text, "other", line);
+  else ctx.keyReads.push({ recv: recv ?? { kind: "other" }, scope: ctx.top, line, stays: false });
+}
+// What an object pattern takes apart: the value it is given, the type a
+// parameter or the declaration declares, or an element of what a
+// `for...of` reads; null when that is not known (a nested pattern, a
+// parameter with no type, a `catch`), undefined for a module a `require`
+// or `import()` loads (read as an import) and the string keys of
+// `for...in`.
+function jsPatternSource(ctx: Ctx, pattern: Node): Receiver | null | undefined {
+  const up = pattern.parent;
+  const is = (field: string) => sameNode(up?.childForFieldName(field) ?? null, pattern);
+  const typed = (t: TypeRef | null): Receiver | null => (t ? { kind: "type", type: t, path: [] } : null);
+  if (up?.type === "variable_declarator" && is("name")) {
+    const annotation = up.childForFieldName("type");
+    if (annotation) return typed(declared(jsTypeRef(annotation)));
+    const value = jsHeld(up.childForFieldName("value"));
+    if (!value) return null;
+    const call = value.type === "await_expression" ? jsHeld(value.firstNamedChild) : value;
+    const fn = call?.type === "call_expression" ? call.childForFieldName("function") : null;
+    if (fn?.type === "import" || (fn?.type === "identifier" && fn.text === "require")) return undefined;
+    return jsReceiver(ctx, value);
+  }
+  if (up?.type === "assignment_expression" && is("left")) {
+    const right = up.childForFieldName("right");
+    return right ? jsReceiver(ctx, right) : null;
+  }
+  if ((up?.type === "required_parameter" || up?.type === "optional_parameter") && is("pattern")) return typed(declared(jsTypeRef(up.childForFieldName("type"))));
+  if (up?.type === "for_in_statement" && is("left")) {
+    if (!up.children.some((c) => c.type === "of")) return undefined;
+    return typed(elementType(collectionType(ctx, up.childForFieldName("right"))));
+  }
+  return null;
 }
 // The key of `c["total"]` or `` c[`total`] ``: the node that holds its text.
 function jsLiteralKey(index: Node | null): Node | null {
@@ -2203,12 +2338,54 @@ function jsLiteralKey(index: Node | null): Node | null {
   return null;
 }
 // A value indexed by a key that runs no getter of the repository: one
-// declared as an array, a string, a number or a record.
-const PLAIN_INDEXED = new Set(["Array", "ReadonlyArray", "Record", "string", "String", "number", "Uint8Array", "Buffer"]);
-function jsPlainIndexed(ctx: Ctx, target: Node): boolean {
-  const recv = jsReceiver(ctx, target);
-  delete (recv as Tagged)[IDENT];
+// declared as an array, a string, a number, a boolean, a typed array or a
+// record.
+const PLAIN_INDEXED = new Set([
+  "Array", "ReadonlyArray", "Record", "string", "String", "number", "Number", "boolean", "Boolean", "bigint", "Buffer",
+  "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
+  "Float16Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
+]);
+function jsPlainType(recv: Receiver): boolean {
   return recv.kind === "type" && recv.path.length === 0 && (recv.type.elem === true || (recv.type.qualifier === null && PLAIN_INDEXED.has(recv.type.name)));
+}
+// Whether the value of a read is used where it is read and never passed
+// on: called, read further, operated on, tested, written or thrown away.
+// A method taken by such a read can run only there.
+function jsValueStays(node: Node): boolean {
+  let at = node;
+  let up = node.parent;
+  while (up && JS_WRAPPERS.has(up.type)) {
+    at = up;
+    up = up.parent;
+  }
+  const is = (field: string) => sameNode(up?.childForFieldName(field) ?? null, at);
+  switch (up?.type) {
+    case "expression_statement":
+    case "unary_expression":
+    case "update_expression":
+    case "template_substitution":
+      return true;
+    case "call_expression":
+      return is("function");
+    case "subscript_expression":
+      return is("object");
+    // `c[k].bind(o)` makes a function that may run anywhere.
+    case "member_expression":
+      return is("object") && up.childForFieldName("property")?.text !== "bind";
+    // `a || c[k]` gives the value on.
+    case "binary_expression":
+      return !["&&", "||", "??"].includes(up.childForFieldName("operator")?.text ?? "");
+    case "assignment_expression":
+    case "augmented_assignment_expression":
+      return is("left");
+    case "ternary_expression":
+      return is("condition");
+    case "if_statement":
+    case "while_statement":
+    case "do_statement":
+      return is("condition");
+  }
+  return false;
 }
 
 // Names of the global object: a computed member of one may be any global.
@@ -2390,8 +2567,9 @@ function jsNameEscapes(ctx: Ctx, name: string, role: ValueRef["role"], prop: str
       if (role !== "object" || prop === "parent" || prop === "children" || prop === "constructor") ctx.addEscape({ kind: "load", line }, name);
       return;
   }
-  // A name imported as `createRequire`, read other than as a direct call.
-  if (jsFactoryName(ctx, name)) ctx.addEscape({ kind: "load", line });
+  // A name that may be the loader factory or the module object, decided
+  // once every import is known.
+  if (ctx.loaderSpec) ctx.loaderReads.push({ name, role, prop, line });
   if (GLOBAL_OBJECTS.has(name) && (role !== "object" || prop === "eval")) ctx.addEscape({ kind: "global", line }, name);
 }
 
@@ -2402,6 +2580,7 @@ function jsResults(fn: Node): TypeRef[] | undefined {
 
 function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): FileFacts {
   const ctx = new Ctx(lang);
+  ctx.loaderSpec = /["'`](?:node:)?module["'`]/.test(tree.rootNode.text);
   const fnFrame = (node: Node, def: number): Leave => {
     const locals = new Map<string, TypeRef | null>();
     const typeParams = jsTypeParams(node);
@@ -3044,9 +3223,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (role !== "object" && object?.type === "identifier" && object.text === "module" && prop.text === "exports") ctx.addEscape({ kind: "own", line }, "module");
         if (prop.text === "constructor") jsConstructorRead(ctx, line);
         // `m.createRequire` taken as a value: what it makes is not followed.
-        if (prop.text === "createRequire" && !(node.parent?.type === "call_expression" && sameNode(node.parent.childForFieldName("function"), node))) ctx.addEscape({ kind: "load", line });
+        if (prop.text === "createRequire" && !(node.parent?.type === "call_expression" && sameNode(node.parent.childForFieldName("function"), node))) jsFactoryUse(ctx, node, { kind: "load", line });
         if (ctx.readAt.has(prop.startIndex) || (prop.type !== "property_identifier" && prop.type !== "private_property_identifier")) return;
-        jsMemberRead(ctx, object, prop, prop.text, role, line);
+        jsMemberRead(ctx, object ? jsReceiver(ctx, object) : null, prop, prop.text, role, line);
         return;
       }
       case "subscript_expression": {
@@ -3060,8 +3239,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           const { role } = jsReadRole(node, upType(1), field);
           const target = jsUnwrap(node.childForFieldName("object"));
           const key = jsLiteralKey(index);
-          if (key) jsMemberRead(ctx, target, key, key.text, role, line);
-          else if (index && index.type !== "number" && target && !jsPlainIndexed(ctx, target)) jsMemberRead(ctx, null, null, "*", role, line);
+          if (key) jsMemberRead(ctx, target ? jsReceiver(ctx, target) : null, key, key.text, role, line);
+          else if (index && index.type !== "number" && target) {
+            const recv: Receiver = ctx.top.depth > MAX_SCOPE_DEPTH ? { kind: "other" } : jsReceiver(ctx, target);
+            ctx.keyReads.push({ recv, scope: ctx.top, line, stays: jsValueStays(node) });
+          }
         }
         // `this[k]` where `this` may be the global object or a CommonJS module's exports.
         const object = jsUnwrap(node.childForFieldName("object"));
@@ -3080,12 +3262,19 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // module's exports or any object a call hands it.
         if (ctx.top.thisClass !== true) ctx.addOpaque(THIS_OUTSIDE, node.startPosition.row + 1);
         return;
-      case "pair_pattern":
-        if (node.childForFieldName("key")?.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
+      case "pair_pattern": {
+        const key = node.childForFieldName("key");
+        if (key?.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
+        // A number key reads an element, as `c[0]` does.
+        if (key && key.type !== "number" && node.parent?.type === "object_pattern") jsPatternRead(ctx, node.parent, key.type === "property_identifier" ? key : jsLiteralKey(key), node.startPosition.row + 1);
         return;
-      case "shorthand_property_identifier_pattern":
+      }
+      case "shorthand_property_identifier_pattern": {
         if (node.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
+        const up = node.parent?.type === "object_assignment_pattern" ? node.parent.parent : node.parent;
+        if (up?.type === "object_pattern") jsPatternRead(ctx, up, node, node.startPosition.row + 1);
         return;
+      }
       case "ambient_declaration": {
         // `declare const V: string`: a global name of plain data, when the
         // file is a script; inside `declare global`, in any file.

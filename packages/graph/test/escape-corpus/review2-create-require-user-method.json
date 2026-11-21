@@ -1,0 +1,13 @@
+{
+  "covers": "a method named `createRequire` on a class of the repository makes no loader: the repository stays whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.ts": "class Kit {\n  createRequire(o: string): string {\n    return o;\n  }\n}\nexport const v = [new Kit().createRequire(\"a\")];\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
+}

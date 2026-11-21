@@ -283,7 +283,9 @@ export type EscapeFact =
 // definitions. `any`: any module (code made from a string, the global
 // object indexed, a module loaded by a pattern).
 // `name`: the free name read, for a free name.
-export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any"; name?: string };
+// `passed`: a read by a computed key (`why` "*") whose value may be passed
+// on, so a method it takes may be called anywhere.
+export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any"; name?: string; passed?: boolean };
 
 export type FileFacts = {
   lang: Lang;
@@ -440,8 +442,10 @@ export type Escapes = {
   opaque: Map<string, Place & { why: string; count: number; all: OpaqueFact[]; any: boolean; global: boolean; unbound: boolean; reach: string[] }>;
   // Scripts: files whose top-level definitions are names of the global scope.
   scripts: Set<string>;
-  // Member reads on a value of unknown type, by "family:name".
-  members: Map<string, Place & { count: number }>;
+  // Member reads on a value of unknown type, by "family:name". For the
+  // reads by a computed key ("js:*"), the first place in each file, and
+  // whether any read may pass its value on.
+  members: Map<string, Place & { count: number; places?: Place[]; passed?: boolean }>;
 };
 
 // An eligible file the graph did not read, and why.

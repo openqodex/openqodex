@@ -1,0 +1,18 @@
+{
+  "covers": "a computed key read in a function on a variable given a class instance later in the file may run its getter",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/cart.js": "export class Cart {\n  get total() {\n    return 1;\n  }\n}\n",
+    "src/show.js": "import { Cart } from \"./cart.js\";\nlet box = new Uint8Array(1);\nexport function show(k) {\n  return box[k];\n}\nbox = new Cart();\nshow(\"total\");\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/cart.js#Cart.total",
+      "caller": "src/show.js#show",
+      "file": "src/show.js",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

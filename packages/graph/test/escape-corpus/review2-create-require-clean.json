@@ -1,0 +1,14 @@
+{
+  "covers": "a `require` made by `createRequire`, imported under another name below its use, that loads a module by a literal path leaves the repository whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.mjs": "const require = cr(import.meta.url);\nconst lib = require(\"./a.cjs\");\nlib.f();\nimport { createRequire as cr } from \"node:module\";\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
+}

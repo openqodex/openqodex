@@ -1,0 +1,24 @@
+{
+  "covers": "an aliased `createRequire` imported below its use (imports are hoisted) makes a loader",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.mjs": "const load = cr(\"/repo/src/use.mjs\");\nconst key = \"f\";\nload(\"./a.cjs\")[key]();\nimport { createRequire as cr } from \"node:module\";\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.mjs",
+      "file": "src/use.mjs",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}
