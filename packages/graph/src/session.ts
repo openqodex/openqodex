@@ -23,7 +23,7 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
   const v = gen.manifest.versions;
   if (v.extractor !== EXTRACTOR_VERSION || v.resolver !== RESOLVER_VERSION) return null;
   let inventory: { files: Record<string, { key: string; lang: string }> };
-  let projects: { model: Record<string, unknown>; goModules: [string, string][] };
+  let projects: { model: Record<string, unknown>; goModules: [string, string][]; declared?: { file: string; names: string[] }[] };
   let coverage: { notRead: NotRead[]; budgetFiles: string[]; unreadLanguages?: { language: string; files: number }[] };
   try {
     inventory = JSON.parse(gen.read("inventory.json") ?? "null") as typeof inventory;
@@ -42,7 +42,7 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
   }
   const model = deserializeModel(projects.model);
   const known = new Set(Object.keys(inventory.files));
-  const resolved = createWorld({ files, known, model, goModules: projects.goModules }).resolveAll();
+  const resolved = createWorld({ files, known, model, goModules: projects.goModules, declared: declaredOf(projects.declared) }).resolveAll();
   // No framework data is kept without the index: no function written in place stays bound.
   foldInline(resolved, files, new Set());
   const m = gen.manifest;
@@ -75,4 +75,11 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
     escapes: resolved.escapes,
   });
   return { ...graph, repoRoot: store.repoRoot };
+}
+
+// What the declaration files of a kept build declare, as it was written:
+// anything else is read as nothing declared, so no name is vouched for.
+function declaredOf(v: unknown): { file: string; names: string[] }[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((d): d is { file: string; names: string[] } => typeof d?.file === "string" && Array.isArray(d.names) && d.names.every((n: unknown) => typeof n === "string"));
 }

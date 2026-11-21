@@ -282,7 +282,8 @@ export type EscapeFact =
 // the modules it imports. `global`: the global scope, so a script's
 // definitions. `any`: any module (code made from a string, the global
 // object indexed, a module loaded by a pattern).
-export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any" };
+// `name`: the free name read, for a free name.
+export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any"; name?: string };
 
 export type FileFacts = {
   lang: Lang;
@@ -320,6 +321,9 @@ export type FileFacts = {
   // outside a class, a `.constructor` read, a construct it does not read),
   // each with its first line and how many times it was seen.
   opaque?: OpaqueFact[];
+  // TypeScript: the global names the file declares as plain data
+  // (`declare const V: string` in a script, or in `declare global`).
+  ambient?: string[];
   // TypeScript and JavaScript: member names read, not called, on a value
   // of unknown type (`c.total`, `const h = obj.save`): a getter runs there,
   // or a method is taken as a value.

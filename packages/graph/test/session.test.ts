@@ -15,6 +15,9 @@
 // 6. A build kept as an index, reopened, does not say which build it is:
 //    the index was written before the build had its id, so an answer read
 //    from it names no build (`graph ... --generation <id>` included).
+// 7. A build reopened from its facts forgets the global names a declaration
+//    file declares as plain data, or an edit to that file keeps the digest,
+//    so a kept build vouches for a name its file no longer declares so.
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readdirSync, unlinkSync } from "node:fs";
@@ -22,6 +25,7 @@ import { join } from "node:path";
 import { buildGraph, openStore } from "../src/index.js";
 import type { Graph } from "../src/index.js";
 import { graphOf } from "../src/session.js";
+import { workTreeDigest } from "../src/build.js";
 import { commitAll, makeHome, makeRepo, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -122,5 +126,24 @@ describe("reopening a kept build", () => {
     const gen = st.open({ id });
     expect(gen?.manifest.hasIndex).toBe(true);
     expect((graphOf(st, gen!) as Graph).status.generation).toBe(id);
+  });
+  it("keeps what a declaration file declares, and an edit to one is a new capture (7)", async () => {
+    const root = makeRepo({
+      "app/package.json": '{"name": "app"}\n',
+      "app/a.ts": "export function f() {}\n",
+      "app/b.ts": 'import { f } from "./a";\nexport const v = VERSION;\nf();\n',
+      "app/globals.d.ts": "declare const VERSION: string;\n",
+    });
+    const st = await store(root);
+    const built = await buildGraph({ repoRoot: root, store: st, mode: "fresh" });
+    expect([...built.escapes.opaque.keys()]).toEqual([]);
+    const gen = st.open({ id: built.status.generation as string });
+    expect(gen?.manifest.hasIndex).toBe(false);
+    expect([...(graphOf(st, gen!) as Graph).escapes.opaque.keys()]).toEqual([]);
+    const digest = await workTreeDigest(root, 1_000_000);
+    writeFiles(root, { "app/globals.d.ts": "declare const VERSION: any;\n" });
+    expect(await workTreeDigest(root, 1_000_000)).not.toBe(digest);
+    const again = await buildGraph({ repoRoot: root, store: st });
+    expect([...again.escapes.opaque.keys()]).toEqual(["app/b.ts"]);
   });
 });

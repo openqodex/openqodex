@@ -227,13 +227,14 @@ export function isFileFacts(v: unknown): v is FileFacts {
     (v.frameworks === undefined || isFrameworkFileFacts(v.frameworks)) &&
     (v.escapes === undefined || isList(v.escapes, isEscape, 20_000)) &&
     (v.opaque === undefined || isList(v.opaque, isCounted, 4096)) &&
+    (v.ambient === undefined || isList(v.ambient, isStr, 4096)) &&
     (v.looseMembers === undefined || isList(v.looseMembers, isCounted, 200_000)) &&
     (v.variables === undefined || isList(v.variables, isStr, 200_000)) &&
     (v.exportedVariables === undefined || isList(v.exportedVariables, isStr, 200_000))
   );
 }
 
-const isCounted = (o: unknown): boolean => isObj(o) && isStr(o.why) && isInt(o.line) && isInt(o.count) && (o.reach === undefined || o.reach === "global" || o.reach === "any");
+const isCounted = (o: unknown): boolean => isObj(o) && isStr(o.why) && isInt(o.line) && isInt(o.count) && (o.reach === undefined || o.reach === "global" || o.reach === "any") && (o.name === undefined || isStr(o.name));
 const ESCAPES = new Set(["own", "eval", "global"]);
 function isEscape(e: unknown): boolean {
   if (!isObj(e) || !isInt(e.line)) return false;

@@ -252,7 +252,7 @@ const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
   if (list) list.push(v);
   else m.set(k, [v]);
 };
-function opaqueFor(graph: Graph, file: string, project: string): (Place & { why: string; how: string; files: number }) | undefined {
+function opaqueFor(graph: Graph, file: string, project: string): { file: string; line: number; why: string; how: string }[] {
   let r = opaqueReach.get(graph);
   if (!r) {
     r = { any: [], byFile: new Map(), global: [], unbound: new Map() };
@@ -265,16 +265,23 @@ function opaqueFor(graph: Graph, file: string, project: string): (Place & { why:
     }
     opaqueReach.set(graph, r);
   }
-  const pick = (list: OpaqueFile[] | undefined, how: (o: OpaqueFile) => string) => {
-    const o = list?.[0];
-    return o && list ? { file: o.file, line: o.line, why: o.why, how: how(o), files: list.length } : undefined;
+  // Nearest first: the file itself, the files that import it, then the wider ways.
+  const out: { file: string; line: number; why: string; how: string }[] = [];
+  const seen = new Set<string>();
+  const add = (list: OpaqueFile[] | undefined, how: (o: OpaqueFile) => string) => {
+    for (const o of list ?? []) {
+      if (seen.has(o.file)) continue;
+      seen.add(o.file);
+      out.push({ file: o.file, line: o.line, why: o.why, how: how(o) });
+    }
   };
-  return (
-    pick(r.any, () => "may load any module") ??
-    pick(r.byFile.get(file), (o) => (o.file === file ? "defines it" : "imports its module")) ??
-    (graph.escapes.scripts.has(file) ? pick(r.global, () => "reads the global scope, where a script's definitions live") : undefined) ??
-    pick(r.unbound.get(project), () => "imports a module the graph could not find, so what it reaches is not known")
-  );
+  const reaching = r.byFile.get(file);
+  add(reaching?.filter((o) => o.file === file), () => "defines it");
+  add(reaching, () => "imports its module");
+  if (graph.escapes.scripts.has(file)) add(r.global, () => "reads the global scope, where a script's definitions live");
+  add(r.unbound.get(project), () => "imports a module the graph could not find, so what it reaches is not known");
+  add(r.any, () => "may load any module");
+  return out;
 }
 
 // Calls through a value (a callback, a computed member), per family, with the first place.
@@ -356,8 +363,13 @@ export function floorReasons(graph: Graph, seed: { id: string; name: string; fil
     // :name`), so only a call through a value in the project clears it.
     // A file the reader cannot vouch for that can reach the function:
     // anything there may call it by a path the graph does not see.
-    const dark = family === "js" ? opaqueFor(graph, seed.file, project) : undefined;
-    if (dark) reasons.push(`${at(dark)} cannot be read whole (${dark.why}) and ${dark.how}${dark.files > 1 ? `, as ${dark.files - 1} more ${dark.files === 2 ? "file does" : "files do"}` : ""}, so a path the graph does not see may reach it`);
+    const dark = family === "js" ? opaqueFor(graph, seed.file, project) : [];
+    if (dark.length > 0) {
+      // Commas between the places: the renderers join whole reasons with semicolons.
+      const shown = dark.slice(0, 3).map((d) => `${at(d)} ${d.why} (its file ${d.how})`).join(", ");
+      const more = dark.length > 3 ? ` and ${dark.length - 3} more` : "";
+      reasons.push(`${dark.length} ${dark.length === 1 ? "file" : "files"} the graph cannot read whole could call it by a path it does not see: ${shown}${more}`);
+    }
     const kept = family !== "js" && projectValues();
     const read = kind === "method" && family === "js" ? x.members.get(`js:${seed.name}`) : undefined;
     if (read) reasons.push(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`);

@@ -86,7 +86,8 @@ export const SHAPE_CAP = 20;
 // uses no rule binds; an unbound call that cannot run a plain function is
 // marked (UnknownSite.notPlain). 32: the opaque files (Escapes.opaque).
 // 33: what each opaque file reaches, and the scripts (Escapes.scripts).
-export const RESOLVER_VERSION = 33;
+// 34: a free name its project declares as plain data vouches for itself.
+export const RESOLVER_VERSION = 34;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -226,6 +227,9 @@ export type ResolveInput = {
   known: ReadonlySet<string>; // every path import resolution may land on: eligible files and removed ones
   model: ProjectModel;
   goModules: [string, string][]; // module path, folder ("" for the root)
+  // The global names each declaration file (`.d.ts`, read beside the
+  // source files) declares as plain data.
+  declared?: { file: string; names: string[] }[];
   // Checked between files while calls are resolved: true stops; the files
   // left are listed in `budgetFiles`.
   stop?: () => boolean;
@@ -4014,12 +4018,24 @@ export function createWorld(input: ResolveInput): World {
     // scope when it reads a free name or is a script, and every module when
     // it may load any.
     const opaque: Escapes["opaque"] = new Map();
+    // Global names declared as plain data (`declare const V: string`), per
+    // project: a read of one in the project that declares it reaches nothing.
+    const plain = new Map<string, Set<string>>();
+    const declare = (file: string, names: readonly string[]) => {
+      const project = projectFolder(model, input.goModules, file);
+      const set = plain.get(project) ?? new Set<string>();
+      for (const n of names) set.add(n);
+      plain.set(project, set);
+    };
+    for (const { path, facts: f } of jsFiles) if (f.ambient) declare(path, f.ambient);
+    for (const d of input.declared ?? []) declare(d.file, d.names);
     for (const { path, facts: f } of jsFiles) {
-      const all = f.opaque ?? [];
+      const own = plain.size > 0 ? plain.get(projectFolder(model, input.goModules, path)) : undefined;
+      const all = (f.opaque ?? []).filter((o) => !(o.name !== undefined && o.reach === "global" && own?.has(o.name)));
       if (all.length === 0) continue;
       // A load-any place is shown first: the reason says why it reaches every function.
       const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || (e.kind === "load" && !e.names));
-      const loose = runs.map((e): OpaqueFact => ({ why: e.kind === "load" ? "a module loaded by a computed path" : e.kind === "eval" ? "`eval`" : "code or a name built at run time on the global scope", line: e.line, count: 1, reach: "any" }));
+      const loose = runs.map((e): OpaqueFact => ({ why: e.kind === "load" ? "loads a module by a computed path" : e.kind === "eval" ? "runs `eval`" : "builds code or a name at run time on the global scope", line: e.line, count: 1, reach: "any" }));
       const shown = [...all, ...loose].filter((o) => o.reach === "any");
       const any = shown.length > 0;
       const first = (any ? shown : all).reduce((a, b) => (b.line < a.line ? b : a));
