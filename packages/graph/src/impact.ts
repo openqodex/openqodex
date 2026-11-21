@@ -230,9 +230,31 @@ function unknownsNamed(graph: Graph, name: string): UnknownSite[] {
 export function sameNameGaps(graph: Graph, seed: { name: string; file: string; kind?: ImpactKind | undefined }): UnknownSite[] {
   const family = familyAt(graph, seed.file);
   const named = unknownsNamed(graph, seed.name);
-  if (family === null) return named;
-  const plain = family === "js" && seed.kind === "function";
+  // Only TypeScript and JavaScript are narrowed to their own family. The
+  // others call by a name built at run time (Java reflection, Ruby `send`,
+  // Python `getattr`, Go `reflect`) in ways their readers do not record, so
+  // a call of the name in any language keeps the floor it kept before.
+  if (family !== "js") return named;
+  const plain = seed.kind === "function";
   return named.filter((u) => familyAt(graph, u.file) === family && !(plain && u.notPlain));
+}
+
+// The opaque files of each project: the first, and how many.
+const projectOpaque = new WeakMap<Graph, Map<string, Place & { why: string; files: number }>>();
+function opaqueIn(graph: Graph, project: string): (Place & { why: string; files: number }) | undefined {
+  let byProject = projectOpaque.get(graph);
+  if (!byProject) {
+    byProject = new Map();
+    const files = [...graph.escapes.opaque.values()].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+    for (const o of files) {
+      const p = graph.projectOf(o.file);
+      const kept = byProject.get(p);
+      if (kept) kept.files++;
+      else byProject.set(p, { file: o.file, line: o.line, why: o.why, files: 1 });
+    }
+    projectOpaque.set(graph, byProject);
+  }
+  return byProject.get(project);
 }
 
 // Calls through a value (a callback, a computed member), per family, with the first place.
@@ -289,7 +311,7 @@ export function floorReasons(graph: Graph, seed: { id: string; name: string; fil
     const x = graph.escapes;
     const used = x.uses.get(seed.id);
     if (used) reasons.push(`it is used as a value in ${used.count} ${used.count === 1 ? "place" : "places"}, first at ${at(used)}; a call through that value is not listed`);
-    const loose = family && kind === "function" ? x.unbound.get(`${family}:${seed.name}`) : undefined;
+    const loose = family ? x.unbound.get(`${family}:${seed.name}`) : undefined;
     if (loose) reasons.push(`${loose.count} ${loose.count === 1 ? "use" : "uses"} of the name \`${seed.name}\` as a value could not be bound to one definition, first at ${at(loose)}`);
     const reach = x.reach.get(seed.id) ?? [];
     const removed = !graph.nodes.has(seed.id);
@@ -312,7 +334,13 @@ export function floorReasons(graph: Graph, seed: { id: string; name: string; fil
     // JavaScript) keeps the rule it had, for its methods too: its reader
     // does not record every way a name escapes (a Rails `before_action
     // :name`), so only a call through a value in the project clears it.
+    // A file of its project the reader cannot vouch for: anything there may
+    // reach the function by a path the graph does not see.
+    const dark = family === "js" ? opaqueIn(graph, project) : undefined;
+    if (dark) reasons.push(`${at(dark)} cannot be read whole (${dark.why})${dark.files > 1 ? `, nor can ${dark.files - 1} more ${dark.files === 2 ? "file" : "files"} of its project` : ""}, so a path the graph does not see may reach it`);
     const kept = family !== "js" && projectValues();
+    const read = kind === "method" && family === "js" ? x.members.get(`js:${seed.name}`) : undefined;
+    if (read) reasons.push(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`);
     if (kind === "method" && family && !kept) {
       const values = valueCallsOf(graph, family);
       if (values) reasons.push(`${values.count} ${values.count === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in projects that can hold its objects, first at ${at(values)}`);

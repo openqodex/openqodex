@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: ruby symbol proc",
+  "files": {
+    "app/a.rb": "class Item\n  def save\n  end\nend\ndef go(items)\n  items.each(&:save)\nend\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/a.rb#Item.save",
+      "caller": null,
+      "file": "app/a.rb",
+      "line": 6
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

@@ -75,8 +75,9 @@ const parseLines = <T>(text: string | null): T[] | null => {
 // (references), the dispatch sites and the invocation summaries. 4: the
 // framework layer's data (index/frameworks.json). 5: the escape paths of
 // each function (index/escapes.json), and the mark on an unbound call that
-// cannot run a plain function.
-export const INDEX_FORMAT = 5;
+// cannot run a plain function. 6: the files the reader cannot vouch for
+// (the opaque rows of index/escapes.json).
+export const INDEX_FORMAT = 6;
 
 type Row = (number | number[])[];
 
@@ -131,6 +132,8 @@ export function writeIndex(g: Graph): Record<string, string> {
     modules: [...x.modules].map(([file, p]) => [e.s(file), ...place(p)]),
     loadAny: x.loadAny.map((p) => [...place(p), e.s(p.why)]),
     offered: [...x.offered].map(e.s),
+    opaque: [...x.opaque.values()].map((o) => [...place(o), e.s(o.why), o.count, o.all.map((a) => [e.s(a.why), a.line, a.count])]),
+    members: [...x.members].map(([k, m]) => [e.s(k), ...place(m), m.count]),
   };
   const references = g.references.map(e.edge);
   const dispatch = g.dispatch.map((x) => [e.s(x.file), x.line, x.column, e.s(x.caller), e.s(x.name), x.declared.map(e.s), x.candidates.map(e.s), x.total, e.s(x.rule)]);
@@ -220,8 +223,8 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
     }));
     const summaries = new Map<string, InvocationSummary>(summaryRows.map((r) => [d.s(r[0] as number), { params: (r[1] as number[]).map(d.s), invokes: r[2] as number[], returns: (r[3] as number[]).map(d.s), returnsOther: r[4] === 1 }]));
     type N = number;
-    const x = JSON.parse(read("index/escapes.json") ?? "null") as { uses: N[][]; unbound: N[][]; reach: [N, N[][]][]; modules: N[][]; loadAny: N[][]; offered: N[] } | null;
-    if (!x || !Array.isArray(x.uses) || !Array.isArray(x.unbound) || !Array.isArray(x.reach) || !Array.isArray(x.modules) || !Array.isArray(x.loadAny) || !Array.isArray(x.offered)) return null;
+    const x = JSON.parse(read("index/escapes.json") ?? "null") as { uses: N[][]; unbound: N[][]; reach: [N, N[][]][]; modules: N[][]; loadAny: N[][]; offered: N[]; opaque: N[][]; members: N[][] } | null;
+    if (!x || !Array.isArray(x.uses) || !Array.isArray(x.unbound) || !Array.isArray(x.reach) || !Array.isArray(x.modules) || !Array.isArray(x.loadAny) || !Array.isArray(x.offered) || !Array.isArray(x.opaque) || !Array.isArray(x.members)) return null;
     const placeOf = (r: N[], at: number) => ({ file: d.s(r[at] as N), line: r[at + 1] as N });
     const escapes: Escapes = {
       uses: new Map(x.uses.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
@@ -233,6 +236,8 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
       modules: new Map(x.modules.map((r) => [d.s(r[0] as N), placeOf(r, 1)])),
       loadAny: x.loadAny.map((r) => ({ ...placeOf(r, 0), why: d.s(r[2] as N) as Escapes["loadAny"][number]["why"] })),
       offered: new Set(x.offered.map(d.s)),
+      opaque: new Map(x.opaque.map((r) => [d.s(r[0] as N), { ...placeOf(r, 0), why: d.s(r[2] as N), count: r[3] as N, all: ((r[4] ?? []) as unknown as N[][]).map((a) => ({ why: d.s(a[0] as N), line: a[1] as N, count: a[2] as N })) }])),
+      members: new Map(x.members.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
     };
     const extra = { references: referenceRows.map(d.edge), dispatch, summaries, escapes };
     const graph = assemble(nodes, edgeRows.map(d.edge), importerRows.map(d.edge), misses, unknowns, status, deserializeModel(projects.model), projects.goModules, extra);

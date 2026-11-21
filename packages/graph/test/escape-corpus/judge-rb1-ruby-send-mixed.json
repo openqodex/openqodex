@@ -1,0 +1,17 @@
+{
+  "covers": "an adversarial case from the review of piece A: ruby send mixed",
+  "files": {
+    "app/item.rb": "class Item\n  def save_all\n  end\nend\n\ndef go(item, name)\n  item.send(name)\nend\n",
+    "web/x.ts": "export function go(o: any) { o.save_all(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/item.rb#Item.save_all",
+      "caller": null,
+      "file": "web/x.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

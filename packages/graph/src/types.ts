@@ -278,6 +278,8 @@ export type EscapeFact =
   | { kind: "own" | "eval" | "global"; line: number }
   | { kind: "load"; line: number; names?: string[] };
 
+export type OpaqueFact = { why: string; line: number; count: number };
+
 export type FileFacts = {
   lang: Lang;
   defs: DefFact[];
@@ -309,6 +311,15 @@ export type FileFacts = {
   // (frameworks/plugin.ts); absent when no plugin found anything.
   frameworks?: FrameworkFileFacts;
   escapes?: EscapeFact[];
+  // TypeScript and JavaScript: why the reader cannot vouch for every value
+  // read in the file (a free name it does not know as harmless, `this`
+  // outside a class, a `.constructor` read, a construct it does not read),
+  // each with its first line and how many times it was seen.
+  opaque?: OpaqueFact[];
+  // TypeScript and JavaScript: member names read, not called, on a value
+  // of unknown type (`c.total`, `const h = obj.save`): a getter runs there,
+  // or a method is taken as a value.
+  looseMembers?: OpaqueFact[];
   // TypeScript and JavaScript: the module-level variables that are no
   // definition (`const LIMIT = 10`), and those exported as declared
   // (`export const LIMIT`, CommonJS `exports.LIMIT = 10`). An import of one
@@ -411,6 +422,11 @@ export type Escapes = {
   modules: Map<string, Place>;
   loadAny: (Place & { why: "load" | "eval" | "global" })[];
   offered: Set<string>;
+  // TypeScript and JavaScript files the reader cannot vouch for, by file:
+  // the first reason, its line, how many places in the file, and each reason.
+  opaque: Map<string, Place & { why: string; count: number; all: OpaqueFact[] }>;
+  // Member reads on a value of unknown type, by "family:name".
+  members: Map<string, Place & { count: number }>;
 };
 
 // An eligible file the graph did not read, and why.

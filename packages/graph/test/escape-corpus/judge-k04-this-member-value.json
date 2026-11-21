@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: this member value",
+  "files": {
+    "src/a.js": "exports.f = function () {};\nfunction run(cb) { cb(); }\nrun(this.f);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": null,
+      "file": "src/a.js",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

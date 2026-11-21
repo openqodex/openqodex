@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: top index",
+  "files": {
+    "public/app.js": "function f() {}\nfunction go(name) { top[name](); }\ngo(location.hash);\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/app.js#f",
+      "caller": null,
+      "file": "public/app.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

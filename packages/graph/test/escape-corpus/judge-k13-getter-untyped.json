@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: getter untyped",
+  "files": {
+    "src/a.ts": "export class Cart { get total() { return 1; } }\nexport function show(c: any) { return c.total; }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#Cart.total",
+      "caller": null,
+      "file": "src/a.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

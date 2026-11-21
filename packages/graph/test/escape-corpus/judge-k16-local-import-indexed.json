@@ -1,0 +1,17 @@
+{
+  "covers": "an adversarial case from the review of piece A: local import indexed",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/use.ts": "export async function go(k: string) { const m = await import(\"./a\"); (m as any)[k](); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/use.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

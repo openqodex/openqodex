@@ -7,7 +7,7 @@
 // patterns were written here against the pinned grammar files.
 import { createHash } from "node:crypto";
 import type { Node, Tree } from "web-tree-sitter";
-import type { BoundImport, CallFact, DefFact, EscapeFact, FileFacts, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
+import type { BoundImport, CallFact, DefFact, EscapeFact, FileFacts, OpaqueFact, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
 import { MAX_TYPE_DEPTH } from "./types.js";
 import { walkTree } from "./walk.js";
 import type { TreeVisitor } from "./walk.js";
@@ -73,8 +73,9 @@ import type { TreeVisitor } from "./walk.js";
 // that is not a call (roles other, object, index); a named function
 // expression's own name is bound to its definition inside it; and the
 // places a function may be reached by a name the graph cannot follow
-// (FileFacts.escapes).
-export const EXTRACTOR_VERSION = 40;
+// (FileFacts.escapes). 41: what the reader cannot vouch for in a file
+// (FileFacts.opaque).
+export const EXTRACTOR_VERSION = 41;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -97,6 +98,10 @@ type Frame = {
   // function that is no arrow and no method, where `this` is whatever the
   // caller binds. Unset: as around it, and true in a class frame.
   thisKnown?: boolean;
+  // `this` here is proved an instance of a class or the class itself: a
+  // method or field of a class body (a class expression's too), and an
+  // arrow inside one. Unset: as around it, and true in a class frame.
+  thisClass?: boolean;
   // Parameters and locals given another value lose their original callable value.
   reassigned?: Set<string>;
   // A Java type's frame: the names of its fields, read before its methods,
@@ -330,6 +335,11 @@ class Ctx {
   defaultExport: string | null = null;
   goPackage: string | null = null;
   escapes: EscapeFact[] = [];
+  opaque = new Map<string, OpaqueFact>();
+  looseMembers = new Map<string, OpaqueFact>();
+  // Timers given a name: `setTimeout(code)` runs a string as code unless
+  // the name is a function the file defines.
+  pendingTimers: { scope: Scope; timer: string; arg: string | null; line: number }[] = [];
   variables = new Set<string>();
   exportedVariables = new Set<string>();
   // TypeScript and JavaScript: the name nodes already recorded as a value,
@@ -395,6 +405,7 @@ class Ctx {
     s.caller = frame.def >= 0 ? frame.def : parent.caller;
     s.clsScope = frame.cls !== null ? s : parent.clsScope;
     s.thisKnown = frame.thisKnown ?? (frame.cls !== null || parent.thisKnown !== false);
+    s.thisClass = frame.thisClass ?? (frame.cls !== null || parent.thisClass === true);
     s.inFunction = parent.inFunction || !(frame.block === true || (frame.cls !== null && frame.locals === null));
     s.decl = frame.locals ? s : parent.decl;
     s.fnDecl = frame.locals && !frame.block ? s : parent.fnDecl;
@@ -621,6 +632,7 @@ class Ctx {
     if (ident) delete (v.recv as Tagged)[IDENT];
     if (this.lang === "go" || this.lang === "ruby") return index;
     if (this.top.depth > MAX_SCOPE_DEPTH) {
+      if (JS_LANGS.has(this.lang)) this.addOpaque("a scope nested too deep to read", line);
       ref.recv = { kind: "other" };
       return index;
     }
@@ -675,6 +687,14 @@ class Ctx {
   addEscape(fact: EscapeFact, name?: string): void {
     if (name === undefined) this.escapes.push(fact);
     else this.pendingEscapes.push({ fact, scope: this.top, name });
+  }
+
+  // A place the reader cannot vouch for: the file is opaque, and every
+  // function of its project may be reached by a path the graph does not see.
+  addOpaque(why: string, line: number): void {
+    const kept = this.opaque.get(why);
+    if (kept) kept.count++;
+    else this.opaque.set(why, { why, line, count: 1 });
   }
 
   // A name given a module loaded by a computed path, in the scope that declares it.
@@ -774,6 +794,8 @@ class Ctx {
     // definition and is dropped; the indices that name a reference are
     // renumbered over the ones kept.
     const drop = new Set<ValueRef>();
+    // The names an import binds, a namespace among them, for the free-name check.
+    const importLocals = new Set(this.imports.flatMap((i) => [...i.names.map((n) => n.local), ...(i.namespace ? [i.namespace] : [])]));
     for (const { ref, scope, ident } of this.pendingValues) {
       if (!ident && ref.recv.kind === "none" && this.loadBindings.length > 0) loadRead(scope, ref.name, ref.role === "object" ? (this.propOf.get(ref) ?? null) : null);
       // The name of a table passed on, assigned or returned: what it holds
@@ -789,7 +811,10 @@ class Ctx {
         continue;
       }
       const at = this.lookup(scope, ref.name);
-      if (!at) continue;
+      if (!at) {
+        if (JS_LANGS.has(this.lang) && ref.recv.kind === "none" && !topNames.has(ref.name) && !importLocals.has(ref.name) && !jsHarmlessGlobal(ref.name, ref.role, this.propOf.get(ref) ?? null)) this.addOpaque(`the free name \`${ref.name}\``, ref.line);
+        continue;
+      }
       const fn = at.fns?.get(ref.name);
       const bound = at.imports?.get(ref.name);
       if (fn !== undefined) ref.local = fn;
@@ -799,8 +824,26 @@ class Ctx {
     this.pendingValues = [];
     for (const { fact, scope, name } of this.pendingEscapes) if (!this.lookup(scope, name) && !topNames.has(name)) this.escapes.push(fact);
     this.pendingEscapes = [];
+    for (const t of this.pendingTimers) {
+      if (this.lookup(t.scope, t.timer) || topNames.has(t.timer)) continue;
+      const at = t.arg === null ? null : this.lookup(t.scope, t.arg);
+      if (t.arg !== null && (at?.fns?.has(t.arg) || (!at && topNames.has(t.arg)))) continue;
+      this.addOpaque(`\`${t.timer}\` given what may be a string of code`, t.line);
+      this.escapes.push({ kind: "global", line: t.line });
+    }
+    this.pendingTimers = [];
     for (const b of this.loadBindings) if (!b.any) b.fact.names = [...b.names].sort();
-    for (const ref of this.values) if (ref.recv.kind === "other") drop.add(ref);
+    for (const ref of this.values) {
+      const untyped = ref.recv.kind === "type" && (ref.recv.type.name === "any" || ref.recv.type.name === "unknown") && !ref.recv.type.qualifier;
+      if (ref.recv.kind !== "other" && !untyped) continue;
+      if (!untyped) drop.add(ref);
+      // A member read on a value of unknown type.
+      if (JS_LANGS.has(this.lang)) {
+        const kept = this.looseMembers.get(ref.name);
+        if (kept) kept.count++;
+        else this.looseMembers.set(ref.name, { why: ref.name, line: ref.line, count: 1 });
+      }
+    }
     const renumber = new Map<number, number>();
     const values: ValueRef[] = [];
     this.values.forEach((ref, i) => {
@@ -873,6 +916,8 @@ class Ctx {
       defaultExport: this.defaultExport,
       goPackage: this.goPackage,
       ...(this.escapes.length > 0 ? { escapes: this.escapes } : {}),
+      ...(this.opaque.size > 0 ? { opaque: [...this.opaque.values()] } : {}),
+      ...(this.looseMembers.size > 0 ? { looseMembers: [...this.looseMembers.values()] } : {}),
       ...(this.variables.size > 0 ? { variables: [...this.variables].filter((n) => !topNames.has(n)) } : {}),
       ...(this.exportedVariables.size > 0 ? { exportedVariables: [...this.exportedVariables].filter((n) => !topNames.has(n)) } : {}),
     };
@@ -882,6 +927,13 @@ class Ctx {
 // ---------- TypeScript, TSX, JavaScript ----------
 
 const JS_TYPES = new Set([
+  "this",
+  "pair_pattern",
+  "shorthand_property_identifier_pattern",
+  "internal_module",
+  "module",
+  "import_alias",
+  "meta_property",
   "import_statement",
   "export_statement",
   "function_declaration",
@@ -1486,6 +1538,7 @@ function jsImport(ctx: Ctx, node: Node): void {
   // TypeScript `import m = require("./m")`: m is bound to the whole module.
   const required = node.namedChildren.find((c) => c.type === "import_require_clause");
   if (required) {
+    ctx.addOpaque("`import x = require(...)`, which the reader does not read whole", node.startPosition.row + 1);
     const name = required.namedChildren.find((c) => c.type === "identifier");
     const spec = required.namedChildren.find((c) => c.type === "string");
     if (name && spec) ctx.imports.push({ spec: stringContent(spec), ...pos(node), names: [], namespace: name.text, star: false, reexport: false, typeOnly: false });
@@ -1651,6 +1704,13 @@ function jsPatternKeys(pattern: Node): { names: { imported: string; local: strin
   return { names, full };
 }
 
+// A read of `.constructor`: from a function it is `Function`, which makes
+// code from a string, so the file is opaque and the code may load anything.
+function jsConstructorRead(ctx: Ctx, line: number): void {
+  ctx.addOpaque("a `.constructor` read", line);
+  ctx.addEscape({ kind: "global", line });
+}
+
 // The escapes a call may open: a load the reader did not read as a binding,
 // a direct eval, `Function`, a string run as code by a timer, a call that
 // makes or uses a loader (`createRequire`, `module.require`), an eval
@@ -1674,8 +1734,15 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
   }
   if (fn.type === "identifier") {
     if (fn.text === "eval") ctx.addEscape({ kind: "eval", line }, "eval");
-    else if (fn.text === "Function") ctx.addEscape({ kind: "global", line }, "Function");
-    else if ((fn.text === "setTimeout" || fn.text === "setInterval") && first && first.type !== "arrow_function" && first.type !== "function_expression" && first.type !== "function" && first.type !== "identifier" && first.type !== "member_expression") ctx.addEscape({ kind: "global", line }, fn.text);
+    else if (fn.text === "Function") {
+      ctx.addEscape({ kind: "global", line }, "Function");
+      ctx.addOpaque("`Function` called to make code from a string", line);
+    }
+    else if ((fn.text === "setTimeout" || fn.text === "setInterval") && first && first.type !== "arrow_function" && first.type !== "function_expression" && first.type !== "function" && first.type !== "generator_function") {
+      // A browser runs a string given to a timer as code: only a function
+      // written in place, or a name the file defines as a function, is safe.
+      ctx.pendingTimers.push({ scope: ctx.top, timer: fn.text, arg: first.type === "identifier" ? first.text : null, line });
+    }
     else if (fn.text === "createRequire") {
       // `const require = createRequire(...)`: its uses are read as require's
       // are; `createRequire(...)("x")` as a load of x.
@@ -1693,6 +1760,8 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
   if (fn.type === "member_expression") {
     const prop = fn.childForFieldName("property")?.text;
     const object = jsUnwrap(fn.childForFieldName("object"));
+    // `f.constructor("code")`: the constructor of a function is `Function`.
+    if (prop === "constructor") jsConstructorRead(ctx, line);
     if (prop === "require" && loaderOwner(object)) load();
     else if (prop === "eval" && object?.type === "identifier" && GLOBAL_OBJECTS.has(object.text)) ctx.addEscape({ kind: "global", line }, object.text);
   }
@@ -1906,6 +1975,31 @@ function jsValueType(ctx: Ctx, value: Node | null): TypeRef | null {
 
 // Names of the global object: a computed member of one may be any global.
 const GLOBAL_OBJECTS = new Set(["globalThis", "window", "self", "global"]);
+const JS_LANGS: ReadonlySet<Lang> = new Set<Lang>(["typescript", "tsx", "javascript"]);
+// Free names (bound to nothing in the file) whose every use is known to
+// reach no code by a name built at run time: no global object, no way to
+// make code from a string, no loader. `require`, `module` and `exports`
+// have rules of their own. Any other free name makes the file opaque.
+const HARMLESS_GLOBALS = new Set([
+  "console", "JSON", "Math", "Number", "String", "Boolean", "Array", "Object", "Promise", "Symbol", "BigInt", "Date", "RegExp",
+  "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "ArrayBuffer", "SharedArrayBuffer", "DataView",
+  "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
+  "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "URIError", "AggregateError",
+  "Buffer", "URL", "URLSearchParams", "TextEncoder", "TextDecoder", "AbortController", "AbortSignal", "Intl",
+  "NaN", "Infinity", "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI",
+  "structuredClone", "clearTimeout", "clearInterval", "clearImmediate", "__dirname", "__filename",
+  "require", "module", "exports",
+]);
+// The members of `process` that read or set plain data, or take a listener
+// (a function the file names as a value, so it is a use of its own).
+const HARMLESS_PROCESS = new Set([
+  "env", "argv", "argv0", "execArgv", "execPath", "exit", "exitCode", "cwd", "chdir", "platform", "arch", "pid", "ppid", "title", "version", "versions", "release",
+  "stdout", "stderr", "stdin", "on", "once", "off", "removeListener", "hrtime", "nextTick", "memoryUsage", "uptime", "kill", "emitWarning", "umask", "getuid", "getgid", "config",
+]);
+function jsHarmlessGlobal(name: string, role: ValueRef["role"], prop: string | null): boolean {
+  if (name === "process") return role === "object" && prop !== null && HARMLESS_PROCESS.has(prop);
+  return HARMLESS_GLOBALS.has(name);
+}
 // The objects whose `require` member is a loader: a module, and the ones
 // `require.main` and `process.mainModule` give. Any other way to one reads
 // `module`, `require` or `process.mainModule` first, which is a load itself.
@@ -1924,7 +2018,7 @@ const JS_NAMED = new Set([
 const JS_NOT_READ = new Set([
   "formal_parameters", "array_pattern", "rest_pattern", "object_pattern", "export_specifier", "namespace_export", "import_specifier",
   "import_clause", "namespace_import", "import_require_clause", "meta_property", "nested_identifier", "type_query", "type_predicate",
-  "asserts", "jsx_namespace_name", "jsx_closing_element", "export_statement",
+  "asserts", "jsx_namespace_name", "jsx_closing_element", "export_statement", "nested_type_identifier",
 ]);
 
 const sameNode = (a: Node | null | undefined, b: Node): boolean => !!a && a.startIndex === b.startIndex && a.endIndex === b.endIndex && a.type === b.type;
@@ -2047,7 +2141,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     // Only an arrow keeps the `this` around it; a method's own is its class's,
     // and so is that of a function a class field holds.
     const ownThis = (def >= 0 && ctx.defs[def]?.kind === "method") || node.parent?.type === "public_field_definition" || node.parent?.type === "field_definition";
-    const leave = ctx.push({ def, cls: null, locals, ...(typeParams ? { typeParams } : {}), ...(node.type === "arrow_function" ? {} : { thisKnown: ownThis }) });
+    // A method of a class body, a class expression's too: `this` is the
+    // instance (or the class, for a static one). In an object literal, or in
+    // a function a field holds, it is whatever the caller binds.
+    const inClassBody = node.type === "method_definition" && node.parent?.type === "class_body";
+    const leave = ctx.push({ def, cls: null, locals, ...(typeParams ? { typeParams } : {}), ...(node.type === "arrow_function" ? {} : { thisKnown: ownThis, thisClass: inClassBody }) });
     // A named function expression (`const f = function inner() {}`): its own
     // name, inside its body, is the definition it makes.
     const own = def >= 0 && (node.type === "function_expression" || node.type === "function" || node.type === "generator_function") ? node.childForFieldName("name") : null;
@@ -2181,6 +2279,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         jsImport(ctx, node);
         return false;
       case "export_statement":
+        if (node.children.some((c) => c.type === "=")) ctx.addOpaque("`export =`, which the reader does not read", node.startPosition.row + 1);
         jsExport(ctx, node);
         return;
       case "function_declaration":
@@ -2224,7 +2323,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         enteringTypeParams = null;
         // The superclass first: a member is looked up there before an interface.
         bases.push(...implemented);
-        const def = ctx.addDef(node, name, "class", { topLevel: ctx.atModuleLevel(), exported: isExportedDecl(node) && !isDefaultExport(node), bases, ...(dynamicBases.length > 0 ? { dynamicBases } : {}) });
+        const topLevel = ctx.atModuleLevel();
+        // A class declared inside a function is a name of that scope, as a
+        // `const` would be: a read of it is no free name.
+        if (!topLevel && name.type !== "computed_property_name") ctx.setLocal(name.text, null, true);
+        const def = ctx.addDef(node, name, "class", { topLevel, exported: isExportedDecl(node) && !isDefaultExport(node), bases, ...(dynamicBases.length > 0 ? { dynamicBases } : {}) });
         for (const t of argUses) ctx.addTypeUse(t, def);
         const leave = ctx.push({ def, cls: name.text, locals: null, ...(typeParams ? { typeParams } : {}) });
         (ctx.defs[def] as DefFact).fields = jsFields(node, typeParams ?? undefined);
@@ -2504,7 +2607,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       }
       case "new_expression": {
         const ctor = node.childForFieldName("constructor");
-        if (ctor?.type === "identifier" && ctor.text === "Function") ctx.addEscape({ kind: "global", line: node.startPosition.row + 1 }, "Function");
+        if (ctor?.type === "identifier" && ctor.text === "Function") {
+          ctx.addEscape({ kind: "global", line: node.startPosition.row + 1 }, "Function");
+          ctx.addOpaque("`Function` called to make code from a string", node.startPosition.row + 1);
+        }
+        if (ctor?.type === "member_expression" && ctor.childForFieldName("property")?.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
         jsCallee(ctx, ctor);
         jsArgs(ctx, node.childForFieldName("arguments"), undefined);
         for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
@@ -2640,12 +2747,20 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if ((prop.text === "require" && loaderOwner(object)) || (prop.text === "mainModule" && object?.type === "identifier" && object.text === "process")) ctx.addEscape({ kind: "load", line });
         if (prop.text === "eval" && object?.type === "identifier" && GLOBAL_OBJECTS.has(object.text)) ctx.addEscape({ kind: "global", line }, object.text);
         if (role !== "object" && object?.type === "identifier" && object.text === "module" && prop.text === "exports") ctx.addEscape({ kind: "own", line }, "module");
+        if (prop.text === "constructor") jsConstructorRead(ctx, line);
         if (ctx.readAt.has(prop.startIndex) || (prop.type !== "property_identifier" && prop.type !== "private_property_identifier")) return;
         const recv = object ? jsReceiver(ctx, object) : null;
         if (recv && recv.kind !== "other") ctx.addValue({ name: prop, recv }, role);
+        else if (prop.type === "property_identifier") {
+          const kept = ctx.looseMembers.get(prop.text);
+          if (kept) kept.count++;
+          else ctx.looseMembers.set(prop.text, { why: prop.text, line, count: 1 });
+        }
         return;
       }
       case "subscript_expression": {
+        const index = node.childForFieldName("index");
+        if ((index?.type === "string" || index?.type === "template_string") && index.text.slice(1, -1) === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
         // `this[k]` where `this` may be the global object or a CommonJS module's exports.
         const object = jsUnwrap(node.childForFieldName("object"));
         if (object?.type === "this" && jsLooseThis(ctx)) {
@@ -2657,6 +2772,29 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       }
       case "with_statement":
         ctx.addEscape({ kind: "eval", line: node.startPosition.row + 1 });
+        return;
+      case "this":
+        // Outside a class, `this` may be the global object, a CommonJS
+        // module's exports or any object a call hands it.
+        if (ctx.top.thisClass !== true) ctx.addOpaque("`this` outside a class", node.startPosition.row + 1);
+        return;
+      case "pair_pattern":
+        if (node.childForFieldName("key")?.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
+        return;
+      case "shorthand_property_identifier_pattern":
+        if (node.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
+        return;
+      case "internal_module":
+      case "module":
+        // `declare namespace` and `declare module "x"` hold types alone.
+        if (node.parent?.type === "ambient_declaration") return;
+        ctx.addOpaque("a TypeScript namespace, which the reader does not read", node.startPosition.row + 1);
+        return;
+      case "import_alias":
+        ctx.addOpaque("`import x = a.b`, which the reader does not read", node.startPosition.row + 1);
+        return;
+      case "meta_property":
+        ctx.addOpaque(`\`${node.text.replace(/\s+/g, "")}\`, which the reader does not read`, node.startPosition.row + 1);
         return;
       case "jsx_opening_element":
       case "jsx_self_closing_element": {
@@ -4385,6 +4523,29 @@ function rbQualify(nesting: string | null, name: string): string {
   return nesting && !name.startsWith("::") ? `${nesting}::${n}` : n;
 }
 
+// Calls Ruby makes by a name in a symbol or a string: `items.each(&:save)`
+// calls `save` on each item, `send(:save)` and `method(:save)` name it. A
+// literal name is an unbound call of that name; `send(name)` with a name
+// built at run time is a call through a value.
+const RB_SENDS = new Set(["send", "public_send", "__send__", "method", "public_method", "instance_method", "try", "respond_to?"]);
+function rbNamedCalls(ctx: Ctx, node: Node, method: Node): void {
+  const args = node.childForFieldName("arguments")?.namedChildren ?? [];
+  const named = (at: Node, name: string) => {
+    const i = ctx.addCall(at, { kind: "other" });
+    (ctx.calls[i] as CallFact).name = name;
+  };
+  for (const a of args) {
+    const sym = a.type === "block_argument" ? a.firstNamedChild : null;
+    if (sym?.type === "simple_symbol") named(sym, sym.text.slice(1));
+  }
+  if (!RB_SENDS.has(method.text)) return;
+  const first = args.find((a) => a.type !== "comment");
+  if (!first) return;
+  if (first.type === "simple_symbol") named(first, first.text.slice(1));
+  else if (first.type === "string" && first.namedChildren.length === 1 && first.namedChildren[0]?.type === "string_content") named(first, first.namedChildren[0].text);
+  else if (method.text !== "respond_to?") ctx.addDynamicCall(node);
+}
+
 function extractRuby(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
   const ctx = new Ctx("ruby");
   const nesting = () => ctx.cls()?.cls ?? null;
@@ -4456,6 +4617,7 @@ function extractRuby(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
       case "call": {
         const method = node.childForFieldName("method");
         if (!method) return;
+        rbNamedCalls(ctx, node, method);
         const recv = node.childForFieldName("receiver");
         if (!recv) {
           const args = node.childForFieldName("arguments")?.namedChildren ?? [];

@@ -25,7 +25,7 @@ import { governingTsconfig, isGoStdlib, isNodeBuiltin, isPyStdlib, isRubyStdlib,
 import type { Cause, Cut, EvidenceKind, Shape, Tier, Via } from "./model/records.js";
 import { weakest } from "./model/records.js";
 import type { Lookup as PluginLookup } from "./frameworks/plugin.js";
-import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, InvocationSummary, Miss, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
+import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
 import { CALLER_KINDS, MAX_TYPE_DEPTH, familyOf } from "./types.js";
 
 const MAX_DEPTH = 8; // re-export and base-class chains
@@ -84,8 +84,8 @@ export const SHAPE_CAP = 20;
 // value, its own body included, the modules that escape and what they
 // offer, the places a name built at run time may reach it, and the value
 // uses no rule binds; an unbound call that cannot run a plain function is
-// marked (UnknownSite.notPlain).
-export const RESOLVER_VERSION = 31;
+// marked (UnknownSite.notPlain). 32: the opaque files (Escapes.opaque).
+export const RESOLVER_VERSION = 32;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -4005,7 +4005,20 @@ export function createWorld(input: ResolveInput): World {
       }
     }
     if (loadAny.length > 0) for (const { path } of jsFiles) for (const id of offers(path).ids) offered.add(id);
-    return { uses, unbound, reach, modules, loadAny, offered };
+    const opaque = new Map<string, Place & { why: string; count: number; all: OpaqueFact[] }>();
+    for (const { path, facts: f } of jsFiles) {
+      const first = f.opaque?.reduce((a, b) => (b.line < a.line ? b : a));
+      if (first) opaque.set(path, { file: path, line: first.line, why: first.why, count: (f.opaque ?? []).reduce((k, o) => k + o.count, 0), all: f.opaque ?? [] });
+    }
+    const members = new Map<string, Place & { count: number }>();
+    for (const { path, facts: f } of jsFiles) {
+      for (const m of f.looseMembers ?? []) {
+        const kept = members.get(`js:${m.why}`);
+        if (kept) kept.count += m.count;
+        else members.set(`js:${m.why}`, { file: path, line: m.line, count: m.count });
+      }
+    }
+    return { uses, unbound, reach, modules, loadAny, offered, opaque, members };
   };
 
   const trace = (files: Iterable<string>): SiteTrace[] => {

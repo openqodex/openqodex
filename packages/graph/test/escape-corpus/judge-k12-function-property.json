@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: function property",
+  "files": {
+    "src/a.js": "function f() {}\nf.helper = function helper() {};\nexports.go = function go(k) { f[k](); };\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": null,
+      "file": "src/a.js",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

@@ -1,0 +1,17 @@
+{
+  "covers": "an adversarial case from the review of piece A: cjs object this",
+  "files": {
+    "src/a.js": "function f() {}\nmodule.exports = { f, g() { this.f(); } };\n",
+    "src/use.js": "const m = require(\"./a\");\nm.g();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": null,
+      "file": "src/a.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

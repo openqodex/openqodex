@@ -1,0 +1,17 @@
+{
+  "covers": "an adversarial case from the review of piece A: export equals",
+  "files": {
+    "src/a.ts": "function f() {}\nexport = f;\n",
+    "src/use.ts": "import m = require(\"./a\");\nfunction run(cb: () => void) { cb(); }\nrun(m);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/a.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}
