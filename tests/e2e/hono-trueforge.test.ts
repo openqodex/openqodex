@@ -1,5 +1,5 @@
-// The Hono plugin on the prospect's own repo. trueforge (a public
-// TypeScript service on Hono and @hono/zod-openapi) is pinned to a commit;
+// The Hono plugin on a real application. An open source TypeScript
+// service on Hono and @hono/zod-openapi is pinned to a commit;
 // a separate script (hono-truth.mjs) reads the routes its application
 // serves with the TypeScript compiler's own name binding, and this test
 // requires the graph to list exactly those routes for that application:
