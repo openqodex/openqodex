@@ -79,7 +79,11 @@ import type { TreeVisitor } from "./walk.js";
 // 43: a timer given a name proved a function, the global names a file
 // declares as plain data (FileFacts.ambient), and each place said as what
 // it does.
-export const EXTRACTOR_VERSION = 43;
+// 44: a TypeScript angle-bracket cast (`<Row>x`) is a type use; a type
+// named through an import type (`import("./m").Row`) binds through a scoped
+// import of the module it names; a Python `typing.cast` and a Go type
+// assertion are type uses.
+export const EXTRACTOR_VERSION = 44;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -146,6 +150,8 @@ let enteringTypeParams: Map<string, TypeRef | null> | null = null;
 const READ_AS = Symbol("readAs");
 type Stamped = TypeRef & { [READ_IN]?: Scope; [READ_AS]?: { at: Scope; bound: BoundImport } };
 let readingScope: Scope | null = null;
+// The file being read's import of a module an import type names (jsImportType).
+let readingImportType: ((spec: string, at: Node) => number) | null = null;
 
 function typeRef(t: TypeRef): TypeRef {
   if (!readingScope) return t;
@@ -384,6 +390,8 @@ class Ctx {
   private callAt = new Map<number, number>();
   private aliasCalls: { call: CallFact; callNode: number }[] = [];
   private typeSeen = new Set<string>();
+  // The import each import type made, by the module and where it is written.
+  private importTypes = new Map<string, number>();
   // Computed calls on a name: the table it is bound to, decided once every
   // scope is known (a module's table may be declared below the function).
   private tableCalls: { call: number; name: string; scope: Scope }[] = [];
@@ -408,6 +416,7 @@ class Ctx {
     root.fnDecl = root;
     this.top = root;
     readingScope = root;
+    readingImportType = (spec, at) => this.importType(spec, at);
     typeCuts = 0;
   }
 
@@ -510,6 +519,20 @@ class Ctx {
     at.imports ??= new Map();
     for (const n of fact.names) at.imports.set(n.local, { import: index, imported: n.imported });
     if (fact.namespace) at.imports.set(fact.namespace, { import: index, imported: "*" });
+  }
+
+  // The module an import type names (`import("./m").Row`): an import of
+  // the whole module, once per place it is written, that binds no name of
+  // the file; the type binds through it.
+  importType(spec: string, at: Node): number {
+    const key = `${at.startIndex}\0${spec}`;
+    let index = this.importTypes.get(key);
+    if (index === undefined) {
+      index = this.imports.length;
+      this.imports.push({ spec, ...pos(at), names: [], namespace: null, star: false, reexport: false, typeOnly: true, scoped: true });
+      this.importTypes.set(key, index);
+    }
+    return index;
   }
 
   // An assignment to a name that may exist already. A declared type stands;
@@ -739,6 +762,7 @@ class Ctx {
 
   facts(): FileFacts {
     readingScope = null;
+    readingImportType = null;
     const topNames = new Set(this.defs.filter((d) => d.topLevel).map((d) => d.name));
     // A read of a name bound to a module loaded by a computed path: `m.name`
     // adds the name, a call of it the module's default, anything else any name.
@@ -979,6 +1003,7 @@ const JS_TYPES = new Set([
   "array",
   "as_expression",
   "satisfies_expression",
+  "type_assertion",
   "instantiation_expression",
   "binary_expression",
   "jsx_expression",
@@ -1053,9 +1078,39 @@ function jsTypeNames(node: Node | null): TypeRef[] {
       if (name && module) out.push(typeRef({ name: name.text, qualifier: module.text, ...pos(n) }));
       return true;
     }
+    // `typeof import("./m").x` names a value, not a type.
+    if (n.type === "member_expression" && n.parent?.type !== "type_query" && importTypeCall(n)) {
+      const t = jsImportType(n);
+      if (t) out.push(t);
+      return true;
+    }
     return false;
   });
   return bound.size === 0 ? out : out.filter((t) => t.qualifier !== null || !bound.has(t.name));
+}
+
+// The `import("./m")` a type is named through (`import("./m").Row`,
+// `import("./m").ns.Row`, which the grammar reads as member expressions),
+// or null when the member expression is no import type.
+function importTypeCall(n: Node): Node | null {
+  let o = n.childForFieldName("object");
+  while (o?.type === "member_expression") o = o.childForFieldName("object");
+  return o?.type === "call_expression" && o.childForFieldName("function")?.type === "import" ? o : null;
+}
+
+// A type named through an import type: bound to a scoped import of the
+// module it names, as `import * as m from "./m"` and `m.Row` would bind
+// it. Its qualifier is `import` and the namespaces between, a head no
+// name of the file can shadow.
+function jsImportType(n: Node): TypeRef | null {
+  const call = importTypeCall(n);
+  const arg = call?.childForFieldName("arguments")?.firstNamedChild;
+  const name = n.childForFieldName("property");
+  if (!call || arg?.type !== "string" || !name || !readingImportType) return null;
+  const path: string[] = [];
+  for (let o = n.childForFieldName("object"); o?.type === "member_expression"; o = o.childForFieldName("object")) path.unshift(o.childForFieldName("property")?.text ?? "");
+  const bound = { import: readingImportType(stringContent(arg), call), imported: "*" };
+  return typeRef({ name: name.text, qualifier: ["import", ...path].join("."), ...pos(n), bound });
 }
 
 // The named types in the type arguments a base is written with
@@ -1174,6 +1229,7 @@ function readJsTypeRef(annotation: Node): TypeRef | null {
   }
   // A predefined type (`string`, `number`) is kept, so a call on it is known to be the language's own.
   if (t.type === "type_identifier" || t.type === "identifier" || t.type === "predefined_type") return typeRef({ name: t.text, qualifier: null, line, column });
+  if (t.type === "member_expression" && importTypeCall(t)) return jsImportType(t);
   if (t.type === "nested_type_identifier" || t.type === "member_expression") {
     const name = t.childForFieldName("name") ?? t.childForFieldName("property");
     const module = t.childForFieldName("module") ?? t.childForFieldName("object");
@@ -2780,6 +2836,10 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "satisfies_expression":
         for (const t of jsTypeNames(node.namedChildren[1] ?? null)) ctx.addTypeUse(t, ctx.caller());
         return;
+      case "type_assertion":
+        // `<Row>x`, TypeScript only (in TSX it is a JSX element).
+        for (const t of jsTypeNames(node.namedChildren[0] ?? null)) ctx.addTypeUse(t, ctx.caller());
+        return;
       case "instantiation_expression":
         // `make<Repo>` used as a value, or `sql<Row>` before a template the
         // grammar reads this way: each type argument is a use of that type.
@@ -3001,6 +3061,17 @@ function pyTypeNames(node: Node | null): TypeRef[] {
     return true;
   });
   return out;
+}
+
+// Whether a call is written with the typing module's `cast`: a name
+// imported from typing (`from typing import cast as c`) or an attribute of
+// a name bound to the module (`typing.cast`, `t.cast`).
+const PY_TYPING = new Set(["typing", "typing_extensions"]);
+function pyTypingCast(ctx: Ctx, fn: Node | null): boolean {
+  if (fn?.type === "identifier") return ctx.imports.some((i) => PY_TYPING.has(i.spec) && i.names.some((n) => n.imported === "cast" && n.local === fn.text));
+  if (fn?.type !== "attribute" || fn.childForFieldName("attribute")?.text !== "cast") return false;
+  const object = fn.childForFieldName("object");
+  return object?.type === "identifier" && ctx.imports.some((i) => PY_TYPING.has(i.spec) && i.namespace === object.text);
 }
 
 // A method Python never runs on an instance of a concrete class: one
@@ -3300,6 +3371,11 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
         if (fn?.type === "identifier" && (fn.text === "isinstance" || fn.text === "issubclass")) {
           for (const r of pyTypeNames(args?.namedChildren[1] ?? null)) ctx.addTypeUse(r, ctx.caller());
         }
+        // `cast(Foo, x)`, `typing.cast("Foo", x)`: the type is a type use.
+        if (pyTypingCast(ctx, fn)) {
+          const first = args?.namedChildren.find((a) => a.type !== "comment");
+          if (first && first.type !== "keyword_argument") for (const r of pyTypeNames(first)) ctx.addTypeUse(r, ctx.caller());
+        }
         return;
       }
       case "return_statement":
@@ -3343,6 +3419,7 @@ const GO_TYPES = new Set([
   "return_statement",
   "literal_value",
   "type_conversion_expression",
+  "type_assertion_expression",
 ]);
 
 // Every named type in a Go type (`map[string]*Repo` names Repo).
@@ -3681,6 +3758,10 @@ function extractGo(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
         }
         return;
       }
+      case "type_assertion_expression":
+        // `v.(Bar)`, `v.(*store.Bar)`: the type is a type use.
+        for (const r of goTypeNames(node.childForFieldName("type"))) ctx.addTypeUse(r, ctx.caller());
+        return;
       case "type_conversion_expression": {
         // `handlers[k](x)` reads like a generic conversion `T[k](x)`; when
         // the name is a variable it is a call of an indexed value.
