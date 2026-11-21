@@ -110,7 +110,12 @@ import type { TreeVisitor } from "./walk.js";
 // (`import.meta.url`, `import.meta.filename`, `__filename`, `pathToFileURL`
 // of a file name or its `.href`) and bound to `require` or called at once
 // makes the file's own require, which loads as `require` does.
-export const EXTRACTOR_VERSION = 50;
+// 51: `__filename` is that place only in a CommonJS file that never binds
+// it (EscapeFact.cjs), `pathToFileURL` only when an import of `url` binds
+// it; an export of a made `require` is a load; any read of
+// `getBuiltinModule` but a call, an import of it, and a pattern that takes
+// `createRequire`, `_load` or `getBuiltinModule` from a value are loads.
+export const EXTRACTOR_VERSION = 51;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -411,9 +416,21 @@ class Ctx {
   // to `require`, or called at once (`outer`: the load that call makes).
   // `name` is the callee, or the object of `m.createRequire`; `key` the
   // place of that name's read. Whether it is the loader factory is
-  // decided once every import is known; `filename`: the base reads
-  // `__filename`, which must be the free one.
-  ownRequires: { name: string; member: boolean; key: string; scope: Scope; line: number; filename: boolean; outer: EscapeFact | null }[] = [];
+  // decided once every import is known, as is the base: `filename`, it
+  // reads `__filename`, which must never be bound or assigned in the file;
+  // `url`, it goes through `pathToFileURL` under that name (`member`: of
+  // that object), which an import of `url` must bind.
+  ownRequires: { name: string; member: boolean; key: string; scope: Scope; line: number; filename: boolean; url: { name: string; member: boolean } | null; outer: EscapeFact | null }[] = [];
+  // Names an import of `url` or `node:url` binds, as libBindings are kept.
+  private urlBindings: { name: string; scope: Scope | null; imported: string }[] = [];
+  // Reads of `__filename` as a value, and the file's text, whose every
+  // `__filename` they must be for it to be the free one.
+  filenameReads = 0;
+  source: () => string = () => "";
+  // Object patterns that take apart Node's module library loaded by a
+  // written path, read as an import is (Ctx.libImport), by their start.
+  libPatterns = new Set<number>();
+  private root: Scope;
   // The member read after a name with role `object` (`m.run`): what the
   // module library bound to a name is read for.
   propOf = new Map<ValueRef, string>();
@@ -475,6 +492,7 @@ class Ctx {
     root.decl = root;
     root.fnDecl = root;
     this.top = root;
+    this.root = root;
     readingScope = root;
     readingImportType = (spec, at) => this.importType(spec, at);
     typeCuts = 0;
@@ -803,7 +821,18 @@ class Ctx {
   // The names an import of Node's module library binds, in `scope` (null
   // for the module's own): the module object, or a member LIB_SAFE does not name.
   libImport(fact: ImportFact, scope: Scope | null): void {
-    if (fact.typeOnly || fact.reexport || !jsLoaderSpec(fact.spec)) return;
+    if (fact.typeOnly || fact.reexport) return;
+    const spec = jsUnescape(fact.spec);
+    if (spec === "url" || spec === "node:url") {
+      if (fact.namespace !== null) this.urlBindings.push({ name: fact.namespace, scope, imported: "*" });
+      for (const n of fact.names) this.urlBindings.push({ name: n.local, scope, imported: n.imported });
+    }
+    if (!LOADER_MODULES.has(spec)) {
+      // `getBuiltinModule` taken by name (`import { getBuiltinModule } from
+      // "node:process"`), or a loader member of another module: a loader.
+      if (fact.names.some((n) => LOADER_READS.has(n.imported))) this.escapes.push({ kind: "load", line: fact.line });
+      return;
+    }
     if (fact.namespace !== null) this.libBindings.push({ name: fact.namespace, scope, member: false, imported: "*" });
     for (const n of fact.names) {
       if (n.imported === "default") this.libBindings.push({ name: n.local, scope, member: false, imported: n.imported });
@@ -840,10 +869,14 @@ class Ctx {
     for (const o of this.ownRequires) {
       const b = libAt(o.scope, o.name);
       const factory = b !== undefined && (o.member ? !b.member : b.imported === "createRequire");
-      const base = !o.filename || (!this.lookup(o.scope, "__filename") && !topNames.has("__filename"));
-      if (factory && base) {
+      const url = o.url;
+      const viaUrl = url === null || this.urlBindings.some((u) => u.name === url.name && this.lookup(o.scope, url.name) === u.scope && (url.member ? u.imported === "*" || u.imported === "default" : u.imported === "pathToFileURL"));
+      const filename = !o.filename || this.filenameReads === (this.source().match(/__filename/g) ?? []).length;
+      if (factory && viaUrl && filename) {
         own.add(o.key);
         if (o.outer) this.escapes.push(o.outer);
+        // `__filename` is the file's own place only in a CommonJS file.
+        if (o.filename) this.escapes.push({ kind: "load", line: o.line, cjs: true });
       } else if (o.member || o.name === "createRequire") this.escapes.push({ kind: "load", line: o.line });
     }
     this.ownRequires = [];
@@ -948,6 +981,10 @@ class Ctx {
       else if (at.depth > 0 || !topNames.has(ref.name)) drop.add(ref);
     }
     this.pendingValues = [];
+    // A `require` exported (`export { require }`, `export default require`,
+    // `module.exports = require`) goes wherever an importer takes it.
+    for (const e of this.exportsLocal) if (e.local === "require") this.pendingEscapes.push({ fact: { kind: "load", line: e.line ?? 1 }, scope: this.root, name: "require" });
+    if (this.defaultExport === "require") this.pendingEscapes.push({ fact: { kind: "load", line: 1 }, scope: this.root, name: "require" });
     for (const { fact, scope, name } of this.pendingEscapes) if ((name === "require" && this.madeRequire) || (!this.lookup(scope, name) && !topNames.has(name))) this.escapes.push(fact);
     this.pendingEscapes = [];
     // Node's module library handed on: a re-export of anything LIB_SAFE
@@ -1872,6 +1909,7 @@ function jsRequire(ctx: Ctx, node: Node, nameNode: Node, value: Node, block: boo
   }
   const fact: ImportFact = { spec: stringContent(arg), ...pos(node), names: [], namespace: null, star: false, reexport: false, typeOnly: false };
   if (jsLoaderSpec(fact.spec) && isExportedDecl(node)) ctx.addEscape({ kind: "load", line });
+  if (jsLoaderSpec(fact.spec) && nameNode.type === "object_pattern") ctx.libPatterns.add(nameNode.startIndex);
   if (nameNode.type === "identifier") fact.namespace = nameNode.text;
   else {
     const keys = jsPatternKeys(nameNode);
@@ -1914,15 +1952,20 @@ function jsConstructorRead(ctx: Ctx, line: number): void {
 
 // Node's module library under the paths that name it. The members LIB_SAFE
 // names load nothing: `isBuiltin` and `builtinModules` name the built-in
-// modules, `findSourceMap` and `SourceMap` read source maps (Node's module
-// docs). Any other use of it may make a loader (`createRequire`, `Module`,
+// modules, `findSourceMap` and `SourceMap` read source maps, and
+// `syncBuiltinESMExports` updates the built-in modules' ES bindings (Node's
+// module docs). Any other use of it may make a loader (`createRequire`, `Module`,
 // `_load`, its default export), so it is a load by a computed path.
 const LOADER_MODULES = new Set(["module", "node:module"]);
-const LIB_SAFE = new Set(["isBuiltin", "builtinModules", "findSourceMap", "SourceMap"]);
+const LIB_SAFE = new Set(["isBuiltin", "builtinModules", "findSourceMap", "SourceMap", "syncBuiltinESMExports"]);
 // Members that make a loader or are one, on any value: a call or a read of
 // one is a load by a computed path, a method of that name of the
 // repository too.
 const LOADER_MEMBERS = new Set(["createRequire", "_load"]);
+// Read by name other than as a call (`const g = process.getBuiltinModule`,
+// `const { createRequire } = x`), these are loaders too: `getBuiltinModule`
+// gives Node's module library for a path the reader no longer sees.
+const LOADER_READS = new Set([...LOADER_MEMBERS, "getBuiltinModule"]);
 // Whether a path written as a string names Node's module library, its
 // escapes decoded (`"node:\u006dodule"`).
 function jsLoaderSpec(raw: string): boolean {
@@ -1943,20 +1986,24 @@ function jsUnescape(raw: string): string {
   });
 }
 // Whether a base given to `createRequire` is the file's own place:
-// `import.meta.url`, `import.meta.filename`, `__filename` ("filename": it
-// must be the free one), or `pathToFileURL` of a file name, or its `.href`.
-// Null for any other base: a computed one, or another folder.
-function jsOwnBase(arg: Node): "meta" | "filename" | null {
+// `import.meta.url`, `import.meta.filename`, `__filename` (`filename`: it
+// must be the free one in a CommonJS file), or `pathToFileURL` of a file
+// name, or its `.href` (`url`: the name it is called by, which an import of
+// `url` must bind). Null for any other base: a computed one, or another
+// folder. What must hold is decided once the file is read (Ctx.facts).
+function jsOwnBase(arg: Node): { filename: boolean; url: { name: string; member: boolean } | null } | null {
   let n = jsHeld(arg);
   const href = n?.type === "member_expression" && n.childForFieldName("property")?.text === "href";
   if (href) n = jsHeld(n?.childForFieldName("object") ?? null);
-  const fn = n?.type === "call_expression" ? n.childForFieldName("function") : null;
-  const url = fn?.type === "identifier" ? fn.text === "pathToFileURL" : fn?.type === "member_expression" && fn.childForFieldName("property")?.text === "pathToFileURL";
-  if (href && !url) return null;
+  const fn = n?.type === "call_expression" ? jsHeld(n.childForFieldName("function")) : null;
+  const object = fn?.type === "member_expression" ? jsHeld(fn.childForFieldName("object")) : null;
+  const url = fn?.type === "identifier" && fn.text === "pathToFileURL" ? { name: fn.text, member: false }
+    : object?.type === "identifier" && fn?.childForFieldName("property")?.text === "pathToFileURL" ? { name: object.text, member: true } : null;
+  if ((href || fn) && !url) return null;
   if (url) n = jsHeld(n?.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment") ?? null);
-  if (n?.type === "identifier" && n.text === "__filename") return "filename";
+  if (n?.type === "identifier" && n.text === "__filename") return { filename: true, url };
   const text = n?.type === "member_expression" ? n.text.replace(/\s+/g, "") : "";
-  return text === "import.meta.filename" || (!url && text === "import.meta.url") ? "meta" : null;
+  return text === "import.meta.filename" || (!url && text === "import.meta.url") ? { filename: false, url } : null;
 }
 // A load of Node's module library by a written path that the reader did
 // not read as a binding (`require("module")`, `import("node:module")`,
@@ -2009,6 +2056,12 @@ function jsMarkRequireBinders(ctx: Ctx, value: Node | null, own = false): void {
   }
 }
 
+// A pattern that takes a loader by name from a value (`const {
+// createRequire } = x`), as `x.createRequire` does, unless it takes apart
+// Node's module library loaded by a written path, which binds as an import.
+function jsPatternLoader(ctx: Ctx, pattern: Node | null, key: string | null, line: number): void {
+  if (key !== null && LOADER_READS.has(key) && pattern?.type === "object_pattern" && !ctx.libPatterns.has(pattern.startIndex)) ctx.addEscape({ kind: "load", line });
+}
 // The escapes a call may open: a load the reader did not read as a binding,
 // a direct eval, `Function`, a string run as code by a timer, a call that
 // makes or uses a loader (`createRequire`, `module.require`, Node's module
@@ -2036,7 +2089,7 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
     const arg = outer?.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment");
     const made: EscapeFact | null = !outer ? null : arg?.type !== "string" ? { kind: "load", line } : ctx.discardedCalls.has(callKey(outer)) ? null : { kind: "module", spec: stringContent(arg), line };
     const { line: at, column } = pos(name);
-    ctx.ownRequires.push({ name: name.text, member, key: `${at}:${column}`, scope: ctx.top, line, filename: base === "filename", outer: made });
+    ctx.ownRequires.push({ name: name.text, member, key: `${at}:${column}`, scope: ctx.top, line, filename: base?.filename === true, url: base?.url ?? null, outer: made });
   };
   if (fn.type === "import" || (fn.type === "identifier" && fn.text === "require")) {
     if (ctx.consumedLoads.has(node.startIndex)) return;
@@ -2683,6 +2736,7 @@ function jsResults(fn: Node): TypeRef[] | undefined {
 
 function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): FileFacts {
   const ctx = new Ctx(lang);
+  ctx.source = () => tree.rootNode.text;
   const fnFrame = (node: Node, def: number): Leave => {
     const locals = new Map<string, TypeRef | null>();
     const typeParams = jsTypeParams(node);
@@ -2848,7 +2902,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         return false;
       case "export_statement":
         ctx.esm = true;
-        if (node.children.some((c) => c.type === "=")) ctx.addOpaque("uses `export =` that the reader does not read", node.startPosition.row + 1);
+        if (node.children.some((c) => c.type === "=")) {
+          ctx.addOpaque("uses `export =` that the reader does not read", node.startPosition.row + 1);
+          // `export = require`: the file's require goes wherever an importer takes it.
+          if (node.namedChildren.some((c) => c.type === "identifier" && c.text === "require")) ctx.addEscape({ kind: "load", line: node.startPosition.row + 1 }, "require");
+        }
         jsExport(ctx, node);
         return;
       case "function_declaration":
@@ -3307,6 +3365,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // recorded it or the place writes, declares or calls it.
         const text = node.text;
         if (text === "undefined" || text === "arguments") return;
+        if (text === "__filename") ctx.filenameReads++;
         const { role, prop } = jsReadRole(node, upType(1), field);
         jsNameEscapes(ctx, text, role, prop, node.startPosition.row + 1);
         if (ctx.readAt.has(node.startIndex)) return;
@@ -3327,8 +3386,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (prop.text === "eval" && object?.type === "identifier" && GLOBAL_OBJECTS.has(object.text)) ctx.addEscape({ kind: "global", line }, object.text);
         if (role !== "object" && object?.type === "identifier" && object.text === "module" && prop.text === "exports") ctx.addEscape({ kind: "own", line }, "module");
         if (prop.text === "constructor") jsConstructorRead(ctx, line);
-        // `m.createRequire` or `m._load` taken as a value, on any value: a loader.
-        if (LOADER_MEMBERS.has(prop.text)) ctx.addEscape({ kind: "load", line });
+        // `m.createRequire`, `m._load` or `process.getBuiltinModule` taken as
+        // a value, on any value: a loader.
+        if (LOADER_READS.has(prop.text)) ctx.addEscape({ kind: "load", line });
         if (ctx.readAt.has(prop.startIndex) || (prop.type !== "property_identifier" && prop.type !== "private_property_identifier")) return;
         jsMemberRead(ctx, object ? jsReceiver(ctx, object) : null, prop, prop.text, role, line);
         return;
@@ -3344,7 +3404,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
           const { role } = jsReadRole(node, upType(1), field);
           const target = jsUnwrap(node.childForFieldName("object"));
           const key = jsLiteralKey(index);
-          if (key && LOADER_MEMBERS.has(key.text)) ctx.addEscape({ kind: "load", line });
+          if (key && LOADER_READS.has(key.text)) ctx.addEscape({ kind: "load", line });
           if (key) jsMemberRead(ctx, target ? jsReceiver(ctx, target) : null, key, key.text, role, line);
           else if (index && index.type !== "number" && target) {
             const recv: Receiver = ctx.top.depth > MAX_SCOPE_DEPTH ? { kind: "other" } : jsReceiver(ctx, target);
@@ -3378,6 +3438,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "pair_pattern": {
         const key = node.childForFieldName("key");
         if (key?.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
+        jsPatternLoader(ctx, node.parent, key === null ? null : key.type === "string" ? stringContent(key) : key.text, node.startPosition.row + 1);
         // A number key reads an element, as `c[0]` does.
         if (key && key.type !== "number" && node.parent?.type === "object_pattern") jsPatternRead(ctx, node.parent, key.type === "property_identifier" ? key : jsLiteralKey(key), node.startPosition.row + 1);
         return;
@@ -3385,6 +3446,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "shorthand_property_identifier_pattern": {
         if (node.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
         const up = node.parent?.type === "object_assignment_pattern" ? node.parent.parent : node.parent;
+        jsPatternLoader(ctx, up, node.text, node.startPosition.row + 1);
         if (up?.type === "object_pattern") jsPatternRead(ctx, up, node, node.startPosition.row + 1);
         return;
       }

@@ -1,0 +1,18 @@
+{
+  "covers": "`process.getBuiltinModule` read as a value and called later reaches Node's module library: any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.mjs": "const gbm = process.getBuiltinModule;\nconst { createRequire: c } = gbm(\"node:module\");\nconst load = c(new URL(\"./lib/\", import.meta.url));\nconst k = \"f\";\nload(\"./a.cjs\")[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

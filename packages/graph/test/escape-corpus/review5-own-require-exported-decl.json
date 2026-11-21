@@ -1,0 +1,20 @@
+{
+  "covers": "the file's own `require` declared as an export (`export const require = createRequire(import.meta.url)`) goes to an importer: any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/lib/req.mjs": "import { createRequire } from \"node:module\";\nexport const require = createRequire(import.meta.url);\n",
+    "src/use.mjs": "import { require as r } from \"./lib/req.mjs\";\nconst k = \"f\";\nr(\"./a.cjs\")[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

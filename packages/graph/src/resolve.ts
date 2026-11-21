@@ -25,7 +25,7 @@ import { governingTsconfig, isGoStdlib, isNodeBuiltin, isPyStdlib, isRubyStdlib,
 import type { Cause, Cut, EvidenceKind, Shape, Tier, Via } from "./model/records.js";
 import { weakest } from "./model/records.js";
 import type { Lookup as PluginLookup } from "./frameworks/plugin.js";
-import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, ImportFact, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
+import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, EscapeFact, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, ImportFact, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
 import { CALLER_KINDS, MAX_TYPE_DEPTH, familyOf } from "./types.js";
 
 const MAX_DEPTH = 8; // re-export and base-class chains
@@ -3904,6 +3904,8 @@ export function createWorld(input: ResolveInput): World {
       else if (!list.some((x) => x.why === r.why && x.file === r.file && x.line === r.line)) list.push(r);
     };
     const jsFiles = input.files.filter((x) => familyOf(x.facts.lang) === "js");
+    // A load fact that holds in its file: one marked `cjs` holds outside a CommonJS file only.
+    const loads = (path: string, e: EscapeFact) => e.kind === "load" && !(e.cjs === true && /\.c[jt]s$/.test(path));
     // Every definition a module offers, and the modules whole namespaces of it name.
     const offers = (file: string): { ids: string[]; modules: string[] } => {
       const ids: string[] = [];
@@ -3971,7 +3973,8 @@ export function createWorld(input: ResolveInput): World {
             walk(path, place);
           }
         } else if (e.kind === "load") {
-          loadAny.push({ ...place, why: "load" });
+          // One place once, so "and N more places" counts places.
+          if (loads(path, e) && !loadAny.some((l) => l.why === "load" && l.file === path && l.line === e.line)) loadAny.push({ ...place, why: "load" });
         } else {
           runtime.push({ why: e.kind, place });
           if (e.kind === "eval") {
@@ -4023,7 +4026,7 @@ export function createWorld(input: ResolveInput): World {
       const all = (f.opaque ?? []).filter((o) => !(o.name !== undefined && o.reach === "global" && own?.has(o.name)));
       if (all.length === 0) continue;
       // A load-any place is shown first: the reason says why it reaches every function.
-      const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || e.kind === "load");
+      const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || loads(path, e));
       const loose = runs.map((e): OpaqueFact => ({ why: e.kind === "load" ? "loads a module by a computed path" : e.kind === "eval" ? "runs `eval`" : "builds code or a name at run time on the global scope", line: e.line, count: 1, reach: "any" }));
       const shown = [...all, ...loose].filter((o) => o.reach === "any");
       const any = shown.length > 0;

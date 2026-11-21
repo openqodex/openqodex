@@ -272,10 +272,13 @@ export type ImportFact = {
 // `global`: code or a name built at run time on the global scope
 // (`Function`, an indirect eval, `globalThis[k]`). `load`: a module loaded
 // by a computed path, `require` used other than as a direct call with a
-// written path, or a use of Node's module library that may make a loader.
+// written path, or a use of Node's module library that may make a loader;
+// `cjs` when it holds only outside a CommonJS file (`.cjs`, `.cts`), where
+// `__filename` is the file's own place.
 export type EscapeFact =
   | { kind: "module"; spec: string; line: number }
-  | { kind: "own" | "eval" | "global" | "load"; line: number };
+  | { kind: "own" | "eval" | "global"; line: number }
+  | { kind: "load"; line: number; cjs?: true };
 
 // `reach`: how far the place may reach past the file's own definitions and
 // the modules it imports. `global`: the global scope, so a script's
