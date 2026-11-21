@@ -1,6 +1,8 @@
-// Publishes accepted benchmark numbers from the committed index only.
-// --check writes nothing and names the first differing line in each file.
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+// Publishes accepted benchmark numbers from the committed index only: the
+// full results page, the README block and the README chart (one SVG per
+// GitHub theme). --check writes nothing and names the first differing line
+// in each file.
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { acceptedProblems, entryProblems, groupKeys, listEntries } from "../benchmark/lib/index.mjs";
@@ -66,7 +68,12 @@ export function rangeLine(e, g) {
 }
 const precisionRange = (s) => (s.precision.lower.of === 0 ? "not measured" : `${ratio(s.precision.lower)} to ${ratio(s.precision.upper)}`);
 
-export function renderResults(index) {
+// The openqodex version a run reviewed with, and the day it ran.
+const cliVersion = (e) => e.build?.cliVersion ?? "not recorded";
+const runDate = (e) => e.date ?? "not recorded";
+
+// Every entry and the accepted row of each group, after the index checks.
+function acceptedRows(index) {
   const entries = listEntries(join(index, "runs")).map(({ entry }) => entry);
   const byId = new Map(entries.map((e) => [e.runId, e]));
   const pointer = JSON.parse(readFileSync(join(index, "accepted.json"), "utf8"));
@@ -77,6 +84,80 @@ export function renderResults(index) {
     const g = groupKeys(e).find((g) => g.key === key);
     return { e, g, s: e.scores[g.config], accepted };
   });
+  return { entries, rows };
+}
+
+// The run the README chart shows: among the accepted planted-bug reviews by
+// Claude Code, the highest scoring rules version; on a tie, the latest accepted.
+export function headlineRow(rows) {
+  const candidates = rows.filter(({ e, g }) => e.suite === "planted" && e.mode === "review" && g.reviewer === "claude");
+  candidates.sort((a, b) => (b.e.rulesVersion ?? -1) - (a.e.rulesVersion ?? -1) || b.accepted.acceptedAt.localeCompare(a.accepted.acceptedAt));
+  if (candidates.length === 0) throw new Error("no accepted planted-bug review by Claude Code for the README chart");
+  return candidates[0];
+}
+
+// The chart's four measures, each a share for its bar (a range for precision) and its text.
+const share = (r) => (r && r.of > 0 ? r.hit / r.of : 0);
+function chartBars({ s }) {
+  return [
+    { label: "Issue recall", from: 0, to: unruled(s) ? 0 : share(s.issueRecall.all), text: recall(s) },
+    { label: "Location recall", from: 0, to: share(s.location?.recall), text: ratio(s.location?.recall) },
+    { label: "Precision", from: share(s.precision.lower), to: share(s.precision.upper), text: precisionRange(s) },
+    { label: "Clean rate", from: 0, to: share(s.controls), text: ratio(s.controls) },
+  ];
+}
+const xml = (text) => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+// One skin per GitHub theme. The page shows the one that matches the reader's.
+const SKINS = {
+  light: { surface: "#ffffff", border: "#d0d7de", text: "#1f2328", muted: "#59636e", track: "#eaeef2", bar: "#0969da", range: "#9cc5f5" },
+  dark: { surface: "#0d1117", border: "#3d444d", text: "#f0f6fc", muted: "#9198a1", track: "#262c36", bar: "#4493f8", range: "#1d4b8a" },
+};
+export function chartTitle(row) {
+  const { e, g } = row;
+  return `${suiteName(e.suite)}: ${reviewer(g)} review with ${modelName(e, g)}`;
+}
+export function chartSubtitle(row) {
+  const { e } = row;
+  return `openqodex ${cliVersion(e)}, run on ${runDate(e)}, ${rulesLabel(e)}, ${e.repeat} repeats of each case`;
+}
+export function chartAlt(row) {
+  return `${chartTitle(row)}. ${chartBars(row).map((b) => `${b.label} ${b.text}`).join(", ")}.`;
+}
+export function renderChart(index, skin) {
+  const c = SKINS[skin];
+  if (!c) throw new Error(`unknown chart skin ${skin}`);
+  const row = headlineRow(acceptedRows(index).rows);
+  const [width, left, barX, barW, valueX, top, step] = [960, 32, 210, 400, 630, 112, 44];
+  const bars = chartBars(row);
+  const height = top + bars.length * step + 44;
+  const font = `font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"`;
+  const body = bars.map((b, i) => {
+    const y = top + i * step;
+    const x0 = barX + barW * b.from;
+    const solid = b.from > 0 ? `<rect x="${barX}" y="${y - 7}" width="${(barW * b.from).toFixed(1)}" height="14" rx="4" fill="${c.bar}"/>` : "";
+    const span = b.to > b.from ? `<rect x="${x0.toFixed(1)}" y="${y - 7}" width="${(barW * (b.to - b.from)).toFixed(1)}" height="14" rx="4" fill="${b.from > 0 ? c.range : c.bar}"/>` : "";
+    return [
+      `<text x="${left}" y="${y + 5}" font-size="15" fill="${c.text}">${xml(b.label)}</text>`,
+      `<rect x="${barX}" y="${y - 7}" width="${barW}" height="14" rx="4" fill="${c.track}"/>`,
+      span, solid,
+      `<text x="${valueX}" y="${y + 5}" font-size="15" fill="${c.text}">${xml(b.text)}</text>`,
+    ].filter(Boolean).join("\n  ");
+  });
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="title" ${font}>`,
+    `  <title id="title">${xml(chartAlt(row))}</title>`,
+    `  <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="12" fill="${c.surface}" stroke="${c.border}"/>`,
+    `  <text x="${left}" y="44" font-size="20" font-weight="600" fill="${c.text}">${xml(chartTitle(row))}</text>`,
+    `  <text x="${left}" y="72" font-size="14" fill="${c.muted}">${xml(chartSubtitle(row))}</text>`,
+    ...body.map((b) => `  ${b}`),
+    `  <text x="${left}" y="${height - 22}" font-size="13" fill="${c.muted}">Precision: the bar is full colour up to the lower bound and pale up to the upper bound.</text>`,
+    "</svg>",
+    "",
+  ].join("\n");
+}
+
+export function renderResults(index) {
+  const { entries, rows } = acceptedRows(index);
   const page = ["# Benchmark results", "", "Generated by `node scripts/benchmark-results.mjs` from `benchmark/index`. Do not edit this page by hand.", "", "## How to read this", "",
     "- A group is one configuration on one set of cases under one version of the scoring rules. Each row is the run a person accepted for its group.",
     "- Library is the Node library's reviewChange function. It reviews with the model in the row, as a server would.",
@@ -102,10 +183,10 @@ export function renderResults(index) {
   for (const suite of suites) {
     const selected = rows.filter(({ e }) => e.suite === suite);
     page.push(`## ${suiteName(suite)}`, "",
-      table(["Reviewer", "Model", "Group", "Repeats", "Issue recall", "Location recall", "Precision lower bound", "Precision upper bound", "Clean rate", "Cost per review", "Time per review", "Run", "Accepted date"], selected.map(({ e, g, s, accepted }) => [
+      table(["Reviewer", "Model", "Group", "Repeats", "Issue recall", "Location recall", "Precision lower bound", "Precision upper bound", "Clean rate", "Cost per review", "Time per review", "openqodex", "Run date", "Run", "Accepted date"], selected.map(({ e, g, s, accepted }) => [
         reviewer(g), modelName(e, g), groupLabel(e, g),
         e.repeat, tuned(e, recall(s, true)), ratio(s.location?.recall), ratio(s.precision.lower), ratio(s.precision.upper), ratio(s.controls), cost(s),
-        typeof s.wallMsMean === "number" ? `${(s.wallMsMean / 1000).toFixed(1)} s` : "not measured", runLink(e), accepted.acceptedAt.slice(0, 10),
+        typeof s.wallMsMean === "number" ? `${(s.wallMsMean / 1000).toFixed(1)} s` : "not measured", cliVersion(e), runDate(e), runLink(e), accepted.acceptedAt.slice(0, 10),
       ])), "");
     for (const { e, g, s } of selected) {
       // Published A/A twins use the parent's run id with the -aa suffix.
@@ -135,19 +216,31 @@ export function renderResults(index) {
   const plain = shown.filter(({ e, g }) => !board(e, g));
   const boarded = shown.filter(({ e, g }) => board(e, g));
   const cases = casesCells(shown);
+  const top = headlineRow(rows);
+  const asset = (skin) => `https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/benchmark-${skin}.svg`;
   const headline = [START, "## Benchmark", "",
-    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review"], plain.map((r) => [
-      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), precisionRange(r.s), ratio(r.s.controls), cost(r.s),
+    "<picture>",
+    `  <source media="(prefers-color-scheme: dark)" srcset="${asset("dark")}">`,
+    `  <img alt="${xml(chartAlt(top))}" src="${asset("light")}" width="960">`,
+    "</picture>",
+    "",
+    `The chart shows one accepted run: ${reviewer(top.g)} with ${modelName(top.e, top.g)} on openqodex ${cliVersion(top.e)}, run on ${runDate(top.e)}. ` +
+      `Each number adds up ${top.e.repeat} repeats of every case, and repeats of one case can give different results. ` +
+      "The table gives every accepted run, each under the scoring rules version it was scored with.",
+    "",
+    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review", "openqodex", "Run date"], plain.map((r) => [
+      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), precisionRange(r.s), ratio(r.s.controls), cost(r.s), cliVersion(r.e), runDate(r.e),
     ])), ""] : []),
-    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review"], boarded.map((r) => [
-      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), ...boardCells(board(r.e, r.g)), cost(r.s),
+    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review", "openqodex", "Run date"], boarded.map((r) => [
+      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), ...boardCells(board(r.e, r.g)), cost(r.s), cliVersion(r.e), runDate(r.e),
     ])), ""] : []),
     "[Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)", END].join("\n");
   return { page: page.join("\n"), headline };
 }
 
 export function generateResults({ root = repo, check = false } = {}) {
-  const { page, headline } = renderResults(join(root, "benchmark/index"));
+  const index = join(root, "benchmark/index");
+  const { page, headline } = renderResults(index);
   const readmePath = join(root, "README.md");
   const readme = readFileSync(readmePath, "utf8");
   const start = readme.indexOf(START);
@@ -155,9 +248,13 @@ export function generateResults({ root = repo, check = false } = {}) {
   if (start < 0 || end < start || readme.indexOf(START, start + START.length) !== -1 || readme.indexOf(END, end + END.length) !== -1) throw new Error("README.md needs one ordered pair of benchmark-results markers");
   const expectedReadme = readme.slice(0, start) + headline + readme.slice(end + END.length);
   let differs = false;
-  for (const [name, expected] of [["docs/benchmark-results.md", page], ["README.md", expectedReadme]]) {
+  const charts = ["light", "dark"].map((skin) => [`.github/assets/benchmark-${skin}.svg`, renderChart(index, skin)]);
+  for (const [name, expected] of [["docs/benchmark-results.md", page], ["README.md", expectedReadme], ...charts]) {
     const path = join(root, name);
-    if (!check) writeFileSync(path, expected);
+    if (!check) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, expected);
+    }
     else {
       const actual = existsSync(path) ? readFileSync(path, "utf8") : "";
       if (actual === expected) continue;

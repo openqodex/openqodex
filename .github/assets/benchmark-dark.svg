@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="332" viewBox="0 0 960 332" role="img" aria-labelledby="title" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="title">Planted bugs: Claude Code review with claude-opus-5-5. Issue recall 150/153 (98.0%), Location recall 153/153 (100.0%), Precision 254/302 (84.1%) to 301/302 (99.7%), Clean rate 5/6 (83.3%).</title>
+  <rect x="0.5" y="0.5" width="959" height="331" rx="12" fill="#0d1117" stroke="#3d444d"/>
+  <text x="32" y="44" font-size="20" font-weight="600" fill="#f0f6fc">Planted bugs: Claude Code review with claude-opus-5-5</text>
+  <text x="32" y="72" font-size="14" fill="#9198a1">openqodex 0.15.0, run on 2026-10-27, scoring rules 12, 3 repeats of each case</text>
+  <text x="32" y="117" font-size="15" fill="#f0f6fc">Issue recall</text>
+  <rect x="210" y="105" width="400" height="14" rx="4" fill="#262c36"/>
+  <rect x="210.0" y="105" width="392.2" height="14" rx="4" fill="#4493f8"/>
+  <text x="630" y="117" font-size="15" fill="#f0f6fc">150/153 (98.0%)</text>
+  <text x="32" y="161" font-size="15" fill="#f0f6fc">Location recall</text>
+  <rect x="210" y="149" width="400" height="14" rx="4" fill="#262c36"/>
+  <rect x="210.0" y="149" width="400.0" height="14" rx="4" fill="#4493f8"/>
+  <text x="630" y="161" font-size="15" fill="#f0f6fc">153/153 (100.0%)</text>
+  <text x="32" y="205" font-size="15" fill="#f0f6fc">Precision</text>
+  <rect x="210" y="193" width="400" height="14" rx="4" fill="#262c36"/>
+  <rect x="546.4" y="193" width="62.3" height="14" rx="4" fill="#1d4b8a"/>
+  <rect x="210" y="193" width="336.4" height="14" rx="4" fill="#4493f8"/>
+  <text x="630" y="205" font-size="15" fill="#f0f6fc">254/302 (84.1%) to 301/302 (99.7%)</text>
+  <text x="32" y="249" font-size="15" fill="#f0f6fc">Clean rate</text>
+  <rect x="210" y="237" width="400" height="14" rx="4" fill="#262c36"/>
+  <rect x="210.0" y="237" width="333.3" height="14" rx="4" fill="#4493f8"/>
+  <text x="630" y="249" font-size="15" fill="#f0f6fc">5/6 (83.3%)</text>
+  <text x="32" y="310" font-size="13" fill="#9198a1">Precision: the bar is full colour up to the lower bound and pale up to the upper bound.</text>
+</svg>
