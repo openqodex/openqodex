@@ -1,11 +1,11 @@
-// Where the benchmark's model calls go: the base URL and key of Sid's Azure
-// OpenAI resource (its OpenAI-compatible v1 endpoint), read from one file
-// and from nowhere else, and the check that a model id is a deployment the
-// session has probed.
+// Where the benchmark's model calls go: the base URL and key of the selected
+// OpenAI-compatible endpoint, read from one file and from nowhere else, and
+// the check that a model id is a deployment the session has probed.
 //
 // The file is ~/.config/openqodex-bench/azure.env, or the path
-// OPENQODEX_BENCH_MODEL_ENV names. It holds AZURE_OPENAI_BASE_URL and
-// AZURE_OPENAI_KEY; the resource takes the key in an `api-key` header.
+// OPENQODEX_BENCH_MODEL_ENV names. It holds either AZURE_OPENAI_BASE_URL /
+// AZURE_OPENAI_KEY or MINIMAX_BASE_URL / MINIMAX_API_KEY; the selected
+// endpoint takes the key in an `api-key` or `bearer` header.
 //
 // Failure list, written before the code:
 // 1. A missing file or field falls back to another provider (OPENAI_API_KEY
@@ -25,7 +25,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { inspect } from "node:util";
 
-export const MODEL_ENV_FIELDS = Object.freeze({ baseUrl: "AZURE_OPENAI_BASE_URL", apiKey: "AZURE_OPENAI_KEY" });
+export const MODEL_ENV_FIELDS = Object.freeze({
+  azure: Object.freeze({ baseUrl: "AZURE_OPENAI_BASE_URL", apiKey: "AZURE_OPENAI_KEY", authHeader: "api-key" }),
+  minimax: Object.freeze({ baseUrl: "MINIMAX_BASE_URL", apiKey: "MINIMAX_API_KEY", authHeader: "bearer" }),
+});
 
 const BOARDS = new URL("../outside/boards.json", import.meta.url);
 const LOOPBACK = new Set(["127.0.0.1", "[::1]", "localhost"]);
@@ -95,17 +98,19 @@ export function loadModelEnv({ env = process.env } = {}) {
   try {
     text = readFileSync(path, "utf8");
   } catch {
-    throw new Error(`refused: the model settings file ${shown(path)} cannot be read; it must hold ${MODEL_ENV_FIELDS.baseUrl} and ${MODEL_ENV_FIELDS.apiKey}, and no other provider is used in its place`);
+    throw new Error(`refused: the model settings file ${shown(path)} cannot be read; it must hold endpoint settings, and no other provider is used in its place`);
   }
   const found = fields(text);
-  for (const name of [MODEL_ENV_FIELDS.baseUrl, MODEL_ENV_FIELDS.apiKey]) {
+  const provider = (found.get(MODEL_ENV_FIELDS.minimax.baseUrl) ?? found.get(MODEL_ENV_FIELDS.minimax.apiKey)) !== undefined ? "minimax" : "azure";
+  const selected = MODEL_ENV_FIELDS[provider];
+  for (const name of [selected.baseUrl, selected.apiKey]) {
     if ((found.get(name) ?? "") === "") throw new Error(`refused: the model settings file ${shown(path)} has no ${name}; no other provider is used in its place`);
   }
-  const baseUrl = found.get(MODEL_ENV_FIELDS.baseUrl);
-  const apiKey = found.get(MODEL_ENV_FIELDS.apiKey);
+  const baseUrl = found.get(selected.baseUrl);
+  const apiKey = found.get(selected.apiKey);
   const problem = baseUrlProblem(baseUrl);
-  if (problem !== null) throw new Error(`refused: ${MODEL_ENV_FIELDS.baseUrl} in ${shown(path)} ${problem}`);
-  return modelSettings({ baseUrl, apiKey, authHeader: "api-key" });
+  if (problem !== null) throw new Error(`refused: ${selected.baseUrl} in ${shown(path)} ${problem}`);
+  return modelSettings({ baseUrl, apiKey, authHeader: selected.authHeader });
 }
 
 // The settings with the two values usable as properties, and shown as
