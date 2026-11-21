@@ -328,9 +328,11 @@ export function floorReasons(graph: Graph, seed: { id: string; name: string; fil
   return floorOf(graph, seed, cutAt).reasons;
 }
 
-// The reasons with every place they rest on. `places` is null when a
-// reason does not know each of its places (a count, the first of many, a
-// cut): such a floor may hide a caller anywhere.
+// The reasons with every place they rest on: where a hidden call would
+// run. `places` is null when a reason does not know each of them (a count,
+// the first of many, a cut) or when the call runs where a value goes, not
+// where it was taken (a use as a value, a getter read, a function passed
+// to a callee that calls it): such a floor may hide a caller anywhere.
 export type Floor = { reasons: string[]; places: { file: string; line: number | null }[] | null };
 export function floorOf(graph: Graph, seed: { id: string; name: string; file: string; kind?: ImpactKind | undefined }, cutAt: ReadonlySet<string>): Floor {
   const reasons: string[] = [];
@@ -339,12 +341,13 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     reasons.push(reason);
     places = places && at ? [...places, ...at.map((p) => ({ file: p.file, line: p.line }))] : null;
   };
-  // A count with its first place knows every place only when it is one.
+  // A count of calls with its first place knows every place only when it is one.
   const only = (p: Place & { count: number }) => (p.count === 1 ? [p] : null);
   // A possible caller is never proof that the code runs, nor that nothing else reaches it.
   const possibleSites = (graph.in.get(seed.id) ?? []).filter((e) => e.tier === "possible" && e.from !== seed.id).flatMap((e) => e.sites);
   const possible = possibleSites.length;
-  if (possible > 0) why(`${possible} ${possible === 1 ? "call" : "calls"} may reach it through an interface, a base type or a function value, and none is proved to`, possibleSites);
+  // A function passed to a callee that calls it runs in that callee, not at the site that passed it.
+  if (possible > 0) why(`${possible} ${possible === 1 ? "call" : "calls"} may reach it through an interface, a base type or a function value, and none is proved to`, possibleSites.some((p) => p.evidence === "invocation-summary") ? null : possibleSites);
   const kind = seed.kind ?? graph.nodes.get(seed.id)?.kind;
   const family = familyAt(graph, seed.file);
   const project = graph.projectOf(seed.file);
@@ -362,9 +365,9 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     if (gaps.length > 0) why(`${calls(gaps.length)} named \`${seed.name}\` in the repository could not be bound to one definition`, gaps);
     const x = graph.escapes;
     const used = x.uses.get(seed.id);
-    if (used) why(`it is used as a value in ${used.count} ${used.count === 1 ? "place" : "places"}, first at ${at(used)}; a call through that value is not listed`, only(used));
+    if (used) why(`it is used as a value in ${used.count} ${used.count === 1 ? "place" : "places"}, first at ${at(used)}; a call through that value is not listed`, null);
     const loose = family ? x.unbound.get(`${family}:${seed.name}`) : undefined;
-    if (loose) why(`${loose.count} ${loose.count === 1 ? "use" : "uses"} of the name \`${seed.name}\` as a value could not be bound to one definition, first at ${at(loose)}`, only(loose));
+    if (loose) why(`${loose.count} ${loose.count === 1 ? "use" : "uses"} of the name \`${seed.name}\` as a value could not be bound to one definition, first at ${at(loose)}`, null);
     const reach = x.reach.get(seed.id) ?? [];
     const removed = !graph.nodes.has(seed.id);
     // A definition a change removed: the module that held it escapes, so a
@@ -399,7 +402,9 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     }
     const kept = family !== "js" && projectValues();
     const read = kind === "method" && family === "js" ? x.members.get(`js:${seed.name}`) : undefined;
-    if (read) why(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`, only(read));
+    if (read) why(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`, null);
+    const anyRead = kind === "method" && family === "js" ? x.members.get("js:*") : undefined;
+    if (anyRead) why(`${anyRead.count} ${anyRead.count === 1 ? "read" : "reads"} by a computed key on a value that is no array, string or record, first at ${at(anyRead)}, may run it (a getter) or take it as a value`, null);
     if (kind === "method" && family && !kept) {
       const values = valueCallsOf(graph, family);
       if (values) why(`${values.count} ${values.count === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in projects that can hold its objects, first at ${at(values)}`, only(values));

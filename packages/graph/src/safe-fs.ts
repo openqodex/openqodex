@@ -226,7 +226,7 @@ export function isFileFacts(v: unknown): v is FileFacts {
     (v.javaPackage === undefined || v.javaPackage === null || isStr(v.javaPackage)) &&
     (v.frameworks === undefined || isFrameworkFileFacts(v.frameworks)) &&
     (v.escapes === undefined || isList(v.escapes, isEscape, 20_000)) &&
-    (v.opaque === undefined || isList(v.opaque, isCounted, 4096)) &&
+    (v.opaque === undefined || isList(v.opaque, isCounted, 200_000)) &&
     (v.ambient === undefined || isList(v.ambient, isStr, 4096)) &&
     (v.looseMembers === undefined || isList(v.looseMembers, isCounted, 200_000)) &&
     (v.variables === undefined || isList(v.variables, isStr, 200_000)) &&

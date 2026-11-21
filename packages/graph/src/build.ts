@@ -172,14 +172,17 @@ function readGoModules(reader: RepoReader, all: string[]): [string, string][] {
 // read for one fact: the global names they declare as plain data
 // (`declare const V: string`). Read through the traced reader, so their
 // contents are part of the capture's digest. Past the cap the rest are not
-// read, and the names they declare stay unknown.
+// read, and the names they declare stay unknown. The cap counts every
+// file read, one that declares nothing too.
 const DECLARATION = /\.d\.[cm]?ts$/;
 const DECLARATION_FILES = 500;
 function readDeclarations(reader: RepoReader, all: string[]): [string, string][] {
   const out: [string, string][] = [];
+  let read = 0;
   for (const f of all) {
-    if (out.length >= DECLARATION_FILES) break;
+    if (read >= DECLARATION_FILES) break;
     if (!DECLARATION.test(f) || langOf(f.replace(DECLARATION, ".ts")) === null) continue;
+    read++;
     const text = reader.read(f, MANIFEST_BYTES);
     if (text !== null && text.includes("declare")) out.push([f, text]);
   }

@@ -263,7 +263,8 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     }
     const partial = g.status.status === "partial";
     const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples } };
-    if (inTests && !partial) Object.assign(answer.unknown, { scope: "tests", note: testsNote(inTests) });
+    // Only the target's floor is read: past one hop a caller of a caller may hide anywhere.
+    if (inTests && !partial && depth === 1) Object.assign(answer.unknown, { scope: "tests", note: testsNote(inTests) });
     // The same count the floor reason gives, said before the rows.
     const unbound = kind !== "callers" ? 0 : n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n).length : (g.unknownNames.get(n.name) ?? 0);
     if (unbound > 0) answer.warning = `${unbound} ${unbound === 1 ? "call" : "calls"} named ${n.name} could not be bound; this list may be missing callers. See: openqodex graph unknowns --name ${n.name}`;

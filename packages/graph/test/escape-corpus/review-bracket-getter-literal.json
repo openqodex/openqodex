@@ -1,0 +1,17 @@
+{
+  "covers": "a getter read by a literal bracket key (`c[\"total\"]`) runs it, as `c.total` does",
+  "files": {
+    "src/cart.ts": "export class Cart {\n  get total(): number {\n    return 1;\n  }\n}\n",
+    "src/show.ts": "import { Cart } from \"./cart\";\nexport function show(c: Cart): number {\n  return c[\"total\"];\n}\nshow(new Cart());\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/cart.ts#Cart.total",
+      "caller": "src/show.ts#show",
+      "file": "src/show.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

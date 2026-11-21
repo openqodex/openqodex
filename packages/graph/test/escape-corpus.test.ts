@@ -19,6 +19,8 @@
 //  5. A resolver change drops the value-use count of a function a value
 //     may call: a may_invoke edge into a symbol whose count is zero (14b, a
 //     consistency check, never a proof that the reader sees every use).
+//  6. A floor reads "complete in product code" though product code may run
+//     the hidden caller (a `floored` row's `scope`, when it has one).
 //
 // Each case is one JSON file in escape-corpus/: the files of a small repo,
 // what it covers, and its rows. The files are kept as data, not as source
@@ -39,7 +41,7 @@ import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 afterAll(removeTempDirs);
 
 type Row = { target: string; caller: string | null; file: string; line: number };
-type Case = { covers: string; files: Record<string, string>; mustReach: Row[]; whole: string[]; floored: { target: string; reason: string; at: string }[] };
+type Case = { covers: string; files: Record<string, string>; mustReach: Row[]; whole: string[]; floored: { target: string; reason: string; at: string; scope?: "tests" | "all" }[] };
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), "escape-corpus");
 const cases = readdirSync(dir)
@@ -87,6 +89,8 @@ describe("the escape corpus", () => {
         expect(a.unknown.floor, f.target).toBe(true);
         const hit = a.unknown.reasons.find((r) => r.includes(f.reason) && (f.at === "" || r.includes(f.at)));
         expect(hit, `${f.target}: a reason with "${f.reason}" at ${f.at || "any place"}; got: ${a.unknown.reasons.join("; ")}`).toBeDefined();
+        // Where a hidden caller could be, when the row says.
+        if (f.scope) expect(a.unknown.scope, `${f.target}: scope; note: ${a.unknown.note ?? "none"}`).toBe(f.scope);
         const [file, line] = f.at.split(":") as [string, string];
         const self = g.nodes.get(idOf(g, f.target));
         const inOwnBody = self !== undefined && self.file === file && Number(line) >= self.startLine && Number(line) <= self.endLine;
