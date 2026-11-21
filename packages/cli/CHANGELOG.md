@@ -1,5 +1,13 @@
 # openqodex
 
+## 0.22.1
+
+### Patch Changes
+
+- [#407](https://github.com/openqodex/openqodex/pull/407) [`8d899e5`](https://github.com/openqodex/openqodex/commit/8d899e5568009f41e265ca971db71cd1a5ab8a42) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The README is rewritten around the install line, with current pictures of a review, the code graph and the benchmark. The code graph page opens with a short summary, and the FAQ answers three more questions.
+
+- [#399](https://github.com/openqodex/openqodex/pull/399) [`6b2f72b`](https://github.com/openqodex/openqodex/commit/6b2f72b2339e7c53de495b4c10214ba261fecbce) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - A scanner that ends on a signal OpenQodex did not send now says which signal, and the end of what it printed to stderr. The reason read only "sqlfluff was killed" before, so a crash (SIGSEGV, SIGABRT) and a kill from outside the run (SIGKILL) looked the same. It now reads, for example, "sqlfluff was killed by SIGKILL".
+
 ## 0.22.0
 
 ### Minor Changes
