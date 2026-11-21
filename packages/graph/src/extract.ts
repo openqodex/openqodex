@@ -1943,7 +1943,9 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
   const first = node.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment") ?? null;
   const literal = first?.type === "string";
   // A load whose value is thrown away runs the module and reads none of its names.
-  let up = node.parent;
+  // Tree-sitter finds a parent by walking down from the root, so it is read once.
+  const parent = node.parent;
+  let up = parent;
   if (up?.type === "await_expression") up = up.parent;
   const discarded = up?.type === "expression_statement";
   const loaded: EscapeFact | null = !literal ? { kind: "load", line } : !discarded ? { kind: "module", spec: stringContent(first as Node), line } : null;
@@ -1962,7 +1964,7 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
   // `const require = createRequire(...)`: its uses are read as require's
   // are (jsBindsRequire); `createRequire(...)("x")` as a load of x; any
   // other use of what it makes, as a load by a computed path.
-  const called = node.parent?.type === "call_expression" && sameNode(node.parent.childForFieldName("function"), node);
+  const called = parent?.type === "call_expression" && sameNode(parent.childForFieldName("function"), node);
   const made: EscapeFact | null = !called && !binds ? { kind: "load", line } : null;
   if (fn.type === "identifier") {
     if (fn.text === "eval") ctx.addEscape({ kind: "eval", line }, "eval");
