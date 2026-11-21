@@ -77,8 +77,9 @@ const parseLines = <T>(text: string | null): T[] | null => {
 // each function (index/escapes.json), and the mark on an unbound call that
 // cannot run a plain function. 6: the files the reader cannot vouch for
 // (the opaque rows of index/escapes.json). 7: what each opaque file
-// reaches, and the scripts.
-export const INDEX_FORMAT = 7;
+// reaches, and the scripts. 8: a read by a computed key keeps whether it
+// passes its value on and its places; a reach row holds no name.
+export const INDEX_FORMAT = 8;
 
 type Row = (number | number[])[];
 
@@ -135,7 +136,8 @@ export function writeIndex(g: Graph): Record<string, string> {
     offered: [...x.offered].map(e.s),
     opaque: [...x.opaque.values()].map((o) => [...place(o), e.s(o.why), o.count, o.all.map((a) => [e.s(a.why), a.line, a.count, a.reach === "any" ? 2 : a.reach === "global" ? 1 : 0]), (o.any ? 1 : 0) | (o.global ? 2 : 0) | (o.unbound ? 4 : 0), o.reach.map(e.s)]),
     scripts: [...x.scripts].map(e.s),
-    members: [...x.members].map(([k, m]) => [e.s(k), ...place(m), m.count]),
+    // A read by a computed key keeps whether it passes its value on, and its places.
+    members: [...x.members].map(([k, m]) => [e.s(k), ...place(m), m.count, m.passed ? 1 : 0, ...(m.places ? [m.places.flatMap(place)] : [])]),
   };
   const references = g.references.map(e.edge);
   const dispatch = g.dispatch.map((x) => [e.s(x.file), x.line, x.column, e.s(x.caller), e.s(x.name), x.declared.map(e.s), x.candidates.map(e.s), x.total, e.s(x.rule)]);
@@ -241,7 +243,11 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
         return [d.s(r[0] as N), { ...placeOf(r, 0), why: d.s(r[2] as N), count: r[3] as N, all, any: (flags & 1) !== 0, global: (flags & 2) !== 0, unbound: (flags & 4) !== 0, reach: ((r[6] ?? []) as unknown as N[]).map(d.s) }];
       })),
       scripts: new Set(x.scripts.map(d.s)),
-      members: new Map(x.members.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
+      members: new Map(x.members.map((r) => {
+        const places = r[5] as unknown as N[] | undefined;
+        const at = places ? Array.from({ length: places.length / 2 }, (_, i) => placeOf(places, i * 2)) : undefined;
+        return [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N, ...(r[4] === 1 ? { passed: true } : {}), ...(at ? { places: at } : {}) }];
+      })),
     };
     const extra = { references: referenceRows.map(d.edge), dispatch, summaries, escapes };
     const graph = assemble(nodes, edgeRows.map(d.edge), importerRows.map(d.edge), misses, unknowns, status, deserializeModel(projects.model), projects.goModules, extra);

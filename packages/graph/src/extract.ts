@@ -106,7 +106,11 @@ import type { TreeVisitor } from "./walk.js";
 // read by a computed key on a value of a plain type keeps the names a type
 // of the repository would have to take to make it not plain (OpaqueFact.plain);
 // and a read followed by a member or a call whose value is passed on is passed.
-export const EXTRACTOR_VERSION = 49;
+// 50: `createRequire` of Node's module library given the file's own place
+// (`import.meta.url`, `import.meta.filename`, `__filename`, `pathToFileURL`
+// of a file name or its `.href`) and bound to `require` or called at once
+// makes the file's own require, which loads as `require` does.
+export const EXTRACTOR_VERSION = 50;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -394,10 +398,22 @@ class Ctx {
   // callKey, so no call reads its own `parent`: tree-sitter finds a parent
   // by walking down from the root, and a read per call made a deeply nested
   // file quadratic. A call whose value is given to the name `require`
-  // (jsMarkRequireBinders), and one whose value is thrown away (`f();`,
-  // `await f();`).
+  // (jsMarkRequireBinders), and among them those given to a `const`, `let`
+  // or `var` named `require` that is not exported (`own`); one whose value
+  // is called at once (`f()(x)`), with the call that calls it; and one
+  // whose value is thrown away (`f();`, `await f();`).
   bindsRequire = new Set<string>();
+  ownBinders = new Set<string>();
+  calledCalls = new Map<string, Node>();
   discardedCalls = new Set<string>();
+  // Calls that may be `createRequire` given the file's own place
+  // (`import.meta.url`) and whose value is the file's own require: bound
+  // to `require`, or called at once (`outer`: the load that call makes).
+  // `name` is the callee, or the object of `m.createRequire`; `key` the
+  // place of that name's read. Whether it is the loader factory is
+  // decided once every import is known; `filename`: the base reads
+  // `__filename`, which must be the free one.
+  ownRequires: { name: string; member: boolean; key: string; scope: Scope; line: number; filename: boolean; outer: EscapeFact | null }[] = [];
   // The member read after a name with role `object` (`m.run`): what the
   // module library bound to a name is read for.
   propOf = new Map<ValueRef, string>();
@@ -419,7 +435,7 @@ class Ctx {
   // them (null: the module's own scope, where an import binds). Imports are
   // hoisted, so the reads are decided once every scope is known. And the
   // names called past the depth bound, where no scope is read.
-  private libBindings: { name: string; scope: Scope | null; member: boolean }[] = [];
+  private libBindings: { name: string; scope: Scope | null; member: boolean; imported: string }[] = [];
   deepCalls: { name: string; line: number }[] = [];
   top: Scope;
   // Calls whose names are bound when the walk ends, each with a reference to
@@ -788,10 +804,10 @@ class Ctx {
   // for the module's own): the module object, or a member LIB_SAFE does not name.
   libImport(fact: ImportFact, scope: Scope | null): void {
     if (fact.typeOnly || fact.reexport || !jsLoaderSpec(fact.spec)) return;
-    if (fact.namespace !== null) this.libBindings.push({ name: fact.namespace, scope, member: false });
+    if (fact.namespace !== null) this.libBindings.push({ name: fact.namespace, scope, member: false, imported: "*" });
     for (const n of fact.names) {
-      if (n.imported === "default") this.libBindings.push({ name: n.local, scope, member: false });
-      else if (!LIB_SAFE.has(n.imported)) this.libBindings.push({ name: n.local, scope, member: true });
+      if (n.imported === "default") this.libBindings.push({ name: n.local, scope, member: false, imported: n.imported });
+      else if (!LIB_SAFE.has(n.imported)) this.libBindings.push({ name: n.local, scope, member: true, imported: n.imported });
     }
   }
 
@@ -814,11 +830,30 @@ class Ctx {
     readingScope = null;
     readingImportType = null;
     const topNames = new Set(this.defs.filter((d) => d.topLevel).map((d) => d.name));
+    // `createRequire` of Node's module library given the file's own place
+    // makes the file's own require: a call of what it makes loads as
+    // `require` does. Any other callee of that name (a local function too),
+    // or `m.createRequire` on a value that is not Node's module library, is
+    // a loader.
+    const own = new Set<string>();
+    const libAt = (scope: Scope, name: string) => this.libBindings.find((b) => b.name === name && this.lookup(scope, name) === b.scope);
+    for (const o of this.ownRequires) {
+      const b = libAt(o.scope, o.name);
+      const factory = b !== undefined && (o.member ? !b.member : b.imported === "createRequire");
+      const base = !o.filename || (!this.lookup(o.scope, "__filename") && !topNames.has("__filename"));
+      if (factory && base) {
+        own.add(o.key);
+        if (o.outer) this.escapes.push(o.outer);
+      } else if (o.member || o.name === "createRequire") this.escapes.push({ kind: "load", line: o.line });
+    }
+    this.ownRequires = [];
     // A read of a name bound to Node's module library where it is read:
-    // anything but a member LIB_SAFE names (`m.isBuiltin`) is a load.
-    const libRead = (scope: Scope, name: string, prop: string | null, line: number) => {
+    // anything but a member LIB_SAFE names (`m.isBuiltin`) is a load, but
+    // for the factory read by an own `createRequire` call above.
+    const libRead = (scope: Scope, name: string, prop: string | null, line: number, key: string) => {
       for (const b of this.libBindings) {
         if (b.name !== name || this.lookup(scope, name) !== b.scope) continue;
+        if (own.has(key) && (b.member ? prop === null : prop === "createRequire")) continue;
         if (b.member || prop === null || !LIB_SAFE.has(prop)) this.escapes.push({ kind: "load", line });
       }
     };
@@ -847,7 +882,7 @@ class Ctx {
         if (!ident || ident.path.length === 0) bindAlias(call, at, name, true);
         continue;
       }
-      if (this.libBindings.length > 0) libRead(scope, call.name, null, call.line);
+      if (this.libBindings.length > 0) libRead(scope, call.name, null, call.line, `${call.line}:${call.column}`);
       const at = this.lookup(scope, call.name);
       if (!at) continue;
       const fn = at.fns?.get(call.name);
@@ -888,7 +923,7 @@ class Ctx {
     // The names an import binds, a namespace among them, for the free-name check.
     const importLocals = new Set(this.imports.flatMap((i) => [...i.names.map((n) => n.local), ...(i.namespace ? [i.namespace] : [])]));
     for (const { ref, scope, ident } of this.pendingValues) {
-      if (!ident && ref.recv.kind === "none" && this.libBindings.length > 0) libRead(scope, ref.name, ref.role === "object" ? (this.propOf.get(ref) ?? null) : null, ref.line);
+      if (!ident && ref.recv.kind === "none" && this.libBindings.length > 0) libRead(scope, ref.name, ref.role === "object" ? (this.propOf.get(ref) ?? null) : null, ref.line, `${ref.line}:${ref.column}`);
       // The name of a table passed on, assigned or returned: what it holds
       // may change elsewhere. A read of its member or by a computed key does not.
       if (!ident && ref.recv.kind === "none" && ref.role !== "object" && ref.role !== "index") {
@@ -1907,6 +1942,22 @@ function jsUnescape(raw: string): string {
     return SIMPLE_ESCAPES[ch] ?? ch;
   });
 }
+// Whether a base given to `createRequire` is the file's own place:
+// `import.meta.url`, `import.meta.filename`, `__filename` ("filename": it
+// must be the free one), or `pathToFileURL` of a file name, or its `.href`.
+// Null for any other base: a computed one, or another folder.
+function jsOwnBase(arg: Node): "meta" | "filename" | null {
+  let n = jsHeld(arg);
+  const href = n?.type === "member_expression" && n.childForFieldName("property")?.text === "href";
+  if (href) n = jsHeld(n?.childForFieldName("object") ?? null);
+  const fn = n?.type === "call_expression" ? n.childForFieldName("function") : null;
+  const url = fn?.type === "identifier" ? fn.text === "pathToFileURL" : fn?.type === "member_expression" && fn.childForFieldName("property")?.text === "pathToFileURL";
+  if (href && !url) return null;
+  if (url) n = jsHeld(n?.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment") ?? null);
+  if (n?.type === "identifier" && n.text === "__filename") return "filename";
+  const text = n?.type === "member_expression" ? n.text.replace(/\s+/g, "") : "";
+  return text === "import.meta.filename" || (!url && text === "import.meta.url") ? "meta" : null;
+}
 // A load of Node's module library by a written path that the reader did
 // not read as a binding (`require("module")`, `import("node:module")`,
 // `process.getBuiltinModule("module")`): thrown away, or read for a member
@@ -1947,10 +1998,13 @@ const REQUIRE_WRAPPERS = new Set(["await_expression", "parenthesized_expression"
 // declarator's or the assignment's value, down through the wrappers that
 // keep it: what such a call returns may be a loader, so each read of that
 // `require` stays one.
-function jsMarkRequireBinders(ctx: Ctx, value: Node | null): void {
+function jsMarkRequireBinders(ctx: Ctx, value: Node | null, own = false): void {
   const stack = value ? [value] : [];
   for (let n = stack.pop(); n; n = stack.pop()) {
-    if (n.type === "call_expression") ctx.bindsRequire.add(callKey(n));
+    if (n.type === "call_expression") {
+      ctx.bindsRequire.add(callKey(n));
+      if (own) ctx.ownBinders.add(callKey(n));
+    }
     else if (REQUIRE_WRAPPERS.has(n.type)) stack.push(...n.namedChildren);
   }
 }
@@ -1973,6 +2027,17 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
     if (loaded) ctx.addEscape(loaded);
   };
   const lib = literal && jsLoaderSpec(stringContent(first as Node));
+  // A call that may be `createRequire` given the file's own place, whose
+  // value is the file's own require: bound to `require` (its uses are read
+  // as require's are), or called at once (that call loads as `require` does).
+  const outer = ctx.calledCalls.get(key);
+  const base = (outer !== undefined || ctx.ownBinders.has(key)) && first !== null ? jsOwnBase(first) : null;
+  const ownRequire = (name: Node, member: boolean) => {
+    const arg = outer?.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment");
+    const made: EscapeFact | null = !outer ? null : arg?.type !== "string" ? { kind: "load", line } : ctx.discardedCalls.has(callKey(outer)) ? null : { kind: "module", spec: stringContent(arg), line };
+    const { line: at, column } = pos(name);
+    ctx.ownRequires.push({ name: name.text, member, key: `${at}:${column}`, scope: ctx.top, line, filename: base === "filename", outer: made });
+  };
   if (fn.type === "import" || (fn.type === "identifier" && fn.text === "require")) {
     if (ctx.consumedLoads.has(node.startIndex)) return;
     load();
@@ -1990,6 +2055,7 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
       // written in place, or a name proved a function, is safe.
       ctx.pendingTimers.push({ scope: ctx.top, timer: fn.text, arg: first.type === "identifier" ? first.text : null, proof: first.type === "identifier" ? jsFunctionProof(first, first.text) : null, line });
     }
+    else if (base !== null) ownRequire(fn, false);
     // What `createRequire(...)` makes loads any module.
     else if (fn.text === "createRequire") ctx.addEscape({ kind: "load", line });
     return;
@@ -1999,7 +2065,8 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
     const object = jsUnwrap(fn.childForFieldName("object"));
     // `f.constructor("code")`: the constructor of a function is `Function`.
     if (prop === "constructor") jsConstructorRead(ctx, line);
-    if (prop !== undefined && LOADER_MEMBERS.has(prop)) ctx.addEscape({ kind: "load", line });
+    if (prop === "createRequire" && base !== null && object?.type === "identifier") ownRequire(object, true);
+    else if (prop !== undefined && LOADER_MEMBERS.has(prop)) ctx.addEscape({ kind: "load", line });
     if (prop === "require" && loaderOwner(object)) {
       load();
       if (lib) jsLibUse(ctx, node, line);
@@ -2897,7 +2964,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const name = node.childForFieldName("name");
         const value = node.childForFieldName("value");
         if (!name) return;
-        if (name.type === "identifier" ? name.text === "require" : patternNames(name).includes("require")) jsMarkRequireBinders(ctx, value);
+        if (name.type === "identifier" ? name.text === "require" : patternNames(name).includes("require")) jsMarkRequireBinders(ctx, value, name.type === "identifier" && !isExportedDecl(node));
         // `let` and `const` belong to their block, `var` to its function.
         const block = node.parent?.type !== "variable_declaration";
         // A module-level variable: a value an import of it binds.
@@ -3085,6 +3152,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       }
       case "call_expression": {
         const fn = node.childForFieldName("function");
+        if (fn?.type === "call_expression") ctx.calledCalls.set(callKey(fn), node);
         jsCallEscapes(ctx, node, jsUnwrap(fn));
         if (fn?.type === "import") return;
         const before = ctx.calls.length;

@@ -18,6 +18,9 @@
 // 7. A build reopened from its facts forgets the global names a declaration
 //    file declares as plain data, or an edit to that file keeps the digest,
 //    so a kept build vouches for a name its file no longer declares so.
+// 8. A build kept as an index forgets that a read by a computed key passes
+//    its value on, or where it is, so a reopened build says only tests could
+//    hide a caller that product code may call.
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readdirSync, unlinkSync } from "node:fs";
@@ -145,5 +148,20 @@ describe("reopening a kept build", () => {
     expect(await workTreeDigest(root, 1_000_000)).not.toBe(digest);
     const again = await buildGraph({ repoRoot: root, store: st });
     expect([...again.escapes.opaque.keys()]).toEqual(["app/b.ts"]);
+  });
+  it("keeps whether a read by a computed key passes its value on, and its places (8)", async () => {
+    const root = makeRepo({
+      "src/cart.ts": "export class Cart {\n  run(): void {}\n}\n",
+      "src/cart.test.ts": "export function pick(c: any, k: string): unknown {\n  return c[k];\n}\n",
+      "src/stay.test.ts": "export function go(c: any, k: string): void {\n  c[k]();\n}\n",
+    });
+    const st = await store(root);
+    const built = await buildGraph({ repoRoot: root, store: st, mode: "retained" });
+    const gen = st.open({ id: built.status.generation as string });
+    expect(gen?.manifest.hasIndex).toBe(true);
+    const read = (graphOf(st, gen!) as Graph).escapes.members.get("js:*");
+    expect(read?.passed).toBe(true);
+    expect(read?.places).toEqual([{ file: "src/cart.test.ts", line: 2 }, { file: "src/stay.test.ts", line: 2 }]);
+    expect(read).toEqual(built.escapes.members.get("js:*"));
   });
 });

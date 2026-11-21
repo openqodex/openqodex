@@ -1,5 +1,5 @@
 {
-  "covers": "a `require` made by `createRequire`, imported under another name below its use, is a load by a computed path though it loads a literal path: the path is read from the place `createRequire` is given",
+  "covers": "a `require` made by `createRequire` given the file's own place (`import.meta.url`), imported under another name below its use, loads a literal path as `require` does: the repository stays whole",
   "files": {
     "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
     "src/a.cjs": "exports.f = function () {};\n",
@@ -7,12 +7,8 @@
     "src/use.mjs": "const require = cr(import.meta.url);\nconst lib = require(\"./a.cjs\");\nlib.f();\nimport { createRequire as cr } from \"node:module\";\n"
   },
   "mustReach": [],
-  "whole": [],
-  "floored": [
-    {
-      "target": "src/b.ts#g",
-      "reason": "may be any module of the repository",
-      "at": "src/use.mjs:1"
-    }
-  ]
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
 }
