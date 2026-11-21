@@ -25,7 +25,12 @@
 //     AGENTS.md or CONTRIBUTING.md says less; and the gate action's steps
 //     equal scripts/gate.sh's, one for one, the full-only ones included;
 //  8. the staged part and brief budgets, the long-line limits and the
-//     --timeout maximum match the code, on every page that states them.
+//     --timeout maximum match the code, on every page that states them;
+//  9. every file the README shows from raw.githubusercontent.com at main,
+//     such as a picture, is in the repository;
+// 10. "At a glance" in docs/graph.md names exactly the languages the graph
+//     parses (LANGUAGES in its query engine) and the questions that
+//     `openqodex graph help` lists.
 // It cannot check what a sentence means, a measured time or a privacy
 // promise. Those are in the manual claims ledger.
 import { execFileSync } from "node:child_process";
@@ -435,6 +440,38 @@ if (maxTimeout === null) fail("docs/cli.md", "the --timeout maximum is no longer
 else {
   const most = Math.floor((2 ** Number(maxTimeout[1]) - 1) / 1000);
   if (!read("docs/cli.md").includes(`The maximum is ${most} seconds`)) fail("docs/cli.md", `must say "The maximum is ${most} seconds" (MAX_TIMEOUT_SECONDS)`);
+}
+
+// 9. Pictures and other files the README shows from main. GitHub and the
+// npm page load them by URL, so a wrong name is a broken picture there.
+for (const m of readmeText.matchAll(/https:\/\/raw\.githubusercontent\.com\/openqodex\/openqodex\/main\/([^\s"'()<>]+)/g)) {
+  if (!existsSync(join(root, m[1]))) fail(README, `shows ${m[0]}, but ${m[1]} is not in the repository`);
+}
+
+// 10. The graph page's summary: its languages and its questions.
+const GRAPH_PAGE = "docs/graph.md";
+const graphText = read(GRAPH_PAGE);
+const glanceAt = graphText.indexOf("\n## At a glance\n");
+if (glanceAt === -1) fail(GRAPH_PAGE, `has no section "## At a glance"`);
+else {
+  const glance = graphText.slice(glanceAt + 1, graphText.indexOf("\n## ", glanceAt + 1));
+  const same = (a, b) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
+  const engine = /const LANGUAGES = \[([^\]]*)\]/.exec(read("packages/graph/src/query/engine.ts"));
+  const languages = [...(engine?.[1] ?? "").matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
+  const listed = (/^- Languages: (.+)\.$/m.exec(glance)?.[1] ?? "").split(/, | and /).map((l) => l.trim().toLowerCase()).filter(Boolean);
+  if (languages.length === 0) fail(GRAPH_PAGE, "LANGUAGES is no longer a list in packages/graph/src/query/engine.ts; update this check");
+  else if (!same(listed, languages)) fail(GRAPH_PAGE, `"At a glance" lists the languages ${listed.join(", ") || "nowhere"}; the graph parses ${languages.join(", ")}`);
+  let help = "";
+  try {
+    help = execFileSync(process.execPath, [BIN, "graph", "help"], { encoding: "utf8", env: { ...process.env, CI: "1", OPENQODEX_AUTO_UPDATE: "0" } });
+  } catch (error) {
+    help = String(error.stdout ?? "");
+  }
+  // Each usage line names one or more questions before its first argument.
+  const questions = [...new Set(help.split("\n").filter((l) => /^  [a-z]/.test(l)).flatMap((l) => l.trim().split(/ <| \[|  /)[0].split("|").map((q) => q.trim())).filter((q) => /^[a-z]+$/.test(q)))];
+  const named = glance.split("\n").filter((l) => /^\s+- /.test(l)).flatMap((l) => [...l.matchAll(/`([a-z]+)`/g)].map((m) => m[1]));
+  if (questions.length === 0) fail(GRAPH_PAGE, "`openqodex graph help` lists no question; update this check");
+  else if (!same(named, questions)) fail(GRAPH_PAGE, `"At a glance" groups the questions ${named.join(", ") || "nowhere"}; \`openqodex graph help\` lists ${questions.join(", ")}`);
 }
 
 if (errors.length) {

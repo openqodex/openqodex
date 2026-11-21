@@ -47,7 +47,19 @@ In `.openqodex/reviews/<time>-<id>/` in the repository: `report.html` to open in
 
 ## Does it work on Windows?
 
-Through WSL. OpenQodex runs on macOS and Linux.
+OpenQodex runs on macOS and Linux. CI runs the gate on macOS and on Ubuntu Linux. No test runs on Windows or WSL.
+
+## What is the code graph?
+
+A map of your repository that OpenQodex builds on your machine, with no model. It records every function, class and type, and every call and import between them. A review gives the reviewer what your change reaches in the graph. You or your agent can also ask it questions, such as `openqodex graph callers <name>`. `graph` describes it.
+
+## Does my agent get the code graph through MCP?
+
+Yes, in Claude Code, Cursor and Codex CLI, and in the Cline CLI in user scope. `init` registers an MCP server named `openqodex` with each one. For Goose and the Cline VS Code extension, `init` prints the entry for you to add. Restart the agent after `init`. `agents` lists every file `init` writes.
+
+## Does it work in Goose?
+
+Goose can start a review. Claude Code or Codex must be installed too, to be the reviewer. `init` writes a skill and a section in `.goosehints` for Goose, and no hook. The hints ask Goose to review before a push. The git pre-push hook still checks each push from a repository where `init` added it. This setup was built from Goose's documentation and has not been run against Goose.
 
 ## How do I remove it?
 
