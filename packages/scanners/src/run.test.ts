@@ -87,6 +87,10 @@
 //  39. A custom adapter written for wants() alone, with no paths(), makes
 //      runScanners throw or skips the scanner, now that the scan record
 //      asks each custom scanner for its file list.
+// Added for issue #307:
+//  40. A scanner result whose error is a real failure (result.failure) is
+//      recorded as status "ran", not "failed", because findings from
+//      another file of the same run sit beside it.
 
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
@@ -212,6 +216,29 @@ describe("runScanners", () => {
     expect(scan.candidates[0]?.message).toBe(`found ${REDACTED} on line 1`);
     expect(scan.secretFingerprints).toEqual([{ length: secret.length, sha256: expect.any(String) }]);
     expect(scan.scanners.find((s) => s.scanner === "custom:secrets")).toMatchObject({ status: "ran", version: "1.0.0" });
+  });
+
+  it("a result marked failure stays failed beside findings from another file (40)", async () => {
+    const dir = repo({ "a.go": "package a\n" });
+    const { scan } = await runScanners({
+      repoDir: dir,
+      changedPaths: ["a.go"],
+      coverage: new Map([["a.go", lines(1)]]),
+      config: config(),
+      resolveTool: notInstalled(),
+      custom: [
+        custom({
+          source: "custom:halftype",
+          run: async () => ({
+            findings: [finding({ source: "custom:halftype", ruleId: "lint", filePath: "a.go", severity: "low", message: "unused import" })],
+            error: "pkg/b: could not type-check: undefined: limiter",
+            failure: true,
+            version: "1.0.0",
+          }),
+        }),
+      ],
+    });
+    expect(scan.scanners.find((s) => s.scanner === "custom:halftype")).toMatchObject({ status: "failed", rawCount: 1 });
   });
 });
 

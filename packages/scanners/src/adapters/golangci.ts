@@ -172,6 +172,11 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
   const notes: string[] = [];
   // States of the developer's machine, not failures: see the header.
   const skips: string[] = [];
+  // A note that is a real failure (a module that could not type-check, a
+  // crashed run, an unparseable report), not a cap or a deadline that a
+  // clean run can still hit (issue 307): the runner keeps status "failed"
+  // for this even though another module's findings are kept beside it.
+  let hadFailure = false;
   if (orphans.length > 0) {
     // Worth naming precisely: Go's own message for this ("no go files to
     // analyze: running `go mod tidy` may solve the problem") sends the
@@ -229,7 +234,10 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
         const report = parseGolangciJson(stdout);
         findings.push(...reanchorToRunDir(report.findings, group.moduleRoot));
         const first = report.typecheckErrors[0];
-        if (first) notes.push(`${toolText(group.moduleRoot)}: could not type-check: ${toolText(inModule(first, cwd)).slice(0, 200)}`);
+        if (first) {
+          notes.push(`${toolText(group.moduleRoot)}: could not type-check: ${toolText(inModule(first, cwd)).slice(0, 200)}`);
+          hadFailure = true;
+        }
         return report;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -280,7 +288,7 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
     skips.push(notDownloadedSkip(moduleRoot, imports, linted.has(moduleRoot)));
   }
   if (notes.length > 0) {
-    return { findings, error: joinParts([...notes, ...skips]) };
+    return { findings, error: joinParts([...notes, ...skips]), ...(hadFailure ? { failure: true } : {}) };
   }
   if (skips.length === 0) return { findings, error: null };
   const reason = joinParts(skips);
