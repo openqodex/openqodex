@@ -74,8 +74,9 @@ import type { TreeVisitor } from "./walk.js";
 // expression's own name is bound to its definition inside it; and the
 // places a function may be reached by a name the graph cannot follow
 // (FileFacts.escapes). 41: what the reader cannot vouch for in a file
-// (FileFacts.opaque).
-export const EXTRACTOR_VERSION = 41;
+// (FileFacts.opaque). 42: how far each such place reaches
+// (OpaqueFact.reach), and `this` in a script may be the global object.
+export const EXTRACTOR_VERSION = 42;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -336,6 +337,9 @@ class Ctx {
   goPackage: string | null = null;
   escapes: EscapeFact[] = [];
   opaque = new Map<string, OpaqueFact>();
+  // An `import` or `export` statement: a module, strict, so `this` in a
+  // plain function is never the global object.
+  esm = false;
   looseMembers = new Map<string, OpaqueFact>();
   // Timers given a name: `setTimeout(code)` runs a string as code unless
   // the name is a function the file defines.
@@ -632,7 +636,7 @@ class Ctx {
     if (ident) delete (v.recv as Tagged)[IDENT];
     if (this.lang === "go" || this.lang === "ruby") return index;
     if (this.top.depth > MAX_SCOPE_DEPTH) {
-      if (JS_LANGS.has(this.lang)) this.addOpaque("a scope nested too deep to read", line);
+      if (JS_LANGS.has(this.lang)) this.addOpaque("a scope nested too deep to read", line, "any");
       ref.recv = { kind: "other" };
       return index;
     }
@@ -689,12 +693,16 @@ class Ctx {
     else this.pendingEscapes.push({ fact, scope: this.top, name });
   }
 
-  // A place the reader cannot vouch for: the file is opaque, and every
-  // function of its project may be reached by a path the graph does not see.
-  addOpaque(why: string, line: number): void {
+  // A place the reader cannot vouch for: the file is opaque, and what it
+  // reaches (its own definitions, the modules it imports, and with `reach`
+  // the global scope or every module) may be reached by a path the graph
+  // does not see.
+  addOpaque(why: string, line: number, reach?: OpaqueFact["reach"]): void {
     const kept = this.opaque.get(why);
-    if (kept) kept.count++;
-    else this.opaque.set(why, { why, line, count: 1 });
+    if (kept) {
+      kept.count++;
+      if (reach === "any" || (reach === "global" && kept.reach === undefined)) kept.reach = reach;
+    } else this.opaque.set(why, { why, line, count: 1, ...(reach ? { reach } : {}) });
   }
 
   // A name given a module loaded by a computed path, in the scope that declares it.
@@ -812,7 +820,7 @@ class Ctx {
       }
       const at = this.lookup(scope, ref.name);
       if (!at) {
-        if (JS_LANGS.has(this.lang) && ref.recv.kind === "none" && !topNames.has(ref.name) && !importLocals.has(ref.name) && !jsHarmlessGlobal(ref.name, ref.role, this.propOf.get(ref) ?? null)) this.addOpaque(`the free name \`${ref.name}\``, ref.line);
+        if (JS_LANGS.has(this.lang) && ref.recv.kind === "none" && !topNames.has(ref.name) && !importLocals.has(ref.name) && !jsHarmlessGlobal(ref.name, ref.role, this.propOf.get(ref) ?? null)) this.addOpaque(`the free name \`${ref.name}\``, ref.line, jsFreeReach(ref.name, ref.role, this.propOf.get(ref) ?? null));
         continue;
       }
       const fn = at.fns?.get(ref.name);
@@ -828,7 +836,7 @@ class Ctx {
       if (this.lookup(t.scope, t.timer) || topNames.has(t.timer)) continue;
       const at = t.arg === null ? null : this.lookup(t.scope, t.arg);
       if (t.arg !== null && (at?.fns?.has(t.arg) || (!at && topNames.has(t.arg)))) continue;
-      this.addOpaque(`\`${t.timer}\` given what may be a string of code`, t.line);
+      this.addOpaque(`\`${t.timer}\` given what may be a string of code`, t.line, "any");
       this.escapes.push({ kind: "global", line: t.line });
     }
     this.pendingTimers = [];
@@ -916,7 +924,8 @@ class Ctx {
       defaultExport: this.defaultExport,
       goPackage: this.goPackage,
       ...(this.escapes.length > 0 ? { escapes: this.escapes } : {}),
-      ...(this.opaque.size > 0 ? { opaque: [...this.opaque.values()] } : {}),
+      // In a script, `this` in a plain function is the global object.
+      ...(this.opaque.size > 0 ? { opaque: [...this.opaque.values()].map((o) => (o.why === THIS_OUTSIDE && !this.esm ? { ...o, reach: "any" as const } : o)) } : {}),
       ...(this.looseMembers.size > 0 ? { looseMembers: [...this.looseMembers.values()] } : {}),
       ...(this.variables.size > 0 ? { variables: [...this.variables].filter((n) => !topNames.has(n)) } : {}),
       ...(this.exportedVariables.size > 0 ? { exportedVariables: [...this.exportedVariables].filter((n) => !topNames.has(n)) } : {}),
@@ -1707,7 +1716,7 @@ function jsPatternKeys(pattern: Node): { names: { imported: string; local: strin
 // A read of `.constructor`: from a function it is `Function`, which makes
 // code from a string, so the file is opaque and the code may load anything.
 function jsConstructorRead(ctx: Ctx, line: number): void {
-  ctx.addOpaque("a `.constructor` read", line);
+  ctx.addOpaque("a `.constructor` read", line, "any");
   ctx.addEscape({ kind: "global", line });
 }
 
@@ -1736,7 +1745,7 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
     if (fn.text === "eval") ctx.addEscape({ kind: "eval", line }, "eval");
     else if (fn.text === "Function") {
       ctx.addEscape({ kind: "global", line }, "Function");
-      ctx.addOpaque("`Function` called to make code from a string", line);
+      ctx.addOpaque("`Function` called to make code from a string", line, "any");
     }
     else if ((fn.text === "setTimeout" || fn.text === "setInterval") && first && first.type !== "arrow_function" && first.type !== "function_expression" && first.type !== "function" && first.type !== "generator_function") {
       // A browser runs a string given to a timer as code: only a function
@@ -1999,6 +2008,28 @@ const HARMLESS_PROCESS = new Set([
 function jsHarmlessGlobal(name: string, role: ValueRef["role"], prop: string | null): boolean {
   if (name === "process") return role === "object" && prop !== null && HARMLESS_PROCESS.has(prop);
   return HARMLESS_GLOBALS.has(name);
+}
+const THIS_OUTSIDE = "`this` outside a class";
+// The members of `import.meta` that hold plain data.
+const META_PLAIN = new Set(["url", "dirname", "filename", "resolve", "env", "main"]);
+// Names of the global object, and the members of one that lead to it again,
+// to code made from a string, or to a loader.
+const GLOBAL_NAMES = new Set([...GLOBAL_OBJECTS, "top", "parent", "frames"]);
+const GLOBAL_CHAIN = new Set([
+  ...GLOBAL_NAMES, "document", "opener", "frameElement", "eval", "Function", "constructor", "__proto__", "Reflect",
+  "setTimeout", "setInterval", "setImmediate", "execScript", "importScripts", "process", "require", "module",
+]);
+// The members of `process` that load code or open native bindings.
+const PROCESS_LOADERS = new Set(["mainModule", "binding", "_linkedBinding", "dlopen", "constructor"]);
+// How far a free name the reader does not know may reach. A name of the
+// global scope reaches the global scope: a script's definitions. The global
+// object indexed, passed on or followed to a member that leads to code, and
+// a name that makes code (`eval`, `Function`, `document`), may load any module.
+function jsFreeReach(name: string, role: ValueRef["role"], prop: string | null): "any" | "global" {
+  if (name === "eval" || name === "Function" || name === "document") return "any";
+  if (name === "process") return role === "object" && prop !== null && !PROCESS_LOADERS.has(prop) ? "global" : "any";
+  if (GLOBAL_NAMES.has(name)) return role === "object" && prop !== null && !GLOBAL_CHAIN.has(prop) ? "global" : "any";
+  return "global";
 }
 // The objects whose `require` member is a loader: a module, and the ones
 // `require.main` and `process.mainModule` give. Any other way to one reads
@@ -2276,9 +2307,11 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
   walkTree(tree.rootNode, readers, { interesting: JS_TYPES, wants: reads, visit: (node, field, upType) => {
     switch (node.type) {
       case "import_statement":
+        ctx.esm = true;
         jsImport(ctx, node);
         return false;
       case "export_statement":
+        ctx.esm = true;
         if (node.children.some((c) => c.type === "=")) ctx.addOpaque("`export =`, which the reader does not read", node.startPosition.row + 1);
         jsExport(ctx, node);
         return;
@@ -2609,7 +2642,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const ctor = node.childForFieldName("constructor");
         if (ctor?.type === "identifier" && ctor.text === "Function") {
           ctx.addEscape({ kind: "global", line: node.startPosition.row + 1 }, "Function");
-          ctx.addOpaque("`Function` called to make code from a string", node.startPosition.row + 1);
+          ctx.addOpaque("`Function` called to make code from a string", node.startPosition.row + 1, "any");
         }
         if (ctor?.type === "member_expression" && ctor.childForFieldName("property")?.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
         jsCallee(ctx, ctor);
@@ -2776,7 +2809,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "this":
         // Outside a class, `this` may be the global object, a CommonJS
         // module's exports or any object a call hands it.
-        if (ctx.top.thisClass !== true) ctx.addOpaque("`this` outside a class", node.startPosition.row + 1);
+        if (ctx.top.thisClass !== true) ctx.addOpaque(THIS_OUTSIDE, node.startPosition.row + 1);
         return;
       case "pair_pattern":
         if (node.childForFieldName("key")?.text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
@@ -2793,9 +2826,14 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       case "import_alias":
         ctx.addOpaque("`import x = a.b`, which the reader does not read", node.startPosition.row + 1);
         return;
-      case "meta_property":
-        ctx.addOpaque(`\`${node.text.replace(/\s+/g, "")}\`, which the reader does not read`, node.startPosition.row + 1);
+      case "meta_property": {
+        // `import.meta.url` and its like are strings; any other use
+        // (Vite's `import.meta.glob`, the object passed on) may load modules.
+        const up = node.parent;
+        const safe = up?.type === "member_expression" && up.childForFieldName("object")?.startIndex === node.startIndex && META_PLAIN.has(up.childForFieldName("property")?.text ?? "");
+        ctx.addOpaque(`\`${node.text.replace(/\s+/g, "")}\`, which the reader does not read`, node.startPosition.row + 1, safe ? undefined : "any");
         return;
+      }
       case "jsx_opening_element":
       case "jsx_self_closing_element": {
         const name = node.childForFieldName("name");

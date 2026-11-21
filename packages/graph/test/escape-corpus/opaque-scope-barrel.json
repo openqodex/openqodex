@@ -1,0 +1,27 @@
+{
+  "covers": "an opaque file that imports a barrel reaches what the barrel re-exports, and nothing it does not",
+  "files": {
+    "src/b.ts": "export function g() {}\n",
+    "src/c.ts": "export function h() {}\n",
+    "src/index.ts": "export * from \"./b\";\n",
+    "src/x.test.ts": "import * as api from \"./index\";\nfunction t() { return this; }\nt();\napi.g();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/b.ts#g",
+      "caller": null,
+      "file": "src/x.test.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "src/c.ts#h"
+  ],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "imports its module",
+      "at": "src/x.test.ts:2"
+    }
+  ]
+}

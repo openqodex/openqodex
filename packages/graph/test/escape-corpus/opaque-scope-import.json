@@ -1,0 +1,26 @@
+{
+  "covers": "an opaque test reaches only what it defines and imports: `this` outside a class and a free name floor a.ts, not b.ts",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/b.ts": "export function g() {}\n",
+    "src/a.test.ts": "import { f } from \"./a\";\nfunction t() { return this; }\nconst started = performance.now();\nf();\nt();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/a.test.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "imports its module",
+      "at": "src/a.test.ts:2"
+    }
+  ]
+}

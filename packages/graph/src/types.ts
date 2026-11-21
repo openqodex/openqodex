@@ -278,7 +278,11 @@ export type EscapeFact =
   | { kind: "own" | "eval" | "global"; line: number }
   | { kind: "load"; line: number; names?: string[] };
 
-export type OpaqueFact = { why: string; line: number; count: number };
+// `reach`: how far the place may reach past the file's own definitions and
+// the modules it imports. `global`: the global scope, so a script's
+// definitions. `any`: any module (code made from a string, the global
+// object indexed, a module loaded by a pattern).
+export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any" };
 
 export type FileFacts = {
   lang: Lang;
@@ -423,8 +427,15 @@ export type Escapes = {
   loadAny: (Place & { why: "load" | "eval" | "global" })[];
   offered: Set<string>;
   // TypeScript and JavaScript files the reader cannot vouch for, by file:
-  // the first reason, its line, how many places in the file, and each reason.
-  opaque: Map<string, Place & { why: string; count: number; all: OpaqueFact[] }>;
+  // the first reason (one that reaches any module when there is one), its
+  // line, how many places in the file, and each reason. `any`: it may load
+  // any module. `global`: it reads the global scope (a free name, or the
+  // file is a script). `unbound`: an import of it names no file the graph
+  // found, so what it reaches is not known. `reach`: the file and the
+  // modules it imports, through their re-exports.
+  opaque: Map<string, Place & { why: string; count: number; all: OpaqueFact[]; any: boolean; global: boolean; unbound: boolean; reach: string[] }>;
+  // Scripts: files whose top-level definitions are names of the global scope.
+  scripts: Set<string>;
   // Member reads on a value of unknown type, by "family:name".
   members: Map<string, Place & { count: number }>;
 };

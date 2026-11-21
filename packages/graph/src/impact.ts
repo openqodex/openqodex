@@ -239,22 +239,42 @@ export function sameNameGaps(graph: Graph, seed: { name: string; file: string; k
   return named.filter((u) => familyAt(graph, u.file) === family && !(plain && u.notPlain));
 }
 
-// The opaque files of each project: the first, and how many.
-const projectOpaque = new WeakMap<Graph, Map<string, Place & { why: string; files: number }>>();
-function opaqueIn(graph: Graph, project: string): (Place & { why: string; files: number }) | undefined {
-  let byProject = projectOpaque.get(graph);
-  if (!byProject) {
-    byProject = new Map();
+// The opaque files that can reach a file's definitions, by how: one that
+// may load any module reaches every one; one reaches its own and those of
+// the modules it imports; one that reads the global scope reaches a
+// script's; one with an import the graph could not bind reaches every one
+// of its project, since what it imports is not known.
+type OpaqueFile = Graph["escapes"]["opaque"] extends Map<string, infer V> ? V : never;
+type OpaqueReach = { any: OpaqueFile[]; byFile: Map<string, OpaqueFile[]>; global: OpaqueFile[]; unbound: Map<string, OpaqueFile[]> };
+const opaqueReach = new WeakMap<Graph, OpaqueReach>();
+const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+};
+function opaqueFor(graph: Graph, file: string, project: string): (Place & { why: string; how: string; files: number }) | undefined {
+  let r = opaqueReach.get(graph);
+  if (!r) {
+    r = { any: [], byFile: new Map(), global: [], unbound: new Map() };
     const files = [...graph.escapes.opaque.values()].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
     for (const o of files) {
-      const p = graph.projectOf(o.file);
-      const kept = byProject.get(p);
-      if (kept) kept.files++;
-      else byProject.set(p, { file: o.file, line: o.line, why: o.why, files: 1 });
+      if (o.any) r.any.push(o);
+      if (o.global) r.global.push(o);
+      if (o.unbound) push(r.unbound, graph.projectOf(o.file), o);
+      for (const m of o.reach) push(r.byFile, m, o);
     }
-    projectOpaque.set(graph, byProject);
+    opaqueReach.set(graph, r);
   }
-  return byProject.get(project);
+  const pick = (list: OpaqueFile[] | undefined, how: (o: OpaqueFile) => string) => {
+    const o = list?.[0];
+    return o && list ? { file: o.file, line: o.line, why: o.why, how: how(o), files: list.length } : undefined;
+  };
+  return (
+    pick(r.any, () => "may load any module") ??
+    pick(r.byFile.get(file), (o) => (o.file === file ? "defines it" : "imports its module")) ??
+    (graph.escapes.scripts.has(file) ? pick(r.global, () => "reads the global scope, where a script's definitions live") : undefined) ??
+    pick(r.unbound.get(project), () => "imports a module the graph could not find, so what it reaches is not known")
+  );
 }
 
 // Calls through a value (a callback, a computed member), per family, with the first place.
@@ -334,10 +354,10 @@ export function floorReasons(graph: Graph, seed: { id: string; name: string; fil
     // JavaScript) keeps the rule it had, for its methods too: its reader
     // does not record every way a name escapes (a Rails `before_action
     // :name`), so only a call through a value in the project clears it.
-    // A file of its project the reader cannot vouch for: anything there may
-    // reach the function by a path the graph does not see.
-    const dark = family === "js" ? opaqueIn(graph, project) : undefined;
-    if (dark) reasons.push(`${at(dark)} cannot be read whole (${dark.why})${dark.files > 1 ? `, nor can ${dark.files - 1} more ${dark.files === 2 ? "file" : "files"} of its project` : ""}, so a path the graph does not see may reach it`);
+    // A file the reader cannot vouch for that can reach the function:
+    // anything there may call it by a path the graph does not see.
+    const dark = family === "js" ? opaqueFor(graph, seed.file, project) : undefined;
+    if (dark) reasons.push(`${at(dark)} cannot be read whole (${dark.why}) and ${dark.how}${dark.files > 1 ? `, as ${dark.files - 1} more ${dark.files === 2 ? "file does" : "files do"}` : ""}, so a path the graph does not see may reach it`);
     const kept = family !== "js" && projectValues();
     const read = kind === "method" && family === "js" ? x.members.get(`js:${seed.name}`) : undefined;
     if (read) reasons.push(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`);

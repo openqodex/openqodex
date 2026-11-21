@@ -25,7 +25,7 @@ import { governingTsconfig, isGoStdlib, isNodeBuiltin, isPyStdlib, isRubyStdlib,
 import type { Cause, Cut, EvidenceKind, Shape, Tier, Via } from "./model/records.js";
 import { weakest } from "./model/records.js";
 import type { Lookup as PluginLookup } from "./frameworks/plugin.js";
-import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
+import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, ImportFact, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
 import { CALLER_KINDS, MAX_TYPE_DEPTH, familyOf } from "./types.js";
 
 const MAX_DEPTH = 8; // re-export and base-class chains
@@ -85,7 +85,8 @@ export const SHAPE_CAP = 20;
 // offer, the places a name built at run time may reach it, and the value
 // uses no rule binds; an unbound call that cannot run a plain function is
 // marked (UnknownSite.notPlain). 32: the opaque files (Escapes.opaque).
-export const RESOLVER_VERSION = 32;
+// 33: what each opaque file reaches, and the scripts (Escapes.scripts).
+export const RESOLVER_VERSION = 33;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -3985,12 +3986,14 @@ export function createWorld(input: ResolveInput): World {
         }
       }
     }
+    // A script's definitions are names of the global scope.
+    const script = (file: string, f: FileFacts) =>
+      !/\.(mjs|cjs|mts|cts)$/.test(file) && f.imports.length === 0 && f.exportsLocal.length === 0 && f.defaultExport === null && !f.defs.some((d) => d.exported) && !(f.escapes ?? []).some((e) => e.kind === "own" || e.kind === "module" || e.kind === "load");
+    const scripts = new Set<string>();
+    for (const { path, facts: f } of jsFiles) if (script(path, f)) scripts.add(path);
     if (runtime.length > 0) {
-      // A script's definitions are names of the global scope.
-      const script = (file: string, f: FileFacts) =>
-        !/\.(mjs|cjs|mts|cts)$/.test(file) && f.imports.length === 0 && f.exportsLocal.length === 0 && f.defaultExport === null && !f.defs.some((d) => d.exported) && !(f.escapes ?? []).some((e) => e.kind === "own" || e.kind === "module" || e.kind === "load");
       for (const { path, facts: f } of jsFiles) {
-        if (!script(path, f)) continue;
+        if (!scripts.has(path)) continue;
         for (const d of f.defs) if (d.topLevel || d.kind === "method") for (const r of runtime) addReach(symbolId(path, d), { why: r.why, ...r.place });
       }
     }
@@ -4005,10 +4008,51 @@ export function createWorld(input: ResolveInput): World {
       }
     }
     if (loadAny.length > 0) for (const { path } of jsFiles) for (const id of offers(path).ids) offered.add(id);
-    const opaque = new Map<string, Place & { why: string; count: number; all: OpaqueFact[] }>();
+    // What an opaque file reaches: its own definitions, the modules it
+    // imports (a named import, the module the name comes from through
+    // re-exports; a whole module, every module it re-exports), the global
+    // scope when it reads a free name or is a script, and every module when
+    // it may load any.
+    const opaque: Escapes["opaque"] = new Map();
     for (const { path, facts: f } of jsFiles) {
-      const first = f.opaque?.reduce((a, b) => (b.line < a.line ? b : a));
-      if (first) opaque.set(path, { file: path, line: first.line, why: first.why, count: (f.opaque ?? []).reduce((k, o) => k + o.count, 0), all: f.opaque ?? [] });
+      const all = f.opaque ?? [];
+      if (all.length === 0) continue;
+      // A load-any place is shown first: the reason says why it reaches every function.
+      const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || (e.kind === "load" && !e.names));
+      const loose = runs.map((e): OpaqueFact => ({ why: e.kind === "load" ? "a module loaded by a computed path" : e.kind === "eval" ? "`eval`" : "code or a name built at run time on the global scope", line: e.line, count: 1, reach: "any" }));
+      const shown = [...all, ...loose].filter((o) => o.reach === "any");
+      const any = shown.length > 0;
+      const first = (any ? shown : all).reduce((a, b) => (b.line < a.line ? b : a));
+      const seen = new Set<string>([path]);
+      const queue: string[] = [];
+      let unbound = false;
+      const take = (line: number, spec: string, names: ImportFact["names"] | null) => {
+        const mod = jsSpec(path, line, spec);
+        if (mod === null || "gap" in mod) unbound = true;
+        if (mod === null || !("file" in mod)) return;
+        if (names === null) return void queue.push(mod.file);
+        seen.add(mod.file);
+        for (const n of names) {
+          const v = index.exports(mod.file, n.imported, 0);
+          if (v?.v === "sym") for (const id of v.ids) seen.add(defById.get(id)?.file ?? mod.file);
+          else queue.push(v?.v === "mod" ? v.file : mod.file);
+        }
+      };
+      // `export ... from` binds no name the file's own code can read.
+      for (const imp of f.imports) if (!imp.typeOnly && !imp.reexport) take(imp.line, imp.spec, imp.namespace !== null || imp.star || imp.names.length === 0 ? null : imp.names);
+      for (const e of f.escapes ?? []) if (e.kind === "module") take(e.line, e.spec, null);
+      // A whole module: it and every module it re-exports.
+      const whole = new Set<string>();
+      for (let m = queue.pop(); m !== undefined; m = queue.pop()) {
+        if (whole.has(m)) continue;
+        whole.add(m);
+        seen.add(m);
+        queue.push(...forwards(m));
+      }
+      opaque.set(path, {
+        file: path, line: first.line, why: first.why, count: all.reduce((k, o) => k + o.count, 0), all,
+        any, global: scripts.has(path) || all.some((o) => o.reach === "global"), unbound, reach: [...seen].sort(),
+      });
     }
     const members = new Map<string, Place & { count: number }>();
     for (const { path, facts: f } of jsFiles) {
@@ -4018,7 +4062,7 @@ export function createWorld(input: ResolveInput): World {
         else members.set(`js:${m.why}`, { file: path, line: m.line, count: m.count });
       }
     }
-    return { uses, unbound, reach, modules, loadAny, offered, opaque, members };
+    return { uses, unbound, reach, modules, loadAny, offered, opaque, scripts, members };
   };
 
   const trace = (files: Iterable<string>): SiteTrace[] => {

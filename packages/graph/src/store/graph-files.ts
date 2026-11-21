@@ -6,7 +6,7 @@ import type { ProjectModel } from "../discovery/projects.js";
 import { FRAMEWORK_DATA_VERSION } from "../frameworks/stage.js";
 import type { FrameworkData } from "../frameworks/stage.js";
 import { projectFolder } from "../resolve.js";
-import type { DispatchSite, Escapes, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, Reach, UnknownSite } from "../types.js";
+import type { DispatchSite, Escapes, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, OpaqueFact, Reach, UnknownSite } from "../types.js";
 import type { OpenGeneration } from "./types.js";
 
 // How an index is read back: a file of it by its name, or null when the
@@ -76,8 +76,9 @@ const parseLines = <T>(text: string | null): T[] | null => {
 // framework layer's data (index/frameworks.json). 5: the escape paths of
 // each function (index/escapes.json), and the mark on an unbound call that
 // cannot run a plain function. 6: the files the reader cannot vouch for
-// (the opaque rows of index/escapes.json).
-export const INDEX_FORMAT = 6;
+// (the opaque rows of index/escapes.json). 7: what each opaque file
+// reaches, and the scripts.
+export const INDEX_FORMAT = 7;
 
 type Row = (number | number[])[];
 
@@ -132,7 +133,8 @@ export function writeIndex(g: Graph): Record<string, string> {
     modules: [...x.modules].map(([file, p]) => [e.s(file), ...place(p)]),
     loadAny: x.loadAny.map((p) => [...place(p), e.s(p.why)]),
     offered: [...x.offered].map(e.s),
-    opaque: [...x.opaque.values()].map((o) => [...place(o), e.s(o.why), o.count, o.all.map((a) => [e.s(a.why), a.line, a.count])]),
+    opaque: [...x.opaque.values()].map((o) => [...place(o), e.s(o.why), o.count, o.all.map((a) => [e.s(a.why), a.line, a.count, a.reach === "any" ? 2 : a.reach === "global" ? 1 : 0]), (o.any ? 1 : 0) | (o.global ? 2 : 0) | (o.unbound ? 4 : 0), o.reach.map(e.s)]),
+    scripts: [...x.scripts].map(e.s),
     members: [...x.members].map(([k, m]) => [e.s(k), ...place(m), m.count]),
   };
   const references = g.references.map(e.edge);
@@ -223,8 +225,8 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
     }));
     const summaries = new Map<string, InvocationSummary>(summaryRows.map((r) => [d.s(r[0] as number), { params: (r[1] as number[]).map(d.s), invokes: r[2] as number[], returns: (r[3] as number[]).map(d.s), returnsOther: r[4] === 1 }]));
     type N = number;
-    const x = JSON.parse(read("index/escapes.json") ?? "null") as { uses: N[][]; unbound: N[][]; reach: [N, N[][]][]; modules: N[][]; loadAny: N[][]; offered: N[]; opaque: N[][]; members: N[][] } | null;
-    if (!x || !Array.isArray(x.uses) || !Array.isArray(x.unbound) || !Array.isArray(x.reach) || !Array.isArray(x.modules) || !Array.isArray(x.loadAny) || !Array.isArray(x.offered) || !Array.isArray(x.opaque) || !Array.isArray(x.members)) return null;
+    const x = JSON.parse(read("index/escapes.json") ?? "null") as { uses: N[][]; unbound: N[][]; reach: [N, N[][]][]; modules: N[][]; loadAny: N[][]; offered: N[]; opaque: N[][]; scripts: N[]; members: N[][] } | null;
+    if (!x || !Array.isArray(x.uses) || !Array.isArray(x.unbound) || !Array.isArray(x.reach) || !Array.isArray(x.modules) || !Array.isArray(x.loadAny) || !Array.isArray(x.offered) || !Array.isArray(x.opaque) || !Array.isArray(x.scripts) || !Array.isArray(x.members)) return null;
     const placeOf = (r: N[], at: number) => ({ file: d.s(r[at] as N), line: r[at + 1] as N });
     const escapes: Escapes = {
       uses: new Map(x.uses.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
@@ -236,7 +238,12 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
       modules: new Map(x.modules.map((r) => [d.s(r[0] as N), placeOf(r, 1)])),
       loadAny: x.loadAny.map((r) => ({ ...placeOf(r, 0), why: d.s(r[2] as N) as Escapes["loadAny"][number]["why"] })),
       offered: new Set(x.offered.map(d.s)),
-      opaque: new Map(x.opaque.map((r) => [d.s(r[0] as N), { ...placeOf(r, 0), why: d.s(r[2] as N), count: r[3] as N, all: ((r[4] ?? []) as unknown as N[][]).map((a) => ({ why: d.s(a[0] as N), line: a[1] as N, count: a[2] as N })) }])),
+      opaque: new Map(x.opaque.map((r) => {
+        const flags = r[5] as N;
+        const all = ((r[4] ?? []) as unknown as N[][]).map((a): OpaqueFact => ({ why: d.s(a[0] as N), line: a[1] as N, count: a[2] as N, ...(a[3] === 2 ? { reach: "any" as const } : a[3] === 1 ? { reach: "global" as const } : {}) }));
+        return [d.s(r[0] as N), { ...placeOf(r, 0), why: d.s(r[2] as N), count: r[3] as N, all, any: (flags & 1) !== 0, global: (flags & 2) !== 0, unbound: (flags & 4) !== 0, reach: ((r[6] ?? []) as unknown as N[]).map(d.s) }];
+      })),
+      scripts: new Set(x.scripts.map(d.s)),
       members: new Map(x.members.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
     };
     const extra = { references: referenceRows.map(d.edge), dispatch, summaries, escapes };

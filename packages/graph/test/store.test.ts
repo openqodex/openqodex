@@ -1254,7 +1254,7 @@ describe("a build from before the list floor", () => {
     const g = await buildGraph({ repoRoot: root, store, mode: "fresh" });
     const files = writeIndex(g);
     expect(readIndexFrom((name) => files[name] ?? null, root)).not.toBeNull();
-    expect(INDEX_FORMAT).toBe(6);
+    expect(INDEX_FORMAT).toBe(7);
     const old = { ...files, "index/format.json": JSON.stringify({ format: 4 }) };
     expect(readIndexFrom((name) => old[name] ?? null, root)).toBeNull();
 
