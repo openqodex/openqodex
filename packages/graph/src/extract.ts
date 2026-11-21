@@ -85,7 +85,9 @@ import type { TreeVisitor } from "./walk.js";
 // assertion are type uses.
 // 45: a read of a local named `require` (a parameter, a let or const, a
 // destructured name) is no load, unless `createRequire(...)` made it.
-export const EXTRACTOR_VERSION = 45;
+// 46: `import.meta.url`, `dirname` and `filename`, `performance.now`,
+// `Atomics.wait` and `process.cpuUsage` leave a file readable.
+export const EXTRACTOR_VERSION = 46;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -2159,9 +2161,21 @@ const HARMLESS_GLOBALS = new Set([
 const HARMLESS_PROCESS = new Set([
   "env", "argv", "argv0", "execArgv", "execPath", "exit", "exitCode", "cwd", "chdir", "platform", "arch", "pid", "ppid", "title", "version", "versions", "release",
   "stdout", "stderr", "stdin", "on", "once", "off", "removeListener", "hrtime", "nextTick", "memoryUsage", "uptime", "kill", "emitWarning", "umask", "getuid", "getgid", "config",
+  "cpuUsage",
+]);
+// Members of other globals that read a clock or wait, and take no function:
+// a read of one reaches no code. A file that sets one to a function of its
+// own (`performance.now = tick`) uses that function as a value, which keeps
+// its own floor. Any other member, a computed one, or the name passed on
+// stays opaque (`performance.timerify(f)`, `Atomics.waitAsync`).
+const HARMLESS_MEMBERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["performance", new Set(["now"])],
+  ["Atomics", new Set(["wait"])],
 ]);
 function jsHarmlessGlobal(name: string, role: ValueRef["role"], prop: string | null): boolean {
   if (name === "process") return role === "object" && prop !== null && HARMLESS_PROCESS.has(prop);
+  const members = HARMLESS_MEMBERS.get(name);
+  if (members) return role === "object" && prop !== null && members.has(prop);
   return HARMLESS_GLOBALS.has(name);
 }
 const THIS_OUTSIDE = "uses `this` outside a class";
@@ -2171,8 +2185,11 @@ const JS_FN_LITERALS = new Set(["arrow_function", "function_expression", "functi
 const JS_FN_NODES = new Set([...JS_FN_LITERALS, "function_declaration", "generator_function_declaration", "method_definition"]);
 // The plain-data types a global name declared ambient may have.
 const PLAIN_TYPES = new Set(["string", "number", "boolean"]);
-// The members of `import.meta` that hold plain data.
+// The members of `import.meta` that hold plain data. The module's own
+// place (`url`, `dirname`, `filename`) is a string the runtime sets: a read
+// of it reaches no code, so it leaves the file readable.
 const META_PLAIN = new Set(["url", "dirname", "filename", "resolve", "env", "main"]);
+const META_PLACE = new Set(["url", "dirname", "filename"]);
 // Names of the global object, and the members of one that lead to it again,
 // to code made from a string, or to a loader.
 const GLOBAL_NAMES = new Set([...GLOBAL_OBJECTS, "top", "parent", "frames"]);
@@ -3018,7 +3035,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // `import.meta.url` and its like are strings; any other use
         // (Vite's `import.meta.glob`, the object passed on) may load modules.
         const up = node.parent;
-        const safe = up?.type === "member_expression" && up.childForFieldName("object")?.startIndex === node.startIndex && META_PLAIN.has(up.childForFieldName("property")?.text ?? "");
+        const member = up?.type === "member_expression" && up.childForFieldName("object")?.startIndex === node.startIndex ? (up.childForFieldName("property")?.text ?? "") : "";
+        if (META_PLACE.has(member)) return;
+        const safe = META_PLAIN.has(member);
         ctx.addOpaque(safe ? "uses `import.meta` that the reader does not read" : "uses `import.meta` for more than its url or path and so may load modules", node.startPosition.row + 1, safe ? undefined : "any");
         return;
       }

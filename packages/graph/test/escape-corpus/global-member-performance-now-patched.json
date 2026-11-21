@@ -1,0 +1,23 @@
+{
+  "covers": "a function set as `performance.now` runs at every `performance.now()`: it keeps its floor as a value use",
+  "files": {
+    "src/clock.ts": "export function tick(): number {\n  return 1;\n}\nperformance.now = tick;\n",
+    "src/run.ts": "export function stamp(): number {\n  return performance.now();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/clock.ts#tick",
+      "caller": "src/run.ts#stamp",
+      "file": "src/run.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/clock.ts#tick",
+      "reason": "it is used as a value",
+      "at": "src/clock.ts:4"
+    }
+  ]
+}

@@ -310,7 +310,7 @@ describe("where a floor's hidden callers can be", () => {
   };
 
   it("reads tests, fixtures, a package's corpus, benchmarks and the top-level scripts as outside product code (12)", () => {
-    for (const p of ["src/a.test.ts", "test/x.ts", "examples/fixtures/a.ts", "packages/graph/corpus/ts/a.ts", "benchmark/run.mjs", "app/benchmarks/x.ts", "scripts/copy-assets.mjs"]) expect(isOutsideProduct(p), p).toBe(true);
+    for (const p of ["src/a.test.ts", "test/x.ts", "examples/fixtures/a.ts", "packages/graph/corpus/ts/a.ts", "benchmark/run.mjs", "app/benchmarks/x.ts", "scripts/copy-assets.mjs", "packages/graph/scripts/score.mjs"]) expect(isOutsideProduct(p), p).toBe(true);
     for (const p of ["src/a.ts", "packages/graph/src/build.ts", "app/scripts/x.ts", "src/corpus/a.ts", "packages/cli/src/assets.ts"]) expect(isOutsideProduct(p), p).toBe(false);
   });
 
