@@ -7,7 +7,7 @@
 // patterns were written here against the pinned grammar files.
 import { createHash } from "node:crypto";
 import type { Node, Tree } from "web-tree-sitter";
-import type { BoundImport, CallFact, DefFact, FileFacts, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
+import type { BoundImport, CallFact, DefFact, EscapeFact, FileFacts, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
 import { MAX_TYPE_DEPTH } from "./types.js";
 import { walkTree } from "./walk.js";
 import type { TreeVisitor } from "./walk.js";
@@ -69,7 +69,12 @@ import type { TreeVisitor } from "./walk.js";
 // (FileFacts.literals); a literal counts its computed keys that hold code
 // (LiteralFact.unread), and a value given members by assignment or
 // Object.assign is recorded as one (LiteralFact.by).
-export const EXTRACTOR_VERSION = 39;
+// 40: TypeScript and JavaScript record every read of a name or a member path
+// that is not a call (roles other, object, index); a named function
+// expression's own name is bound to its definition inside it; and the
+// places a function may be reached by a name the graph cannot follow
+// (FileFacts.escapes).
+export const EXTRACTOR_VERSION = 40;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -324,6 +329,24 @@ class Ctx {
   exportsLocal: { local: string; exported: string; line?: number }[] = [];
   defaultExport: string | null = null;
   goPackage: string | null = null;
+  escapes: EscapeFact[] = [];
+  variables = new Set<string>();
+  exportedVariables = new Set<string>();
+  // TypeScript and JavaScript: the name nodes already recorded as a value,
+  // by their start, so the catch-all read of every name records each once.
+  readAt = new Set<number>();
+  // Loads already read as a binding (jsRequire), by the call's start.
+  consumedLoads = new Set<number>();
+  // The member read after a name with role `object` (`m.run`): what a
+  // module loaded by a computed path is read for.
+  propOf = new Map<ValueRef, string>();
+  // An escape that holds only when its name is not a local, a nested
+  // definition, an import or a top-level definition of the file
+  // (`eval`, `window`, `exports`), decided once every scope is known.
+  private pendingEscapes: { fact: EscapeFact; scope: Scope; name: string }[] = [];
+  // Names bound to a module loaded by a computed path: each read of one as
+  // `m.name` or `m.name()` adds that name; any other read means any name.
+  private loadBindings: { name: string; scope: Scope; fact: { kind: "load"; line: number; names?: string[] }; names: Set<string>; any: boolean }[] = [];
   top: Scope;
   // Calls whose names are bound when the walk ends, each with a reference to
   // its scope: a scope's names are known only once all of it has been read
@@ -588,6 +611,7 @@ class Ctx {
   addValue(v: { name: Node; recv: Receiver }, role: ValueRef["role"], extra: { call?: number; arg?: number; key?: string } = {}): number {
     const { line, column } = pos(v.name);
     const ref: ValueRef = { name: v.name.text, line, column, caller: this.caller(), recv: v.recv, role };
+    this.readAt.add(v.name.startIndex);
     if (extra.call !== undefined) ref.call = extra.call;
     if (extra.arg !== undefined) ref.arg = extra.arg;
     if (extra.key !== undefined) ref.key = extra.key;
@@ -646,6 +670,20 @@ class Ctx {
     this.tableUses.push({ name, scope: this.top });
   }
 
+  // A place a function may be reached by a name the graph cannot follow;
+  // with `name`, only when that name is not one the file declares.
+  addEscape(fact: EscapeFact, name?: string): void {
+    if (name === undefined) this.escapes.push(fact);
+    else this.pendingEscapes.push({ fact, scope: this.top, name });
+  }
+
+  // A name given a module loaded by a computed path, in the scope that declares it.
+  bindLoad(name: string, line: number, block: boolean): void {
+    const fact: { kind: "load"; line: number; names?: string[] } = { kind: "load", line };
+    this.escapes.push(fact);
+    this.loadBindings.push({ name, scope: block ? this.top.decl : this.top.fnDecl, fact, names: new Set(), any: false });
+  }
+
   // A table that something outside this file may change from the start.
   openTable(index: number): void {
     this.openTables.add(index);
@@ -664,6 +702,15 @@ class Ctx {
   facts(): FileFacts {
     readingScope = null;
     const topNames = new Set(this.defs.filter((d) => d.topLevel).map((d) => d.name));
+    // A read of a name bound to a module loaded by a computed path: `m.name`
+    // adds the name, a call of it the module's default, anything else any name.
+    const loadRead = (scope: Scope, name: string, prop: string | null) => {
+      for (const b of this.loadBindings) {
+        if (b.name !== name || this.lookup(scope, name) !== b.scope) continue;
+        if (prop === null) b.any = true;
+        else b.names.add(prop);
+      }
+    };
     // A local alias's call node, made into the call it names.
     const aliasCalls: { call: CallFact; callNode: number }[] = [...this.aliasCalls];
     const bindAlias = (call: CallFact, at: Scope | null, name: string, refOnly = false) => {
@@ -689,6 +736,7 @@ class Ctx {
         if (!ident || ident.path.length === 0) bindAlias(call, at, name, true);
         continue;
       }
+      if (this.loadBindings.length > 0) loadRead(scope, call.name, "default");
       const at = this.lookup(scope, call.name);
       if (!at) continue;
       const fn = at.fns?.get(call.name);
@@ -727,8 +775,10 @@ class Ctx {
     // renumbered over the ones kept.
     const drop = new Set<ValueRef>();
     for (const { ref, scope, ident } of this.pendingValues) {
-      // The name of a table passed on, assigned or returned: what it holds may change elsewhere.
-      if (!ident && ref.recv.kind === "none") {
+      if (!ident && ref.recv.kind === "none" && this.loadBindings.length > 0) loadRead(scope, ref.name, ref.role === "object" ? (this.propOf.get(ref) ?? null) : null);
+      // The name of a table passed on, assigned or returned: what it holds
+      // may change elsewhere. A read of its member or by a computed key does not.
+      if (!ident && ref.recv.kind === "none" && ref.role !== "object" && ref.role !== "index") {
         const table = this.lookup(scope, ref.name)?.tables?.get(ref.name);
         if (table !== undefined) this.openTables.add(table);
       }
@@ -747,6 +797,9 @@ class Ctx {
       else if (at.depth > 0 || !topNames.has(ref.name)) drop.add(ref);
     }
     this.pendingValues = [];
+    for (const { fact, scope, name } of this.pendingEscapes) if (!this.lookup(scope, name) && !topNames.has(name)) this.escapes.push(fact);
+    this.pendingEscapes = [];
+    for (const b of this.loadBindings) if (!b.any) b.fact.names = [...b.names].sort();
     for (const ref of this.values) if (ref.recv.kind === "other") drop.add(ref);
     const renumber = new Map<number, number>();
     const values: ValueRef[] = [];
@@ -819,6 +872,9 @@ class Ctx {
       exportsLocal: this.exportsLocal,
       defaultExport: this.defaultExport,
       goPackage: this.goPackage,
+      ...(this.escapes.length > 0 ? { escapes: this.escapes } : {}),
+      ...(this.variables.size > 0 ? { variables: [...this.variables].filter((n) => !topNames.has(n)) } : {}),
+      ...(this.exportedVariables.size > 0 ? { exportedVariables: [...this.exportedVariables].filter((n) => !topNames.has(n)) } : {}),
     };
   }
 }
@@ -864,6 +920,11 @@ const JS_TYPES = new Set([
   "statement_block",
   "switch_body",
   "catch_clause",
+  "identifier",
+  "shorthand_property_identifier",
+  "member_expression",
+  "subscript_expression",
+  "with_statement",
 ]);
 
 // The constraint a TypeScript type parameter in scope stands for (`T
@@ -1410,7 +1471,7 @@ function isExportedDecl(node: Node): boolean {
 }
 
 function jsImport(ctx: Ctx, node: Node): void {
-  const source = node.childForFieldName("source");
+  const source = node.childForFieldName("source") ?? node.namedChildren.find((c) => c.type === "import_require_clause")?.namedChildren.find((c) => c.type === "string");
   if (!source) return;
   const fact: ImportFact = {
     spec: stringContent(source),
@@ -1422,6 +1483,14 @@ function jsImport(ctx: Ctx, node: Node): void {
     typeOnly: node.children.some((c) => c.type === "type"),
   };
   const clause = node.namedChildren.find((c) => c.type === "import_clause");
+  // TypeScript `import m = require("./m")`: m is bound to the whole module.
+  const required = node.namedChildren.find((c) => c.type === "import_require_clause");
+  if (required) {
+    const name = required.namedChildren.find((c) => c.type === "identifier");
+    const spec = required.namedChildren.find((c) => c.type === "string");
+    if (name && spec) ctx.imports.push({ spec: stringContent(spec), ...pos(node), names: [], namespace: name.text, star: false, reexport: false, typeOnly: false });
+    return;
+  }
   for (const part of clause?.namedChildren ?? []) {
     if (part.type === "identifier") fact.names.push({ imported: "default", local: part.text });
     else if (part.type === "namespace_import") fact.namespace = part.firstNamedChild?.text ?? null;
@@ -1485,15 +1554,19 @@ function isDefaultExport(node: Node): boolean {
 function jsCommonExport(ctx: Ctx, node: Node, left: Node, right: Node | null): Leave | boolean {
   if (!right || !ctx.atModuleLevel() || ctx.caller() >= 0) return false;
   const target = left.text.replace(/\s+/g, "");
+  // A value the export table cannot list whole: the module's exports may hold any function.
+  const unread = () => ctx.addEscape({ kind: "own", line: node.startPosition.row + 1 });
   if (target === "module.exports") {
     if (right.type === "identifier") ctx.defaultExport = right.text;
+    else if (right.type !== "object" && !isFnNode(right) && !DATA_VALUES.has(right.type)) unread();
     for (const p of right.type === "object" ? right.namedChildren : []) {
       if (p.type === "shorthand_property_identifier") ctx.exportsLocal.push({ local: p.text, exported: p.text, line: p.startPosition.row + 1 });
       else if (p.type === "pair") {
         const key = p.childForFieldName("key");
         const value = p.childForFieldName("value");
-        if (key && value?.type === "identifier") ctx.exportsLocal.push({ local: value.text, exported: key.text, line: p.startPosition.row + 1 });
-      }
+        if (key && key.type !== "computed_property_name" && value?.type === "identifier") ctx.exportsLocal.push({ local: value.text, exported: key.type === "string" ? stringContent(key) : key.text, line: p.startPosition.row + 1 });
+        else if (!value || key?.type === "computed_property_name" || (!isFnNode(value) && !DATA_VALUES.has(value.type))) unread();
+      } else if (p.type !== "comment" && p.type !== "method_definition") unread();
     }
     return true;
   }
@@ -1509,35 +1582,120 @@ function jsCommonExport(ctx: Ctx, node: Node, left: Node, right: Node | null): L
     const def = ctx.addDef(node, prop, "function", { topLevel: true, exported: true, results: jsResults(right) });
     return ctx.push({ def, cls: null, locals: null });
   }
+  if (!DATA_VALUES.has(right.type)) unread();
+  else ctx.exportedVariables.add(name);
   return false;
 }
 
 // `const x = require("./m")` and `const { a, b: c } = require("./m")`, and the
 // same with `await import("./m")`. Inside a function or a block the names
 // belong to that scope (`block`: a `let` or `const`). Without `await` the
-// value is a promise, not the module, so it is not an import.
+// value is a promise, not the module, so it is not an import. A pattern the
+// reader does not read whole (a default value, a rest, a nested part, an
+// array, a computed key) keeps the names it does read and marks the module:
+// any of its names may be reached. A computed path is a load of a module the
+// graph cannot name: the names a pattern reads, or what a name bound to it
+// is read for (Ctx.bindLoad).
 function jsRequire(ctx: Ctx, node: Node, nameNode: Node, value: Node, block: boolean): boolean {
   const awaited = value.type === "await_expression";
   const call = awaited ? value.firstNamedChild : value;
   if (call?.type !== "call_expression") return false;
   const fn = call.childForFieldName("function");
-  if (awaited ? fn?.type !== "import" : fn?.text !== "require") return false;
-  const arg = call.childForFieldName("arguments")?.firstNamedChild;
-  if (arg?.type !== "string") return false;
+  if (awaited ? fn?.type !== "import" : fn?.type !== "identifier" || fn.text !== "require") return false;
+  const arg = call.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment");
+  const line = node.startPosition.row + 1;
+  ctx.consumedLoads.add(call.startIndex);
+  // Exported as a variable, the module goes wherever an importer takes it.
+  if (arg?.type === "string" && isExportedDecl(node)) ctx.addEscape({ kind: "module", spec: stringContent(arg), line });
+  if (arg?.type !== "string") {
+    if (nameNode.type === "identifier") {
+      ctx.setLocal(nameNode.text, null, block);
+      ctx.bindLoad(nameNode.text, line, block);
+      return true;
+    }
+    const keys = jsPatternKeys(nameNode);
+    ctx.addEscape(keys && keys.full ? { kind: "load", line, names: keys.names.map((n) => n.imported) } : { kind: "load", line });
+    for (const name of patternNames(nameNode)) ctx.setLocal(name, null, block);
+    return true;
+  }
   const fact: ImportFact = { spec: stringContent(arg), ...pos(node), names: [], namespace: null, star: false, reexport: false, typeOnly: false };
   if (nameNode.type === "identifier") fact.namespace = nameNode.text;
-  else if (nameNode.type === "object_pattern") {
-    for (const p of nameNode.namedChildren) {
-      const key = p.type === "pair_pattern" ? p.childForFieldName("key") : null;
-      const val = p.type === "pair_pattern" ? p.childForFieldName("value") : null;
-      if (p.type === "shorthand_property_identifier_pattern") fact.names.push({ imported: p.text, local: p.text });
-      else if (key && val?.type === "identifier") fact.names.push({ imported: key.text, local: val.text });
-      // A default value or a nested pattern: a local whose value is not known.
-      else for (const name of patternNames(p)) ctx.setLocal(name, null, block);
+  else {
+    const keys = jsPatternKeys(nameNode);
+    if (keys) fact.names.push(...keys.names);
+    if (!keys || !keys.full) {
+      ctx.addEscape({ kind: "module", spec: fact.spec, line });
+      // A default value, a rest or a nested pattern: a local whose value is not known.
+      const read = new Set(fact.names.map((n) => n.local));
+      for (const name of patternNames(nameNode)) if (!read.has(name)) ctx.setLocal(name, null, block);
     }
   }
   ctx.addImport(fact, block);
   return true;
+}
+
+// The names an object pattern reads by a plain key (`{ a }`, `{ a: b }`,
+// `{ "a": b }`), and whether it reads nothing else; null for any other pattern.
+function jsPatternKeys(pattern: Node): { names: { imported: string; local: string }[]; full: boolean } | null {
+  if (pattern.type !== "object_pattern") return null;
+  const names: { imported: string; local: string }[] = [];
+  let full = true;
+  for (const p of pattern.namedChildren) {
+    if (p.type === "comment") continue;
+    const key = p.type === "pair_pattern" ? p.childForFieldName("key") : null;
+    const val = p.type === "pair_pattern" ? p.childForFieldName("value") : null;
+    if (p.type === "shorthand_property_identifier_pattern") names.push({ imported: p.text, local: p.text });
+    else if ((key?.type === "property_identifier" || key?.type === "string") && val?.type === "identifier") names.push({ imported: key.type === "string" ? stringContent(key) : key.text, local: val.text });
+    else full = false;
+  }
+  return { names, full };
+}
+
+// The escapes a call may open: a load the reader did not read as a binding,
+// a direct eval, `Function`, a string run as code by a timer, a call that
+// makes or uses a loader (`createRequire`, `module.require`), an eval
+// through the global object.
+function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
+  if (!fn) return;
+  const line = node.startPosition.row + 1;
+  const first = node.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment") ?? null;
+  const literal = first?.type === "string";
+  // A load whose value is thrown away runs the module and reads none of its names.
+  let up = node.parent;
+  if (up?.type === "await_expression") up = up.parent;
+  const discarded = up?.type === "expression_statement";
+  const load = () => {
+    if (!literal) ctx.addEscape({ kind: "load", line });
+    else if (!discarded) ctx.addEscape({ kind: "module", spec: stringContent(first as Node), line });
+  };
+  if (fn.type === "import" || (fn.type === "identifier" && fn.text === "require")) {
+    if (!ctx.consumedLoads.has(node.startIndex)) load();
+    return;
+  }
+  if (fn.type === "identifier") {
+    if (fn.text === "eval") ctx.addEscape({ kind: "eval", line }, "eval");
+    else if (fn.text === "Function") ctx.addEscape({ kind: "global", line }, "Function");
+    else if ((fn.text === "setTimeout" || fn.text === "setInterval") && first && first.type !== "arrow_function" && first.type !== "function_expression" && first.type !== "function" && first.type !== "identifier" && first.type !== "member_expression") ctx.addEscape({ kind: "global", line }, fn.text);
+    else if (fn.text === "createRequire") {
+      // `const require = createRequire(...)`: its uses are read as require's
+      // are; `createRequire(...)("x")` as a load of x.
+      const name = node.parent?.type === "variable_declarator" ? node.parent.childForFieldName("name") : null;
+      const called = node.parent?.type === "call_expression" && sameNode(node.parent.childForFieldName("function"), node);
+      if (!called && (name?.type !== "identifier" || name.text !== "require")) ctx.addEscape({ kind: "load", line });
+    }
+    return;
+  }
+  if (fn.type === "call_expression") {
+    const inner = fn.childForFieldName("function");
+    if (inner?.type === "identifier" && inner.text === "createRequire") load();
+    return;
+  }
+  if (fn.type === "member_expression") {
+    const prop = fn.childForFieldName("property")?.text;
+    const object = jsUnwrap(fn.childForFieldName("object"));
+    if (prop === "require" && loaderOwner(object)) load();
+    else if (prop === "eval" && object?.type === "identifier" && GLOBAL_OBJECTS.has(object.text)) ctx.addEscape({ kind: "global", line }, object.text);
+  }
 }
 
 function newType(value: Node | null): TypeRef | null {
@@ -1744,6 +1902,119 @@ function jsValueType(ctx: Ctx, value: Node | null): TypeRef | null {
   return type;
 }
 
+// ---------- escape paths (TypeScript, JavaScript) ----------
+
+// Names of the global object: a computed member of one may be any global.
+const GLOBAL_OBJECTS = new Set(["globalThis", "window", "self", "global"]);
+// The objects whose `require` member is a loader: a module, and the ones
+// `require.main` and `process.mainModule` give. Any other way to one reads
+// `module`, `require` or `process.mainModule` first, which is a load itself.
+const LOADER_OWNERS = new Set(["module", "require.main", "process.mainModule", "module.parent"]);
+const loaderOwner = (object: Node | null): boolean => object !== null && LOADER_OWNERS.has(object.text.replace(/\s+/g, ""));
+// Wrappers that keep the value of what they hold.
+const JS_WRAPPERS = new Set(["parenthesized_expression", "as_expression", "satisfies_expression", "non_null_expression", "type_assertion"]);
+// Nodes whose `name` field declares a name, never reads one.
+const JS_NAMED = new Set([
+  "variable_declarator", "function_declaration", "generator_function_declaration", "function_expression", "function", "generator_function",
+  "class_declaration", "abstract_class_declaration", "class", "method_definition", "enum_declaration", "internal_module", "module",
+  "function_signature", "interface_declaration", "type_alias_declaration", "import_alias", "method_signature", "abstract_method_signature",
+  "public_field_definition", "field_definition", "property_signature",
+]);
+// Nodes whose identifiers are never reads: patterns, clauses, type positions.
+const JS_NOT_READ = new Set([
+  "formal_parameters", "array_pattern", "rest_pattern", "object_pattern", "export_specifier", "namespace_export", "import_specifier",
+  "import_clause", "namespace_import", "import_require_clause", "meta_property", "nested_identifier", "type_query", "type_predicate",
+  "asserts", "jsx_namespace_name", "jsx_closing_element", "export_statement",
+]);
+
+const sameNode = (a: Node | null | undefined, b: Node): boolean => !!a && a.startIndex === b.startIndex && a.endIndex === b.endIndex && a.type === b.type;
+
+// A name or member path in a place that writes, declares or calls it, not
+// one that reads its value, from its parent's type and the field it holds
+// it in. `export default name` is read by the export table.
+function jsNotRead(parent: string | null, field: () => string | null): boolean {
+  if (parent === null) return true;
+  switch (parent) {
+    case "call_expression":
+      return field() === "function";
+    case "new_expression":
+      return field() === "constructor";
+    case "assignment_expression":
+    case "augmented_assignment_expression":
+    case "for_in_statement":
+    case "assignment_pattern":
+    case "object_assignment_pattern":
+      return field() === "left";
+    case "required_parameter":
+    case "optional_parameter":
+      return field() === "pattern";
+    case "pair_pattern":
+      return field() === "value";
+    case "arrow_function":
+    case "catch_clause":
+      return field() === "parameter";
+    case "jsx_opening_element":
+    case "jsx_self_closing_element":
+      return field() === "name";
+  }
+  if (JS_NOT_READ.has(parent)) return true;
+  return JS_NAMED.has(parent) && field() === "name";
+}
+
+// What a read's value is used for, through the wrappers that keep it:
+// the object before a dot, the object of a computed member, or anything else.
+function jsReadRole(n: Node, parent: string | null, field: () => string | null): { role: "object" | "index" | "other"; prop: string | null } {
+  // The common places, read without making the parent.
+  if (parent === "subscript_expression") return field() === "object" ? { role: "index", prop: null } : { role: "other", prop: null };
+  if (parent !== null && !JS_WRAPPERS.has(parent) && parent !== "member_expression") return { role: "other", prop: null };
+  if (parent === "member_expression" && field() !== "object") return { role: "other", prop: null };
+  let at = n;
+  let p = n.parent;
+  while (p && JS_WRAPPERS.has(p.type) && (p.type === "type_assertion" ? sameNode(p.lastNamedChild, at) : sameNode(p.firstNamedChild, at))) {
+    at = p;
+    p = p.parent;
+  }
+  if (p?.type === "member_expression" && sameNode(p.childForFieldName("object"), at)) {
+    const prop = p.childForFieldName("property");
+    return { role: "object", prop: prop?.type === "property_identifier" ? prop.text : null };
+  }
+  if (p?.type === "subscript_expression" && sameNode(p.childForFieldName("object"), at)) return { role: "index", prop: null };
+  return { role: "other", prop: null };
+}
+
+// `this` where the graph has not proved it the instance of a class: a
+// function that is no arrow and no method, or the top of a file.
+function jsLooseThis(ctx: Ctx): boolean {
+  return ctx.top.thisKnown === false || !ctx.cls();
+}
+
+// The escapes a read of a name may open: `require` or `createRequire` used
+// other than as a direct call (`const load = require`), `eval` read and
+// called elsewhere, the global object passed on or indexed, a CommonJS
+// module's own `exports` or `module` read as a value.
+function jsNameEscapes(ctx: Ctx, name: string, role: ValueRef["role"], prop: string | null, line: number): void {
+  switch (name) {
+    case "require":
+      if (role !== "object" || prop !== "resolve") ctx.addEscape({ kind: "load", line });
+      return;
+    case "createRequire":
+      ctx.addEscape({ kind: "load", line });
+      return;
+    case "eval":
+      ctx.addEscape({ kind: "eval", line }, name);
+      ctx.addEscape({ kind: "global", line }, name);
+      return;
+    case "exports":
+      if (role !== "object") ctx.addEscape({ kind: "own", line }, name);
+      return;
+    case "module":
+      if (role !== "object") ctx.addEscape({ kind: "own", line }, name);
+      if (role !== "object" || prop === "parent" || prop === "children" || prop === "constructor") ctx.addEscape({ kind: "load", line }, name);
+      return;
+  }
+  if (GLOBAL_OBJECTS.has(name) && (role !== "object" || prop === "eval")) ctx.addEscape({ kind: "global", line }, name);
+}
+
 function jsResults(fn: Node): TypeRef[] | undefined {
   const r = jsTypeRef(fn.childForFieldName("return_type"));
   return r ? [r] : undefined;
@@ -1777,6 +2048,10 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     // and so is that of a function a class field holds.
     const ownThis = (def >= 0 && ctx.defs[def]?.kind === "method") || node.parent?.type === "public_field_definition" || node.parent?.type === "field_definition";
     const leave = ctx.push({ def, cls: null, locals, ...(typeParams ? { typeParams } : {}), ...(node.type === "arrow_function" ? {} : { thisKnown: ownThis }) });
+    // A named function expression (`const f = function inner() {}`): its own
+    // name, inside its body, is the definition it makes.
+    const own = def >= 0 && (node.type === "function_expression" || node.type === "function" || node.type === "generator_function") ? node.childForFieldName("name") : null;
+    if (own?.type === "identifier") (ctx.top.fns ??= new Map()).set(own.text, def);
     if (def >= 0 && !(ctx.defs[def] as DefFact).results) {
       const generator = node.type.startsWith("generator") || node.children.some((c) => c.type === "*");
       returned.set(def, { types: [], bad: generator, async: node.children.some((c) => c.type === "async") });
@@ -1897,7 +2172,10 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
     const object = fn.childForFieldName("object");
     if (object?.type === "identifier") ctx.tableCall(ctx.calls.length - 1, object.text);
   };
-  walkTree(tree.rootNode, readers, { interesting: JS_TYPES, visit: (node) => {
+  // The reads a name or a member path may be: none where its place declares, writes or calls it.
+  const reads = (type: string, field: () => string | null, upType: (k: number) => string | null): boolean =>
+    (type !== "identifier" && type !== "shorthand_property_identifier" && type !== "member_expression") || !jsNotRead(upType(1), field);
+  walkTree(tree.rootNode, readers, { interesting: JS_TYPES, wants: reads, visit: (node, field, upType) => {
     switch (node.type) {
       case "import_statement":
         jsImport(ctx, node);
@@ -2016,6 +2294,14 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (!name) return;
         // `let` and `const` belong to their block, `var` to its function.
         const block = node.parent?.type !== "variable_declaration";
+        // A module-level variable: a value an import of it binds.
+        if (ctx.caller() < 0 && (node.parent?.parent?.type === "program" || node.parent?.parent?.type === "export_statement")) {
+          const exported = isExportedDecl(node);
+          for (const n of name.type === "identifier" ? [name.text] : patternNames(name)) {
+            ctx.variables.add(n);
+            if (exported) ctx.exportedVariables.add(n);
+          }
+        }
         // The walk goes on into the declarator either way: a default value
         // such as `{ a = fallback() }` holds calls of its own.
         if (value && jsRequire(ctx, node, name, value, block)) return;
@@ -2193,6 +2479,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       }
       case "call_expression": {
         const fn = node.childForFieldName("function");
+        jsCallEscapes(ctx, node, jsUnwrap(fn));
         if (fn?.type === "import") return;
         const before = ctx.calls.length;
         const inner = fn?.type === "await_expression" ? fn.firstNamedChild : fn;
@@ -2216,7 +2503,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         return;
       }
       case "new_expression": {
-        jsCallee(ctx, node.childForFieldName("constructor"));
+        const ctor = node.childForFieldName("constructor");
+        if (ctor?.type === "identifier" && ctor.text === "Function") ctx.addEscape({ kind: "global", line: node.startPosition.row + 1 }, "Function");
+        jsCallee(ctx, ctor);
         jsArgs(ctx, node.childForFieldName("arguments"), undefined);
         for (const t of jsTypeNames(node.childForFieldName("type_arguments"))) ctx.addTypeUse(t, ctx.caller());
         return;
@@ -2329,6 +2618,46 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         }
         return leave;
       }
+      case "identifier":
+      case "shorthand_property_identifier": {
+        // Every other read of a name: a value use, unless a rule above
+        // recorded it or the place writes, declares or calls it.
+        const text = node.text;
+        if (text === "undefined" || text === "arguments") return;
+        const { role, prop } = jsReadRole(node, upType(1), field);
+        jsNameEscapes(ctx, text, role, prop, node.startPosition.row + 1);
+        if (ctx.readAt.has(node.startIndex)) return;
+        const ref = ctx.values[ctx.addValue({ name: node, recv: { kind: "none" } }, role)] as ValueRef;
+        if (prop !== null) ctx.propOf.set(ref, prop);
+        return;
+      }
+      case "member_expression": {
+        const prop = node.childForFieldName("property");
+        if (!prop) return;
+        const line = node.startPosition.row + 1;
+        const { role } = jsReadRole(node, upType(1), field);
+        const object = jsUnwrap(node.childForFieldName("object"));
+        if ((prop.text === "require" && loaderOwner(object)) || (prop.text === "mainModule" && object?.type === "identifier" && object.text === "process")) ctx.addEscape({ kind: "load", line });
+        if (prop.text === "eval" && object?.type === "identifier" && GLOBAL_OBJECTS.has(object.text)) ctx.addEscape({ kind: "global", line }, object.text);
+        if (role !== "object" && object?.type === "identifier" && object.text === "module" && prop.text === "exports") ctx.addEscape({ kind: "own", line }, "module");
+        if (ctx.readAt.has(prop.startIndex) || (prop.type !== "property_identifier" && prop.type !== "private_property_identifier")) return;
+        const recv = object ? jsReceiver(ctx, object) : null;
+        if (recv && recv.kind !== "other") ctx.addValue({ name: prop, recv }, role);
+        return;
+      }
+      case "subscript_expression": {
+        // `this[k]` where `this` may be the global object or a CommonJS module's exports.
+        const object = jsUnwrap(node.childForFieldName("object"));
+        if (object?.type === "this" && jsLooseThis(ctx)) {
+          const line = node.startPosition.row + 1;
+          ctx.addEscape({ kind: "global", line });
+          ctx.addEscape({ kind: "own", line });
+        }
+        return;
+      }
+      case "with_statement":
+        ctx.addEscape({ kind: "eval", line: node.startPosition.row + 1 });
+        return;
       case "jsx_opening_element":
       case "jsx_self_closing_element": {
         const name = node.childForFieldName("name");

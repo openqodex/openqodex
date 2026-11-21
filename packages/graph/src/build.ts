@@ -583,6 +583,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       unknowns,
       unknownNames,
       valueCalls,
+      escapes: resolved.escapes,
       model,
       goModules,
       projectOf,

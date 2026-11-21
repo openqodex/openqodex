@@ -1,0 +1,22 @@
+{
+  "covers": "a computed member of the global object in a script file (rule H2)",
+  "files": {
+    "public/app.js": "function f() {}\nwindow[name]();\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/app.js#f",
+      "caller": "public/app.js",
+      "file": "public/app.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "public/app.js#f",
+      "reason": "reaches the global scope",
+      "at": "public/app.js:2"
+    }
+  ]
+}

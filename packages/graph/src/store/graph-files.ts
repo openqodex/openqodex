@@ -6,7 +6,7 @@ import type { ProjectModel } from "../discovery/projects.js";
 import { FRAMEWORK_DATA_VERSION } from "../frameworks/stage.js";
 import type { FrameworkData } from "../frameworks/stage.js";
 import { projectFolder } from "../resolve.js";
-import type { DispatchSite, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, UnknownSite } from "../types.js";
+import type { DispatchSite, Escapes, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, Reach, UnknownSite } from "../types.js";
 import type { OpenGeneration } from "./types.js";
 
 // How an index is read back: a file of it by its name, or null when the
@@ -73,8 +73,10 @@ const parseLines = <T>(text: string | null): T[] | null => {
 // number. Measured on vscode: the plain JSON lines were 552 MB, past the
 // folder's 512 MB bound on their own. 3: the uses that are not calls
 // (references), the dispatch sites and the invocation summaries. 4: the
-// framework layer's data (index/frameworks.json).
-export const INDEX_FORMAT = 4;
+// framework layer's data (index/frameworks.json). 5: the escape paths of
+// each function (index/escapes.json), and the mark on an unbound call that
+// cannot run a plain function.
+export const INDEX_FORMAT = 5;
 
 type Row = (number | number[])[];
 
@@ -119,7 +121,17 @@ export function writeIndex(g: Graph): Record<string, string> {
   const edges = g.edges.map(e.edge);
   const importers = [...g.importers.values()].flat().map(e.edge);
   const misses = g.misses.map((m) => [e.s(m.target), e.s(m.name), e.s(m.from), e.site(m.site)]);
-  const unknowns = g.unknowns.map((u) => [e.s(u.file), u.line, u.column, e.s(u.name), e.s(u.cause), e.s(u.shape), e.s(u.caller), u.scope === "project" ? 1 : 0, e.s(u.note), u.candidates ? u.candidates.map(e.s) : -1, ...(u.receiver ? [e.s(u.receiver)] : [])]);
+  const unknowns = g.unknowns.map((u) => [e.s(u.file), u.line, u.column, e.s(u.name), e.s(u.cause), e.s(u.shape), e.s(u.caller), u.scope === "project" ? 1 : 0, e.s(u.note), u.candidates ? u.candidates.map(e.s) : -1, ...(u.receiver || u.notPlain ? [e.s(u.receiver)] : []), ...(u.notPlain ? [1] : [])]);
+  const place = (p: { file: string; line: number }) => [e.s(p.file), p.line];
+  const x = g.escapes;
+  const escapes = {
+    uses: [...x.uses].map(([id, u]) => [e.s(id), ...place(u), u.count]),
+    unbound: [...x.unbound].map(([k, u]) => [e.s(k), ...place(u), u.count]),
+    reach: [...x.reach].map(([id, rs]) => [e.s(id), rs.map((r) => [e.s(r.why), ...place(r), e.s(r.name)])]),
+    modules: [...x.modules].map(([file, p]) => [e.s(file), ...place(p)]),
+    loadAny: x.loadAny.map((p) => [...place(p), e.s(p.why)]),
+    offered: [...x.offered].map(e.s),
+  };
   const references = g.references.map(e.edge);
   const dispatch = g.dispatch.map((x) => [e.s(x.file), x.line, x.column, e.s(x.caller), e.s(x.name), x.declared.map(e.s), x.candidates.map(e.s), x.total, e.s(x.rule)]);
   const summaries = [...g.summaries].map(([id, x]) => [e.s(id), x.params.map(e.s), x.invokes, x.returns.map(e.s), x.returnsOther ? 1 : 0]);
@@ -137,6 +149,7 @@ export function writeIndex(g: Graph): Record<string, string> {
     "index/summaries.jsonl": lines(summaries),
     "index/status.json": JSON.stringify(g.status),
     "index/frameworks.json": JSON.stringify(g.frameworks ?? null),
+    "index/escapes.json": JSON.stringify(escapes),
   };
 }
 
@@ -190,7 +203,8 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
       const note = d.n(r[8] as number);
       if (note !== null) u.note = note;
       if (Array.isArray(r[9])) u.candidates = (r[9] as number[]).map(d.s);
-      if (typeof r[10] === "number") u.receiver = d.s(r[10]);
+      if (typeof r[10] === "number" && r[10] >= 0) u.receiver = d.s(r[10]);
+      if (r[11] === 1) u.notPlain = true;
       return u;
     });
     const dispatch = dispatchRows.map((r): DispatchSite => ({
@@ -205,7 +219,22 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
       rule: d.s(r[8] as number) as DispatchSite["rule"],
     }));
     const summaries = new Map<string, InvocationSummary>(summaryRows.map((r) => [d.s(r[0] as number), { params: (r[1] as number[]).map(d.s), invokes: r[2] as number[], returns: (r[3] as number[]).map(d.s), returnsOther: r[4] === 1 }]));
-    const extra = { references: referenceRows.map(d.edge), dispatch, summaries };
+    type N = number;
+    const x = JSON.parse(read("index/escapes.json") ?? "null") as { uses: N[][]; unbound: N[][]; reach: [N, N[][]][]; modules: N[][]; loadAny: N[][]; offered: N[] } | null;
+    if (!x || !Array.isArray(x.uses) || !Array.isArray(x.unbound) || !Array.isArray(x.reach) || !Array.isArray(x.modules) || !Array.isArray(x.loadAny) || !Array.isArray(x.offered)) return null;
+    const placeOf = (r: N[], at: number) => ({ file: d.s(r[at] as N), line: r[at + 1] as N });
+    const escapes: Escapes = {
+      uses: new Map(x.uses.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
+      unbound: new Map(x.unbound.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
+      reach: new Map(x.reach.map(([id, rs]) => [d.s(id), rs.map((r): Reach => {
+        const name = d.n(r[3] as N);
+        return { why: d.s(r[0] as N) as Reach["why"], ...placeOf(r, 1), ...(name !== null ? { name } : {}) };
+      })])),
+      modules: new Map(x.modules.map((r) => [d.s(r[0] as N), placeOf(r, 1)])),
+      loadAny: x.loadAny.map((r) => ({ ...placeOf(r, 0), why: d.s(r[2] as N) as Escapes["loadAny"][number]["why"] })),
+      offered: new Set(x.offered.map(d.s)),
+    };
+    const extra = { references: referenceRows.map(d.edge), dispatch, summaries, escapes };
     const graph = assemble(nodes, edgeRows.map(d.edge), importerRows.map(d.edge), misses, unknowns, status, deserializeModel(projects.model), projects.goModules, extra);
     graph.repoRoot = repoRoot;
     const frameworks = JSON.parse(read("index/frameworks.json") ?? "null") as FrameworkData | null;
@@ -228,7 +257,7 @@ export function assemble(
   status: GraphStatus,
   model: ProjectModel,
   goModules: [string, string][],
-  extra: Pick<Graph, "references" | "dispatch" | "summaries"> = { references: [], dispatch: [], summaries: new Map() },
+  extra: Pick<Graph, "references" | "dispatch" | "summaries" | "escapes">,
 ): Graph {
   const nodes = new Map<string, GraphNode>();
   const defsByFile = new Map<string, GraphNode[]>();
@@ -276,6 +305,7 @@ export function assemble(
     unknowns,
     unknownNames,
     valueCalls,
+    escapes: extra.escapes,
     model,
     goModules,
     projectOf,

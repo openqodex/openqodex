@@ -65,10 +65,15 @@ export type TreeVisitor = {
 // `interesting`, inside a region the parser could not read too, as the
 // extractor has always read it. It returns false to skip the node's
 // children, or a function to run when the walk leaves the node. A child the
-// core skips is still walked for a reader that reads it.
+// core skips is still walked for a reader that reads it. `wants`, when set,
+// is asked first with the node's type, its field in its parent and the
+// types above it, before the node is made: false passes the node by (its
+// children are still walked), so a common node it has no use for costs
+// no node.
 export type CoreVisitor = {
   interesting: ReadonlySet<string>;
-  visit(node: Node): (() => void) | false | void;
+  wants?(type: string, field: () => string | null, upType: UpType): boolean;
+  visit(node: Node, field: () => string | null, upType: UpType): (() => void) | false | void;
 };
 
 // What the walk does at a node of one type, worked out once per type id.
@@ -248,11 +253,13 @@ export function walkTree(root: Node, visitors: readonly TreeVisitor[], core: Cor
       if (id === ERROR_ID) plan = errorPlan ??= planOf(id);
       else plan = plans[id] ??= planOf(id);
       node = null;
+      fieldRead = false;
+      if (plan.named) types[depth] = plan.type;
       let descend = false;
       if (core !== null && coreSkip < 0) {
         descend = true;
-        if (plan.core) {
-          const result = core.visit(make());
+        if (plan.core && (core.wants === undefined || core.wants(plan.type, field, upType))) {
+          const result = core.visit(make(), field, upType);
           if (result === false) {
             coreSkip = depth;
             descend = false;

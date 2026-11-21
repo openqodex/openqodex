@@ -460,8 +460,10 @@ export type ImpactSummary = {
   exports: ImpactExportChange[];
   // What the graph could not see. `floor` is true when any listed caller
   // count may be short: a call of the same name was not bound, a file of
-  // the project was not read, a call through a value could reach it, or a
-  // walk was cut. Per seed, with its reasons.
+  // the project was not read, the symbol or its module is used as a value,
+  // code built at run time or a module loaded by a computed path may reach
+  // it, a call through a value could reach it, or a walk was cut. Per
+  // seed, with its reasons.
   unknown: {
     floor: boolean;
     seeds: { seed: string; floor: boolean; reasons: string[] }[];

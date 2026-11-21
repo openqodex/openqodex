@@ -1,0 +1,22 @@
+{
+  "covers": "a named function expression passed to a timer under its own name (flaw 1)",
+  "files": {
+    "src/c.ts": "export const g = function g() { setTimeout(g, 10); };\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/c.ts#g",
+      "caller": null,
+      "file": "src/c.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/c.ts#g",
+      "reason": "it is used as a value",
+      "at": "src/c.ts:1"
+    }
+  ]
+}

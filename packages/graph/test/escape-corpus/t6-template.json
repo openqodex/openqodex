@@ -1,0 +1,15 @@
+{
+  "covers": "a value use the old reader skipped: a template's substitution (test 6)",
+  "files": {
+    "src/a.ts": "export function f() {}\nexport function run() {\n  return `${f}`;\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "it is used as a value",
+      "at": "src/a.ts:3"
+    }
+  ]
+}

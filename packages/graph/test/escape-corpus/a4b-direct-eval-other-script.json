@@ -1,0 +1,23 @@
+{
+  "covers": "a direct eval in one script reaches a function of another script (audit amendment 4)",
+  "files": {
+    "public/a.js": "function f() {}\n",
+    "public/b.js": "function run(s) { eval(s); }\nrun(\"f()\");\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/a.js#f",
+      "caller": "public/b.js#run",
+      "file": "public/b.js",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "public/a.js#f",
+      "reason": "runs code by a name built at run time",
+      "at": "public/b.js:1"
+    }
+  ]
+}

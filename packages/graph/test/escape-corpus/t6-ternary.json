@@ -1,0 +1,22 @@
+{
+  "covers": "a value use the old reader skipped: a ternary's side (test 6)",
+  "files": {
+    "src/a.ts": "export function f() {}\nexport function g() {}\nexport function run(flag: boolean) {\n  const pick = flag ? f : g;\n  pick();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/a.ts#run",
+      "file": "src/a.ts",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "it is used as a value",
+      "at": "src/a.ts:4"
+    }
+  ]
+}

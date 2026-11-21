@@ -1,0 +1,1 @@
+The twin of shadowed-param: page passes the module's own slugify to renderTitle, whose parameter of that name it then calls. The call in renderTitle may run the module function, so slugify's caller list must be a floor, with the reason that it is used as a value at the line of page that passes it.

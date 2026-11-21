@@ -21,6 +21,6 @@
     }
   ],
   "floor": {
-    "src/text.ts#slugify": true
+    "src/text.ts#slugify": false
   }
 }

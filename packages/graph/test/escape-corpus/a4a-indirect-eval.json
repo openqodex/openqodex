@@ -1,0 +1,22 @@
+{
+  "covers": "an indirect eval in a script reaches a global function (audit amendment 4)",
+  "files": {
+    "public/a.js": "function f() {}\n(0, eval)(\"f()\");\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/a.js#f",
+      "caller": "public/a.js",
+      "file": "public/a.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "public/a.js#f",
+      "reason": "reaches the global scope",
+      "at": "public/a.js:2"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "covers": "a namespace read only as ns.a() and ns.a marks no other function of it (test 9)",
+  "files": {
+    "src/h.ts": "export function a() {}\nexport function b() {}\n",
+    "src/use.ts": "import * as ns from \"./h\";\nns.a();\nexport const ref = ns.a;\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#a",
+      "caller": "src/use.ts",
+      "file": "src/use.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "src/h.ts#b"
+  ],
+  "floored": [
+    {
+      "target": "src/h.ts#a",
+      "reason": "it is used as a value",
+      "at": "src/use.ts:3"
+    }
+  ]
+}

@@ -17,7 +17,7 @@
 // answer in slices with a turn of the event loop between them, so a
 // cancellation that arrives while the work runs is seen (the MCP server).
 import { langOf, unreadNote } from "../capture/inventory.js";
-import { floorReasons, toImpactUnknown } from "../impact.js";
+import { floorReasons, sameNameGaps, toImpactUnknown } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
 import { CALLER_KINDS } from "../types.js";
@@ -243,8 +243,8 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     let causes: Record<string, number | null> = {};
     let examples: Answer["unknown"]["examples"];
     if (kind === "callers") {
-      reasons = floorReasons(g, { id: n.id, name: n.name, file: n.file }, new Set());
-      const named = unknownsNamed(g, n.name);
+      reasons = floorReasons(g, { id: n.id, name: n.name, file: n.file, kind: n.kind }, new Set());
+      const named = n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n) : unknownsNamed(g, n.name);
       for (const u of named) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = mayBe(named, n).slice(0, 5).map(toImpactUnknown);
     } else {
@@ -260,7 +260,7 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     const partial = g.status.status === "partial";
     const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples } };
     // The same count the floor reason gives, said before the rows.
-    const unbound = kind === "callers" ? (g.unknownNames.get(n.name) ?? 0) : 0;
+    const unbound = kind !== "callers" ? 0 : n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n).length : (g.unknownNames.get(n.name) ?? 0);
     if (unbound > 0) answer.warning = `${unbound} ${unbound === 1 ? "call" : "calls"} named ${n.name} could not be bound; this list may be missing callers. See: openqodex graph unknowns --name ${n.name}`;
     return listing(answer, walk.items, { beyond: walk.beyond ? { frontier: walk.past } : null });
   };

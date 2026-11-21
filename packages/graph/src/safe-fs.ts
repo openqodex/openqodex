@@ -95,7 +95,7 @@ function isTypeRef(v: unknown, imports: number, depth = 0): boolean {
 // An index into a list of `size` items.
 const isIndex = (v: unknown, size: number) => isInt(v) && (v as number) >= 0 && (v as number) < size;
 const optIndex = (v: unknown, size: number) => v === undefined || isIndex(v, size);
-const ROLES = new Set(["arg", "assign", "return", "property", "element"]);
+const ROLES = new Set(["arg", "assign", "return", "property", "element", "other", "object", "index"]);
 
 function isReceiver(v: unknown, imports: number): boolean {
   if (!isObj(v)) return false;
@@ -224,6 +224,17 @@ export function isFileFacts(v: unknown): v is FileFacts {
     (v.defaultExport === null || isStr(v.defaultExport)) &&
     (v.goPackage === null || isStr(v.goPackage)) &&
     (v.javaPackage === undefined || v.javaPackage === null || isStr(v.javaPackage)) &&
-    (v.frameworks === undefined || isFrameworkFileFacts(v.frameworks))
+    (v.frameworks === undefined || isFrameworkFileFacts(v.frameworks)) &&
+    (v.escapes === undefined || isList(v.escapes, isEscape, 20_000)) &&
+    (v.variables === undefined || isList(v.variables, isStr, 200_000)) &&
+    (v.exportedVariables === undefined || isList(v.exportedVariables, isStr, 200_000))
   );
+}
+
+const ESCAPES = new Set(["own", "eval", "global"]);
+function isEscape(e: unknown): boolean {
+  if (!isObj(e) || !isInt(e.line)) return false;
+  if (e.kind === "module") return isStr(e.spec);
+  if (e.kind === "load") return e.names === undefined || isList(e.names, isStr, 4096);
+  return ESCAPES.has(e.kind as string);
 }

@@ -1,0 +1,23 @@
+{
+  "covers": "a CommonJS export whose value is a call (other escape paths, CX5)",
+  "files": {
+    "src/a.js": "function f() {}\nfunction makeRun() { return f; }\nmodule.exports = { run: makeRun() };\n",
+    "src/use.js": "require(\"./a\").run();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": "src/use.js",
+      "file": "src/use.js",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.js#f",
+      "reason": "it is used as a value",
+      "at": "src/a.js:2"
+    }
+  ]
+}

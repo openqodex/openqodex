@@ -1,0 +1,26 @@
+{
+  "guards": "keeps a module function's caller list a floor when it is passed to the parameter that shadows it, so the call through the parameter may run it",
+  "callers": [
+    {
+      "to": "src/text.ts#slugify",
+      "site": "src/text.ts:10",
+      "tier": "certain"
+    }
+  ],
+  "notCertain": [
+    {
+      "to": "src/text.ts#slugify",
+      "site": "src/text.ts:6"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/text.ts",
+      "line": 6,
+      "cause": "dynamic"
+    }
+  ],
+  "floor": {
+    "src/text.ts#slugify": true
+  }
+}

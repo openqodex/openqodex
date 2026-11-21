@@ -165,7 +165,11 @@ export type ValueRef = {
   recv: Receiver;
   local?: number;
   bound?: BoundImport;
-  role: "arg" | "assign" | "return" | "property" | "element";
+  // `other`: any read no other role took (a ternary's side, a spread, a
+  // default value). `object`: the name before a dot (`f.bind`, `ns.x`), a
+  // use of a function, never of a module. `index`: the name before a
+  // computed member (`ns[k]`), a use of a function and of a module.
+  role: "arg" | "assign" | "return" | "property" | "element" | "other" | "object" | "index";
   call?: number; // an argument: the call (index into calls) it is passed to
   arg?: number; // its position among the arguments
   key?: string; // a Python keyword argument's name
@@ -259,6 +263,21 @@ export type ImportFact = {
   staticStar?: boolean;
 };
 
+// TypeScript and JavaScript: a place where a function may be reached by a
+// name the graph cannot follow. `module`: a module loaded in a way the
+// reader does not read whole (a pattern with a default, a rest or a nested
+// part, a load written in place), by its specifier. `own`: the file's own
+// `exports` or `module.exports` read as a value or given a value the reader
+// does not read whole. `eval`: a direct `eval(...)` or a `with` statement.
+// `global`: code or a name built at run time on the global scope
+// (`Function`, an indirect eval, `globalThis[k]`). `load`: a module loaded
+// by a computed path, or `require` used other than as a direct call with a
+// written path; `names` when only those names of it are read.
+export type EscapeFact =
+  | { kind: "module"; spec: string; line: number }
+  | { kind: "own" | "eval" | "global"; line: number }
+  | { kind: "load"; line: number; names?: string[] };
+
 export type FileFacts = {
   lang: Lang;
   defs: DefFact[];
@@ -289,6 +308,13 @@ export type FileFacts = {
   // Each framework plugin's context-free facts of the file, by plugin id
   // (frameworks/plugin.ts); absent when no plugin found anything.
   frameworks?: FrameworkFileFacts;
+  escapes?: EscapeFact[];
+  // TypeScript and JavaScript: the module-level variables that are no
+  // definition (`const LIMIT = 10`), and those exported as declared
+  // (`export const LIMIT`, CommonJS `exports.LIMIT = 10`). An import of one
+  // binds a value the graph follows, not a name it could not find.
+  variables?: string[];
+  exportedVariables?: string[];
 };
 
 // ---------- the graph ----------
@@ -358,6 +384,33 @@ export type UnknownSite = {
   // The receiver as written and the type it was read as, when known
   // (`sessions any`): which same-name gaps may be a class's callers.
   receiver?: string;
+  // The call cannot run a plain function of that name: a bare call of a
+  // local or a parameter, `this.x()` where `this` is proved an instance of
+  // a class, or a call on a value whose class or interface the graph knows.
+  notPlain?: boolean;
+};
+
+export type Place = { file: string; line: number };
+
+// Why a function's caller list may miss a caller the graph cannot see, as
+// the build found it (impact.ts, floorReasons reads it). `uses`: per
+// symbol id, its uses as a value under any of its names, its own body
+// included. `unbound`: value uses no rule could bind, by family and name
+// (`js:save`). `reach`: per symbol id, each place its module escapes
+// (`module`), or a name built at run time may reach it (`eval`, `global`,
+// `load` with the name a load by a computed path may read). `modules`:
+// every module found escaping, with its place, for the definitions a
+// change removed. `loadAny`: the places that may load any module
+// (a load by a computed path read for any name, code built at run time),
+// and `offered`, then, every definition a module offers.
+export type Reach = Place & { why: "module" | "eval" | "global" | "load"; name?: string };
+export type Escapes = {
+  uses: Map<string, Place & { count: number }>;
+  unbound: Map<string, Place & { count: number }>;
+  reach: Map<string, Reach[]>;
+  modules: Map<string, Place>;
+  loadAny: (Place & { why: "load" | "eval" | "global" })[];
+  offered: Set<string>;
 };
 
 // An eligible file the graph did not read, and why.
@@ -409,6 +462,7 @@ export type Graph = {
   // folder: what makes a caller count a floor.
   unknownNames: Map<string, number>;
   valueCalls: Map<string, number>;
+  escapes: Escapes;
   model: ProjectModel;
   // Go module paths by folder, as the build read them: with `model`, what
   // the index needs to give back `projectOf`.

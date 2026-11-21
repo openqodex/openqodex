@@ -1,0 +1,21 @@
+{
+  "covers": "an array pattern on require marks the module (flaw 2)",
+  "files": {
+    "src/m.js": "exports.a = function a() {};\nexports.b = function b() {};\n",
+    "src/use.js": "const [first] = require(\"./m\");\nfirst();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/m.js#a",
+      "reason": "its module is used as a value at",
+      "at": "src/use.js:1"
+    },
+    {
+      "target": "src/m.js#b",
+      "reason": "its module is used as a value at",
+      "at": "src/use.js:1"
+    }
+  ]
+}

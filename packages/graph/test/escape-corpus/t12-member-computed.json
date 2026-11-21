@@ -1,0 +1,22 @@
+{
+  "covers": "a member that a computed call in the same package may reach (test 12)",
+  "files": {
+    "src/jobs.ts": "export class Jobs {\n  runA() {}\n}\nexport function go(jobs: Jobs, name: string) {\n  (jobs as any)[name]();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/jobs.ts#Jobs.runA",
+      "caller": "src/jobs.ts#go",
+      "file": "src/jobs.ts",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/jobs.ts#Jobs.runA",
+      "reason": "in projects that can hold its objects",
+      "at": "src/jobs.ts:5"
+    }
+  ]
+}

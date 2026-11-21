@@ -97,6 +97,10 @@
 //     trusted by the next build.
 // 31. The record grows forever: facts and builds the collector removes, or
 //     the developer deletes, keep their entries.
+// 32. A kept build from before the list floor read value uses is read as
+//     though nothing were used as a value: its index (format 4) is read, or
+//     its facts are resolved again by a reader that expects facts they do
+//     not hold, so a caller list reads as whole where callers hide.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -105,6 +109,9 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildGraph, factsKey } from "../src/build.js";
+import { EXTRACTOR_VERSION } from "../src/extract.js";
+import { graphOf } from "../src/session.js";
+import { INDEX_FORMAT, readIndexFrom, writeIndex } from "../src/store/graph-files.js";
 import { blobId } from "../src/capture/inventory.js";
 import { isFileFacts } from "../src/safe-fs.js";
 import { ownStart } from "../src/store/lock.js";
@@ -1237,5 +1244,33 @@ describe("the record of facts and builds", () => {
     for (const tag of ["b", "c", "d"]) ok(await store.publish(publishInput({ tag, keys: left })));
     expect(Object.keys(recordOf(root).builds).sort()).toEqual(ids(store).sort());
     expect(ids(store).length).toBe(2);
+  });
+});
+
+describe("a build from before the list floor", () => {
+  it("32. reads neither an index of the old format nor facts of the old reader, so the graph is built again", async () => {
+    const root = repo();
+    const store = await storeOf(root);
+    const g = await buildGraph({ repoRoot: root, store, mode: "fresh" });
+    const files = writeIndex(g);
+    expect(readIndexFrom((name) => files[name] ?? null, root)).not.toBeNull();
+    expect(INDEX_FORMAT).toBe(5);
+    const old = { ...files, "index/format.json": JSON.stringify({ format: 4 }) };
+    expect(readIndexFrom((name) => old[name] ?? null, root)).toBeNull();
+
+    // The build just kept is read back; the same build as the old reader kept it is not.
+    const kept = store.list()[0];
+    if (!kept) throw new Error("no kept build");
+    const gen = store.open({ id: kept.id });
+    if (!gen) throw new Error("kept build not opened");
+    expect(graphOf(store, gen)).not.toBeNull();
+    const copy: Record<string, string> = {};
+    for (const name of Object.keys(gen.manifest.files)) copy[name] = gen.read(name) ?? "";
+    copy["index/format.json"] = JSON.stringify({ format: 4 });
+    const { layout: _layout, id: _id, createdAt: _createdAt, files: _files, ...manifest } = gen.manifest;
+    const oldId = ok(await store.publish({ manifest: { ...manifest, capture: { ...manifest.capture, digest: `${manifest.capture.digest}-old` }, versions: { ...manifest.versions, extractor: EXTRACTOR_VERSION - 1 } }, files: copy }));
+    const oldGen = store.open({ id: oldId });
+    if (!oldGen) throw new Error("old build not opened");
+    expect(graphOf(store, oldGen)).toBeNull();
   });
 });

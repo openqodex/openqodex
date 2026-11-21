@@ -21,11 +21,32 @@
 //     count disagrees with `causes` for the same cause.
 //  6. A list on a floor gives no field that says the list is incomplete,
 //     so a reader of the counts takes "2 certain" as every caller.
+//
+// The list floor of a function or method (the escape corpus holds the
+// shapes of a function that escapes; these hold the narrowing and the
+// change):
+//  7. A plain function is a floor because of a member call on a typed
+//     value (`items.push(1)` on an array) or a parameter of its name (a
+//     Promise executor's `resolve`), though neither can run it; or a class
+//     method of the same name loses its floor with it (test 10).
+//  8. A call in another language makes a TypeScript function a floor: an
+//     unbound `x.get()` in Go cannot call a TypeScript `get` (test 11).
+//  9. A family the new rules do not read yet (Python, Ruby) loses its
+//     floor: a decorated function, a function passed as a callback, or a
+//     method a Rails callback names by a symbol (test 13).
+// 10. A change removes a function still passed as a value, and the removed
+//     function reads as having no hidden caller (test 16); or the module
+//     gave it out under another name (`export { f as g }`), so the current
+//     export table no longer holds the name that escapes.
+// 11. The review brief keeps the old noise (a function with no caller and
+//     no value use is a floor), or loses a real one (a function passed
+//     through a ternary reads as having no caller) (test 17).
 import { afterAll, describe, expect, it } from "vitest";
-import { buildGraph } from "../src/index.js";
+import { getChange } from "@openqodex/core";
+import { buildGraph, detectImpact, renderImpactBlock } from "../src/index.js";
 import { query } from "../src/query/engine.js";
 import type { Answer, Request, Session } from "../src/query/answer.js";
-import { makeRepo } from "./helpers.js";
+import { commitAll, makeRepo, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -171,5 +192,104 @@ describe("a list on a floor", () => {
     expect(floor.listIncomplete).toBe(true);
     // The tiers are untouched.
     expect(Object.keys(floor.counts).sort()).toEqual(["certain", "likely", "possible"]);
+  }, 60_000);
+});
+
+// A change on a real repository: the graph of the current files with the base.
+async function changed(before: Record<string, string>, after: Record<string, string>) {
+  const root = makeRepo(before);
+  commitAll(root);
+  writeFiles(root, after);
+  const change = await getChange({ repoRoot: root, scope: { uncommitted: true }, exclude: [] });
+  const graph = await buildGraph({ repoRoot: root, store: null, files: change.changedPaths, base: { sha: change.baseSha, files: change.files } });
+  return detectImpact(graph, change);
+}
+const seedOf = (impact: Awaited<ReturnType<typeof changed>>, name: string) => impact.unknown.seeds.find((s) => s.seed.includes(`#${name}@`));
+
+describe("the list floor of a function", () => {
+  it("clears a plain function whose name is only called on a typed array or as a parameter, and keeps the method of that name (7)", async () => {
+    const s = await sessionOf({
+      "src/a.ts": "export function push(n: number): number {\n  return n;\n}\nexport function resolve(): number {\n  return 1;\n}\nexport class Stack {\n  push(n: number): void {}\n}\n",
+      "src/b.ts": "export function fill(): Promise<number> {\n  const items: number[] = [];\n  items.push(1);\n  return new Promise<number>((resolve) => resolve(items.length));\n}\n",
+    });
+    expect(ask(s, { kind: "callers", target: { name: "push" } }).unknown.floor).toBe(false);
+    expect(ask(s, { kind: "callers", target: { name: "resolve" } }).unknown.floor).toBe(false);
+    expect(ask(s, { kind: "callers", target: { name: "Stack.push" } }).unknown.floor).toBe(true);
+  }, 60_000);
+
+  it("clears a TypeScript function that a Go call of the same name cannot reach (8)", async () => {
+    const s = await sessionOf({
+      "src/a.ts": "export function get(): number {\n  return 1;\n}\n",
+      "src/b.ts": 'import { get } from "./a";\nexport function use(): number {\n  return get();\n}\n',
+      "go.mod": "module demo\n\ngo 1.21\n",
+      "main.go": "package main\n\ntype getter interface{ get() int }\n\nfunc run(x getter) int {\n\treturn x.get()\n}\n",
+    });
+    const a = ask(s, { kind: "callers", target: { name: "get", file: "src/a.ts" } } as Omit<Request, "apiVersion">);
+    expect(a.counts.certain).toBe(1);
+    expect(a.unknown.floor, a.unknown.reasons.join("; ")).toBe(false);
+  }, 60_000);
+
+  it("keeps a decorated Python function and a Python callback on the floor with the reason they had (9)", async () => {
+    const s = await sessionOf({
+      "app.py": "def wrap(fn):\n    return fn\n\n\n@wrap\ndef handler():\n    return 1\n\n\ndef call(cb):\n    return cb()\n\n\ndef target():\n    return 2\n\n\ncall(target)\n",
+    });
+    for (const name of ["handler", "target"]) {
+      const a = ask(s, { kind: "callers", target: { name } });
+      expect(a.unknown.floor, name).toBe(true);
+      expect(a.unknown.reasons.join(" "), name).toMatch(/through a value \(a callback or a computed member\) in the repository root project, and could reach it/);
+    }
+  }, 60_000);
+
+  it("keeps a Ruby method a callback names by a symbol on the floor with the reason it had (9)", async () => {
+    const s = await sessionOf({
+      "app/controllers/posts_controller.rb": "class PostsController\n  before_action :set_post\n\n  def show\n    @post\n  end\n\n  def set_post\n    @post = 1\n  end\nend\n",
+      "web/run.js": "export function run(f) {\n  return f();\n}\n",
+    });
+    const a = ask(s, { kind: "callers", target: { name: "PostsController.set_post" } });
+    expect(a.unknown.floor, a.unknown.reasons.join("; ")).toBe(true);
+    expect(a.unknown.reasons.join(" ")).toMatch(/through a value \(a callback or a computed member\) in the repository root project, and could reach it/);
+  }, 60_000);
+
+  it("keeps a removed function on the floor while its name is still passed as a value (10)", async () => {
+    const impact = await changed(
+      { "src/a.ts": "export function f(): void {}\nexport function g(): void {}\n", "src/b.ts": 'import { f } from "./a";\nexport function run(cb: () => void): void {\n  cb();\n}\nexport function main(): void {\n  run(f);\n}\n' },
+      { "src/a.ts": "export function g(): void {}\n" },
+    );
+    const f = seedOf(impact, "f");
+    expect(f?.floor).toBe(true);
+    expect(f?.reasons.join(" ")).toMatch(/1 use of the name `f` as a value could not be bound to one definition, first at src\/b\.ts:6/);
+  }, 60_000);
+
+  it("keeps a removed function on the floor when its module gave it out under another name (10)", async () => {
+    const impact = await changed(
+      { "src/a.ts": "function f(): void {}\nexport { f as g };\n", "src/b.ts": 'import { g } from "./a";\nexport function run(cb: () => void): void {\n  cb();\n}\nexport function main(): void {\n  run(g);\n}\n' },
+      { "src/a.ts": "export const other = 1;\n" },
+    );
+    const f = seedOf(impact, "f");
+    expect(f?.floor).toBe(true);
+    expect(f?.reasons.join(" ")).toMatch(/its module is used as a value at src\/b\.ts:\d+/);
+  }, 60_000);
+
+  it("leaves a function with no caller and no value use quiet in the brief, and keeps a function passed through a ternary loud (11)", async () => {
+    const before = {
+      "src/a.ts": "export function quiet(): number {\n  return 1;\n}\nexport function loud(): number {\n  return 2;\n}\nexport function other(): number {\n  return 3;\n}\n",
+      "src/b.ts": 'import { loud, other } from "./a";\nexport function run(cb: () => number): number {\n  return cb();\n}\nexport function start(flag: boolean): number {\n  const pick = flag ? loud : other;\n  return run(pick);\n}\n',
+    };
+    const quiet = "export function quiet(): number {\n  return 10;\n}\n";
+    const loud = "export function loud(): number {\n  return 20;\n}\n";
+    const rest = "export function other(): number {\n  return 3;\n}\n";
+    const both = await changed(before, { "src/a.ts": quiet + loud + rest });
+    expect(seedOf(both, "quiet")).toEqual(expect.objectContaining({ floor: false, reasons: [] }));
+    expect(seedOf(both, "loud")?.floor).toBe(true);
+    expect(seedOf(both, "loud")?.reasons.join(" ")).toMatch(/used as a value in 1 place, first at src\/b\.ts:6/);
+    expect(both.unknown.floor).toBe(true);
+
+    const onlyQuiet = renderImpactBlock(await changed(before, { "src/a.ts": quiet + "export function loud(): number {\n  return 2;\n}\n" + rest }));
+    expect(onlyQuiet).toContain("No caller of the touched code was found in the graph.");
+    expect(onlyQuiet).not.toContain(", a floor");
+
+    const onlyLoud = renderImpactBlock(await changed(before, { "src/a.ts": "export function quiet(): number {\n  return 1;\n}\n" + loud + rest }));
+    expect(onlyLoud).toContain("the list is a floor (below), so callers may exist.");
+    expect(onlyLoud).toMatch(/The callers of `loud` are a floor: .*src\/b\.ts:6/);
   }, 60_000);
 });

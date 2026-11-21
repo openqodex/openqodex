@@ -1,0 +1,31 @@
+{
+  "covers": "a namespace import indexed by a computed name (test 8)",
+  "files": {
+    "src/h.ts": "export function a() {}\nexport function b() {}\n",
+    "src/use.ts": "import * as h from \"./h\";\nexport function go(name: string) { (h as Record<string, () => void>)[name](); }\n",
+    "src/z.ts": "export function z() {}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#a",
+      "caller": "src/use.ts#go",
+      "file": "src/use.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "src/z.ts#z"
+  ],
+  "floored": [
+    {
+      "target": "src/h.ts#a",
+      "reason": "its module is used as a value at",
+      "at": "src/use.ts:2"
+    },
+    {
+      "target": "src/h.ts#b",
+      "reason": "its module is used as a value at",
+      "at": "src/use.ts:2"
+    }
+  ]
+}
