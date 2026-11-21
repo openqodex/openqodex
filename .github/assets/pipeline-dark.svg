@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 248" width="1200" height="248" role="img" aria-label="How a review runs: Your change, Scanners, Changed-line filter, Code graph context, Finder sessions, Quote check by a script, Verifier sessions, Receipt and report" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<line x1="278" y1="60" x2="310" y2="60" stroke="#9198a1" stroke-width="1.5"/>
+<path d="M317 60l-9.600000000000001 -6v12z" fill="#9198a1"/>
+<line x1="580" y1="60" x2="612" y2="60" stroke="#9198a1" stroke-width="1.5"/>
+<path d="M619 60l-9.600000000000001 -6v12z" fill="#9198a1"/>
+<line x1="882" y1="60" x2="914" y2="60" stroke="#9198a1" stroke-width="1.5"/>
+<path d="M921 60l-9.600000000000001 -6v12z" fill="#9198a1"/>
+<line x1="1053" y1="96" x2="1053" y2="144" stroke="#9198a1" stroke-width="1.5"/>
+<path d="M1053 151l-6 -9.600000000000001h12z" fill="#9198a1"/>
+<line x1="922" y1="188" x2="890" y2="188" stroke="#9198a1" stroke-width="1.5"/>
+<path d="M883 188l9.600000000000001 -6v12z" fill="#9198a1"/>
+<line x1="620" y1="188" x2="588" y2="188" stroke="#9198a1" stroke-width="1.5"/>
+<path d="M581 188l9.600000000000001 -6v12z" fill="#9198a1"/>
+<line x1="318" y1="188" x2="286" y2="188" stroke="#9198a1" stroke-width="1.5"/>
+<path d="M279 188l9.600000000000001 -6v12z" fill="#9198a1"/>
+<rect x="16.5" y="24.5" width="261" height="71" rx="10" fill="#151b23" stroke="#a98bf5" stroke-width="1.5"/>
+<text x="32" y="46" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#c2adf7">1</text>
+<text x="147" y="69" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">Your change</text>
+<rect x="318.5" y="24.5" width="261" height="71" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1"/>
+<text x="334" y="46" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#9198a1">2</text>
+<text x="449" y="69" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">Scanners</text>
+<rect x="620.5" y="24.5" width="261" height="71" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1"/>
+<text x="636" y="46" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#9198a1">3</text>
+<text x="751" y="69" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">Changed-line filter</text>
+<rect x="922.5" y="24.5" width="261" height="71" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1"/>
+<text x="938" y="46" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#9198a1">4</text>
+<text x="1053" y="69" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">Code graph context</text>
+<rect x="922.5" y="152.5" width="261" height="71" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1"/>
+<text x="938" y="174" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#9198a1">5</text>
+<text x="1053" y="197" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">Finder sessions</text>
+<rect x="620.5" y="152.5" width="261" height="71" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1"/>
+<text x="636" y="174" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#9198a1">6</text>
+<text x="751" y="186.5" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">Quote check by a</text>
+<text x="751" y="207.5" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">script</text>
+<rect x="318.5" y="152.5" width="261" height="71" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1"/>
+<text x="334" y="174" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#9198a1">7</text>
+<text x="449" y="197" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">Verifier sessions</text>
+<rect x="16.5" y="152.5" width="261" height="71" rx="10" fill="#151b23" stroke="#a98bf5" stroke-width="1.5"/>
+<text x="32" y="174" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" fill="#c2adf7">8</text>
+<text x="147" y="197" font-size="17" font-weight="600" text-anchor="middle" fill="#f0f6fc">Receipt and report</text>
+</svg>

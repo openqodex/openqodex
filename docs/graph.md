@@ -2,6 +2,19 @@
 
 The code graph is a map of your repository: every function, method, class and type as a point, and every call, import and inheritance between them as a line, with the proof attached. `openqodex review` builds it on your machine and puts what your change reaches into the reviewer's brief. No model is called to build it and nothing is sent anywhere.
 
+## At a glance
+
+- Languages: TypeScript, TSX, JavaScript, Python, Go, Ruby and Java.
+- Framework readers: Express, Hono, Nest, React, Next.js, FastAPI, Go net/http, gin, Django, Rails and JUnit. They add routes, handlers and tests to the graph ([Django and Rails](#framework-entries-django-and-rails), [JUnit](#framework-plugin-junit), [the others](#framework-plugins-express-hono-react-nextjs-nest-fastapi-go-nethttp-and-gin)).
+- Questions, in five groups. [The graph commands](#the-graph-commands) says what each one answers.
+  - Find code: `search`, `symbol` and `outline`.
+  - Who uses it: `callers`, `references`, `implementers`, `importers`, `routes` and `tests`.
+  - What it uses: `callees`, `path`, `packages` and `cycles`.
+  - What a change reaches: `impact` and `changes`.
+  - How far to trust an answer: `build`, `status`, `capabilities`, `unknowns` and `explain`.
+- MCP tools: `openqodex mcp` serves one tool per question except `build`, named `graph_<question>`, and `graph_refresh`. `init` registers the server with Claude Code, Cursor and Codex CLI, and with the Cline CLI in user scope. For Goose and the Cline VS Code extension, `init` prints the entry to add ([The MCP server](#the-mcp-server)).
+- Gaps: an answer that may be short says so. `listIncomplete` is true and the answer names the reasons. Zero callers on such an answer never means unused ([What it cannot see](#what-it-cannot-see)).
+
 ## What it answers
 
 For a review, the brief's block "What this change reaches" lists:

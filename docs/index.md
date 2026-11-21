@@ -1,6 +1,6 @@
 # OpenQodex docs
 
-OpenQodex is open source AI code review for Claude Code and Codex. It runs before you push, from your coding agent or your terminal.
+OpenQodex is open source AI code review for coding agents. It works in Claude Code, Codex, Cursor, Cline and Goose. It runs before you push, from your coding agent or your terminal.
 
 These pages ship inside the npm package. `npx openqodex guide <topic>` prints one in your terminal, offline. The topic is the file name without `.md`.
 

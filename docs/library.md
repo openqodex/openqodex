@@ -2,6 +2,8 @@
 
 `openqodex` is also a library. A Node program, on Node 22 or newer, imports the scanners, the code graph, the lenses, the config parser and the renderers from the same package the command comes from, with TypeScript types.
 
+The package has no runtime dependencies. The build bundles the workspace packages under `packages/` into it. This repository does not publish them to npm.
+
 ```
 npm install openqodex
 ```
