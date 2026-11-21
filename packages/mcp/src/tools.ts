@@ -51,19 +51,6 @@ const SYMBOL: Record<string, Schema> = {
   id: { type: "string" },
 };
 
-// What every result carries in structuredContent: the answer of the query
-// layer, or the envelope of a refusal or a failure (apiVersion, kind and
-// error alone). The rest is left open: the shape of the items is the
-// question's, and an answer only grows (docs/graph.md). That holds for both
-// forms of an item: short, with a short `edge` and the fields that repeat
-// left out, or whole with `full`; each tool's schema stays this one, as the
-// tool list is paid for on every turn.
-export const OUTPUT_SCHEMA: Schema = {
-  type: "object",
-  properties: { apiVersion: { type: "integer" }, kind: { type: "string" }, error: { type: ["object", "null"] }, items: { type: "array" } },
-  required: ["apiVersion", "kind", "error"],
-};
-
 export const TOOLS: ToolSpec[] = [
   { name: "graph_status", op: "status", description: `How fresh and complete the code graph is: files in it, files left out and why, the build id, its mode. ${DATA}`, properties: {} },
   { name: "graph_capabilities", op: "capabilities", description: `What this installation's graph can answer: languages, relations, and which questions it cannot answer yet. ${DATA}`, properties: {} },
