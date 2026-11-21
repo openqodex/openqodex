@@ -119,7 +119,7 @@ function printText(a: Shaped, op: Operation): void {
   if (tr.by === "limit" || (tr.by === "budget" && tr.cursor)) line(tr.note ?? `truncated by ${tr.by}: ${tr.omitted ?? "an unknown number of"} more; --cursor ${tr.cursor}`);
   else if (tr.by === "budget") line(`stopped at the time budget: what lies past ${tr.frontierTotal ?? "the"} unexpanded ${tr.frontierTotal === 1 ? "point" : "points"} is not counted; ask again with a larger --budget-ms`);
   else if (tr.by === "depth") line(`stopped at the depth asked: ${tr.frontierTotal ?? "some"} ${tr.frontierTotal === 1 ? "point has" : "points have"} more past it; --depth goes further`);
-  if (a.unknown.floor) line(`floor: ${a.unknown.reasons.join("; ") || "the graph could not see every relation"}`);
+  if (a.unknown.floor) line(`floor: ${(a.unknown.scope === "tests" && a.unknown.note) || a.unknown.reasons.join("; ") || "the graph could not see every relation"}`);
   else if (op === "unknowns") for (const r of a.unknown.reasons) line(`note: ${r}`);
   const g = a.graph;
   line(`graph: build ${g.generation ?? "not saved"}, ${g.status}, ${g.mode}${g.reasons.length > 0 ? `: ${g.reasons.join("; ")}` : ""}${g.freshness.laterEditsKnown ? "; files changed since this build" : ""}`);

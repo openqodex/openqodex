@@ -39,6 +39,13 @@ export function isTestPath(path: string): boolean {
   return TEST_PATH.test(path);
 }
 
+// Code that is not the product: a test, a fixture, or a benchmark script,
+// which measures the product and is never shipped or imported by it.
+const BENCHMARK_PATH = /(^|\/)benchmarks?\//;
+export function isOutsideProduct(path: string): boolean {
+  return isTestPath(path) || BENCHMARK_PATH.test(path);
+}
+
 // Folders between two files: 0 for the same folder.
 function distance(a: string, b: string): number {
   const pa = dirname(a).split("/");
@@ -316,46 +323,64 @@ const calls = (n: number) => `${n} ${n === 1 ? "call" : "calls"}`;
 // and a name built at run time (H). Other kinds keep the older rule: any call of
 // the name, any call through a value in the project.
 export function floorReasons(graph: Graph, seed: { id: string; name: string; file: string; kind?: ImpactKind | undefined }, cutAt: ReadonlySet<string>): string[] {
+  return floorOf(graph, seed, cutAt).reasons;
+}
+
+// The reasons with every place they rest on. `places` is null when a
+// reason does not know each of its places (a count, the first of many, a
+// cut): such a floor may hide a caller anywhere.
+export type Floor = { reasons: string[]; places: { file: string; line: number | null }[] | null };
+export function floorOf(graph: Graph, seed: { id: string; name: string; file: string; kind?: ImpactKind | undefined }, cutAt: ReadonlySet<string>): Floor {
   const reasons: string[] = [];
+  let places: Floor["places"] = [];
+  const why = (reason: string, at: readonly { file: string; line: number | null }[] | null) => {
+    reasons.push(reason);
+    places = places && at ? [...places, ...at.map((p) => ({ file: p.file, line: p.line }))] : null;
+  };
+  // A count with its first place knows every place only when it is one.
+  const only = (p: Place & { count: number }) => (p.count === 1 ? [p] : null);
   // A possible caller is never proof that the code runs, nor that nothing else reaches it.
-  const possible = (graph.in.get(seed.id) ?? []).filter((e) => e.tier === "possible" && e.from !== seed.id).reduce((k, e) => k + e.sites.length, 0);
-  if (possible > 0) reasons.push(`${possible} ${possible === 1 ? "call" : "calls"} may reach it through an interface, a base type or a function value, and none is proved to`);
+  const possibleSites = (graph.in.get(seed.id) ?? []).filter((e) => e.tier === "possible" && e.from !== seed.id).flatMap((e) => e.sites);
+  const possible = possibleSites.length;
+  if (possible > 0) why(`${possible} ${possible === 1 ? "call" : "calls"} may reach it through an interface, a base type or a function value, and none is proved to`, possibleSites);
   const kind = seed.kind ?? graph.nodes.get(seed.id)?.kind;
   const family = familyAt(graph, seed.file);
   const project = graph.projectOf(seed.file);
   const projectValues = (): boolean => {
     const values = graph.valueCalls.get(project) ?? 0;
-    if (values > 0) reasons.push(`${values} ${values === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in ${project === "" ? "the repository root project" : project}, and could reach it`);
+    if (values > 0) why(`${values} ${values === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in ${project === "" ? "the repository root project" : project}, and could reach it`, null);
     return values > 0;
   };
   if (kind !== "function" && kind !== "method") {
     const named = graph.unknownNames.get(seed.name) ?? 0;
-    if (named > 0) reasons.push(`${calls(named)} named \`${seed.name}\` in the repository could not be bound to one definition`);
+    if (named > 0) why(`${calls(named)} named \`${seed.name}\` in the repository could not be bound to one definition`, null);
     projectValues();
   } else {
     const gaps = sameNameGaps(graph, { ...seed, kind });
-    if (gaps.length > 0) reasons.push(`${calls(gaps.length)} named \`${seed.name}\` in the repository could not be bound to one definition`);
+    if (gaps.length > 0) why(`${calls(gaps.length)} named \`${seed.name}\` in the repository could not be bound to one definition`, gaps);
     const x = graph.escapes;
     const used = x.uses.get(seed.id);
-    if (used) reasons.push(`it is used as a value in ${used.count} ${used.count === 1 ? "place" : "places"}, first at ${at(used)}; a call through that value is not listed`);
+    if (used) why(`it is used as a value in ${used.count} ${used.count === 1 ? "place" : "places"}, first at ${at(used)}; a call through that value is not listed`, only(used));
     const loose = family ? x.unbound.get(`${family}:${seed.name}`) : undefined;
-    if (loose) reasons.push(`${loose.count} ${loose.count === 1 ? "use" : "uses"} of the name \`${seed.name}\` as a value could not be bound to one definition, first at ${at(loose)}`);
+    if (loose) why(`${loose.count} ${loose.count === 1 ? "use" : "uses"} of the name \`${seed.name}\` as a value could not be bound to one definition, first at ${at(loose)}`, only(loose));
     const reach = x.reach.get(seed.id) ?? [];
     const removed = !graph.nodes.has(seed.id);
     // A definition a change removed: the module that held it escapes, so a
     // computed name may still reach it, though the export table no longer lists it.
     const gone = removed && family === "js" ? x.modules.get(seed.file) : undefined;
     const escaped = reach.find((r) => r.why === "module") ?? gone;
-    if (escaped) reasons.push(`its module is used as a value at ${at(escaped)}, so a call by a computed name may reach anything it exports`);
+    // The build keeps only the first place each module escapes at.
+    if (escaped) why(`its module is used as a value at ${at(escaped)}, so a call by a computed name may reach anything it exports`, null);
     const evaluated = reach.find((r) => r.why === "eval");
-    if (evaluated) reasons.push(`${at(evaluated)} runs code by a name built at run time, and it can see this function`);
+    if (evaluated) why(`${at(evaluated)} runs code by a name built at run time, and it can see this function`, reach.filter((r) => r.why === "eval"));
     const global = reach.find((r) => r.why === "global");
-    if (global) reasons.push(`${at(global)} reaches the global scope by a name built at run time, and it can see this function`);
-    for (const r of reach) if (r.why === "load") reasons.push(`a module loaded by a computed path at ${at(r)} may offer \`${r.name ?? seed.name}\``);
+    if (global) why(`${at(global)} reaches the global scope by a name built at run time, and it can see this function`, reach.filter((r) => r.why === "global"));
+    // The build keeps only the first place each name is loaded at.
+    for (const r of reach) if (r.why === "load") why(`a module loaded by a computed path at ${at(r)} may offer \`${r.name ?? seed.name}\``, null);
     const any = x.loadAny[0];
     if (any && family === "js" && (x.offered.has(seed.id) || removed)) {
       const more = x.loadAny.length > 1 ? ` (and ${x.loadAny.length - 1} more ${x.loadAny.length === 2 ? "place" : "places"})` : "";
-      reasons.push(any.why === "load" ? `a module loaded by a computed path at ${at(any)}${more} may be any module of the repository` : `code built at run time at ${at(any)}${more} can load any module of the repository`);
+      why(any.why === "load" ? `a module loaded by a computed path at ${at(any)}${more} may be any module of the repository` : `code built at run time at ${at(any)}${more} can load any module of the repository`, x.loadAny);
     }
     // A family with no checklist of its own (all but TypeScript and
     // JavaScript) keeps the rule it had, for its methods too: its reader
@@ -368,25 +393,27 @@ export function floorReasons(graph: Graph, seed: { id: string; name: string; fil
       // Commas between the places: the renderers join whole reasons with semicolons.
       const shown = dark.slice(0, 3).map((d) => `${at(d)} ${d.why} (its file ${d.how})`).join(", ");
       const more = dark.length > 3 ? ` and ${dark.length - 3} more` : "";
-      reasons.push(`${dark.length} ${dark.length === 1 ? "file" : "files"} the graph cannot read whole could call it by a path it does not see: ${shown}${more}`);
+      why(`${dark.length} ${dark.length === 1 ? "file" : "files"} the graph cannot read whole could call it by a path it does not see: ${shown}${more}`, dark);
     }
     const kept = family !== "js" && projectValues();
     const read = kind === "method" && family === "js" ? x.members.get(`js:${seed.name}`) : undefined;
-    if (read) reasons.push(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`);
+    if (read) why(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`, only(read));
     if (kind === "method" && family && !kept) {
       const values = valueCallsOf(graph, family);
-      if (values) reasons.push(`${values.count} ${values.count === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in projects that can hold its objects, first at ${at(values)}`);
+      if (values) why(`${values.count} ${values.count === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in projects that can hold its objects, first at ${at(values)}`, only(values));
     }
   }
-  const notRead = graph.status.notRead.filter((n) => graph.projectOf(n.file) === project).length;
-  if (notRead > 0) reasons.push(`${notRead} ${notRead === 1 ? "file" : "files"} of its project ${notRead === 1 ? "was" : "were"} not read`);
+  const unread = graph.status.notRead.filter((n) => graph.projectOf(n.file) === project);
+  const notRead = unread.length;
+  if (notRead > 0) why(`${notRead} ${notRead === 1 ? "file" : "files"} of its project ${notRead === 1 ? "was" : "were"} not read`, unread.map((n) => ({ file: n.file, line: null })));
   const budgetFiles = budgetFilesOf(graph);
-  const importersUnresolved = (graph.importers.get(seed.file) ?? []).filter((e) => budgetFiles.has(e.from)).length;
-  if (importersUnresolved > 0) reasons.push(`the calls of ${importersUnresolved} ${importersUnresolved === 1 ? "file" : "files"} that import it were not resolved: the budget ran out`);
+  const unresolved = (graph.importers.get(seed.file) ?? []).filter((e) => budgetFiles.has(e.from));
+  const importersUnresolved = unresolved.length;
+  if (importersUnresolved > 0) why(`the calls of ${importersUnresolved} ${importersUnresolved === 1 ? "file" : "files"} that import it were not resolved: the budget ran out`, unresolved.map((e) => ({ file: e.from, line: null })));
   // A manifest or tsconfig governing its folder that could not be read, when its loss can hide a call.
-  for (const g of graph.model.unreadable) if (g.affects.length > 0 && (g.dir === "" || seed.file.startsWith(`${g.dir}/`))) reasons.push(g.note);
-  if (cutAt.has(seed.id)) reasons.push("the walk was cut at it");
-  return reasons;
+  for (const g of graph.model.unreadable) if (g.affects.length > 0 && (g.dir === "" || seed.file.startsWith(`${g.dir}/`))) why(g.note, null);
+  if (cutAt.has(seed.id)) why("the walk was cut at it", null);
+  return { reasons, places };
 }
 
 export function detectImpact(graph: Graph, change: Pick<Change, "files" | "coverage">): ImpactSummary {

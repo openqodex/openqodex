@@ -17,7 +17,7 @@
 // answer in slices with a turn of the event loop between them, so a
 // cancellation that arrives while the work runs is seen (the MCP server).
 import { langOf, unreadNote } from "../capture/inventory.js";
-import { floorReasons, sameNameGaps, toImpactUnknown } from "../impact.js";
+import { floorOf, isOutsideProduct, sameNameGaps, toImpactUnknown } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
 import { CALLER_KINDS } from "../types.js";
@@ -242,8 +242,12 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     let reasons: string[];
     let causes: Record<string, number | null> = {};
     let examples: Answer["unknown"]["examples"];
+    // The places that could hide a caller, when each is known and none is product code.
+    let inTests: { file: string; line: number | null }[] | null = null;
     if (kind === "callers") {
-      reasons = floorReasons(g, { id: n.id, name: n.name, file: n.file, kind: n.kind }, new Set());
+      const floor = floorOf(g, { id: n.id, name: n.name, file: n.file, kind: n.kind }, new Set());
+      reasons = floor.reasons;
+      if (floor.places && floor.places.length > 0 && floor.places.every((p) => isOutsideProduct(p.file))) inTests = floor.places;
       const named = n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n) : unknownsNamed(g, n.name);
       for (const u of named) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = mayBe(named, n).slice(0, 5).map(toImpactUnknown);
@@ -259,11 +263,20 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     }
     const partial = g.status.status === "partial";
     const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples } };
+    if (inTests && !partial) Object.assign(answer.unknown, { scope: "tests", note: testsNote(inTests) });
     // The same count the floor reason gives, said before the rows.
     const unbound = kind !== "callers" ? 0 : n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n).length : (g.unknownNames.get(n.name) ?? 0);
     if (unbound > 0) answer.warning = `${unbound} ${unbound === 1 ? "call" : "calls"} named ${n.name} could not be bound; this list may be missing callers. See: openqodex graph unknowns --name ${n.name}`;
     return listing(answer, walk.items, { beyond: walk.beyond ? { frontier: walk.past } : null });
   };
+}
+
+// A floor whose every place is a test, fixture or benchmark file, said in one sentence.
+const TESTS_SHOWN = 3;
+function testsNote(places: { file: string; line: number | null }[]): string {
+  const at = [...new Set(places.map((p) => (p.line === null ? p.file : `${p.file}:${p.line}`)))];
+  const more = at.length > TESTS_SHOWN ? ` and ${at.length - TESTS_SHOWN} more` : "";
+  return `Complete in product code. Only test or benchmark files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
 }
 
 function changesJob(s: Session, extra: Extra): Job | Answer {
@@ -449,7 +462,9 @@ const exampleLine = (e: Answer["unknown"]["examples"][number]): string => `${e.f
 
 // Every answer as it leaves the engine: the unread languages that can make
 // it short, its gaps grouped by cause (kept when a question grouped its
-// own), and whether its list is complete.
+// own), whether its list is complete, and where a missing row could be.
+// A floor is scoped to tests only when the callers walk said so and no
+// unread language was added here; any other floor may hide a row anywhere.
 function finish(s: Session, a: Answer): Answer {
   const langs = unreadFor(s, a);
   let unknown = a.unknown;
@@ -463,7 +478,10 @@ function finish(s: Session, a: Answer): Answer {
     : Object.entries(unknown.causes).map(([cause, count]) => ({ cause, count, examples: unknown.examples.filter((e) => e.cause === cause).slice(0, 2).map(exampleLine) }));
   const at = groups.findIndex((g) => g.cause === "language-not-read");
   if (langs.length > 0) groups.splice(at < 0 ? groups.length : at, at < 0 ? 0 : 1, { cause: "language-not-read", count: files, examples: langs.slice(0, 2).map(unreadNote) });
-  return { ...a, unknown: { ...unknown, groups }, listIncomplete: unknown.floor };
+  const { scope, note, ...rest } = unknown;
+  const tests = unknown.floor && scope === "tests" && note !== undefined && langs.length === 0;
+  const where = !unknown.floor ? {} : tests ? { scope: "tests" as const, note } : { scope: "all" as const };
+  return { ...a, unknown: { ...rest, groups, ...where }, listIncomplete: unknown.floor };
 }
 
 // Budget checks in one slice of a question's work.

@@ -41,6 +41,9 @@
 // 11. The review brief keeps the old noise (a function with no caller and
 //     no value use is a floor), or loses a real one (a function passed
 //     through a ternary reads as having no caller) (test 17).
+// 12. A floor whose hidden callers can only be in test or benchmark files
+//     loses its floor, so a zero reads as "unused"; or one place in product
+//     code beside them still reads as "complete in product code".
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact, renderImpactBlock } from "../src/index.js";
@@ -291,5 +294,47 @@ describe("the list floor of a function", () => {
     const onlyLoud = renderImpactBlock(await changed(before, { "src/a.ts": "export function quiet(): number {\n  return 1;\n}\n" + loud + rest }));
     expect(onlyLoud).toContain("the list is a floor (below), so callers may exist.");
     expect(onlyLoud).toMatch(/The callers of `loud` are a floor: .*src\/b\.ts:6/);
+  }, 60_000);
+});
+
+describe("where a floor's hidden callers can be", () => {
+  // Each `export const v = X` reads a free name, so its file cannot be read
+  // whole and could call `f` by a path the graph does not see.
+  const BASE = {
+    "app/package.json": '{"name": "app"}\n',
+    "app/a.ts": "export function f() {}\n",
+    "app/b.ts": 'import { f } from "./a";\nf();\n',
+    "app/a.test.ts": 'import { f } from "./a";\nexport const v = X1;\nf();\n',
+    "app/benchmark/run.ts": 'import { f } from "../a";\nexport const v = X2;\nf();\n',
+  };
+
+  it("says complete in product code when every place is a test or benchmark file, and keeps the floor (12)", async () => {
+    const a = ask(await sessionOf(BASE), { kind: "callers", target: { name: "f", file: "app/a.ts" } });
+    expect(a.unknown.floor).toBe(true);
+    expect(a.listIncomplete).toBe(true);
+    expect(a.unknown.scope).toBe("tests");
+    expect(a.unknown.note).toBe("Complete in product code. Only test or benchmark files could hide a caller: app/a.test.ts:2, app/benchmark/run.ts:2.");
+    expect(a.unknown.reasons.join(" ")).toContain("2 files the graph cannot read whole could call it");
+  }, 60_000);
+
+  it("keeps the full floor when one place is product code beside the test ones (12)", async () => {
+    const a = ask(await sessionOf({ ...BASE, "app/c.ts": 'import { f } from "./a";\nexport const v = X3;\nf();\n' }), { kind: "callers", target: { name: "f", file: "app/a.ts" } });
+    expect(a.unknown.floor).toBe(true);
+    expect(a.listIncomplete).toBe(true);
+    expect(a.unknown.scope).toBe("all");
+    expect(a.unknown.note).toBeUndefined();
+    expect(a.unknown.reasons.join(" ")).toMatch(/3 files the graph cannot read whole could call it by a path it does not see: .*app\/c\.ts:2/);
+  }, 60_000);
+
+  it("gives no scope to a whole list, and scope all to a floor that does not name each place (12)", async () => {
+    const s = await sessionOf({ ...BASE, "app/a.test.ts": 'import { f } from "./a";\nf();\n', "app/benchmark/run.ts": 'import { f } from "../a";\nf();\n', "app/d.ts": 'import { f } from "./a";\nexport const g = [f, f];\n', "app/e.ts": "export function e() {}\n" });
+    const whole = ask(s, { kind: "callers", target: { name: "e", file: "app/e.ts" } });
+    expect(whole.error).toBeNull();
+    expect(whole.unknown.floor).toBe(false);
+    expect(whole.unknown.scope).toBeUndefined();
+    const used = ask(s, { kind: "callers", target: { name: "f", file: "app/a.ts" } });
+    expect(used.unknown.floor).toBe(true);
+    expect(used.unknown.reasons.join(" ")).toContain("it is used as a value in 2 places");
+    expect(used.unknown.scope).toBe("all");
   }, 60_000);
 });
