@@ -444,8 +444,14 @@ else {
 
 // 9. Pictures and other files the README shows from main. GitHub and the
 // npm page load them by URL, so a wrong name is a broken picture there.
-for (const m of readmeText.matchAll(/https:\/\/raw\.githubusercontent\.com\/openqodex\/openqodex\/main\/([^\s"'()<>]+)/g)) {
-  if (!existsSync(join(root, m[1]))) fail(README, `shows ${m[0]}, but ${m[1]} is not in the repository`);
+// The path is the URL's pathname, without query or hash, and it must be a
+// tracked file spelled exactly, case included: macOS finds a file whose
+// name differs only in case, and GitHub does not.
+const RAW_MAIN = "/openqodex/openqodex/main/";
+const tracked = new Set(execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean));
+for (const m of readmeText.matchAll(/https:\/\/raw\.githubusercontent\.com\/openqodex\/openqodex\/main\/[^\s"'()<>]+/g)) {
+  const path = decodeURIComponent(new URL(m[0]).pathname).slice(RAW_MAIN.length);
+  if (!tracked.has(path)) fail(README, `shows ${m[0]}, but ${path} is not a tracked file of the repository`);
 }
 
 // 10. The graph page's summary: its languages and its questions.
@@ -469,7 +475,12 @@ else {
   }
   // Each usage line names one or more questions before its first argument.
   const questions = [...new Set(help.split("\n").filter((l) => /^  [a-z]/.test(l)).flatMap((l) => l.trim().split(/ <| \[|  /)[0].split("|").map((q) => q.trim())).filter((q) => /^[a-z]+$/.test(q)))];
-  const named = glance.split("\n").filter((l) => /^\s+- /.test(l)).flatMap((l) => [...l.matchAll(/`([a-z]+)`/g)].map((m) => m[1]));
+  // The question groups: the nested bullets right under "- Questions", and no other line.
+  const lines = glance.split("\n");
+  const from = lines.findIndex((l) => l.startsWith("- Questions"));
+  const groups = [];
+  for (let i = from + 1; from !== -1 && i < lines.length && /^\s+- /.test(lines[i]); i++) groups.push(lines[i]);
+  const named = groups.flatMap((l) => [...l.matchAll(/`([a-z]+)`/g)].map((m) => m[1]));
   if (questions.length === 0) fail(GRAPH_PAGE, "`openqodex graph help` lists no question; update this check");
   else if (!same(named, questions)) fail(GRAPH_PAGE, `"At a glance" groups the questions ${named.join(", ") || "nowhere"}; \`openqodex graph help\` lists ${questions.join(", ")}`);
 }

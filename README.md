@@ -91,7 +91,7 @@ In Cursor, Cline and Goose, the review needs Claude Code or Codex installed as t
   <img alt="Planted bugs: Claude Code review with claude-opus-5-5. Issue recall 150/153 (98.0%), Location recall 153/153 (100.0%), Precision 254/302 (84.1%) to 301/302 (99.7%), Clean rate 5/6 (83.3%)." src="https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/benchmark-light.svg" width="960">
 </picture>
 
-The chart shows one accepted run: Claude Code with claude-opus-5-5 on openqodex 0.15.0, run on 2026-10-27. Each number adds up 3 repeats of every case, and repeats of one case can give different results. The table gives every accepted run, each under the scoring rules version it was scored with.
+The chart shows one accepted run: Claude Code with claude-opus-5-5 on openqodex 0.15.0, run on 2026-10-27. Each number adds up 3 repeats of every case, and repeats of one case can give different results. The table shows selected accepted runs. [The full results](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md) list every accepted run.
 
 | Reviewer | Model | Cases | Issue recall | Precision | Clean rate | Cost per review | openqodex | Run date |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

@@ -87,10 +87,12 @@ function acceptedRows(index) {
   return { entries, rows };
 }
 
-// The run the README chart shows: among the accepted planted-bug reviews by
-// Claude Code, the highest scoring rules version; on a tie, the latest accepted.
+// The run the README chart and its caption show: among the accepted planted-bug
+// reviews by Claude Code on the whole dev split, with the graph on and not tuned
+// on these cases, the highest scoring rules version; on a tie, the latest accepted.
 export function headlineRow(rows) {
-  const candidates = rows.filter(({ e, g }) => e.suite === "planted" && e.mode === "review" && g.reviewer === "claude");
+  const candidates = rows.filter(({ e, g }) => e.suite === "planted" && e.mode === "review" && g.reviewer === "claude" &&
+    e.split === "dev" && !e.subset && e.tunedOn !== true && g.config.endsWith("-graph-on"));
   candidates.sort((a, b) => (b.e.rulesVersion ?? -1) - (a.e.rulesVersion ?? -1) || b.accepted.acceptedAt.localeCompare(a.accepted.acceptedAt));
   if (candidates.length === 0) throw new Error("no accepted planted-bug review by Claude Code for the README chart");
   return candidates[0];
@@ -226,7 +228,7 @@ export function renderResults(index) {
     "",
     `The chart shows one accepted run: ${reviewer(top.g)} with ${modelName(top.e, top.g)} on openqodex ${cliVersion(top.e)}, run on ${runDate(top.e)}. ` +
       `Each number adds up ${top.e.repeat} repeats of every case, and repeats of one case can give different results. ` +
-      "The table gives every accepted run, each under the scoring rules version it was scored with.",
+      "The table shows selected accepted runs. [The full results](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md) list every accepted run.",
     "",
     ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review", "openqodex", "Run date"], plain.map((r) => [
       `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), precisionRange(r.s), ratio(r.s.controls), cost(r.s), cliVersion(r.e), runDate(r.e),
