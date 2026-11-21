@@ -861,8 +861,8 @@ export function buildReviewerBrief(args: {
   // `review --all`: where to start instead of a diff.
   whole?: { hot: HotSpot[]; graphNote: string | null; inventory: InventoryEntry[] };
   // The lowest confidence a finding may have, stated in the brief of a
-  // change review; GLOBAL_CONFIDENCE_FLOOR when left out. The caller passes
-  // the same value to checkSubmission.
+  // change review or a whole-repo review; GLOBAL_CONFIDENCE_FLOOR when left
+  // out. The caller passes the same value to checkSubmission.
   confidenceFloor?: number;
   // A host's context items (reviewChange), already checked; quoted after the
   // owners' instructions. None on the laptop.
@@ -888,7 +888,7 @@ export function buildReviewerBrief(args: {
       candidatesBlockV2(scan),
       lensBlock(args.lenses, true),
       fileListBlock(change),
-      answerBlock(change, true, GLOBAL_CONFIDENCE_FLOOR, (args.instructionFiles ?? []).length > 0),
+      answerBlock(change, true, args.confidenceFloor, (args.instructionFiles ?? []).length > 0),
     ];
     return { text: redactSecrets(`${blocks.filter((b) => b !== "").join("\n\n")}\n`, args.secrets), diffFiles: new Set() };
   }
