@@ -382,6 +382,15 @@ class Ctx {
   readAt = new Set<number>();
   // Loads already read as a binding (jsRequire), by the call's start.
   consumedLoads = new Set<number>();
+  // Calls marked by the node above them when the walk visits it, by
+  // callKey, so no call reads its own `parent`: tree-sitter finds a parent
+  // by walking down from the root, and a read per call made a deeply nested
+  // file quadratic. A call whose value is given to the name `require`
+  // (jsMarkRequireBinders), one whose value is called (`f()(x)`), and one
+  // whose value is thrown away (`f();`, `await f();`).
+  bindsRequire = new Set<string>();
+  calledCalls = new Set<string>();
+  discardedCalls = new Set<string>();
   // The member read after a name with role `object` (`m.run`): what a
   // module loaded by a computed path is read for.
   propOf = new Map<ValueRef, string>();
@@ -1096,6 +1105,7 @@ const JS_TYPES = new Set([
   "member_expression",
   "subscript_expression",
   "with_statement",
+  "expression_statement",
 ]);
 
 // The constraint a TypeScript type parameter in scope stands for (`T
@@ -1920,34 +1930,32 @@ function jsNamedMemberOf(value: Node): boolean {
   }
   return up?.type === "member_expression" && sameNode(up.childForFieldName("object"), at) && up.childForFieldName("property")?.type === "property_identifier";
 }
-// A call whose value is given to the name `require` (`const require = f()`,
-// `let { require } = f()`, `require = f()`): what it returns may be a
-// loader, so each read of that `require` stays one.
-function jsBindsRequire(node: Node): boolean {
-  let at = node;
-  let up = node.parent;
-  while (up && (up.type === "await_expression" || up.type === "parenthesized_expression" || up.type === "as_expression" || up.type === "non_null_expression" || up.type === "satisfies_expression")) {
-    at = up;
-    up = up.parent;
+// A call by its start and end, the two sameNode compares for nodes of one type.
+const callKey = (call: Node): string => `${call.startIndex}:${call.endIndex}`;
+const REQUIRE_WRAPPERS = new Set(["await_expression", "parenthesized_expression", "as_expression", "non_null_expression", "satisfies_expression"]);
+// The calls whose value is given to the name `require` (`const require =
+// f()`, `let { require } = f()`, `require = f()`), marked from `value`, the
+// declarator's or the assignment's value, down through the wrappers that
+// keep it: what such a call returns may be a loader, so each read of that
+// `require` stays one.
+function jsMarkRequireBinders(ctx: Ctx, value: Node | null): void {
+  const stack = value ? [value] : [];
+  for (let n = stack.pop(); n; n = stack.pop()) {
+    if (n.type === "call_expression") ctx.bindsRequire.add(callKey(n));
+    else if (REQUIRE_WRAPPERS.has(n.type)) stack.push(...n.namedChildren);
   }
-  if (up?.type === "variable_declarator" && sameNode(up.childForFieldName("value"), at)) return patternNames(up.childForFieldName("name")).includes("require");
-  if (up?.type === "assignment_expression" && sameNode(up.childForFieldName("right"), at)) return up.childForFieldName("left")?.type === "identifier" && up.childForFieldName("left")?.text === "require";
-  return false;
 }
 
 function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
   if (!fn) return;
   const line = node.startPosition.row + 1;
-  const binds = jsBindsRequire(node);
+  const key = callKey(node);
+  const binds = ctx.bindsRequire.has(key);
   if (binds) ctx.madeRequire = true;
   const first = node.childForFieldName("arguments")?.namedChildren.find((c) => c.type !== "comment") ?? null;
   const literal = first?.type === "string";
   // A load whose value is thrown away runs the module and reads none of its names.
-  // Tree-sitter finds a parent by walking down from the root, so it is read once.
-  const parent = node.parent;
-  let up = parent;
-  if (up?.type === "await_expression") up = up.parent;
-  const discarded = up?.type === "expression_statement";
+  const discarded = ctx.discardedCalls.has(key);
   const loaded: EscapeFact | null = !literal ? { kind: "load", line } : !discarded ? { kind: "module", spec: stringContent(first as Node), line } : null;
   const load = () => {
     if (loaded) ctx.addEscape(loaded);
@@ -1962,9 +1970,9 @@ function jsCallEscapes(ctx: Ctx, node: Node, fn: Node | null): void {
     return;
   }
   // `const require = createRequire(...)`: its uses are read as require's
-  // are (jsBindsRequire); `createRequire(...)("x")` as a load of x; any
+  // are (jsMarkRequireBinders); `createRequire(...)("x")` as a load of x; any
   // other use of what it makes, as a load by a computed path.
-  const called = parent?.type === "call_expression" && sameNode(parent.childForFieldName("function"), node);
+  const called = ctx.calledCalls.has(key);
   const made: EscapeFact | null = !called && !binds ? { kind: "load", line } : null;
   if (fn.type === "identifier") {
     if (fn.text === "eval") ctx.addEscape({ kind: "eval", line }, "eval");
@@ -2864,6 +2872,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         const name = node.childForFieldName("name");
         const value = node.childForFieldName("value");
         if (!name) return;
+        if (name.type === "identifier" ? name.text === "require" : patternNames(name).includes("require")) jsMarkRequireBinders(ctx, value);
         // `let` and `const` belong to their block, `var` to its function.
         const block = node.parent?.type !== "variable_declaration";
         // A module-level variable: a value an import of it binds.
@@ -3051,6 +3060,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       }
       case "call_expression": {
         const fn = node.childForFieldName("function");
+        if (fn?.type === "call_expression") ctx.calledCalls.add(callKey(fn));
         jsCallEscapes(ctx, node, jsUnwrap(fn));
         if (fn?.type === "import") return;
         const before = ctx.calls.length;
@@ -3148,6 +3158,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         // this.repo = new Repo() in a method declares the field's type.
         const left = node.childForFieldName("left");
         const right = node.childForFieldName("right");
+        if (left?.type === "identifier" && left.text === "require") jsMarkRequireBinders(ctx, right);
         const assigned = jsValueNode(ctx, right);
         if (assigned) ctx.addValue(assigned, "assign");
         const type = newType(right);
@@ -3258,6 +3269,13 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
       }
       case "with_statement":
         ctx.addEscape({ kind: "eval", line: node.startPosition.row + 1 });
+        return;
+      case "expression_statement":
+        // `f();`, `await f();`: the calls whose value is thrown away (jsCallEscapes).
+        for (const c of node.namedChildren) {
+          if (c.type === "call_expression") ctx.discardedCalls.add(callKey(c));
+          else if (c.type === "await_expression") for (const d of c.namedChildren) if (d.type === "call_expression") ctx.discardedCalls.add(callKey(d));
+        }
         return;
       case "this":
         // Outside a class, `this` may be the global object, a CommonJS

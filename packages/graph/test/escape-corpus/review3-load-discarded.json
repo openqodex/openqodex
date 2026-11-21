@@ -1,0 +1,30 @@
+{
+  "covers": "a load whose value is thrown away (`require(x);`, `await import(x);`) reads none of its module's names, and a load passed on marks its module",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.cjs": "exports.g = function () {};\n",
+    "src/c.mjs": "export function h() {}\n",
+    "src/use.cjs": "require(\"./a.cjs\");\nkeep(require(\"./b.cjs\"));\nfunction keep(m) { m.g(); }\n",
+    "src/run.mjs": "await import(\"./c.mjs\");\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/b.cjs#g",
+      "caller": "src/use.cjs#keep",
+      "file": "src/use.cjs",
+      "line": 3
+    }
+  ],
+  "whole": [
+    "src/a.cjs#f",
+    "src/c.mjs#h"
+  ],
+  "floored": [
+    {
+      "target": "src/b.cjs#g",
+      "reason": "its module is used as a value at",
+      "at": "src/use.cjs:2"
+    }
+  ]
+}
