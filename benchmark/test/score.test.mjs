@@ -690,3 +690,18 @@ it("lists under-floor outside-change items after observations, like possible ite
   const counted = { ...SQLI, origin: "agent", confidence: 0.9, title: "Outside counted" };
   expect(shownFindings(report([], { outside_change: [outside, counted], observations: [observation] })).map((f) => [f.title, f.tier])).toEqual([["Outside counted", "finding"], ["Observation", "observation"], ["Outside possible", "possible"]]);
 });
+
+describe("a run that scores nothing has no f1", () => {
+  const nothing = () => scoreJob({
+    job: { jobId: "planted/hand@abababab/c/1", caseId: "planted/hand@abababab", case: "hand", config: "c", repeat: 1 },
+    spec: { ...spec, bugs: [] },
+    report: null,
+    row: { reviewer: "control", status: "complete", nativeBody: "the control's answer", modelStatus: "known", models: ["claude-4-1"], usage: { input_tokens: 1, output_tokens: 1 } },
+    brief: null,
+    origin: "planted",
+  });
+
+  it("records f1 null when precision and recall both have zero denominators", () => {
+    expect(summarizeJobs([nothing()]).f1).toBeNull();
+  });
+});
