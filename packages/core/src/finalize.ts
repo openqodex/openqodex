@@ -227,7 +227,7 @@ export function findingKey(f: Pick<ReportFinding, "file_path" | "line_number" | 
 // the category on overlapping lines. The title does not count. Lines that
 // only share a file, or a different source, keep two findings apart; two
 // real defects of one category on the same lines merge, the accepted cost.
-function sameDefect(a: ReportFinding, b: ReportFinding): boolean {
+export function sameDefect(a: ReportFinding, b: ReportFinding): boolean {
   return a.candidate === null && b.candidate === null && a.source === b.source && a.file_path === b.file_path
     && a.category === b.category && a.line_number <= b.line_end && b.line_number <= a.line_end;
 }
@@ -240,27 +240,31 @@ function merged(a: ReportFinding, b: ReportFinding): ReportFinding {
   return { ...text, severity: severityRank(b.severity) > severityRank(a.severity) ? b.severity : a.severity };
 }
 
+// Two findings the staged verifier did not link (duplicate_of): never one
+// defect, so only the same finding (findingKey) merges.
+const keptApart = (): boolean => false;
+
 // Removes only duplicates: one defect (sameDefect), merged, or the same
 // finding (findingKey) citing a candidate, where the higher severity is kept,
 // then the first.
-function dedup(findings: ReportFinding[]): ReportFinding[] {
+function dedup(findings: ReportFinding[], same = sameDefect): ReportFinding[] {
   const kept: ReportFinding[] = [];
   for (const f of findings) {
-    const at = kept.findIndex((k) => sameDefect(k, f) || findingKey(k) === findingKey(f));
+    const at = kept.findIndex((k) => same(k, f) || findingKey(k) === findingKey(f));
     if (at === -1) {
       kept.push(f);
       continue;
     }
     const prev = kept[at]!;
-    kept[at] = sameDefect(prev, f) ? merged(prev, f) : severityRank(f.severity) > severityRank(prev.severity) ? f : prev;
+    kept[at] = same(prev, f) ? merged(prev, f) : severityRank(f.severity) > severityRank(prev.severity) ? f : prev;
   }
   return kept;
 }
 
 // The possible issues no counted finding already reports.
-function uncounted(possible: ReportFinding[], counted: ReportFinding[]): ReportFinding[] {
+export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect): ReportFinding[] {
   const keys = new Set(counted.map(findingKey));
-  return possible.filter((p) => !keys.has(findingKey(p)) && !counted.some((c) => sameDefect(c, p)));
+  return possible.filter((p) => !keys.has(findingKey(p)) && !counted.some((c) => same(c, p)));
 }
 
 // One redaction pass over every string value in a finished report, run after
@@ -603,6 +607,11 @@ export function checkSubmission(args: {
   confidenceFloor?: number;
   // The instruction files the brief quoted: a finding's rule must quote one.
   instructionFiles?: readonly InstructionFile[];
+  // Set by the staged review. Its verifier rules which findings are one
+  // defect (duplicate_of), and two it did not link stay apart here, whatever
+  // their lines: merging them could move a counted finding into the
+  // observations.
+  verified?: boolean;
 }): SubmissionCheck {
   const { change, scan, manifest, config } = args;
   const clean = (text: string) => redactByFingerprint(text, scan.secretFingerprints);
@@ -714,10 +723,11 @@ export function checkSubmission(args: {
     });
   }
   const droppedBy = new Map(sub.dropped.map((d) => [d.candidate, d]));
-  const deduped = dedup(findings);
+  const same = args.verified ? keptApart : sameDefect;
+  const deduped = dedup(findings, same);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(uncounted(possible, deduped)).filter((f) => {
+  const keptPossible = dedup(uncounted(possible, deduped, same), same).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);

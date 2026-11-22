@@ -402,8 +402,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         }
       }
       const filteredScan = { ...scan, candidates: scan.candidates.filter((c) => !unverified.has(c.id)) };
-      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles });
-      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles }) : null;
+      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles, verified: true });
+      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles, verified: true }) : null;
       return { submission, findingOwners, droppedOwners, items, checked, visible };
     };
     let built = assemble();
