@@ -133,8 +133,11 @@ describe("budget", () => {
     it("reads 20,000 nested name reads in time that grows with the depth (418)", async () => {
       const quarter = nestedReads(n / 4);
       const root = nestedReads(n);
-      const small = await cpuMs(() => buildGraph({ repoRoot: quarter, store: null, budgetMs: 60_000 }));
-      const large = await cpuMs(() => buildGraph({ repoRoot: root, store: null, budgetMs: 60_000 }));
+      // Each build read the file whole: a parse cut by its time limit lists
+      // the file as not read, and a time that measures nothing.
+      const read = (at: string) => async () => expect((await buildGraph({ repoRoot: at, store: null, budgetMs: 60_000 })).status.notRead).toEqual([]);
+      const small = await cpuMs(read(quarter));
+      const large = await cpuMs(read(root));
       expectLinear("a build of 5,000 and of 20,000 nested name reads", small, large);
     }, 120_000);
   });

@@ -11,7 +11,7 @@
 //     to ignore the warning (`whole` rows).
 //  3. A floor says a reason that does not name the escape, or names the
 //     wrong place (`floored` rows: a reason holding the text, at the place,
-//     where `a.ts:2` does not match `a.ts:20`).
+//     where `a.ts:2` does not match `a.ts:20` nor `@a.ts:2`).
 //  4. A value use is the floor's reason but `graph references` does not
 //     list it, so the agent sent to read the use cannot find it (each
 //     `floored` row whose reason is a value use outside the target's own
@@ -90,9 +90,11 @@ describe("the escape corpus", () => {
       for (const f of spec.floored) {
         const a = callersOf(g, idOf(g, f.target));
         expect(a.unknown.floor, f.target).toBe(true);
-        // The place with a boundary on each side: `a.ts:2` is not `a.ts:20` nor `lib/a.ts:2`.
+        // The place with a boundary on each side: `a.ts:2` is not `a.ts:20`,
+        // `lib/a.ts:2` nor `@a.ts:2`. A reason says a place after a space or
+        // at its start.
         const literal = f.at.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const place = new RegExp(`(?<![\\w./-])${literal}(?!\\d)`);
+        const place = new RegExp(`(?<!\\S)${literal}(?!\\d)`);
         const hit = a.unknown.reasons.find((r) => r.includes(f.reason) && (f.at === "" || place.test(r)));
         expect(hit, `${f.target}: a reason with "${f.reason}" at ${f.at || "any place"}; got: ${a.unknown.reasons.join("; ")}`).toBeDefined();
         // Where a hidden caller could be, when the row says.

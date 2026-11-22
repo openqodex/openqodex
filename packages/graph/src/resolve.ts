@@ -3867,8 +3867,9 @@ export function createWorld(input: ResolveInput): World {
     }
 
     // Escape analysis runs once every file is resolved, within the budget:
-    // a pass the budget stops leaves no escape read as whole.
-    let escapes: Escapes = { uses, unbound, reach: new Map(), modules: new Map(), loadAny: [], offered: new Set(), opaque: new Map(), scripts: new Set(), members: new Map() };
+    // a pass the budget stops leaves no escape read as whole, and every
+    // caller list a floor.
+    let escapes: Escapes = { uses, unbound, reach: new Map(), modules: new Map(), loadAny: [], offered: new Set(), opaque: new Map(), scripts: new Set(), members: new Map(), cut: true };
     let escapesCut = stopped;
     if (!stopped) {
       try {
@@ -3945,6 +3946,9 @@ export function createWorld(input: ResolveInput): World {
     // it name. A name the graph cannot follow to one definition (a chain
     // of re-exports too deep, two stars that offer it) may come from any
     // module the file forwards names from, so each of those counts whole.
+    // So does every one of them when the walk of its `export *` met the
+    // step budget: its names are not all listed (a walk not kept, once the
+    // budget is met; one a cycle left open counts too, which only adds).
     const offers = (file: string): { ids: string[]; modules: string[] } => {
       const ids: string[] = [];
       const modules: string[] = [];
@@ -3955,7 +3959,7 @@ export function createWorld(input: ResolveInput): World {
         else if (v?.v === "mod") modules.push(v.file);
         else if (v?.v === "gap") gap = true;
       }
-      if (gap) modules.push(...forwards(file));
+      if (gap || (escapeWalk.cut !== null && !jsNames.has(file))) modules.push(...forwards(file));
       return { ids, modules };
     };
     // The modules a module forwards names from: `export ... from`, and a
@@ -4003,6 +4007,9 @@ export function createWorld(input: ResolveInput): World {
     const runtime: { why: "eval" | "global"; place: Place }[] = [];
     for (const { path, facts: f } of jsFiles) {
       checkBudget();
+      // Every eval site of a file sees the same definitions and imports, and
+      // addReach keeps the first eval place of each: one site reads them.
+      let evalRead = false;
       for (const e of f.escapes ?? []) {
         const place = { file: path, line: e.line };
         if (e.kind === "module") {
@@ -4024,7 +4031,8 @@ export function createWorld(input: ResolveInput): World {
           }
         } else {
           runtime.push({ why: e.kind, place });
-          if (e.kind === "eval") {
+          if (e.kind === "eval" && !evalRead) {
+            evalRead = true;
             // Its own file's definitions and every definition the file imports.
             for (const d of f.defs) addReach(symbolId(path, d), { why: "eval", ...place });
             for (const imp of f.imports) {
@@ -4132,6 +4140,7 @@ export function createWorld(input: ResolveInput): World {
       return names.some((n) => (declared as Set<string>).has(n));
     };
     for (const { path, facts: f } of jsFiles) {
+      checkBudget();
       for (const m of f.looseMembers ?? []) {
         if (m.plain && !ownType(m.plain)) continue;
         const kept = members.get(`js:${m.why}`);
@@ -4145,6 +4154,8 @@ export function createWorld(input: ResolveInput): World {
         }
       }
     }
+    // Work past the deadline in the last file is not read as whole either.
+    checkBudget();
     return { uses, unbound, reach, modules, loadAny, offered, opaque, scripts, members };
   };
 

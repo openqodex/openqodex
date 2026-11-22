@@ -10,12 +10,15 @@
 // 4. Escape analysis, which lists what every module offers when a module is
 //    loaded by a computed path, spends the step budget the comparison of
 //    the change needs, so a changed barrel is said not compared (issue 421).
+// 5. Escape analysis's own walk stops at its step budget, and a function
+//    re-exported past the stop by a module used as a value keeps a caller
+//    list that reads as whole.
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
-import { buildGraph, detectImpact } from "../src/index.js";
+import { buildGraph, detectImpact, floorReasons } from "../src/index.js";
 import { EXPORT_WALK_STEPS } from "../src/resolve.js";
 import { expectLinear, growthTests, stageCpuMs } from "../src/test-timing.js";
-import { commitAll, makeRepo, writeFiles } from "./helpers.js";
+import { commitAll, makeRepo, symbol, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -106,6 +109,7 @@ describe("the export walk", () => {
     const { graph, impact } = await change(files, { "top.ts": 'export * from "./r0";\nfunction mine() {\n  return 2;\n}\n' });
     expect(impact.exports.find((e) => e.name === "mine")).toMatchObject({ file: "top.ts", change: "removed" });
     const notes = graph.status.cuts.filter((c) => c.by === "export-walk").map((c) => c.note);
+    expect(notes, notes.join("; ")).toEqual(expect.arrayContaining([expect.stringContaining("export * for escape analysis stopped")]));
     expect(notes.filter((note) => note.includes("not compared")), notes.join("; ")).toEqual([]);
   }, 300_000);
 
@@ -119,5 +123,17 @@ describe("the export walk", () => {
     const cut = graph.status.cuts.find((c) => c.by === "export-walk");
     expect(cut).toMatchObject({ by: "export-walk", exact: false, omitted: null, unit: "files" });
     expect(cut?.note).toMatch(/export \*/);
+  }, 300_000);
+
+  it("floors a function re-exported past the escape walk's stop by a module used as a value (5)", async () => {
+    // A chain longer than the step budget, one barrel a level, ends at x.ts.
+    const levels = EXPORT_WALK_STEPS + 10;
+    const files: Record<string, string> = { "x.ts": "export function target() {\n  return 1;\n}\n" };
+    for (let i = 1; i <= levels; i++) files[`c${i}.ts`] = i === 1 ? 'export * from "./x";\n' : `export * from "./c${i - 1}";\n`;
+    files["use.ts"] = `import * as all from "./c${levels}";\nexport function run(k: string) {\n  return (all as Record<string, () => number>)[k]();\n}\n`;
+    const g = await buildGraph({ repoRoot: makeRepo(files), store: null, budgetMs: 120_000, maxFiles: 100_000 });
+    expect(g.status.cuts.map((c) => c.note)).toContainEqual(expect.stringContaining("export * for escape analysis stopped"));
+    const reasons = floorReasons(g, { id: symbol(g, "x.ts", "target"), name: "target", file: "x.ts", kind: "function" }, new Set());
+    expect(reasons).toContainEqual(expect.stringMatching(/its module is used as a value at use\.ts:/));
   }, 300_000);
 });

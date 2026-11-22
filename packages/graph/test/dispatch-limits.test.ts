@@ -12,17 +12,24 @@
 // 4. Escape analysis, which runs after every file is resolved, runs on
 //    once the budget is spent, or stops with its escapes read as whole
 //    (issue 420).
+// 5. A caller list built from escapes the budget cut reads as whole.
+// 6. A budget that runs out during the last step of escape analysis, the
+//    sum of member reads, goes unnoticed, so the pass reads as whole.
+// 7. Each eval site of a file walks every definition and import of the
+//    file again, so a file of many functions and many evals takes time
+//    that grows with their product, unchecked by the budget in between.
 import { afterAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildGraph } from "../src/index.js";
+import { buildGraph, floorReasons } from "../src/index.js";
 import { discoverProjects } from "../src/discovery/projects.js";
 import { extract } from "../src/extract.js";
 import { parserFor } from "../src/parser.js";
 import { createWorld } from "../src/resolve.js";
 import { RepoReader } from "../src/safe-fs.js";
+import type { FileFacts } from "../src/types.js";
 import { cpuMs, expectLinear, growthTests } from "../src/test-timing.js";
-import { makeRepo } from "./helpers.js";
+import { makeRepo, symbol } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 // Every folder the shared helpers made for this file goes when it ends (tests/temp-guard.ts).
@@ -123,15 +130,26 @@ describe("the limits of dispatch and function values", () => {
     "src/load.js": "require(process.argv[2]);\n",
     "src/run.js": "eval(location.hash);\n",
   };
-  const worldOf = async (stop: () => boolean) => {
+  // `edit` changes each file's facts before the world is made.
+  const worldOf = async (stop: () => boolean, edit: (facts: FileFacts) => void = () => {}) => {
     const root = repo(escaping);
     const parser = await parserFor("javascript");
-    const files = Object.entries(escaping).map(([path, source]) => {
-      const tree = parser.parse(source);
-      if (!tree) throw new Error("no tree");
-      return { path, facts: extract(tree, "javascript") };
-    });
-    return createWorld({ files, known: new Set(Object.keys(escaping)), model: discoverProjects(Object.keys(escaping), new RepoReader(root)), goModules: [], stop });
+    try {
+      const files = Object.entries(escaping).map(([path, source]) => {
+        const tree = parser.parse(source);
+        if (!tree) throw new Error("no tree");
+        try {
+          const facts = extract(tree, "javascript");
+          edit(facts);
+          return { path, facts };
+        } finally {
+          tree.delete();
+        }
+      });
+      return createWorld({ files, known: new Set(Object.keys(escaping)), model: discoverProjects(Object.keys(escaping), new RepoReader(root)), goModules: [], stop });
+    } finally {
+      parser.delete();
+    }
   };
 
   it("does not start escape analysis once the budget is spent, and says its escapes are cut (4)", async () => {
@@ -146,18 +164,66 @@ describe("the limits of dispatch and function values", () => {
     // the next check is one escape analysis makes.
     const run = async (allowed: number) => {
       let asked = 0;
-      const resolved = (await worldOf(() => ++asked > allowed)).resolveAll();
-      return { resolved, asked };
+      return (await worldOf(() => ++asked > allowed)).resolveAll();
     };
     let allowed = 0;
-    while ((await run(allowed)).resolved.budgetFiles.length > 0) allowed++;
-    const { resolved, asked } = await run(allowed);
+    while ((await run(allowed)).budgetFiles.length > 0) allowed++;
+    const resolved = await run(allowed);
     expect(resolved.budgetFiles).toEqual([]);
     expect(resolved.escapesCut).toBe(true);
-    expect(asked).toBe(allowed + 1);
+    expect(resolved.escapes.loadAny).toEqual([]);
     // With a budget that never runs out, the same files are whole.
     const whole = (await worldOf(() => false)).resolveAll();
     expect(whole.escapesCut).toBe(false);
     expect(whole.escapes.loadAny.length).toBeGreaterThan(0);
+  });
+
+  it("floors every caller list of a graph whose escape analysis the budget cut (5)", async () => {
+    const g = await buildGraph({ repoRoot: repo(escaping), store: null, budgetMs: 60_000 });
+    const seed = { id: symbol(g, "src/a.js", "g"), name: "g", file: "src/a.js", kind: "function" as const };
+    const cut = (await worldOf(() => true)).resolveAll();
+    expect(cut.escapesCut).toBe(true);
+    expect(floorReasons({ ...g, escapes: cut.escapes }, seed, new Set())).toContainEqual(expect.stringMatching(/budget ran out before every way a function escapes was found/));
+  });
+
+  it("cuts escape analysis when the budget runs out while member reads are summed (6)", async () => {
+    // The budget runs out when the facts of a file's member reads are read:
+    // the last step of the pass, after every file is resolved.
+    let summing = false;
+    const world = await worldOf(() => summing, (facts) => {
+      const members = facts.looseMembers;
+      Object.defineProperty(facts, "looseMembers", { get: () => ((summing = true), members) });
+    });
+    const resolved = world.resolveAll();
+    expect(summing).toBe(true);
+    expect(resolved.budgetFiles).toEqual([]);
+    expect(resolved.escapesCut).toBe(true);
+  });
+
+  // A file of `count` functions and as many eval sites, its facts read once:
+  // the time taken is the resolver's.
+  const evalsWorld = async (count: number) => {
+    const source = `${Array.from({ length: count }, (_, i) => `function f${i}() {}\n`).join("")}${"eval(location.hash);\n".repeat(count)}`;
+    const files = { "src/evals.js": source };
+    const root = repo(files);
+    const parser = await parserFor("javascript");
+    const tree = parser.parse(source);
+    if (!tree) throw new Error("no tree");
+    const facts = extract(tree, "javascript");
+    tree.delete();
+    parser.delete();
+    return () => createWorld({ files: [{ path: "src/evals.js", facts }], known: new Set(Object.keys(files)), model: discoverProjects(Object.keys(files), new RepoReader(root)), goModules: [] }).resolveAll();
+  };
+
+  growthTests("in time that grows with the eval sites", () => {
+    it("reads 8,000 eval sites among 8,000 functions in time that grows with the count (7)", async () => {
+      const small = await evalsWorld(2_000);
+      const large = await evalsWorld(8_000);
+      // The last function is still reached by an eval of its file.
+      const whole = large();
+      const last = [...whole.nodes.keys()].find((id) => id.includes("#f7999@")) ?? "";
+      expect(whole.escapes.reach.get(last)).toEqual([expect.objectContaining({ why: "eval", file: "src/evals.js" })]);
+      expectLinear("escape analysis of 2,000 and of 8,000 eval sites among as many functions", await cpuMs(small), await cpuMs(large));
+    }, 120_000);
   });
 });

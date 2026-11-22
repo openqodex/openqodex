@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import type { Node, Tree } from "web-tree-sitter";
 import type { BoundImport, CallFact, DefFact, EscapeFact, FileFacts, OpaqueFact, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
-import { MAX_AMBIENT_NAMES, MAX_TYPE_DEPTH } from "./types.js";
+import { MAX_AMBIENT_NAMES, MAX_FACT_STRING, MAX_TYPE_DEPTH } from "./types.js";
 import { walkTree } from "./walk.js";
 import type { TreeVisitor } from "./walk.js";
 
@@ -133,7 +133,9 @@ import type { TreeVisitor } from "./walk.js";
 // 55: a `type` specifier of an import or a re-export makes no loader; a
 // Python `cast` is typing's only where its import is seen; a file with an
 // `import` or `export` statement says so (`esm`); a file keeps at most
-// MAX_AMBIENT_NAMES global names declared as plain data.
+// MAX_AMBIENT_NAMES global names declared as plain data, none longer than
+// MAX_FACT_STRING; a Python `cast` is typing's only when the last import at
+// the top of the module that binds its name is typing's.
 export const EXTRACTOR_VERSION = 55;
 
 type Frame = {
@@ -3595,7 +3597,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
             for (const d of c.namedChildren) {
               const name = d.type === "variable_declarator" ? d.childForFieldName("name") : null;
               const type = d.childForFieldName("type")?.firstNamedChild;
-              if (name?.type === "identifier" && type?.type === "predefined_type" && PLAIN_TYPES.has(type.text)) (global ? ctx.ambient : ctx.ambientTop).add(name.text);
+              if (name?.type === "identifier" && name.text.length <= MAX_FACT_STRING && type?.type === "predefined_type" && PLAIN_TYPES.has(type.text)) (global ? ctx.ambient : ctx.ambientTop).add(name.text);
             }
           }
         }
@@ -3684,12 +3686,18 @@ function pyTypingCast(ctx: Ctx, fn: Node | null): boolean {
 }
 
 // `name` is bound by an import of the typing module where it is read: an
-// import of the function or block around it, else one at the top of the
-// module. An import inside another function binds nothing here.
+// import of the function or block around it, else the last import at the
+// top of the module that binds the name (a later one replaces it). An
+// import inside another function binds nothing here.
 function pyTypingName(ctx: Ctx, name: string, imported: string, binds: (i: ImportFact) => boolean): boolean {
   const bound = ctx.lookup(ctx.top, name)?.imports?.get(name);
   if (bound) return bound.imported === imported && PY_TYPING.has(ctx.imports[bound.import]?.spec ?? "");
-  return ctx.local(name) === undefined && ctx.imports.some((i) => i.scoped !== true && PY_TYPING.has(i.spec) && binds(i));
+  if (ctx.local(name) !== undefined) return false;
+  for (let k = ctx.imports.length - 1; k >= 0; k--) {
+    const i = ctx.imports[k] as ImportFact;
+    if (i.scoped !== true && (i.namespace === name || i.names.some((n) => n.local === name))) return PY_TYPING.has(i.spec) && binds(i);
+  }
+  return false;
 }
 
 // A method Python never runs on an instance of a concrete class: one

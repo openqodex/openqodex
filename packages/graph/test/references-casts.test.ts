@@ -17,7 +17,9 @@
 //     parameter or local named `cast` or `typing`, which hides the import,
 //     is read as the typing module's and gives a row it does not make; or
 //     an import of `cast` or `typing` inside one function is read as bound
-//     in a sibling function, where the name binds nothing (issue 423).
+//     in a sibling function, where the name binds nothing (issue 423); or
+//     a later import of `cast` from another module, which replaces
+//     typing's, is still read as typing's.
 //  6. A Go type assertion (`v.(Bar)`, `v.(*Bar)`, `v.(store.Bar)`) has no row.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
@@ -130,6 +132,16 @@ const files: Record<string, string> = {
     "    return t.cast(Foo, x)  # py-sibling-module",
     "",
   ].join("\n"),
+  "py/replaced.py": [
+    "from typing import cast",
+    "from other import cast",
+    "from models import Foo",
+    "",
+    "",
+    "def f(x):",
+    "    return cast(Foo, x)  # py-replaced-cast",
+    "",
+  ].join("\n"),
   "go/go.mod": "module example.com/m\n\ngo 1.22\n",
   "go/store/store.go": "package store\n\ntype Bar struct{ ID string }\n",
   "go/store/same.go": ["package store", "", "func Same(v any) any {", "\treturn v.(Bar) // go-assert", "}", "", "func Ptr(v any) any {", "\treturn v.(*Bar) // go-assert-ptr", "}", ""].join("\n"),
@@ -188,6 +200,11 @@ describe("references of a type named only in a cast", () => {
     const r = rows("py/models.py", "Foo").filter((x) => x[1] === "uses_type").map((x) => x[0]);
     for (const marker of ["py-scoped-cast", "py-scoped-module"]) expect(r).toContain(at(files, "py/scoped.py", marker));
     for (const marker of ["py-sibling-cast", "py-sibling-module"]) expect(r).not.toContain(at(files, "py/scoped.py", marker));
+  });
+
+  it("lists no Python cast where a later import of another module's `cast` replaced typing's (5)", () => {
+    const r = rows("py/models.py", "Foo").filter((x) => x[1] === "uses_type").map((x) => x[0]);
+    expect(r).not.toContain(at(files, "py/replaced.py", "py-replaced-cast"));
   });
 
   it("lists a Go type assertion to the type, its pointer and the type of another package (6)", () => {

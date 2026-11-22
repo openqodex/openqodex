@@ -5,7 +5,7 @@ import { isAbsolute, resolve } from "node:path";
 import { FolderReader, type EntryResult } from "@openqodex/core";
 import { isFrameworkFileFacts } from "./frameworks/facts.js";
 import type { FileFacts } from "./types.js";
-import { MAX_AMBIENT_NAMES, MAX_TYPE_DEPTH } from "./types.js";
+import { MAX_AMBIENT_NAMES, MAX_FACT_STRING, MAX_TYPE_DEPTH } from "./types.js";
 
 // Repo-relative reads, each decided by what the filesystem holds at the
 // moment of that read and by nothing kept from an earlier one. The root is
@@ -56,7 +56,7 @@ export class RepoReader {
 // ---------- the cached facts must match their schema exactly ----------
 
 const MAX_ITEMS = 200_000;
-const isStr = (v: unknown): v is string => typeof v === "string" && v.length <= 4096;
+const isStr = (v: unknown): v is string => typeof v === "string" && v.length <= MAX_FACT_STRING;
 const isInt = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= -1 && (v as number) <= 10_000_000;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const optBool = (v: unknown) => v === undefined || typeof v === "boolean";

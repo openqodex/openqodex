@@ -157,8 +157,9 @@ export function writeIndex(g: Graph): Record<string, string> {
     "index/summaries.jsonl": lines(summaries),
     "index/status.json": JSON.stringify(g.status),
     "index/frameworks.json": JSON.stringify(g.frameworks ?? null),
-    // A graph without its escape facts never loads back as one that has them.
-    "index/escapes.json": x.missing ? "null" : JSON.stringify(escapes),
+    // A graph without its escape facts, or with ones the budget cut, never
+    // loads back as one that has them whole.
+    "index/escapes.json": x.missing || x.cut ? "null" : JSON.stringify(escapes),
   };
 }
 
