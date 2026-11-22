@@ -6,17 +6,20 @@
 // the second reviewer's, with the usage of the primary's calls counted in.
 //
 // How its work joins the primary's:
-//   findings       merged by finalize's rule for the same finding (the file,
-//                  the range, the category, and the candidate, source or
-//                  title); the higher severity is kept, then the primary's;
-//                  `foundBy` names every reviewer that raised it
+//   findings       merged by finalize's rules for one defect (sameDefect:
+//                  the file, the category and overlapping lines, with no
+//                  candidate and the same source or none) or for the same
+//                  finding (findingKey: the file, the range, the category,
+//                  and the candidate, source or title); the higher severity
+//                  is kept, then the primary's; `foundBy` names every
+//                  reviewer that raised it
 //   dispositions   both reviewers' kept, each marked with who made it
 //   disagreements  each candidate one raised and the other dropped
 //   failures       a budget refusal ends the whole review incomplete (the
 //                  record says so in `missing`, the primary's findings stay);
 //                  any other failure leaves the review as the primary made it
 //                  and is named in the notes and the record
-import { findingKey, severityRank, shortenedMissing } from "@openqodex/core";
+import { findingKey, sameDefect, severityRank, shortenedMissing } from "@openqodex/core";
 import type { Disagreement, ModelCompletionRecord, Report, ReportFinding } from "@openqodex/core";
 import type { Conversation } from "./conversation.js";
 import { modelSession } from "./model-loop.js";
@@ -56,11 +59,10 @@ export async function runSecondReviewer(args: {
 // The two answers' findings as one list, the primary's first, each with the
 // names of the reviewers that raised it.
 export function mergeFindings(primary: { name: string; findings: ReportFinding[] }, second: { name: string; findings: ReportFinding[] }): { findings: ReportFinding[]; foundBy: string[][] } {
-  const merged = new Map<string, { finding: ReportFinding; foundBy: string[] }>();
-  for (const f of primary.findings) merged.set(findingKey(f), { finding: f, foundBy: [primary.name] });
+  const merged = primary.findings.map((f) => ({ finding: f, foundBy: [primary.name] }));
   for (const f of second.findings) {
-    const same = merged.get(findingKey(f));
-    if (!same) merged.set(findingKey(f), { finding: f, foundBy: [second.name] });
+    const same = merged.find((m) => sameDefect(m.finding, f) || findingKey(m.finding) === findingKey(f));
+    if (!same) merged.push({ finding: f, foundBy: [second.name] });
     else {
       same.foundBy.push(second.name);
       // The staged primary's evidence in other files and its rule citation
@@ -72,8 +74,7 @@ export function mergeFindings(primary: { name: string; findings: ReportFinding[]
       }
     }
   }
-  const all = [...merged.values()];
-  return { findings: all.map((m) => m.finding), foundBy: all.map((m) => m.foundBy) };
+  return { findings: merged.map((m) => m.finding), foundBy: merged.map((m) => m.foundBy) };
 }
 
 // Each candidate one reviewer raised and the other dropped, in the order

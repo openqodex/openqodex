@@ -59,6 +59,7 @@ import {
   verdictFor,
   resolveInstructionFiles,
   shortenedMissing,
+  uncounted,
 } from "@openqodex/core";
 import type {
   BaseSource,
@@ -1199,7 +1200,10 @@ async function reviewInScope(
       // unchecked, even when the primary never answered.
       const disposed = new Set(theirs.map((d) => d.candidate));
       const countedKeys = new Set(merged.findings.map(findingKey));
-      checked = { ...r.report, findings: merged.findings, possible: r.report.possible.filter((f) => !countedKeys.has(findingKey(f))), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
+      // A primary possible issue the second reviewer counts as one defect
+      // leaves; one a staged primary's verifier kept apart from a primary
+      // finding stays.
+      checked = { ...r.report, findings: merged.findings, possible: uncounted(r.report.possible, joined.findings).filter((f) => !countedKeys.has(findingKey(f))), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
       foundBy = merged.foundBy;
       if (answered) disagreements = disagreementsOf({ name: model.model, dispositions }, { name: second.name, dispositions: theirs });
       dispositions.push(...theirs);

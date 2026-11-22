@@ -32,6 +32,11 @@
 // Added after the code review of pull request 350:
 // 10. The second reviewer rates a shared finding higher, and the merged
 //     finding loses the rule citation the primary's finding carried.
+// Added for issue 315:
+// 11. The two reviewers title one defect differently, on overlapping lines,
+//     and it is listed twice, or the primary's possible issue stays beside
+//     the second reviewer's counted finding; or findings on lines that do
+//     not overlap merge.
 import { DEFAULT_CONFIG } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { reviewChange } from "../src/review-change.js";
@@ -227,4 +232,18 @@ it("10. keeps the primary's rule citation when the second reviewer rates the fin
   const merged = mergeFindings({ name: "primary", findings: [{ ...finding, rule }] }, { name: "second", findings: [{ ...finding, severity: "major" }] });
   expect(merged.findings).toEqual([expect.objectContaining({ severity: "major", rule })]);
   expect(merged.foundBy).toEqual([["primary", "second"]]);
+});
+
+it("11. merges one defect the two reviewers title differently on overlapping lines, and keeps lines apart that do not overlap", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 3, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const merged = mergeFindings({ name: "primary", findings: [finding] }, { name: "second", findings: [{ ...finding, line_number: 3, title: "add returns a minus b", severity: "major" }, { ...finding, line_number: 5, line_end: 5, title: "Unused import" }] });
+  expect(merged.findings.map((f) => [f.title, f.severity])).toEqual([["add returns a minus b", "major"], ["Unused import", "minor"]]);
+  expect(merged.foundBy).toEqual([["primary", "second"], ["second"]]);
+});
+
+it("11. drops a primary possible item when the second reviewer counts the same defect under another title", async () => {
+  const { result } = await run({ findings: [{ ...SUBTRACTION, confidence: 0.8, title: "add returns a minus b" }] }, undefined, false, { findings: [{ ...SUBTRACTION, confidence: 0.6 }] });
+  expect(result.findings).toEqual([expect.objectContaining({ title: "add returns a minus b", confidence: 0.8 })]);
+  expect(result.possible).toEqual([]);
+  expect(JSON.parse(result.render.json()).possible).toEqual([]);
 });
