@@ -41,7 +41,8 @@
 //     or two second findings on one broad primary finding collapse into it,
 //     losing a distinct bug; or a primary possible issue leaves for a second
 //     finding that is the same finding as a primary one, which the primary
-//     review already ruled on.
+//     review already ruled on; or one broad second finding takes two
+//     possible issues on lines apart from each other.
 import { DEFAULT_CONFIG } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { reviewChange } from "../src/review-change.js";
@@ -276,4 +277,11 @@ it("11. keeps a primary possible issue beside a second finding that is the same 
   expect(possibleAfterSecond([possible], exact).map((f) => f.title)).toEqual(["Overflow on large input"]);
   const alone = mergeFindings({ name: "primary", findings: [] }, { name: "second", findings: [finding] });
   expect(possibleAfterSecond([possible], alone)).toEqual([]);
+});
+
+it("11. keeps two primary possible issues that one broad second finding overlaps", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 1, line_end: 10, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const possible = [{ ...finding, line_number: 2, line_end: 2, title: "Overflow on large input", confidence: 0.6 }, { ...finding, line_number: 8, line_end: 8, title: "Off by one in the loop", confidence: 0.6 }];
+  const alone = mergeFindings({ name: "primary", findings: [] }, { name: "second", findings: [finding] });
+  expect(possibleAfterSecond(possible, alone).map((f) => f.title)).toEqual(["Overflow on large input", "Off by one in the loop"]);
 });

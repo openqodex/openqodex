@@ -232,12 +232,17 @@ export function sameDefect(a: ReportFinding, b: ReportFinding): boolean {
     && a.category === b.category && a.line_number <= b.line_end && b.line_number <= a.line_end;
 }
 
-// One finding for one defect: the text and lines of the one that says more,
-// with the higher severity of the two.
+// One finding for one defect: the text of the one that says more, the lines
+// of both, and the higher severity of the two.
 function merged(a: ReportFinding, b: ReportFinding): ReportFinding {
   const says = (f: ReportFinding) => f.description.length + (f.suggested_change?.length ?? 0);
   const text = says(b) > says(a) ? b : a;
-  return { ...text, severity: severityRank(b.severity) > severityRank(a.severity) ? b.severity : a.severity };
+  return {
+    ...text,
+    severity: severityRank(b.severity) > severityRank(a.severity) ? b.severity : a.severity,
+    line_number: Math.min(a.line_number, b.line_number),
+    line_end: Math.max(a.line_end, b.line_end),
+  };
 }
 
 // Never one defect, so only the same finding (findingKey) matches: for two
@@ -245,30 +250,47 @@ function merged(a: ReportFinding, b: ReportFinding): ReportFinding {
 // possible issue beside a counted finding the threshold hides.
 const keptApart = (): boolean => false;
 
-// Removes only duplicates: one defect (sameDefect), merged, or the same
-// finding (findingKey) citing a candidate, where the higher severity is kept,
-// then the first.
+// Removes only duplicates, in two steps. First the same finding
+// (findingKey): one defect merges, and one citing a candidate keeps the
+// higher severity, then the first. Then one defect (sameDefect), only for two
+// findings that are each other's one overlap: a broad finding over two
+// findings on lines apart is three defects, all kept, whatever the order.
 function dedup(findings: ReportFinding[], same = sameDefect): ReportFinding[] {
-  const kept: ReportFinding[] = [];
+  const byKey = new Map<string, ReportFinding>();
   for (const f of findings) {
-    const exact = kept.findIndex((k) => findingKey(k) === findingKey(f));
-    const at = exact !== -1 ? exact : kept.findIndex((k) => same(k, f));
-    if (at === -1) {
-      kept.push(f);
-      continue;
-    }
-    const prev = kept[at]!;
-    kept[at] = same(prev, f) ? merged(prev, f) : severityRank(f.severity) > severityRank(prev.severity) ? f : prev;
+    const key = findingKey(f);
+    const prev = byKey.get(key);
+    byKey.set(key, !prev ? f : same(prev, f) ? merged(prev, f) : severityRank(f.severity) > severityRank(prev.severity) ? f : prev);
   }
-  return kept;
+  const kept = [...byKey.values()];
+  if (same === keptApart) return kept;
+  const overlaps = kept.map((a) => kept.filter((b) => b !== a && same(a, b)));
+  const gone = new Set<ReportFinding>();
+  const out: ReportFinding[] = [];
+  kept.forEach((a, i) => {
+    if (gone.has(a)) return;
+    const twin = overlaps[i]!.length === 1 ? overlaps[i]![0]! : null;
+    if (twin && overlaps[kept.indexOf(twin)]!.length === 1) {
+      gone.add(twin);
+      out.push(merged(a, twin));
+    } else out.push(a);
+  });
+  return out;
 }
 
-// The possible issues no counted finding already reports. A caller passes
-// only the counted findings the report shows when it matches by one defect,
-// so a possible issue never leaves for a finding the threshold hides.
+// The possible issues no counted finding already reports: one with the key
+// of a counted finding, or one that is one defect with a counted finding
+// when each is the other's one overlap, so a broad finding never takes two
+// possible issues. A caller passes only the counted findings the report
+// shows when it matches by one defect, so a possible issue never leaves for
+// a finding the threshold hides.
 export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect): ReportFinding[] {
   const keys = new Set(counted.map(findingKey));
-  return possible.filter((p) => !keys.has(findingKey(p)) && !counted.some((c) => same(c, p)));
+  return possible.filter((p) => {
+    if (keys.has(findingKey(p))) return false;
+    const near = counted.filter((c) => same(c, p));
+    return near.length !== 1 || possible.filter((q) => same(near[0]!, q)).length !== 1;
+  });
 }
 
 // One redaction pass over every string value in a finished report, run after
@@ -379,7 +401,7 @@ export function finalizeReview(args: {
   const deduped = dedup(findings);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(uncounted(uncounted(possible, deduped, keptApart), kept)).filter((f) => {
+  const keptPossible = uncounted(dedup(uncounted(possible, deduped, keptApart)), kept).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
@@ -731,7 +753,7 @@ export function checkSubmission(args: {
   const deduped = dedup(findings, same);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(uncounted(uncounted(possible, deduped, keptApart), kept, same), same).filter((f) => {
+  const keptPossible = uncounted(dedup(uncounted(possible, deduped, keptApart), same), kept, same).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);

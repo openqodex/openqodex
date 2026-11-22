@@ -271,8 +271,9 @@ function inputsOf(folder, a, rebuilt) {
   const saved = savedChange(a.brief, manifest, a.report, inventory);
   const files = new Set([...saved.change.files.map((f) => f.path), ...(inventory ?? []).map((f) => f.path), ...(scan.selection ?? []).flatMap((s) => s.paths)]);
   // A staged review's verifier ruled on duplicates, so core merges only the
-  // same finding, as it did in that review.
-  const verified = (a.report.completion.reviewer?.sessions ?? []).some((s) => /^(finder|verifier):/.test(s.role));
+  // same finding, as it did in that review. A model review's record keeps
+  // its sessions at the top, an agent review's under its reviewer.
+  const verified = (a.report.completion.sessions ?? a.report.completion.reviewer?.sessions ?? []).some((s) => /^(finder|verifier):/.test(s.role));
   return { ...saved, lineCount: (p) => saved.lineCount(p) ?? rebuilt.lengths?.get(p) ?? null, hasFile: (p) => rebuilt.lengths?.has(p) || files.has(p), rebuildReason: rebuilt.reason, manifest, scan, config: settings, submission: a.submission, verified };
 }
 

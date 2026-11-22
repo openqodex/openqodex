@@ -36,7 +36,10 @@
 //     the merge keeps the lower severity or the thinner text; or findings on
 //     lines that do not overlap, or from different sources, are merged; or a
 //     possible issue is dropped for a counted finding the threshold hides,
-//     so the defect shows nowhere.
+//     so the defect shows nowhere; or a broad finding absorbs two findings
+//     on lines apart from each other, or a counted finding takes two
+//     possible issues, so a distinct defect is lost; or the merged finding
+//     loses the lines of the one it absorbed.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { checkSubmission, finalizeReview, proseErrors, scanReport, sentences, SETTINGS_RULE, SUPPRESSION_RULE } from "./finalize.js";
@@ -578,10 +581,10 @@ describe("one defect under two titles is shown once (16)", () => {
   const thin = { title: "Pool closed too early", description: "The pool closes.", severity: "minor", line_number: 1, line_end: 3 };
   const rich = { title: "put runs after the pool shut down", description: "The pool closes before the last put, so put raises ShutDown.", severity: "major", line_number: 2, line_end: 2 };
 
-  it.each([1, 2])("version %i merges two counted findings on overlapping lines, keeping the higher severity and the richer text", (version) => {
+  it.each([1, 2])("version %i merges two counted findings on overlapping lines, keeping the higher severity, the richer text and both ranges", (version) => {
     for (const entries of [[thin, rich], [rich, thin]]) {
       const report = run2(version, entries);
-      expect(report.findings.map((f) => [f.severity, f.title, f.line_number])).toEqual([["major", rich.title, 2]]);
+      expect(report.findings.map((f) => [f.severity, f.title, f.line_number, f.line_end])).toEqual([["major", rich.title, 1, 3]]);
     }
     const report = run2(version, [{ ...thin, severity: "critical" }, rich]);
     expect(report.findings.map((f) => [f.severity, f.title])).toEqual([["critical", rich.title]]);
@@ -598,6 +601,18 @@ describe("one defect under two titles is shown once (16)", () => {
     expect(report.findings).toEqual([]);
     expect(report.below_threshold).toBe(1);
     expect(report.possible.map((f) => f.title)).toEqual([rich.title]);
+  });
+
+  it.each([1, 2])("version %i keeps a broad finding and two findings it overlaps on lines apart from each other", (version) => {
+    const broad = { ...rich, line_number: 1, line_end: 3, description: "The pool closes before the last put, so put raises ShutDown, and the caller retries forever." };
+    const first = { ...thin, line_end: 1 };
+    const third = { ...thin, title: "Lock never released", line_number: 3, line_end: 3 };
+    for (const entries of [[broad, first, third], [first, third, broad]]) {
+      expect(run2(version, entries).findings.map((f) => f.title).sort()).toEqual([broad.title, first.title, third.title].sort());
+    }
+    const report = run2(version, [{ ...broad, confidence: 0.9 }, { ...first, confidence: 0.55 }, { ...third, confidence: 0.55 }]);
+    expect(report.findings.map((f) => f.title)).toEqual([broad.title]);
+    expect(report.possible.map((f) => f.title)).toEqual([first.title, third.title]);
   });
 
   it.each([1, 2])("version %i keeps findings on lines that do not overlap, and findings from different sources", (version) => {

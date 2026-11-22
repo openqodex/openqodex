@@ -288,6 +288,9 @@ it("replays a staged run's two titles on one line as two findings, and a single-
   const twoTitles = [[f(), f({ title: "Zero divisor crashes" })]];
   const staged = savedRun(twoTitles, { completion: { status: "complete", reviewer: { sessions: [{ role: "finder:u1:local" }, { role: "verifier:b1" }] } } });
   expect(replayRun(staged.run, { mode: "threshold" }).rows[0].findings).toBe(2);
+  // The model review's completion record keeps its sessions at the top.
+  const model = savedRun(twoTitles, { completion: { contract: "openqodex-model-review-1", status: "complete", reviewer: { kind: "model", model: "fixture" }, sessions: [{ role: "finder:u1:local" }, { role: "verifier:b1" }] } });
+  expect(replayRun(model.run, { mode: "threshold" }).rows[0].findings).toBe(2);
   const single = savedRun(twoTitles, { completion: { status: "complete", reviewer: { sessions: [{ role: "primary" }] } } });
   expect(replayRun(single.run, { mode: "threshold" }).rows[0].findings).toBe(1);
 });
