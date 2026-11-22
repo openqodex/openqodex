@@ -3,7 +3,7 @@
 // installation record: a thing is changed or removed only while it is still
 // exactly what we wrote. In project scope a machine with no record (a
 // teammate's) counts a thing as ours only when it equals the current output.
-import { lstatSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { AgentId } from "./detect.js";
 import { readText, sha256 } from "./files.js";
@@ -365,11 +365,31 @@ export function planInstall(t: Target, ctx: Ctx): Action {
   }
 }
 
+// The text of the regular file at `path`, opened without blocking (a named
+// pipe cannot hold the open) and without following a link: null when it is
+// missing, "other" when it is not a regular file or cannot be read.
+function readPlain(path: string): string | null | "other" {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? null : "other";
+  }
+  try {
+    return fstatSync(fd).isFile() ? readFileSync(fd, "utf8") : "other";
+  } catch {
+    return "other";
+  } finally {
+    closeSync(fd);
+  }
+}
+
 // Whether OpenQodex's part of `t` is on disk, as any version wrote it and
 // whether or not a record names it: the file, a marked section, a hook group
 // whose command runs openqodex, the openqodex MCP server entry or block.
 // Uninstall asks it of an agent that stays (init.ts). A file it cannot read
-// or parse counts as there, so a doubt keeps a shared file.
+// or parse, a link or anything but a regular file counts as there, so a
+// doubt keeps a shared file.
 export function setUpAt(t: Target): boolean {
   if (t.kind === "allow-rules") return false;
   if (t.kind === "file") {
@@ -380,12 +400,8 @@ export function setUpAt(t: Target): boolean {
       return false;
     }
   }
-  let text: string | null;
-  try {
-    text = readText(t.path);
-  } catch {
-    return true;
-  }
+  const text = readPlain(t.path);
+  if (text === "other") return true;
   if (text === null) return false;
   switch (t.kind) {
     case "md-section":

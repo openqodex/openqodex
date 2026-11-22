@@ -6,7 +6,7 @@
 import { execFile } from "node:child_process";
 import { lstatSync, realpathSync, rmdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { DELIVERY_ROW_BYTES, REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
@@ -183,7 +183,10 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
   const child = spawnGroup(opts.bin, claudeArgs(opts.web), { cwd: opts.snapshotDir, env });
   // The configuration folder the agent uses, read from the environment it
   // was given as init reads it; it saves its own output for the session there.
-  const configDir = claudeHome(env.HOME ?? homedir(), env);
+  // Claude Code joins a relative CLAUDE_CONFIG_DIR as given, so it lands in
+  // its working folder, the snapshot.
+  const relative = env.CLAUDE_CONFIG_DIR && !isAbsolute(env.CLAUDE_CONFIG_DIR) ? { ...env, CLAUDE_CONFIG_DIR: `${opts.snapshotDir}${sep}${env.CLAUDE_CONFIG_DIR}` } : env;
+  const configDir = claudeHome(env.HOME ?? homedir(), relative);
   // Every tool call is kept from the moment the agent asks for it, whether or
   // not a result follows, and whichever turn or nesting it came from.
   const pending = new Map<string, ToolCall>();

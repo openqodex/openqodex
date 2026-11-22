@@ -81,7 +81,8 @@
 // 30. Uninstalling one agent removes a file another agent still set up
 //     needs (the project skill Codex and Cursor share, issue 343), whether
 //     both were set up in one init or in two, or on a teammate's machine
-//     that has no record; or the file stays once neither agent is set up.
+//     that has no record; or the file stays once neither agent is set up;
+//     or a named pipe at a file of the agent that stays hangs the uninstall.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -92,6 +93,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   statSync,
   symlinkSync,
   utimesSync,
@@ -506,6 +508,21 @@ describe("init, project scope", () => {
     project(teammate, "--uninstall", "--agent", "cursor");
     expect(existsSync(skill), "both removed, the skill").toBe(false);
   });
+
+  it("30. a named pipe at a file of the agent that stays never hangs the uninstall, and keeps the shared skill", () => {
+    const s = sandbox();
+    project(s, "--agent", "codex", "--agent", "cursor");
+    // Cursor's rule gone, so the uninstall has to read its MCP file to tell
+    // whether Cursor is still set up; that file is a named pipe with no writer.
+    renameSync(join(s.repo, ".cursor/rules/openqodex.mdc"), join(s.root, "rule.mdc"));
+    const mcp = join(s.repo, ".cursor/mcp.json");
+    renameSync(mcp, join(s.root, "mcp.json"));
+    expect(spawnSync("mkfifo", [mcp]).status).toBe(0);
+    const r = spawnSync(process.execPath, [BIN, "init", "--yes", "--project", "--uninstall", "--agent", "codex", "--no-review"], { cwd: s.repo, env: env(s), encoding: "utf8", timeout: 15_000 });
+    expect(r.error, "the uninstall did not finish in 15 seconds").toBeUndefined();
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(s.repo, SHARED_SKILL)), "a pipe there counts as Cursor still set up").toBe(true);
+  }, 30_000);
 
   it("keeps an AGENTS.md section the developer edited", () => {
     const s = sandbox();

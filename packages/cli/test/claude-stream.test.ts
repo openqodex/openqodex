@@ -185,6 +185,16 @@ describe("the output Claude Code saved for the session", () => {
     expect(existsSync(join(cfg, "projects"))).toBe(true);
   });
 
+  it("8. is removed from a relative CLAUDE_CONFIG_DIR, which the agent reads from the snapshot", async () => {
+    config();
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "relative-config");
+    const bin = standIn(`(${SAVE}, ${JSON.stringify(RECORDED)}.split('__SNAPSHOT__').join(snapshot))`);
+    const { turn, snapshotDir } = await runOnce(bin);
+    expect(turn.failure).toBeNull();
+    expect(existsSync(join(snapshotDir, "relative-config", "projects")), "the stand-in saved there").toBe(true);
+    expect(existsSync(join(snapshotDir, "relative-config", "projects", claudeProjectName(snapshotDir)))).toBe(false);
+  });
+
   it("8. is removed also when the turn failed", async () => {
     const cfg = config();
     const failed = RECORDED.replace('"is_error":false,"num_turn', '"is_error":true,"num_turn');
