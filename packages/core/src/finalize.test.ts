@@ -30,6 +30,11 @@
 //     under review.severity_threshold and leaves the report: in a scan, where
 //     it counts as minor, or raised by the reviewer at a low severity in
 //     either submission version.
+// 16. Two finders describe one defect with different titles, with no
+//     candidate cited, on overlapping lines of one file in one category: it
+//     shows twice, as two findings or as a finding and a possible issue; or
+//     the merge keeps the lower severity or the thinner text; or findings on
+//     lines that do not overlap, or from different sources, are merged.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { checkSubmission, finalizeReview, proseErrors, scanReport, sentences, SETTINGS_RULE, SUPPRESSION_RULE } from "./finalize.js";
@@ -554,5 +559,43 @@ describe("sentence counting around code names", () => {
   });
   it("still ends a sentence at a bang or question mark followed by a capital, a digit, a quote or a backtick", () => {
     expect(sentences("The action calls destroy! The caller is unscoped. Is it guarded? `authenticate!` runs first. Why? 2 reasons.")).toHaveLength(6);
+  });
+});
+
+describe("one defect under two titles is shown once (16)", () => {
+  function run2(version: number, entries: Record<string, unknown>[]) {
+    const change = makeChange();
+    const args = { change, scan: makeScan({ candidates: [] }), manifest: makeManifest(change), config: makeConfig() };
+    const findings = entries.map((entry) => ({ ...finding({ source: null, candidate: null, category: "bug", file_path: "app/settings.py" }), ...entry }));
+    if (version === 1) return finalizeReview({ ...args, submission: makeSubmission({ findings, dropped: [] }) });
+    const v2 = findings.map(({ description, suggested_change: _s, ...rest }) => ({ ...rest, problem: description, consequence: "The request fails.", fix: "Open a new pool first." }));
+    const checked = checkSubmission({ ...args, lineCount: () => 100, submission: { version: 2, change_id: change.id, summary: "Checked.", findings: v2, dropped: [] } });
+    if (!checked.ok) throw new Error(checked.errors.join("\n"));
+    return checked.report;
+  }
+  const thin = { title: "Pool closed too early", description: "The pool closes.", severity: "minor", line_number: 1, line_end: 3 };
+  const rich = { title: "put runs after the pool shut down", description: "The pool closes before the last put, so put raises ShutDown.", severity: "major", line_number: 2, line_end: 2 };
+
+  it.each([1, 2])("version %i merges two counted findings on overlapping lines, keeping the higher severity and the richer text", (version) => {
+    for (const entries of [[thin, rich], [rich, thin]]) {
+      const report = run2(version, entries);
+      expect(report.findings.map((f) => [f.severity, f.title, f.line_number])).toEqual([["major", rich.title, 2]]);
+    }
+    const report = run2(version, [{ ...thin, severity: "critical" }, rich]);
+    expect(report.findings.map((f) => [f.severity, f.title])).toEqual([["critical", rich.title]]);
+  });
+
+  it.each([1, 2])("version %i drops a possible issue on lines a counted finding of its category covers", (version) => {
+    const report = run2(version, [{ ...rich, confidence: 0.9 }, { ...thin, confidence: 0.55 }]);
+    expect(report.findings.map((f) => f.title)).toEqual([rich.title]);
+    expect(report.possible).toEqual([]);
+  });
+
+  it.each([1, 2])("version %i keeps findings on lines that do not overlap, and findings from different sources", (version) => {
+    const apart = run2(version, [{ ...thin, line_end: 1 }, { ...rich, line_number: 3, line_end: 3 }]);
+    expect(apart.findings.map((f) => f.title)).toEqual([thin.title, rich.title]);
+    const lens = `lens:${makeManifest(makeChange()).lenses[0]!.name}`;
+    const sources = run2(version, [thin, { ...rich, source: lens }]);
+    expect(sources.findings.map((f) => f.title)).toEqual([thin.title, rich.title]);
   });
 });

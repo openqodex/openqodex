@@ -213,26 +213,54 @@ function checkInRepo(sub: AgentSubmission, lines: Map<string, number>, clean: (t
   });
 }
 
-// What makes two findings the same finding, for dedup here and for merging
-// two reviewers' findings: the file, the range, the category, and the
-// candidate, or the source when no candidate is cited, or the title when
-// neither is.
+// What makes two findings the same finding, for merging two reviewers'
+// findings, and for dedup here beside sameDefect: the file, the range, the
+// category, and the candidate, or the source when no candidate is cited, or
+// the title when neither is.
 export function findingKey(f: Pick<ReportFinding, "file_path" | "line_number" | "line_end" | "category" | "candidate" | "source" | "title">): string {
   const what = f.candidate ? `candidate\0${f.candidate}` : f.source ? `source\0${f.source}` : `title\0${f.title}`;
   return [f.file_path, f.line_number, f.line_end, f.category, what].join("\0");
 }
 
-// Removes only true duplicates: same file, range and category, and the same
-// candidate, or the same source when no candidate is cited, or the same title
-// when neither is. Keeps the higher severity, then the first.
+// One defect two finders titled differently (issue 315): neither cites a
+// candidate, both cite the same source or none, and they share the file and
+// the category on overlapping lines. The title does not count. Lines that
+// only share a file, or a different source, keep two findings apart; two
+// real defects of one category on the same lines merge, the accepted cost.
+function sameDefect(a: ReportFinding, b: ReportFinding): boolean {
+  return a.candidate === null && b.candidate === null && a.source === b.source && a.file_path === b.file_path
+    && a.category === b.category && a.line_number <= b.line_end && b.line_number <= a.line_end;
+}
+
+// One finding for one defect: the text and lines of the one that says more,
+// with the higher severity of the two.
+function merged(a: ReportFinding, b: ReportFinding): ReportFinding {
+  const says = (f: ReportFinding) => f.description.length + (f.suggested_change?.length ?? 0);
+  const text = says(b) > says(a) ? b : a;
+  return { ...text, severity: severityRank(b.severity) > severityRank(a.severity) ? b.severity : a.severity };
+}
+
+// Removes only duplicates: one defect (sameDefect), merged, or the same
+// finding (findingKey) citing a candidate, where the higher severity is kept,
+// then the first.
 function dedup(findings: ReportFinding[]): ReportFinding[] {
-  const kept = new Map<string, ReportFinding>();
+  const kept: ReportFinding[] = [];
   for (const f of findings) {
-    const key = findingKey(f);
-    const prev = kept.get(key);
-    if (!prev || severityRank(f.severity) > severityRank(prev.severity)) kept.set(key, f);
+    const at = kept.findIndex((k) => sameDefect(k, f) || findingKey(k) === findingKey(f));
+    if (at === -1) {
+      kept.push(f);
+      continue;
+    }
+    const prev = kept[at]!;
+    kept[at] = sameDefect(prev, f) ? merged(prev, f) : severityRank(f.severity) > severityRank(prev.severity) ? f : prev;
   }
-  return [...kept.values()];
+  return kept;
+}
+
+// The possible issues no counted finding already reports.
+function uncounted(possible: ReportFinding[], counted: ReportFinding[]): ReportFinding[] {
+  const keys = new Set(counted.map(findingKey));
+  return possible.filter((p) => !keys.has(findingKey(p)) && !counted.some((c) => sameDefect(c, p)));
 }
 
 // One redaction pass over every string value in a finished report, run after
@@ -341,10 +369,9 @@ export function finalizeReview(args: {
     .map((c) => ({ candidate: c, reason: droppedIds.get(c.id) ?? "" }));
 
   const deduped = dedup(findings);
-  const countedKeys = new Set(deduped.map(findingKey));
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(possible.filter((f) => !countedKeys.has(findingKey(f)))).filter((f) => {
+  const keptPossible = dedup(uncounted(possible, deduped)).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
@@ -688,10 +715,9 @@ export function checkSubmission(args: {
   }
   const droppedBy = new Map(sub.dropped.map((d) => [d.candidate, d]));
   const deduped = dedup(findings);
-  const countedKeys = new Set(deduped.map(findingKey));
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(possible.filter((f) => !countedKeys.has(findingKey(f)))).filter((f) => {
+  const keptPossible = dedup(uncounted(possible, deduped)).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
