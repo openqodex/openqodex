@@ -564,6 +564,29 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     return null;
   };
 
+  // Whether the first argument of a use call is a mount path the code
+  // computes: `app.use(PREFIX, router)`, `app.use(process.env.PREFIX, router)`.
+  // Express takes a first argument that is not a function for the path, so
+  // a name or a member with no literal value, before a router or an
+  // application, is a computed prefix. A name bound to a definition, to a
+  // dependency's export, to a call's result or to an inline function is
+  // middleware, as is a router or an application itself.
+  const computedPrefix = (file: string, first: Expr, rest: readonly Expr[], scope: number, line: number): boolean => {
+    if (first.t !== "ref" && first.t !== "member") return false;
+    const mounts = rest.some((a) => {
+      const t = argValue(file, a, scope, line);
+      return t !== null && (t.kind === "router" || t.kind === "app");
+    });
+    if (!mounts) return false;
+    if (first.t === "member") return true;
+    if (argValue(file, first, scope, line) !== null) return false;
+    const name = first.path[0] as string;
+    const writes = writesOf(file, name, bindingScope(file, scope, name));
+    if (first.path.length === 1 && writes.length === 1 && (writes[0]?.value.t === "call" || writes[0]?.value.t === "fn")) return false;
+    const found = lookup(file, first.path);
+    return found.kind !== "symbol" && found.kind !== "external";
+  };
+
   for (const file of files) {
     if (fx(file).tooLarge || fx(file).unread) continue;
     for (const f of fx(file).calls) {
@@ -582,7 +605,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
       if (f.prop === "use") {
         if (base.route || v.kind === "param") continue;
         const first = f.args[0];
-        const isPrefix = first !== undefined && (first.t === "str" || first.t === "dyn" || (first.t === "ref" && evaluate(first, constant(file, f.scope)) !== null));
+        const isPath = first !== undefined && (first.t === "str" || first.t === "dyn" || (first.t === "ref" && evaluate(first, constant(file, f.scope)) !== null));
+        const isPrefix = isPath || (first !== undefined && computedPrefix(file, first, f.args.slice(1), f.scope, f.line));
         addEvent(v, { type: "use", file, site, prefix: isPrefix ? (first as Expr) : null, args: isPrefix ? f.args.slice(1) : f.args, scope: f.scope, more: cutIn(f.args, f.more) });
         continue;
       }

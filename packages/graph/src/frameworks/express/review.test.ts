@@ -21,6 +21,46 @@ const files: Record<string, string> = {
   "src/shadow.ts": ['import express from "express";', H, "export function build(express: () => { get(p: string, f: unknown): void }) {", "  const app = express();", '  app.get("/shadowed", h);', "  return app;", "}", "export const real = express();"].join("\n"),
   // A mount under a computed prefix, then a literal mount below it.
   "src/nested.ts": ['import express, { Router } from "express";', H, "const tenant = process.env.TENANT;", "export const app = express();", "const r = Router();", "const child = Router();", 'child.get("/x", h);', 'r.use("/v1", child);', "app.use(`/${tenant}`, r);"].join("\n"),
+  // Routers mounted under prefixes the code computes (a name, an environment
+  // variable, a template with a substitution), beside a literal prefix, a
+  // template with no substitution and middleware before a router (a
+  // function, and a name holding a call's result), and a test that
+  // requests the path each route would have with no prefix.
+  "src/config.ts": "export const PREFIX = process.env.API_PREFIX ?? \"/api\";\n",
+  "src/computed.ts": [
+    'import express, { Router } from "express";',
+    'import { chooseAuth, h } from "./h.js";',
+    'import { PREFIX as IMPORTED } from "./config.js";',
+    'const PREFIX = process.env.API_PREFIX ?? "/api";',
+    "const version = process.env.VERSION;",
+    "export const app = express();",
+    "const byName = Router();",
+    'byName.get("/by-name", h);',
+    "const byEnv = Router();",
+    'byEnv.get("/by-env", h);',
+    "const byTemplate = Router();",
+    'byTemplate.get("/by-template", h);',
+    "const byImport = Router();",
+    'byImport.get("/by-import", h);',
+    "const literal = Router();",
+    'literal.get("/by-literal", h);',
+    "const plain = Router();",
+    'plain.get("/by-plain", h);',
+    "const guarded = Router();",
+    'guarded.get("/by-guard", h);',
+    "app.use(PREFIX, byName);",
+    "app.use(process.env.API_PREFIX, byEnv);",
+    "app.use(`/${version}`, byTemplate);",
+    "app.use(IMPORTED, byImport);",
+    'app.use("/v1", literal);',
+    "app.use(`/v2`, plain);",
+    "app.use(h, guarded);",
+    "const auth = chooseAuth();",
+    "const byCall = Router();",
+    'byCall.get("/by-call", h);',
+    "app.use(auth, byCall);",
+  ].join("\n"),
+  "src/computed.test.ts": ['import request from "supertest";', 'import { it } from "vitest";', 'import { app } from "./computed.js";', 'it("requests each route without its prefix", async () => {', ...["/by-name", "/by-env", "/by-template", "/by-import", "/v1/by-literal", "/v2/by-plain", "/by-guard", "/by-call"].map((p) => `  await request(app).get("${p}");`), "});"].join("\n"),
   // A path held in a binding that changes: no literal proves which path is registered.
   "src/mutable.ts": ['import express from "express";', H, "export const app = express();", 'let path = "/old";', 'path = "/new";', "app.get(path, h);", 'const FIXED = "/fixed";', "export function inner(FIXED: string) {", "  app.get(FIXED, h);", "}", "app.get(FIXED, h);"].join("\n"),
   // A route with more arguments than the reader keeps: the handler is past the cut.
@@ -64,6 +104,34 @@ describe("the Express plugin on what a review found", () => {
   it("keeps the pattern unknown under every mount below a computed prefix, never restarting from the literal mount", () => {
     const x = regs("src/nested.ts");
     expect(x.map((r) => r.pattern)).toEqual([null]);
+  });
+
+  it("never states a pattern without its prefix for a router mounted under a computed prefix, and says the prefix is computed", () => {
+    const byWritten = new Map(regs("src/computed.ts").map((r) => [r.written, r]));
+    // A name, an environment variable, an imported name and a template with a substitution: the prefix is computed.
+    for (const [written, line, name] of [
+      ["/by-name", 21, "PREFIX"],
+      ["/by-env", 22, "process.env.API_PREFIX"],
+      ["/by-template", 23, "`/${version}`"],
+      ["/by-import", 24, "IMPORTED"],
+    ] as const) {
+      expect(byWritten.get(written)?.pattern, written).toBeNull();
+      const gap = gaps("src/computed.ts").find((u) => u.site?.line === line && u.affects.includes("mounts"));
+      expect(gap?.cause, written).toBe("dynamic");
+      expect(gap?.name, written).toBe(name);
+    }
+    // A literal prefix, a template with no substitution and a middleware before a router keep their patterns.
+    expect(byWritten.get("/by-literal")?.pattern).toBe("/v1/by-literal");
+    expect(byWritten.get("/by-plain")?.pattern).toBe("/v2/by-plain");
+    expect(byWritten.get("/by-guard")?.pattern).toBe("/by-guard");
+    expect(byWritten.get("/by-call")?.pattern).toBe("/by-call");
+    expect(gaps("src/computed.ts").filter((u) => u.affects.includes("mounts") && u.site !== null && u.site.line >= 25)).toEqual([]);
+  });
+
+  it("links a test request only to a route whose whole pattern is known, never to one under a computed prefix", () => {
+    const linked = new Set((graph.frameworks?.edges ?? []).filter((e) => e.kind === "tests" && e.plugin === "express" && e.evidence.site.file === "src/computed.test.ts").map((e) => e.to));
+    const written = regs("src/computed.ts").filter((r) => linked.has(r.id)).map((r) => r.written);
+    expect(written.sort()).toEqual(["/by-call", "/by-guard", "/by-literal", "/by-plain"]);
   });
 
   it("does not take a path from a binding that is reassigned or shadowed: each such route is a dynamic unknown", () => {
