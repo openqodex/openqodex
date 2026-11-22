@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../../index.js";
 import type { FrameworkUnknown, Graph, Registration } from "../../index.js";
-import { MAX_APPS, MAX_MATCH_WORK, MAX_TEST_REQUESTS } from "./resolve.js";
+import { MAX_APPS, MAX_MATCH_WORK, MAX_MOUNT_DEPTH, MAX_STRING_WRITES, MAX_TEST_REQUESTS } from "./resolve.js";
 
 const H = 'import { h } from "./h.js";';
 const many = (n: number) => Array.from({ length: n }, () => "h").join(", ");
@@ -237,6 +237,27 @@ describe("the Express plugin on what a review found", () => {
     expect(cut[0]?.note).toContain(String(MAX_TEST_REQUESTS));
     expect(cut[0]?.note).not.toContain(String(MAX_MATCH_WORK));
   }, 120_000);
+
+  it("reads a prefix through names written many times each in steps that grow with the writes, and reads no name past the write cap", async () => {
+    // Each name is written 20 times with the next one, down to a string: read
+    // path by path, that is 20 to the power of the layers.
+    const layers = MAX_MOUNT_DEPTH;
+    const chain = Array.from({ length: layers }, (_, i) => {
+      const value = i === layers - 1 ? '"/p"' : `x${i + 1}`;
+      return [`let x${i} = ${value};`, ...Array.from({ length: 19 }, () => `x${i} = ${value};`)];
+    }).flat();
+    const wide = ['let wide = "/w";', ...Array.from({ length: MAX_STRING_WRITES }, () => 'wide = "/w";')];
+    const app = ['import express, { Router } from "express";', H, ...chain, ...wide, "export const app = express();", "const deep = Router();", 'deep.get("/deep", h);', "const many = Router();", 'many.get("/many", h);', "app.use(x0, deep);", "app.use(wide, many);"];
+    const g = await buildRepo("oq-express-fanout-", { "src/app.ts": app.join("\n") });
+    const reg = (written: string) => (g.frameworks?.entities ?? []).find((e): e is Registration => e.kind === "registration" && e.written === written);
+    const mountGap = (text: string) => (g.frameworks?.unknowns ?? []).find((u) => u.plugin === "express" && u.site?.line === app.indexOf(text) + 1 && u.affects.includes("mounts"));
+    // The chain ends in a string: a computed prefix, so the route has no pattern.
+    expect(reg("/deep")?.pattern).toBeNull();
+    expect(mountGap("app.use(x0, deep);")?.name).toBe("x0");
+    // A name written more often than the cap is not read: middleware, as before this rule.
+    expect(reg("/many")?.pattern).toBe("/many");
+    expect(mountGap("app.use(wide, many);")).toBeUndefined();
+  }, 60_000);
 
   it("says when a test request could not be matched because the route or the request is beyond what the matcher reads", () => {
     const atRequests = gaps("src/long.test.ts").filter((u) => u.affects.includes("tests"));

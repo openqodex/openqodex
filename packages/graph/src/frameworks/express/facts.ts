@@ -349,7 +349,8 @@ export function reader(root: Node): FactReader<ExpressFact> {
 // binding the path reads. Every other literal, in a handler, an option, a
 // header, a value, an object's key or an export, is kept as `other`, and a
 // test block keeps no title. A computed string in such a path, or given to
-// a name, is kept as a computed string with no text.
+// a name, and a string given to a name no path reads, are kept as a
+// computed string with no text.
 const unread = (e: Expr): Expr => ({ t: "other", line: e.line, column: e.column });
 // A computed string whose pieces are not kept: resolve still knows it is a
 // string (a mount path, never a middleware), with no text of it.
@@ -491,7 +492,7 @@ function keepRead(facts: ExpressFact[]): ExpressFact[] {
     const str = f.value;
     const forms = used.get(key(f.name, binding(f.name, f.scope)));
     const v = forms ? ([...forms].map((form) => (form === "path" ? eitherPathText : eitherSegmentText)(str.v)).find((x) => x !== null) ?? null) : null;
-    return { ...f, value: v === null ? unread(str) : { ...str, v } };
+    return { ...f, value: v === null ? computed(str) : { ...str, v } };
   });
 }
 

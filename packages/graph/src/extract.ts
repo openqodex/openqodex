@@ -130,8 +130,9 @@ import type { TreeVisitor } from "./walk.js";
 // type's path is read with its escapes decoded; `x.total += 1` and
 // `const { 0: a } = x` read the member; a `require` given a value through
 // `<T>` stays a loader.
-// 55: the Express facts keep a computed string as one with no text, and
-// read `process.env["X"]` as `process.env.X`.
+// 55: the Express facts keep a computed string, and a string given to a
+// name no path reads, as a string with no text, and read
+// `process.env["X"]` as `process.env.X`.
 export const EXTRACTOR_VERSION = 55;
 
 type Frame = {

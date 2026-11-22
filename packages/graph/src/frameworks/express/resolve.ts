@@ -47,6 +47,7 @@ const rule = (id: string) => ({ id, version: RULE_VERSION });
 export const MAX_MOUNT_DEPTH = 8; // routers deep under an application: past it that branch stops
 export const MAX_MIDDLEWARE_CHAIN = 64; // middleware kept for one route
 export const MAX_PATTERN_SEGMENTS = 64; // segments of one pattern or request path matched
+export const MAX_STRING_WRITES = 32; // writes of one name read to tell whether it holds a string; past it, it does not
 
 // Budgets for the whole build.
 export const MAX_FACTS_READ = 400_000; // facts of every file together
@@ -577,12 +578,27 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     const writes = writesOf(file, name, at);
     if (e.path.length === 3 && name === "process" && e.path[1] === "env") return at === 0 && writes.length === 0;
     if (e.path.length !== 1) return false;
-    if (writes.length > 0) return writes.every((w) => stringLike(file, w.value, w.scope, depth + 1));
+    if (writes.length > 0) return stringBinding(file, name, at, depth);
     if (at !== 0) return false;
     const found = lookup(file, e.path);
     if (found.kind !== "miss" || !index.languageFacts(found.target)) return false;
-    const there = writesOf(found.target, found.name, 0);
-    return there.some((v) => v.exported) && there.every((w) => stringLike(found.target, w.value, w.scope, depth + 1));
+    return writesOf(found.target, found.name, 0).some((v) => v.exported) && stringBinding(found.target, found.name, 0, depth);
+  };
+  // Whether every write of one binding is a string, read once per build:
+  // each write is charged to the lookup budget, so the work grows with the
+  // writes read, never with the paths through them. A binding with more
+  // than MAX_STRING_WRITES writes, or one that reaches itself (marked while
+  // it is read), is not proved a string.
+  const stringMemo = new Map<string, boolean>();
+  const stringBinding = (file: string, name: string, at: number, depth: number): boolean => {
+    const key = `${file}\0${at}\0${name}`;
+    const kept = stringMemo.get(key);
+    if (kept !== undefined) return kept;
+    stringMemo.set(key, false);
+    const writes = writesOf(file, name, at);
+    const out = writes.length <= MAX_STRING_WRITES && take("lookups", writes.length) && writes.every((w) => stringLike(file, w.value, w.scope, depth + 1));
+    stringMemo.set(key, out);
+    return out;
   };
   // Whether the first argument of a use call is a mount path the code
   // computes: `app.use(PREFIX, router)`, `app.use(process.env.PREFIX, router)`.
