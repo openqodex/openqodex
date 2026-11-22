@@ -397,8 +397,8 @@ class Ctx {
   goPackage: string | null = null;
   escapes: EscapeFact[] = [];
   opaque = new Map<string, OpaqueFact>();
-  // An `import` or `export` statement: a module, strict, so `this` in a
-  // plain function is never the global object.
+  // An `import` or `export` statement at the top of the file: a module,
+  // strict, so `this` in a plain function is never the global object.
   esm = false;
   looseMembers = new Map<string, OpaqueFact>();
   // Timers given a name: `setTimeout(code)` runs a string as code unless
@@ -3016,7 +3016,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         jsImport(ctx, node);
         return false;
       case "export_statement":
-        ctx.esm = true;
+        // An `export` inside a `namespace` or `declare module` block leaves a
+        // script a script: only one at the top of the file makes a module.
+        if (upType(1) === "program") ctx.esm = true;
         if (node.children.some((c) => c.type === "=")) {
           ctx.addOpaque("uses `export =` that the reader does not read", node.startPosition.row + 1);
           // `export = require`: the file's require goes wherever an importer takes it.
