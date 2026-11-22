@@ -19,7 +19,7 @@ import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { openqodexHome } from "@openqodex/scanners";
 import { checkoutsDir } from "../checkouts.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -142,7 +142,7 @@ async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env): P
   const childEnv = codexEnv(env);
   let version: string | null;
   try {
-    const { stdout } = await execFileAsync(bin, ["--version"], { env: childEnv, timeout: DETECT_TIMEOUT_MS });
+    const { stdout } = await execFileAsync(...launch(bin, ["--version"]), { env: childEnv, timeout: DETECT_TIMEOUT_MS });
     version = codexVersion(stdout);
   } catch (error) {
     return { ok: false, missing: `codex --version failed: ${String((error as Error).message).split("\n")[0]}`, fix: "reinstall Codex" };
@@ -152,7 +152,7 @@ async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env): P
   // Exit 0 and "Logged in using ChatGPT" (or an API key) when logged in;
   // exit 1 and "Not logged in" when not.
   try {
-    await execFileAsync(bin, ["login", "status"], { env: childEnv, timeout: DETECT_TIMEOUT_MS });
+    await execFileAsync(...launch(bin, ["login", "status"]), { env: childEnv, timeout: DETECT_TIMEOUT_MS });
   } catch {
     return { ok: false, missing: `Codex ${version} is not logged in`, fix: "run codex login, then review again" };
   }

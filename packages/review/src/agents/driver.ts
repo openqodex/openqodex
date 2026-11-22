@@ -9,10 +9,10 @@
 // (cursor.ts) failed checks with its real binary and says so from detect();
 // docs/internal-reviewer-drivers.md records the runs. A driver is enabled
 // once its isolation was shown with the real binary.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { existsSync, lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import type { ReviewerUsage } from "@openqodex/core";
 import type { CallRecord, ToolLogEntry } from "../usage.js";
 import type { OwnFiles, ToolCall } from "./trace.js";
@@ -27,9 +27,9 @@ export const DEPTH_ENV = "OPENQODEX_REVIEW_DEPTH";
 export const TIMED_OUT = "the reviewer timed out and was stopped";
 
 // What a program on Windows needs beside a driver's own allowlist: the home
-// folder, the app data folders, the system folder, and how programs are
-// named and started.
-const WINDOWS_ENV = ["USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "PATHEXT", "COMSPEC"];
+// folder, the app data folders, the system folder, the temporary folder,
+// and how programs are named and started.
+const WINDOWS_ENV = ["USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "PATHEXT", "COMSPEC", "TEMP", "TMP"];
 
 // `name` is on the allowlist `names`. On Windows a variable's name has no
 // case (Node lists the path as `Path`), so the match ignores case there and
@@ -118,14 +118,51 @@ export interface ReviewerDriver {
   start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): ReviewerSession;
 }
 
-// Spawned without a shell, as the leader of a new process group, so the
-// whole group can be killed at once.
-export function spawnGroup(cmd: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): ChildProcess {
-  return spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], detached: true, shell: false });
+// How to start `bin` with `args`. Node refuses to start a .cmd or .bat file
+// without a shell (EINVAL), and through cmd.exe the arguments (the settings
+// JSON, with its quotes and braces) would be parsed again, and the shim would
+// look for `node` in the review copy before PATH. So on Windows the shim npm
+// writes is read for the program it wraps, and that program is started
+// instead: a Node script with this Node, a .exe as it is. A shim that names
+// neither is refused, in a line that says what to do.
+export function launch(bin: string, args: string[], platform: NodeJS.Platform = process.platform): [string, string[]] {
+  if (platform !== "win32" || !/\.(cmd|bat)$/i.test(bin)) return [bin, args];
+  // npm: `"%dp0%\node_modules\pkg\cli.js" %*`, or `"%~dp0\...\x.exe" %*`.
+  const wrapped = [...readFileSync(bin, "utf8").matchAll(/"%~?dp0%?\\([^"%]+)"\s*%\*/g)].at(-1)?.[1];
+  const target = wrapped === undefined ? null : join(dirname(bin), ...wrapped.split(/[\\/]/));
+  const ext = target === null ? "" : extname(target).toLowerCase();
+  if (target !== null && [".js", ".cjs", ".mjs"].includes(ext)) return [process.execPath, [target, ...args]];
+  if (target !== null && [".exe", ".com"].includes(ext)) return [target, args];
+  throw new Error(`${bin} is a .cmd file that names no program openqodex can start; install the reviewer's .exe or with npm, or review from WSL`);
 }
 
-export function killGroup(child: ChildProcess): void {
+// Spawned without a shell, as the leader of a new process group, so the
+// whole group can be killed at once. Windows has no process groups (the
+// whole tree is stopped there by taskkill), and a detached child there gets
+// a console window of its own, so it is not detached there.
+export function spawnGroup(cmd: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }, platform: NodeJS.Platform = process.platform): ChildProcess {
+  const [file, argv] = launch(cmd, args, platform);
+  return spawn(file, argv, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], detached: platform !== "win32", windowsHide: true, shell: false });
+}
+
+// taskkill on `pid` and every process it started (/T), at once (/F), by its
+// absolute path in the system folder: a bare name is looked for in the
+// current folder first, which may be the repository.
+export function windowsStop(pid: number, env: NodeJS.ProcessEnv = process.env): [string, string[]] {
+  const root = Object.entries(env).find(([k]) => k.toUpperCase() === "SYSTEMROOT")?.[1];
+  return [win32.join(root !== undefined && win32.isAbsolute(root) ? root : "C:\\Windows", "System32", "taskkill.exe"), ["/pid", String(pid), "/T", "/F"]];
+}
+
+export function killGroup(child: ChildProcess, platform: NodeJS.Platform = process.platform): void {
   if (child.pid === undefined) return;
+  if (platform === "win32") {
+    // Once it exited, Windows may give its id to another process, and
+    // taskkill would stop that one.
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const [file, args] = windowsStop(child.pid);
+    spawnSync(file, args, { stdio: "ignore", windowsHide: true });
+    return;
+  }
   try {
     process.kill(-child.pid, "SIGKILL");
   } catch {
@@ -148,12 +185,18 @@ function inside(root: string, path: string): boolean {
   return rel === "" || (!isAbsolute(rel) && rel.split(sep)[0] !== "..");
 }
 
+// What Windows starts by itself. PATHEXT may list more (.JS, .VBS), which
+// need a program of their own.
+const WINDOWS_STARTS = [".com", ".exe", ".bat", ".cmd"];
+
 // The first executable `name` on PATH, from absolute entries only, as its
-// real path. An entry is skipped when the folder, the file, or any link on
+// real path. On Windows a program's name carries an extension: each one of
+// PATHEXT that Windows starts is tried, in PATHEXT's order, and Node reports
+// no execute bit there. An entry is skipped when the folder, the file, or any link on
 // the way from one to the other resolves inside one of the `forbidden`
 // folders (the repository, the review snapshots), so a repository cannot put
 // its own program in the reviewer's place through a link or a folder name.
-export function findOnPath(name: string, forbidden: string[], path = process.env.PATH ?? ""): string | null {
+export function findOnPath(name: string, forbidden: string[], path = process.env.PATH ?? "", platform: NodeJS.Platform = process.platform, pathext = process.env.PATHEXT ?? ""): string | null {
   const roots: string[] = [];
   for (const f of forbidden) {
     try {
@@ -163,24 +206,30 @@ export function findOnPath(name: string, forbidden: string[], path = process.env
     }
   }
   const owned = (p: string) => roots.some((r) => inside(r, p));
-  for (const dir of path.split(delimiter)) {
-    if (dir === "" || !isAbsolute(dir)) continue;
-    try {
-      let hop = join(dir, name);
-      if (!existsSync(hop)) continue;
-      let safe = true;
-      for (let n = 0; n < MAX_HOPS && safe; n++) {
-        // Each hop's folder resolved, the name kept: the link itself is checked.
-        if (owned(join(real(dirname(hop)), FOLD_CASE ? basename(hop).toLowerCase() : basename(hop)))) safe = false;
-        if (!lstatSync(hop).isSymbolicLink()) break;
-        hop = resolve(dirname(hop), readlinkSync(hop));
+  const windows = platform === "win32";
+  const p = windows ? win32 : posix;
+  const exts = (pathext || ".COM;.EXE;.BAT;.CMD").split(";").map((e) => e.toLowerCase()).filter((e) => WINDOWS_STARTS.includes(e));
+  const names = windows ? exts.map((e) => name + e) : [name];
+  for (const dir of path.split(p.delimiter)) {
+    if (dir === "" || !p.isAbsolute(dir)) continue;
+    for (const file of names) {
+      try {
+        let hop = join(dir, file);
+        if (!existsSync(hop)) continue;
+        let safe = true;
+        for (let n = 0; n < MAX_HOPS && safe; n++) {
+          // Each hop's folder resolved, the name kept: the link itself is checked.
+          if (owned(join(real(dirname(hop)), FOLD_CASE ? basename(hop).toLowerCase() : basename(hop)))) safe = false;
+          if (!lstatSync(hop).isSymbolicLink()) break;
+          hop = resolve(dirname(hop), readlinkSync(hop));
+        }
+        const bin = realpathSync.native(join(dir, file));
+        if (!safe || owned(real(bin))) continue;
+        const st = statSync(bin);
+        if (st.isFile() && (windows || (st.mode & 0o111) !== 0)) return bin;
+      } catch {
+        // unreadable entry: try the next
       }
-      const bin = realpathSync.native(join(dir, name));
-      if (!safe || owned(real(bin))) continue;
-      const st = statSync(bin);
-      if (st.isFile() && (st.mode & 0o111) !== 0) return bin;
-    } catch {
-      // unreadable entry: try the next
     }
   }
   return null;

@@ -10,7 +10,7 @@ import type { ReviewerUsage } from "@openqodex/core";
 import { DELIVERY_ROW_BYTES, REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
 import { checkoutsDir } from "../checkouts.js";
 import { claudeHome } from "./homes.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -96,7 +96,7 @@ async function detect(repoRoot: string): Promise<Detected> {
   const env = reviewerEnv();
   let version: string;
   try {
-    const { stdout } = await execFileAsync(bin, ["--version"], { env, timeout: DETECT_TIMEOUT_MS });
+    const { stdout } = await execFileAsync(...launch(bin, ["--version"]), { env, timeout: DETECT_TIMEOUT_MS });
     version = /\d+\.\d+\.\d+/.exec(stdout)?.[0] ?? stdout.trim();
   } catch (error) {
     return { ok: false, missing: `claude --version failed: ${String((error as Error).message).split("\n")[0]}`, fix: "reinstall Claude Code" };
@@ -104,7 +104,7 @@ async function detect(repoRoot: string): Promise<Detected> {
   if (env.ANTHROPIC_API_KEY) return { ok: true, version, bin };
   let status: { loggedIn?: unknown } = {};
   try {
-    const { stdout } = await execFileAsync(bin, ["auth", "status"], { env, timeout: DETECT_TIMEOUT_MS });
+    const { stdout } = await execFileAsync(...launch(bin, ["auth", "status"]), { env, timeout: DETECT_TIMEOUT_MS });
     status = JSON.parse(stdout) as { loggedIn?: unknown };
   } catch (error) {
     const out = (error as { stdout?: string }).stdout;
