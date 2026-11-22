@@ -18,6 +18,8 @@
 //    function in the other, and the function binds certainly, though
 //    JavaScript exports neither; or a module's own `export const x` loses to
 //    an `export *` that offers `x`, though the module's own export wins.
+// 6. An `export *` gives out the module's `default`, which JavaScript never
+//    does, so an import of `default` through it binds a definition.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -128,4 +130,13 @@ describe("looking up an exported name", () => {
       expect(g.unknowns.filter((u) => u.file === "use.js" && u.line === 4).map((u) => `${u.name} ${u.cause}`).sort()).toEqual(["x ambiguous", "y miss"]);
     });
   }
+
+  it("never binds a default export through export * (6)", async () => {
+    const g = await graphOf({
+      "a.js": "export default function f() {\n  return 1;\n}\n",
+      "barrel.js": 'export * from "./a.js";\n',
+      "use.js": 'import f from "./barrel.js";\nexport function run() {\n  return f();\n}\n',
+    });
+    expect(tiers(g, symbol(g, "a.js", "f"))).toEqual([]);
+  });
 });

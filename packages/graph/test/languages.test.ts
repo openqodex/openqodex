@@ -157,11 +157,17 @@ describe("python", () => {
         "@(wrap)  # GROUPED",
         "def k():",
         "    pass",
+        "",
+        "@(  # a comment before the name",
+        "    wrap  # NOTED",
+        ")",
+        "def n():",
+        "    pass",
       ].join("\n"),
     };
     const g = await graphOf(deco);
     expect(callSites(g, symbol(g, "pkg/a.py", "wrap"))).toEqual(
-      [at(deco, "pkg/f.py", "BARE"), at(deco, "pkg/f.py", "DOTTED"), at(deco, "pkg/f.py", "METHOD"), at(deco, "pkg/f.py", "GROUPED")].sort(),
+      [at(deco, "pkg/f.py", "BARE"), at(deco, "pkg/f.py", "DOTTED"), at(deco, "pkg/f.py", "METHOD"), at(deco, "pkg/f.py", "GROUPED"), at(deco, "pkg/f.py", "NOTED")].sort(),
     );
   });
 });

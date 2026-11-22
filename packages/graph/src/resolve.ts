@@ -218,8 +218,9 @@ type Value =
   | { v: "gap"; cause: Cause; note: string; candidates: string[] | null }
   // `held`: the module gives the name out as a value that is no definition
   // (`export const router = Router()`, `export { router }`), so the name is
-  // there, though the graph does not follow the value.
-  | { v: "miss"; target: string; name: string; ev: Ev; held?: true };
+  // there, though the graph does not follow the value; it is the local name
+  // of that value, one binding under every name it is given out as.
+  | { v: "miss"; target: string; name: string; ev: Ev; held?: string };
 
 type Def = DefFact & { id: string; file: string; family: Family };
 
@@ -1014,23 +1015,23 @@ export function createWorld(input: ResolveInput): World {
         // definition (`export const router = Router()`, `export { router }`)
         // is a held miss in this file, so a framework reader reads its own
         // facts there, and it shadows any `export *` that offers the name.
-        const held: Value = { v: "miss", target: file, name, ev: SAME_SCOPE, held: true };
-        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? held;
+        const held = (local: string): Value => ({ v: "miss", target: file, name, ev: SAME_SCOPE, held: local });
+        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? held(f.defaultExport);
         const top = topByFile.get(file)?.get(name)?.filter((id) => defById.get(id)?.exported);
         if (top && top.length > 0) return { v: "sym", ids: top, ev: SAME_SCOPE };
-        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? held;
-        if (f.exportedVariables?.includes(name)) return held;
+        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? held(e.local);
+        if (f.exportedVariables?.includes(name)) return held(name);
         // Every `export *` that offers the name: one definition binds; two
         // different ones are ambiguous (JavaScript exports neither). A star
         // the graph cannot follow (a module that is not there, a package
         // outside the repository, a gap) may bring the name too, so nothing
-        // it competes with is certain.
+        // it competes with is certain. `export *` never gives out `default`.
         const starHits: { v: Value; spec: string }[] = [];
         const unfollowed: Unfollowed[] = [];
         for (const imp of f.imports) {
           if (!imp.reexport) continue;
           const named = imp.names.find((n) => n.local === name);
-          if (!named && !imp.star) continue;
+          if (!named && (!imp.star || name === "default")) continue;
           const mod = jsSpec(file, imp.line, imp.spec);
           if (named) {
             if (mod === null) return { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1106,7 +1107,7 @@ export function createWorld(input: ResolveInput): World {
   function starValue(file: string, name: string, hits: { v: Value; spec: string }[], open: Unfollowed[]): Value | null {
     if (hits.length === 0) return null;
     const keyOf = (v: Value): string | null =>
-      v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : v.v === "miss" && v.held ? `value:${v.target}\0${v.name}` : null;
+      v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : v.v === "miss" && v.held ? `value:${v.target}\0${v.held}` : null;
     const distinct = new Map<string, { v: Value; spec: string }>();
     for (const h of hits) {
       const k = keyOf(h.v);
