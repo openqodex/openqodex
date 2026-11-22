@@ -103,6 +103,8 @@
 // 39. A review stopped at its cap does not say which cap it hit and which
 //     flag raises it, on the terminal or in the report; or a reviewer that
 //     never answers is not stopped at the cap it was given.
+// 41. On Windows the reviewer loses its path (named `Path` there), its home
+//     folder or what starts a program.
 import { stagedFake, stagedAnswer } from "../../review/test/staged-fake.js";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -684,6 +686,14 @@ describe("what leaves the process", () => {
     const env = reviewerEnv({ PATH: "/usr/bin", HOME: "/h", USER: "u", CLAUDE_CONFIG_DIR: "/c", ANTHROPIC_API_KEY: "k", GITHUB_TOKEN: "g", NPM_TOKEN: "n", AWS_SECRET_ACCESS_KEY: "a", OPENAI_API_KEY: "o", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s" });
     expect(Object.keys(env).sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "HOME", DEPTH_ENV, "PATH", "USER"].sort());
     expect(reviewerEnv({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "r", GITHUB_TOKEN: "g" })).toMatchObject({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "r" });
+  });
+  it("41. on Windows the path, the home folder and what starts a program reach the reviewer, under any case", () => {
+    const windows = { Path: "C:\\Windows\\system32;C:\\Program Files\\nodejs", USERPROFILE: "C:\\Users\\u", AppData: "C:\\Users\\u\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local", SystemRoot: "C:\\Windows", PATHEXT: ".COM;.EXE;.CMD", ComSpec: "C:\\Windows\\system32\\cmd.exe", USERNAME: "u", GITHUB_TOKEN: "g" };
+    const env = reviewerEnv(windows, "win32");
+    expect(Object.keys(env).sort()).toEqual(["AppData", "ComSpec", DEPTH_ENV, "LOCALAPPDATA", "PATHEXT", "Path", "SystemRoot", "USERPROFILE"].sort());
+    expect(env.Path).toBe(windows.Path);
+    // Elsewhere a name keeps its case and the Windows variables stay out.
+    expect(Object.keys(reviewerEnv(windows, "linux"))).toEqual([DEPTH_ENV]);
   });
   it("15. every file of the run folder is readable by its owner only", async () => {
     const dir = repo();

@@ -10,7 +10,7 @@ import type { ReviewerUsage } from "@openqodex/core";
 import { DELIVERY_ROW_BYTES, REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
 import { checkoutsDir } from "../checkouts.js";
 import { claudeHome } from "./homes.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, onAllowlist, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -68,12 +68,12 @@ const PROVIDERS: [string, RegExp][] = [
   ["CLAUDE_CODE_USE_FOUNDRY", /^ANTHROPIC_FOUNDRY_[A-Z_]+$/],
 ];
 
-export function reviewerEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function reviewerEnv(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) continue;
     const provider = PROVIDERS.some(([flag, re]) => env[flag] && (k === flag || re.test(k)));
-    if (ALWAYS.includes(k) || k.startsWith("LC_") || ANTHROPIC.test(k) || provider) out[k] = v;
+    if (onAllowlist(ALWAYS, k, platform) || k.startsWith("LC_") || ANTHROPIC.test(k) || provider) out[k] = v;
   }
   out[DEPTH_ENV] = "1";
   return out;

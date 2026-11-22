@@ -38,6 +38,9 @@
 // 17. A relative or empty PATH entry (".", "", "bin") reaches the reviewer or
 //     the probe, so a program committed in the snapshot runs in place of a
 //     system one (a `cat` that prints the inside file and skips the rest).
+// 18. On Windows the path (named `Path` there), the home folder or what
+//     starts a program is dropped, or the path is split on ":" and loses
+//     every entry.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -195,6 +198,15 @@ describe("the Codex command line and environment", () => {
 
   it("17. relative and empty PATH entries never reach the reviewer", () => {
     expect(codexEnv({ PATH: [".", "", "/usr/bin", "bin", "./x", "/bin"].join(":") }).PATH).toBe("/usr/bin:/bin");
+  });
+
+  it("18. on Windows the path, the home folder and what starts a program reach Codex, under any case, with only absolute path entries", () => {
+    const windows = { Path: ["C:\\Windows\\system32", ".", "", "bin", "C:relative", "C:\\Program Files\\nodejs", "\\\\server\\tools"].join(";"), USERPROFILE: "C:\\Users\\u", APPDATA: "C:\\Users\\u\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local", SystemRoot: "C:\\Windows", PATHEXT: ".COM;.EXE;.CMD", ComSpec: "C:\\Windows\\system32\\cmd.exe", GITHUB_TOKEN: "t", OPENAI_API_KEY: "k" };
+    const { GITHUB_TOKEN: _token, OPENAI_API_KEY: _key, ...kept } = windows;
+    expect(codexEnv(windows, "win32")).toStrictEqual({ ...kept, Path: "C:\\Windows\\system32;C:\\Program Files\\nodejs;\\\\server\\tools", [DEPTH_ENV]: "1" });
+    // Elsewhere a name keeps its case and the Windows variables stay out.
+    expect(codexEnv(windows, "linux")).toEqual({ [DEPTH_ENV]: "1" });
+    expect(codexEnv({ PATH: "/usr/bin:C:\\x", Path: "/bin" }, "darwin")).toEqual({ PATH: "/usr/bin", [DEPTH_ENV]: "1" });
   });
 
   it("9. the environment keeps what Codex needs and drops tokens and session ties", () => {

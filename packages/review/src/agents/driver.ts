@@ -26,6 +26,20 @@ export const DEPTH_ENV = "OPENQODEX_REVIEW_DEPTH";
 // conversation reports it as the host words it (ReviewInputs.timedOut).
 export const TIMED_OUT = "the reviewer timed out and was stopped";
 
+// What a program on Windows needs beside a driver's own allowlist: the home
+// folder, the app data folders, the system folder, and how programs are
+// named and started.
+const WINDOWS_ENV = ["USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "PATHEXT", "COMSPEC"];
+
+// `name` is on the allowlist `names`. On Windows a variable's name has no
+// case (Node lists the path as `Path`), so the match ignores case there and
+// the Windows variables above are added.
+export function onAllowlist(names: string[], name: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform !== "win32") return names.includes(name);
+  const upper = name.toUpperCase();
+  return [...names, ...WINDOWS_ENV].some((n) => n.toUpperCase() === upper);
+}
+
 export type Detected = { ok: true; version: string; bin: string } | { ok: false; missing: string; fix: string };
 
 // One answer of the reviewer. `usage` is the session's total so far.

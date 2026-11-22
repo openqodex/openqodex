@@ -14,12 +14,12 @@ import { execFile } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { openqodexHome } from "@openqodex/scanners";
 import { checkoutsDir } from "../checkouts.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, onAllowlist, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -93,15 +93,19 @@ export function codexArgs(snapshotDir: string, web: boolean): string[] {
 // a running Codex session (CODEX_THREAD_ID, CODEX_SANDBOX).
 const ALWAYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", "TZ", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy", "SSL_CERT_FILE"];
 
-export function codexEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function codexEnv(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
-    if (v !== undefined && (ALWAYS.includes(k) || k.startsWith("LC_"))) out[k] = v;
+    if (v !== undefined && (onAllowlist(ALWAYS, k, platform) || k.startsWith("LC_"))) out[k] = v;
   }
   // Only absolute PATH entries: an empty or relative one (".", "bin") would
   // resolve inside the snapshot, where a committed program could stand in
-  // for a system one.
-  if (out.PATH !== undefined) out.PATH = out.PATH.split(":").filter((d) => d.startsWith("/")).join(":");
+  // for a system one. Split and judged by the platform's own rules
+  // (";" and "C:\" on Windows), under whatever case the name has there.
+  const p = platform === "win32" ? win32 : posix;
+  for (const k of Object.keys(out)) {
+    if (k === "PATH" || (platform === "win32" && k.toUpperCase() === "PATH")) out[k] = (out[k] ?? "").split(p.delimiter).filter((d) => p.isAbsolute(d)).join(p.delimiter);
+  }
   out[DEPTH_ENV] = "1";
   return out;
 }
