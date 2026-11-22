@@ -125,7 +125,12 @@ import type { TreeVisitor } from "./walk.js";
 // only; `Function` named by a local makes no code; an `import()` in a type
 // loads nothing; `c[0]` reads the member `0`; top-level `declare` names
 // are kept apart (`ambientTop`), since a `.mts` or `.cts` file is a module.
-export const EXTRACTOR_VERSION = 53;
+// 54: a function declaration given another value is no proof for a
+// timer; a type use keeps the module an import type names; an import
+// type's path is read with its escapes decoded; `x.total += 1` and
+// `const { 0: a } = x` read the member; a `require` given a value through
+// `<T>` stays a loader.
+export const EXTRACTOR_VERSION = 54;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -652,6 +657,11 @@ class Ctx {
         s.locals?.set(name, null);
         return;
       }
+      // A function declaration given another value (`f = "code"`) no longer holds that function.
+      if (s.fns?.has(name)) {
+        (s.reassigned ??= new Set()).add(name);
+        return;
+      }
       if (innermost && !s.locals?.has(name)) break;
       const locals = s.locals;
       if (locals?.has(name)) {
@@ -873,7 +883,8 @@ class Ctx {
   // enclosing definition and name.
   addTypeUse(ref: TypeRef | null, caller: number): void {
     if (!ref || ref.name === "{}") return;
-    const key = `${caller}|${ref.qualifier ?? ""}|${ref.name}`;
+    // An import type keeps its module: `import("./a").Row` and `import("./b").Row` are two types.
+    const key = `${caller}|${ref.qualifier ?? ""}|${ref.name}|${ref.bound ? `${ref.bound.import}:${ref.bound.imported}` : ""}`;
     if (this.typeSeen.has(key)) return;
     this.typeSeen.add(key);
     this.types.push({ ref, caller });
@@ -1050,7 +1061,7 @@ class Ctx {
     for (const t of this.pendingTimers) {
       if (this.lookup(t.scope, t.timer) || topNames.has(t.timer)) continue;
       const at = t.arg === null ? null : this.lookup(t.scope, t.arg);
-      if (t.arg !== null && (at?.fns?.has(t.arg) || (!at && topNames.has(t.arg)))) continue;
+      if (t.arg !== null && ((at?.fns?.has(t.arg) && !at.reassigned?.has(t.arg)) || (!at && topNames.has(t.arg)))) continue;
       // A name proved a function where it is declared, never given another value.
       const promise = () => !this.lookup(t.scope, "Promise") && !topNames.has("Promise") && !importLocals.has("Promise");
       if (t.arg !== null && at && !at.reassigned?.has(t.arg) && (t.proof === "fn" || (t.proof === "promise" && promise()))) continue;
@@ -1298,7 +1309,7 @@ function jsImportType(n: Node): TypeRef | null {
   if (!call || arg?.type !== "string" || !name || !readingImportType) return null;
   const path: string[] = [];
   for (let o = n.childForFieldName("object"); o?.type === "member_expression"; o = o.childForFieldName("object")) path.unshift(o.childForFieldName("property")?.text ?? "");
-  const bound = { import: readingImportType(stringContent(arg), call), imported: "*" };
+  const bound = { import: readingImportType(jsUnescape(stringContent(arg)), call), imported: "*" };
   return typeRef({ name: name.text, qualifier: ["import", ...path].join("."), ...pos(n), bound });
 }
 
@@ -2105,7 +2116,7 @@ function jsHeld(node: Node | null): Node | null {
 }
 // A call by its start and end, the two sameNode compares for nodes of one type.
 const callKey = (call: Node): string => `${call.startIndex}:${call.endIndex}`;
-const REQUIRE_WRAPPERS = new Set(["await_expression", "parenthesized_expression", "as_expression", "non_null_expression", "satisfies_expression"]);
+const REQUIRE_WRAPPERS = new Set(["await_expression", "parenthesized_expression", "as_expression", "non_null_expression", "satisfies_expression", "type_assertion"]);
 // The calls whose value is given to the name `require` (`const require =
 // f()`, `let { require } = f()`, `require = f()`), marked from `value`, the
 // declarator's or the assignment's value, down through the wrappers that
@@ -2738,8 +2749,8 @@ function jsNotRead(parent: string | null, field: () => string | null): boolean {
       return field() === "function";
     case "new_expression":
       return field() === "constructor";
+    // `x.total += 1` reads `total` before it writes it: no case here.
     case "assignment_expression":
-    case "augmented_assignment_expression":
     case "for_in_statement":
     case "assignment_pattern":
     case "object_assignment_pattern":
@@ -3537,8 +3548,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (text === "constructor") jsConstructorRead(ctx, node.startPosition.row + 1);
         if (key?.type === "property_identifier") jsEscapedName(ctx, key.text, node.startPosition.row + 1);
         jsPatternLoader(ctx, node.parent, text, node.startPosition.row + 1);
-        // A number key reads an element, as `c[0]` does.
-        if (key && key.type !== "number" && node.parent?.type === "object_pattern") jsPatternRead(ctx, node.parent, key.type === "property_identifier" ? key : jsLiteralKey(key), node.startPosition.row + 1);
+        // A number key reads the member its digits name, as `c[0]` does; one written otherwise reads any member.
+        const digits = key?.type === "number" && /^(0|[1-9][0-9]*)$/.test(key.text);
+        if (key && node.parent?.type === "object_pattern") jsPatternRead(ctx, node.parent, key.type === "property_identifier" || digits ? key : jsLiteralKey(key), node.startPosition.row + 1);
         return;
       }
       case "shorthand_property_identifier_pattern": {

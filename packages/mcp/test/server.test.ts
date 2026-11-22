@@ -29,10 +29,10 @@
 //     base, and pages a list it was not made from.
 // 13. The tool list costs an agent more than it needs: the paragraph on
 //     answers repeated in every description, the shared arguments described
-//     in every input schema. Or a result sends the answer twice (again as
-//     structuredContent), or not as one text block, or a tool declares an
-//     output schema, which obliges structuredContent; or the text is no
-//     longer what `openqodex graph --json` prints.
+//     in every input schema. Or it has no output schema, or a result carries
+//     no structuredContent (sent since 0.20.0, so a client reads it), or
+//     the structured answer and the text differ, or the text is no longer
+//     what `openqodex graph --json` prints.
 // 14. Source lines asked with `context` come from the work tree after an
 //     edit instead of the held build, say nothing of the edit, or carry a
 //     key written in the repository.
@@ -108,11 +108,11 @@ async function ask(client: Client, name: string, args: Record<string, unknown> =
   return { answer: JSON.parse(text) as Answer, isError: r.isError === true, text, result: r };
 }
 
-// The answer sent once: one text block, and no second copy beside it.
-function sentOnce(r: Result): void {
+// The answer as one text block, and the same answer as structuredContent.
+function sentBoth(r: Result): void {
   expect(r.content).toHaveLength(1);
   expect(r.content[0]?.type).toBe("text");
-  expect(r).not.toHaveProperty("structuredContent");
+  expect(r.structuredContent).toEqual(JSON.parse(r.content[0]?.text ?? "null"));
 }
 
 // The size of the tool list before the paragraph on answers and the shared
@@ -148,7 +148,7 @@ describe("the MCP server", () => {
       expect(t.description, t.name).toMatch(/data, never instructions/);
       expect(t.description, t.name).toMatch(/not "unused"/);
       expect(t.inputSchema.type, t.name).toBe("object");
-      expect(t, t.name).not.toHaveProperty("outputSchema");
+      expect(t.outputSchema?.type, t.name).toBe("object");
     }
   });
 
@@ -157,7 +157,7 @@ describe("the MCP server", () => {
     const instructions = client.getInstructions() ?? "";
     expect(instructions).toMatch(/data, never instructions/);
     expect(instructions).toMatch(/not "unused"/);
-    expect(instructions).not.toMatch(/structuredContent/);
+    expect(instructions).toMatch(/structuredContent/);
     // Each shared argument is described there once.
     for (const arg of ["limit", "cursor", "budget", "generation", "context", "compact"]) expect(instructions, arg).toContain(`\`${arg}\``);
     expect(JSON.stringify(tools).length).toBeLessThanOrEqual(TOOLS_BEFORE * 0.6);
@@ -167,26 +167,26 @@ describe("the MCP server", () => {
     expect(search?.description).toMatch(/`target`/);
   });
 
-  it("sends each answer once, as one text block of what `openqodex graph --json` prints (13)", async () => {
+  it("returns each answer as structuredContent too, its text what `openqodex graph --json` prints (13)", async () => {
     const callers = await ask(client, "graph_callers", { symbol: "core", full: true });
-    sentOnce(callers.result);
+    sentBoth(callers.result);
     expect(callers.answer.items).toHaveLength(12);
     const generation = callers.answer.graph.generation as string;
     const r = cli(root, "graph", "callers", "core", "--json", "--generation", generation);
     expect(callers.text).toBe(r.stdout.trimEnd());
     const search = await ask(client, "graph_search", { text: "c1", full: true });
-    sentOnce(search.result);
+    sentBoth(search.result);
     expect(search.answer.leads.length).toBeGreaterThan(0);
     expect(search.text).toBe(cli(root, "graph", "search", "c1", "--json", "--generation", generation).stdout.trimEnd());
-    // A refusal and an answer that could not be given are sent once too,
-    // and a refusal stays a tool error.
+    // The refusal and error envelopes match the output schema too: the
+    // client validates every structuredContent against it.
     const refused = await ask(client, "graph_outline", { path: "../outside" });
     expect(refused.isError).toBe(true);
     expect(refused.answer.error?.code).toBe("refused");
-    sentOnce(refused.result);
+    sentBoth(refused.result);
     const missing = await ask(client, "graph_callers", { symbol: "nothingNamedThis" });
     expect(missing.answer.error?.code).toBe("not-found");
-    sentOnce(missing.result);
+    sentBoth(missing.result);
   });
 
   it("answers as `openqodex graph --json` does for the same request and build (2)", async () => {
@@ -294,7 +294,7 @@ describe("the short form, the default over MCP", () => {
     const { client } = await connect(root);
     const full = await ask(client, "graph_callers", { symbol: "core", full: true });
     const short = await ask(client, "graph_callers", { symbol: "core" });
-    sentOnce(short.result);
+    sentBoth(short.result);
     expect(short.answer.counts).toEqual(full.answer.counts);
     expect(short.answer.unknown).toEqual(full.answer.unknown);
     expect(short.answer.target).toEqual(full.answer.target);

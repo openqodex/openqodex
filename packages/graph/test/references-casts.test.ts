@@ -7,7 +7,9 @@
 //     array suffix) has no row: the module the import type names is never
 //     read as an import, so the name binds to nothing.
 //  3. The import type binds by its name alone, not by the module it names:
-//     a same-named type of another folder is linked.
+//     a same-named type of another folder is linked; or one function that
+//     names both keeps one of them; or a path written with an escape
+//     (`import("./\u0074ypes")`) binds to nothing.
 //  4. In a .tsx file, where `<Row>x` is not a cast, a cast written with
 //     `as` stops being read, or a JSX element is taken for a cast.
 //  5. A Python `typing.cast(Foo, x)` or `cast("Foo", x)` has no row; or
@@ -51,6 +53,19 @@ const files: Record<string, string> = {
   // The same name in another folder: its import type binds to its own module.
   "src/other/types.ts": "export interface Row {\n  other: number;\n}\n",
   "src/other/cast.ts": ["export function five(x: unknown): unknown {", '  return x as import("./types").Row; // other-import-as', "}", ""].join("\n"),
+  "src/third/types.ts": "export interface Row {\n  third: boolean;\n}\n",
+  "src/both.ts": [
+    "export function both(x: unknown): unknown {",
+    '  const a = x as import("./types").Row; // both-first',
+    '  const b = x as import("./third/types").Row; // both-second',
+    "  return [a, b];",
+    "}",
+    "",
+    "export function escaped(x: unknown): unknown {",
+    '  return x as import("./\\u0074ypes").Row; // escaped-path',
+    "}",
+    "",
+  ].join("\n"),
   "src/view.tsx": [
     'import type { Row } from "./types";',
     "",
@@ -122,6 +137,12 @@ describe("references of a type named only in a cast", () => {
   it("binds an import type through the module it names, not by its name (3)", () => {
     expect(rows("src/types.ts", "Row").map((r) => r[0])).not.toContain(at(files, "src/other/cast.ts", "other-import-as"));
     expect(rows("src/other/types.ts", "Row")).toEqual([[at(files, "src/other/cast.ts", "other-import-as"), "uses_type"]]);
+  });
+
+  it("keeps both import types one function names, and reads an import type's path with its escapes decoded (3)", () => {
+    expect(rows("src/types.ts", "Row")).toContainEqual([at(files, "src/both.ts", "both-first"), "uses_type"]);
+    expect(rows("src/third/types.ts", "Row")).toEqual([[at(files, "src/both.ts", "both-second"), "uses_type"]]);
+    expect(rows("src/types.ts", "Row")).toContainEqual([at(files, "src/both.ts", "escaped-path"), "uses_type"]);
   });
 
   it("reads a cast written with as in a .tsx file, and no JSX element as a cast (4)", () => {
