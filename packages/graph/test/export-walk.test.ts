@@ -7,12 +7,17 @@
 //    barrels never finish.
 // 3. A walk stopped by its step budget drops the names past the stop with
 //    nothing said.
+// 4. A walk stopped by its step budget drops a name a module offers, so a
+//    function past the stop reads as having every caller listed, though
+//    the module is used as a value and a computed name may call it.
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact } from "../src/index.js";
+import { query } from "../src/query/engine.js";
+import type { Request } from "../src/query/answer.js";
 import { EXPORT_WALK_STEPS } from "../src/resolve.js";
 import { expectLinear, growthTests, stageCpuMs } from "../src/test-timing.js";
-import { commitAll, makeRepo, writeFiles } from "./helpers.js";
+import { commitAll, makeRepo, symbol, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -103,4 +108,18 @@ describe("the export walk", () => {
     expect(cut).toMatchObject({ by: "export-walk", exact: false, omitted: null, unit: "files" });
     expect(cut?.note).toMatch(/export \*/);
   }, 300_000);
+
+  it("keeps the floor of a function the walk did not reach before its step budget ran out (4)", async () => {
+    // Eight barrels that each `export *` from the other seven: no walk
+    // through them finishes, so a walk from `r.ts` spends its whole budget
+    // there before it reaches `end.ts`.
+    const files: Record<string, string> = { "end.ts": "export function t(): void {}\n", "r.ts": 'export * from "./mesh0";\nexport * from "./end";\n' };
+    for (let i = 0; i < 8; i++) files[`mesh${i}.ts`] = [0, 1, 2, 3, 4, 5, 6, 7].filter((j) => j !== i).map((j) => `export * from "./mesh${j}";\n`).join("") + `export function own${i}(): void {}\n`;
+    files["use.ts"] = 'import * as r from "./r";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n';
+    const graph = await buildGraph({ repoRoot: makeRepo(files), store: null });
+    expect(graph.status.cuts.some((c) => c.by === "export-walk"), "the walk passes its step budget").toBe(true);
+    const a = query({ graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "callers", target: { id: symbol(graph, "end.ts", "t") }, depth: 1 } as Request);
+    expect(a.unknown.floor).toBe(true);
+    expect(a.unknown.reasons.join(" ")).toContain("its module is used as a value at use.ts:3");
+  }, 120_000);
 });

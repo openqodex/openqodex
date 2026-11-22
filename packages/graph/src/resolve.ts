@@ -89,7 +89,8 @@ export const SHAPE_CAP = 20;
 // 34: a free name its project declares as plain data vouches for itself.
 // 35: a module that offers a name the graph cannot follow to one
 // definition reaches whole every module it forwards names from.
-export const RESOLVER_VERSION = 35;
+// 36: so does a module whose walk of `export *` the step budget cut.
+export const RESOLVER_VERSION = 36;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -3913,8 +3914,10 @@ export function createWorld(input: ResolveInput): World {
     const loads = (path: string, e: EscapeFact) => e.kind === "load" && !(e.cjs === true && /\.c[jt]s$/.test(path));
     // Every definition a module offers, and the modules whole namespaces of
     // it name. A name the graph cannot follow to one definition (a chain
-    // of re-exports too deep, two stars that offer it) may come from any
-    // module the file forwards names from, so each of those counts whole.
+    // of re-exports too deep, two stars that offer it), or one the walk of
+    // `export *` did not reach before its step budget ran out, may come
+    // from any module the file forwards names from, so each of those
+    // counts whole.
     const offers = (file: string): { ids: string[]; modules: string[] } => {
       const ids: string[] = [];
       const modules: string[] = [];
@@ -3925,7 +3928,7 @@ export function createWorld(input: ResolveInput): World {
         else if (v?.v === "mod") modules.push(v.file);
         else if (v?.v === "gap") gap = true;
       }
-      if (gap) modules.push(...forwards(file));
+      if (gap || namesCut.has(file)) modules.push(...forwards(file));
       return { ids, modules };
     };
     // The modules a module forwards names from: `export ... from`, and a
@@ -4169,6 +4172,8 @@ export function createWorld(input: ResolveInput): World {
   const jsNames = new Map<string, Map<string, number | null>>();
   let walkSteps = 0;
   let walkCut: Cut | null = null;
+  // The modules whose last walk the step budget cut: their names miss some re-exported ones.
+  const namesCut = new Set<string>();
   type Frame = { file: string; names: Map<string, number | null>; stars: { file: string; line: number }[]; next: number; partial: boolean };
   const ownJsNames = (file: string): Frame => {
     const names = new Map<string, number | null>();
@@ -4197,6 +4202,7 @@ export function createWorld(input: ResolveInput): World {
     };
     const open = new Set<string>([root]);
     const stack: Frame[] = [ownJsNames(root)];
+    let cut = false;
     for (;;) {
       const top = stack[stack.length - 1] as Frame;
       if (top.next < top.stars.length) {
@@ -4206,6 +4212,7 @@ export function createWorld(input: ResolveInput): World {
         else if (open.has(star.file)) top.partial = true;
         else if (walkSteps >= EXPORT_WALK_STEPS) {
           top.partial = true;
+          cut = true;
           walkCut ??= {
             by: "export-walk",
             at: root,
@@ -4225,7 +4232,11 @@ export function createWorld(input: ResolveInput): World {
       open.delete(top.file);
       if (!top.partial) jsNames.set(top.file, top.names);
       const parent = stack[stack.length - 1];
-      if (!parent) return top.names;
+      if (!parent) {
+        if (cut) namesCut.add(root);
+        else namesCut.delete(root);
+        return top.names;
+      }
       merge(parent, top.names, (parent.stars[parent.next - 1] as { line: number }).line);
       if (top.partial) parent.partial = true;
     }

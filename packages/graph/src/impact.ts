@@ -39,15 +39,6 @@ export function isTestPath(path: string): boolean {
   return TEST_PATH.test(path);
 }
 
-// Code that is not the product: a test or a fixture; a package's corpus
-// (the cases its tests read); a benchmark, which measures the product; and
-// the scripts of the repository or of a package (build, release, checks).
-// None of them is shipped with the product or imported by it.
-const OUTSIDE_PRODUCT = /(^|\/)benchmarks?\/|^packages\/[^/]+\/(corpus|scripts)\/|^scripts\//;
-export function isOutsideProduct(path: string): boolean {
-  return isTestPath(path) || OUTSIDE_PRODUCT.test(path);
-}
-
 // Folders between two files: 0 for the same folder.
 function distance(a: string, b: string): number {
   const pa = dirname(a).split("/");

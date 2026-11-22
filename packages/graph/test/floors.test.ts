@@ -41,9 +41,12 @@
 // 11. The review brief keeps the old noise (a function with no caller and
 //     no value use is a floor), or loses a real one (a function passed
 //     through a ternary reads as having no caller) (test 17).
-// 12. A floor whose hidden callers can only be in test, benchmark or script files
-//     loses its floor, so a zero reads as "unused"; or one place in product
-//     code beside them still reads as "complete in product code".
+// 12. A floor whose hidden callers can only be in test files loses its
+//     floor, so a zero reads as "unused"; or one place in product code
+//     beside them still reads as "complete in product code"; or a place in
+//     a folder named like tooling (`scripts/`, `benchmark/`, a package's
+//     `scripts/` or `corpus/`) reads as outside product code, though it can
+//     hold an entry point that ships.
 // 13. A Ruby `respond_to?(:save)`, which only asks whether the method is
 //     there, is read as a call of `save`, so `save` reads as maybe called.
 // 14. A script's function keeps one reach row per place that builds a name
@@ -51,7 +54,7 @@
 //     with places times functions, though the reason names the first.
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
-import { buildGraph, detectImpact, isOutsideProduct, renderImpactBlock } from "../src/index.js";
+import { buildGraph, detectImpact, renderImpactBlock } from "../src/index.js";
 import { query } from "../src/query/engine.js";
 import type { Answer, Request, Session } from "../src/query/answer.js";
 import { commitAll, makeRepo, writeFiles } from "./helpers.js";
@@ -333,21 +336,16 @@ describe("where a floor's hidden callers can be", () => {
     "app/a.ts": "export function f() {}\n",
     "app/b.ts": 'import { f } from "./a";\nf();\n',
     "app/a.test.ts": 'import { f } from "./a";\nexport const v = X1;\nf();\n',
-    "app/benchmark/run.ts": 'import { f } from "../a";\nexport const v = X2;\nf();\n',
-    "scripts/build.ts": 'import { f } from "../app/a";\nexport const v = X4;\nf();\n',
+    "app/fixtures/run.ts": 'import { f } from "../a";\nexport const v = X2;\nf();\n',
+    "test/build.ts": 'import { f } from "../app/a";\nexport const v = X4;\nf();\n',
   };
 
-  it("reads tests, fixtures, a package's corpus, benchmarks and the top-level scripts as outside product code (12)", () => {
-    for (const p of ["src/a.test.ts", "test/x.ts", "examples/fixtures/a.ts", "packages/graph/corpus/ts/a.ts", "benchmark/run.mjs", "app/benchmarks/x.ts", "scripts/copy-assets.mjs", "packages/graph/scripts/score.mjs"]) expect(isOutsideProduct(p), p).toBe(true);
-    for (const p of ["src/a.ts", "packages/graph/src/build.ts", "app/scripts/x.ts", "src/corpus/a.ts", "packages/cli/src/assets.ts"]) expect(isOutsideProduct(p), p).toBe(false);
-  });
-
-  it("says complete in product code when every place is a test, benchmark or script file, and keeps the floor (12)", async () => {
+  it("says complete in product code when every place is a test file, and keeps the floor (12)", async () => {
     const a = ask(await sessionOf(BASE), { kind: "callers", target: { name: "f", file: "app/a.ts" } });
     expect(a.unknown.floor).toBe(true);
     expect(a.listIncomplete).toBe(true);
     expect(a.unknown.scope).toBe("tests");
-    expect(a.unknown.note).toBe("Complete in product code. Only test, benchmark or script files could hide a caller: app/a.test.ts:2, app/benchmark/run.ts:2, scripts/build.ts:2.");
+    expect(a.unknown.note).toBe("Complete in product code. Only test files could hide a caller: app/a.test.ts:2, app/fixtures/run.ts:2, test/build.ts:2.");
     expect(a.unknown.reasons.join(" ")).toContain("3 files the graph cannot read whole could call it");
   }, 60_000);
 
@@ -360,8 +358,19 @@ describe("where a floor's hidden callers can be", () => {
     expect(a.unknown.reasons.join(" ")).toMatch(/4 files the graph cannot read whole could call it by a path it does not see: .*app\/c\.ts:2/);
   }, 60_000);
 
+  it("keeps the full floor when one place is in a scripts, benchmark or corpus folder beside the test ones (12)", async () => {
+    for (const file of ["scripts/start.js", "benchmark/run.ts", "packages/tool/scripts/x.ts", "packages/tool/corpus/x.ts"]) {
+      const up = "../".repeat(file.split("/").length - 1);
+      const a = ask(await sessionOf({ ...BASE, [file]: `import { f } from "${up}app/a";\nexport const v = X5;\nf();\n` }), { kind: "callers", target: { name: "f", file: "app/a.ts" } });
+      expect(a.unknown.floor, file).toBe(true);
+      expect(a.unknown.scope, file).toBe("all");
+      expect(a.unknown.note, file).toBeUndefined();
+      expect(a.unknown.reasons.join(" "), file).toContain(`${file}:2`);
+    }
+  }, 120_000);
+
   it("gives no scope to a whole list, and scope all to a floor that does not name each place (12)", async () => {
-    const s = await sessionOf({ ...BASE, "app/a.test.ts": 'import { f } from "./a";\nf();\n', "app/benchmark/run.ts": 'import { f } from "../a";\nf();\n', "scripts/build.ts": 'import { f } from "../app/a";\nf();\n', "app/d.ts": 'import { f } from "./a";\nexport const g = [f, f];\n', "app/e.ts": "export function e() {}\n" });
+    const s = await sessionOf({ ...BASE, "app/a.test.ts": 'import { f } from "./a";\nf();\n', "app/fixtures/run.ts": 'import { f } from "../a";\nf();\n', "test/build.ts": 'import { f } from "../app/a";\nf();\n', "app/d.ts": 'import { f } from "./a";\nexport const g = [f, f];\n', "app/e.ts": "export function e() {}\n" });
     const whole = ask(s, { kind: "callers", target: { name: "e", file: "app/e.ts" } });
     expect(whole.error).toBeNull();
     expect(whole.unknown.floor).toBe(false);
