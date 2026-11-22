@@ -169,6 +169,10 @@ export type ScanResult = {
 export type AdapterResult = {
   findings: StaticFinding[];
   error: string | null;
+  // Set when the error is a failure even beside findings, such as a Go
+  // module that could not type-check while another module gave findings.
+  // Without it, an error next to findings leaves the scanner ran.
+  failed?: boolean;
   secrets?: string[];
   // Set when the adapter chose not to run (for example dependency lookups
   // while offline). The runner records status "disabled" with this reason.
