@@ -8,6 +8,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { PLUGINS, buildGraph, detectImpact, renderImpactBlock } from "../src/index.js";
 import type { FrameworkPlugin } from "../src/index.js";
 import { runFrameworks } from "../src/frameworks/stage.js";
+import { query } from "../src/query/engine.js";
+import type { Item } from "../src/query/engine.js";
 import { commitAll, makeRepo, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -108,6 +110,31 @@ describe("the framework stage", () => {
     expect(data.edges.filter((e) => e.kind === "tests" && e.to.includes("#work@"))).toHaveLength(CLASSES);
     expect(reads).toBe(1);
   }, 60_000);
+});
+
+describe("the read API a plugin resolves through", () => {
+  // Way it could fail: a module-level value that is no definition, given out
+  // through the export table (`export { router }`, `export { router as api }`,
+  // `export default router`), reads as nothing where `export const router`
+  // reads as a miss in its file, so the plugin never reads its own facts there
+  // and the route shows unmounted (`/things` for `/v2/things`).
+  for (const [form, exported, imported] of [
+    ["export { router }", "export { router };", "import { router } from './users.js';"],
+    ["export { router as api }", "export { router as api };", "import { api as router } from './users.js';"],
+    ["export default router", "export default router;", "import router from './users.js';"],
+  ] as const) {
+    it(`mounts a router given out through ${form} under its prefix`, async () => {
+      const root = makeRepo({
+        "package.json": '{"name":"x","version":"1.0.0","type":"module","dependencies":{"express":"^4.0.0"}}\n',
+        "src/app.js": `import express from "express";\n${imported}\nconst app = express();\napp.use("/v2", router);\napp.listen(3000);\n`,
+        "src/users.js": `import express from "express";\nconst router = express.Router();\nfunction show(req, res) {\n  res.end();\n}\nrouter.get("/things", show);\n${exported}\n`,
+      });
+      commitAll(root);
+      const graph = await buildGraph({ repoRoot: root, store: null });
+      const a = query({ graph, generation: "g", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "routes", limit: 50 });
+      expect((a.items as (Item & { pattern?: string })[]).map((i) => i.pattern)).toEqual(["/v2/things"]);
+    }, 60_000);
+  }
 });
 
 describe("the framework part of the brief", () => {

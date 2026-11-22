@@ -1007,11 +1007,15 @@ export function createWorld(input: ResolveInput): World {
       if (family === "js") {
         // The export table: exported declarations, `export { a as b }`,
         // `export default`, CommonJS assignments, then re-exports. A private
-        // top-level definition is never an export.
-        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1);
+        // top-level definition is never an export. A local value that is no
+        // definition (`const router = Router(); export { router }`) is a
+        // miss in this file, as `export const router = ...` is, so a
+        // framework reader reads its own facts there.
+        const here: Value = { v: "miss", target: file, name, ev: SAME_SCOPE };
+        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? here;
         const top = topByFile.get(file)?.get(name)?.filter((id) => defById.get(id)?.exported);
         if (top && top.length > 0) return { v: "sym", ids: top, ev: SAME_SCOPE };
-        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1);
+        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? here;
         // Every `export *` that offers the name: one definition binds; two
         // different ones are ambiguous (JavaScript exports neither). A star
         // the graph cannot follow (a module that is not there, a package
