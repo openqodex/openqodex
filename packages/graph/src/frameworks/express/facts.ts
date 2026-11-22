@@ -84,8 +84,13 @@ const specifier = (n: Node | null | undefined): string | null => (n?.type === "s
 
 // An argument or a value as resolve reads it: `process.env["X"]` is read
 // as the name `process.env.X`, the form the member `process.env.X` gives,
-// so a mount path read from the environment is known to be a string.
-function readArg(node: Node | null): Expr {
+// so a mount path read from the environment is known to be a string. The
+// wrappers readExpr looks through (parentheses, `!`, `as`, `satisfies`,
+// `await`) are looked through first.
+const WRAPPERS: ReadonlySet<string> = new Set(["parenthesized_expression", "await_expression", "as_expression", "satisfies_expression", "non_null_expression"]);
+function readArg(start: Node | null): Expr {
+  let node = start;
+  for (let steps = 0; node && WRAPPERS.has(node.type) && steps < 8; steps++) node = node.firstNamedChild;
   if (node?.type === "subscript_expression") {
     const obj = node.childForFieldName("object");
     const index = node.childForFieldName("index");
@@ -93,7 +98,7 @@ function readArg(node: Node | null): Expr {
     const key = index ? stringValue(index) : null;
     if (path?.length === 2 && path[0] === "process" && path[1] === "env" && key !== null && /^[A-Za-z_$][\w$]*$/.test(key)) return { t: "ref", path: ["process", "env", key], ...pos(node) };
   }
-  return readExpr(node);
+  return readExpr(start);
 }
 
 // How many functions out resolve follows a name's binding (resolve.ts).
