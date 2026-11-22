@@ -14,6 +14,7 @@ import type { ChildProcess } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import type { ReviewerUsage } from "@openqodex/core";
+import { redactSecrets } from "@openqodex/core";
 import type { CallRecord, ToolLogEntry } from "../usage.js";
 import type { OwnFiles, ToolCall } from "./trace.js";
 
@@ -47,14 +48,21 @@ const RATE_LIMIT = /rate limit|rate_limit|too many requests|\bHTTP 429\b/i;
 const PLAN_LIMIT = /usage limit|plan limit|limit reached|hit your (\S+ )?limit/i;
 
 // The failure of a turn the reviewer itself ended with an error, from the
-// reviewer's own message (on one line, cut at 200 characters), so the
-// receipt says what happened and, for a limit, when it resets, also when the
-// reset is on a later line. `fallback` stands in when the reviewer sent no
-// message.
-export function reviewerError(message: string | null, fallback = "unknown"): string {
-  const said = message?.replace(/\s+/g, " ").trim().slice(0, 200) || fallback;
-  if (RATE_LIMIT.test(said)) return `the reviewer hit a rate limit (${said})`;
-  return PLAN_LIMIT.test(said) ? `the reviewer hit its usage or plan limit (${said})` : `the reviewer stopped with an error (${said})`;
+// reviewer's own message, so the receipt says what happened and, for a
+// limit, when it resets, also when the reset is on a later line. The
+// scanners' `secrets` are removed first, while the message is whole; then
+// it is put on one line and cut at 200 characters. `fallback` stands in
+// when the reviewer sent no message.
+export function reviewerError(message: string | null, fallback = "unknown", secrets: string[] = []): string {
+  const whole = message === null ? "" : redactSecrets(message, secrets).replace(/\s+/g, " ").trim();
+  const said = whole.slice(0, 200) || fallback;
+  if (RATE_LIMIT.test(whole)) return `the reviewer hit a rate limit (${said})`;
+  return PLAN_LIMIT.test(whole) ? `the reviewer hit its usage or plan limit (${said})` : `the reviewer stopped with an error (${said})`;
+}
+
+// The failure names a rate, usage or plan limit (reviewerError).
+export function namesLimit(failure: string): boolean {
+  return failure.startsWith("the reviewer hit ");
 }
 
 export type Detected = { ok: true; version: string; bin: string } | { ok: false; missing: string; fix: string };
@@ -118,25 +126,34 @@ export interface ReviewerDriver {
   check?(opts: { snapshotDir: string; bin: string; register: (cleanup: (() => void) | null) => void }): Promise<string | null>;
   // `deadline`: epoch milliseconds after which the process group is killed.
   // `web`: the agent gets its web tools (on unless reviewer_web: off).
-  start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): ReviewerSession;
+  // `secrets`: what the scanners found, removed from the agent's own error
+  // text before it is cut.
+  start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): ReviewerSession;
 }
 
-// How to start `bin` with `args`. Node refuses to start a .cmd or .bat file
-// without a shell (EINVAL), and through cmd.exe the arguments (the settings
-// JSON, with its quotes and braces) would be parsed again, and the shim would
-// look for `node` in the review copy before PATH. So on Windows the shim npm
-// writes is read for the program it wraps, and that program is started
-// instead: a Node script with this Node, a .exe as it is. A shim that names
-// neither is refused, in a line that says what to do.
-export function launch(bin: string, args: string[], platform: NodeJS.Platform = process.platform): [string, string[]] {
-  if (platform !== "win32" || !/\.(cmd|bat)$/i.test(bin)) return [bin, args];
+const NODE_SCRIPT = [".js", ".cjs", ".mjs"];
+
+// The program a .cmd or .bat shim npm wrote wraps: a Node script or a .exe,
+// as the path the shim names. Node refuses to start the shim itself without
+// a shell (EINVAL), and through cmd.exe the arguments (the settings JSON,
+// with its quotes and braces) would be parsed again, and the shim would look
+// for `node` in the review copy before PATH. A shim that names neither is
+// refused, in a line that says what to do.
+function shimTarget(shim: string): string {
   // npm: `"%dp0%\node_modules\pkg\cli.js" %*`, or `"%~dp0\...\x.exe" %*`.
-  const wrapped = [...readFileSync(bin, "utf8").matchAll(/"%~?dp0%?\\([^"%]+)"\s*%\*/g)].at(-1)?.[1];
-  const target = wrapped === undefined ? null : join(dirname(bin), ...wrapped.split(/[\\/]/));
-  const ext = target === null ? "" : extname(target).toLowerCase();
-  if (target !== null && [".js", ".cjs", ".mjs"].includes(ext)) return [process.execPath, [target, ...args]];
-  if (target !== null && [".exe", ".com"].includes(ext)) return [target, args];
-  throw new Error(`${bin} is a .cmd file that names no program openqodex can start; install the reviewer's .exe or with npm, or review from WSL`);
+  const wrapped = [...readFileSync(shim, "utf8").matchAll(/"%~?dp0%?\\([^"%]+)"\s*%\*/g)].at(-1)?.[1];
+  const target = wrapped === undefined ? null : join(dirname(shim), ...wrapped.split(/[\\/]/));
+  if (target !== null && [...NODE_SCRIPT, ".exe", ".com"].includes(extname(target).toLowerCase())) return target;
+  throw new Error(`${shim} is a .cmd file that names no program openqodex can start; install the reviewer's .exe or with npm, or review from WSL`);
+}
+
+// How to start `bin` with `args`. On Windows findOnPath gives, for a shim,
+// the Node script it wraps, which runs with this Node; a shim given here is
+// read for its program the same way.
+export function launch(bin: string, args: string[], platform: NodeJS.Platform = process.platform): [string, string[]] {
+  if (platform !== "win32") return [bin, args];
+  const program = /\.(cmd|bat)$/i.test(bin) ? shimTarget(bin) : bin;
+  return NODE_SCRIPT.includes(extname(program).toLowerCase()) ? [process.execPath, [program, ...args]] : [program, args];
 }
 
 // Spawned without a shell, as the leader of a new process group, so the
@@ -216,6 +233,9 @@ const WINDOWS_STARTS = [".com", ".exe", ".bat", ".cmd"];
 // the way from one to the other resolves inside one of the `forbidden`
 // folders (the repository, the review snapshots), so a repository cannot put
 // its own program in the reviewer's place through a link or a folder name.
+// For a Windows shim, what runs is the program it wraps: that program gets
+// the same checks and is what is returned, and a shim whose program is gone
+// or fails them is passed over.
 export function findOnPath(name: string, forbidden: string[], path = process.env.PATH ?? "", platform: NodeJS.Platform = process.platform, pathext = process.env.PATHEXT ?? ""): string | null {
   const roots: string[] = [];
   for (const f of forbidden) {
@@ -230,26 +250,36 @@ export function findOnPath(name: string, forbidden: string[], path = process.env
   const p = windows ? win32 : posix;
   const exts = (pathext || ".COM;.EXE;.BAT;.CMD").split(";").map((e) => e.toLowerCase()).filter((e) => WINDOWS_STARTS.includes(e));
   const names = windows ? exts.map((e) => name + e) : [name];
+  // `candidate` as its real path when it is a file that neither resolves
+  // inside a forbidden folder nor reaches one through a link; else null.
+  const vetted = (candidate: string): string | null => {
+    let hop = candidate;
+    if (!existsSync(hop)) return null;
+    let safe = true;
+    for (let n = 0; n < MAX_HOPS && safe; n++) {
+      // Each hop's folder resolved, the name kept: the link itself is checked.
+      if (owned(join(real(dirname(hop)), FOLD_CASE ? basename(hop).toLowerCase() : basename(hop)))) safe = false;
+      if (!lstatSync(hop).isSymbolicLink()) break;
+      hop = resolve(dirname(hop), readlinkSync(hop));
+    }
+    const bin = realpathSync.native(candidate);
+    if (!safe || owned(real(bin))) return null;
+    return statSync(bin).isFile() ? bin : null;
+  };
   for (const dir of path.split(p.delimiter)) {
     if (dir === "" || !p.isAbsolute(dir)) continue;
     for (const file of names) {
       try {
-        let hop = join(dir, file);
-        if (!existsSync(hop)) continue;
-        let safe = true;
-        for (let n = 0; n < MAX_HOPS && safe; n++) {
-          // Each hop's folder resolved, the name kept: the link itself is checked.
-          if (owned(join(real(dirname(hop)), FOLD_CASE ? basename(hop).toLowerCase() : basename(hop)))) safe = false;
-          if (!lstatSync(hop).isSymbolicLink()) break;
-          hop = resolve(dirname(hop), readlinkSync(hop));
+        const bin = vetted(join(dir, file));
+        if (bin === null) continue;
+        if (!windows) {
+          if ((statSync(bin).mode & 0o111) !== 0) return bin;
+          continue;
         }
-        const bin = realpathSync.native(join(dir, file));
-        if (!safe || owned(real(bin))) continue;
-        const st = statSync(bin);
-        if (!st.isFile()) continue;
-        // A .cmd that launch cannot start throws here, and the search goes on.
-        if (windows) launch(bin, [], platform);
-        if (windows || (st.mode & 0o111) !== 0) return bin;
+        if (!/\.(cmd|bat)$/i.test(bin)) return bin;
+        // shimTarget throws for a shim that names no program it can start.
+        const target = vetted(shimTarget(bin));
+        if (target !== null) return target;
       } catch {
         // unreadable entry: try the next
       }

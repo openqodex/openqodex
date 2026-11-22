@@ -107,7 +107,7 @@ export type Reviewer = AgentReviewer | ModelReviewer;
 
 // A driver's session behind the agent reviewer shape: the session starts
 // here, and every call goes to it unchanged.
-export function agentReviewer(driver: ReviewerDriver, opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): AgentReviewer {
+export function agentReviewer(driver: ReviewerDriver, opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): AgentReviewer {
   const session = driver.start(opts);
   const kill = session.kill?.bind(session);
   return {

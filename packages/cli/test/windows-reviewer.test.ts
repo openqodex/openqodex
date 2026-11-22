@@ -18,9 +18,12 @@
 //  6. A taskkill that fails is silent, and the reviewer keeps running.
 //  7. Codex is offered on Windows, where its sandbox probe cannot run, so
 //     `--reviewer auto` never moves on to Claude Code.
+//  8. The program a shim wraps escapes the checks the shim gets: a target
+//     inside the repository, by `..` or through a link, runs; or a shim whose
+//     program is gone hides a reviewer later on PATH.
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { codexEnv, detectCodex, findOnPath, killGroup, launch, reviewerEnv, spawnGroup, taskkillFailure, windowsStop } from "@openqodex/review";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
@@ -28,6 +31,7 @@ import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 afterAll(removeTempDirs);
 
 const file = (dir: string, name: string, text = "", mode = 0o644) => {
+  mkdirSync(join(dir, name, ".."), { recursive: true });
   writeFileSync(join(dir, name), text);
   chmodSync(join(dir, name), mode);
   return realpathSync(join(dir, name));
@@ -62,7 +66,9 @@ describe("1. finding the reviewer on Windows", () => {
     const b = tempDir("oq-win-path-b-");
     file(a, "claude", "#!/bin/sh\n", 0o755);
     file(a, "claude.js");
-    const cmd = file(a, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
+    file(a, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
+    // What runs is the script the shim wraps, so that is what is found.
+    const cmd = file(a, "node_modules/x/cli.js");
     const exe = file(b, "claude.exe");
     const path = [a, b].join(";");
     expect(findOnPath("claude", [], path, "win32", ".COM;.EXE;.BAT;.CMD;.JS")).toBe(cmd);
@@ -76,7 +82,9 @@ describe("1. finding the reviewer on Windows", () => {
     const repo = tempDir("oq-win-repo-");
     const outside = tempDir("oq-win-out-");
     file(repo, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
-    const cmd = file(outside, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
+    file(repo, "node_modules/x/cli.js");
+    file(outside, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
+    const cmd = file(outside, "node_modules/x/cli.js");
     expect(findOnPath("claude", [repo], [repo, outside].join(";"), "win32", ".CMD")).toBe(cmd);
     const sh = file(outside, "claude", "#!/bin/sh\n", 0o755);
     // A POSIX path list, which a Windows host's temporary folders cannot make.
@@ -90,6 +98,33 @@ describe("1. finding the reviewer on Windows", () => {
     const exe = file(b, "claude.exe");
     expect(findOnPath("claude", [], [a, b].join(";"), "win32", ".EXE;.CMD")).toBe(exe);
     expect(findOnPath("claude", [], a, "win32", ".EXE;.CMD")).toBeNull();
+  });
+
+  it("8. the program a shim wraps gets the checks the shim gets, and a shim whose program is gone is passed over", () => {
+    const repo = tempDir("oq-win-own-repo-");
+    const later = tempDir("oq-win-own-later-");
+    const exe = file(later, "claude.exe");
+    const planted = file(repo, "evil.js");
+    const search = (dir: string) => findOnPath("claude", [repo], [dir, later].join(";"), "win32", ".EXE;.CMD");
+    // A shim outside the repository that names a script inside it.
+    const up = tempDir("oq-win-own-up-");
+    file(up, "claude.cmd", npmShim(relative(up, planted).split("/").join("\\")));
+    expect(search(up)).toBe(exe);
+    // A shim whose script is a link into the repository.
+    const linked = tempDir("oq-win-own-link-");
+    file(linked, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
+    mkdirSync(join(linked, "node_modules", "x"), { recursive: true });
+    symlinkSync(planted, join(linked, "node_modules", "x", "cli.js"));
+    expect(search(linked)).toBe(exe);
+    // A shim whose script was removed.
+    const stale = tempDir("oq-win-own-stale-");
+    file(stale, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
+    expect(search(stale)).toBe(exe);
+    // The same shim with its script in place is found.
+    const script = file(stale, "node_modules/x/cli.js");
+    expect(search(stale)).toBe(script);
+    // What findOnPath gives runs with this Node.
+    expect(launch(script, ["-p"], "win32")).toEqual([process.execPath, [script, "-p"]]);
   });
 });
 

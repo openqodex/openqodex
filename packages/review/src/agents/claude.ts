@@ -123,7 +123,7 @@ type Event = Record<string, unknown> & { type?: string; subtype?: string };
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): ReviewerSession {
+function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): ReviewerSession {
   const allowed = opts.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS;
   const env = reviewerEnv();
   const child = spawnGroup(opts.bin, claudeArgs(opts.web), { cwd: opts.snapshotDir, env });
@@ -220,7 +220,7 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
       };
       const answer = str(e.result) ?? "";
       // The reason is in `result`; `subtype` can say "success" even then.
-      if (e.is_error === true) fail(reviewerError(str(e.result), str(e.subtype) ?? undefined));
+      if (e.is_error === true) fail(reviewerError(str(e.result), str(e.subtype) ?? undefined, opts.secrets));
       else if (Buffer.byteLength(answer, "utf8") > MAX_ANSWER_BYTES) fail(`the reviewer stopped: its answer over ${MAX_ANSWER_BYTES / 1024 / 1024} MB`);
       else finish(answer, null);
     }

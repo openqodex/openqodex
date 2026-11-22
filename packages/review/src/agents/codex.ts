@@ -19,7 +19,7 @@ import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { openqodexHome } from "@openqodex/scanners";
 import { checkoutsDir } from "../checkouts.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, namesLimit, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -284,7 +284,7 @@ export type CodexRun = { finalText: string; calls: ToolCall[]; input: number | n
 
 // Reads one run's event lines, as they arrive. `line` returns a failure as
 // soon as a bound is passed, so the caller can stop the process.
-export function codexStream(): { line(text: string): string | null; end(code: number | null, signal: string | null): CodexRun } {
+export function codexStream(secrets: string[] = []): { line(text: string): string | null; end(code: number | null, signal: string | null): CodexRun } {
   let answer: string | null = null;
   let completed = false;
   let failed: string | null = null;
@@ -301,7 +301,10 @@ export function codexStream(): { line(text: string): string | null; end(code: nu
       return null;
     }
     if (e.type === "turn.failed" || e.type === "error") {
-      failed ??= reviewerError(str((e.error as Record<string, unknown> | undefined)?.message) ?? str(e.message));
+      const said = reviewerError(str((e.error as Record<string, unknown> | undefined)?.message) ?? str(e.message), undefined, secrets);
+      // The first error, unless a later one names a limit and it does not:
+      // a reconnect notice can come before the usage limit that ends the turn.
+      if (failed === null || (namesLimit(said) && !namesLimit(failed))) failed = said;
       return null;
     }
     if (e.type !== "item.completed") return null;
@@ -357,7 +360,7 @@ export function replay(history: string[]): string {
   return out.join("\n\n").trimEnd();
 }
 
-function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): ReviewerSession {
+function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): ReviewerSession {
   // The brief, then each answer and each correction, in the order they came.
   const history: string[] = [];
   let usage: ReviewerUsage = { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null };
@@ -366,7 +369,7 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
 
   const run = (prompt: string): Promise<CodexRun> =>
     new Promise((done) => {
-      const stream = codexStream();
+      const stream = codexStream(opts.secrets);
       const proc = spawnGroup(opts.bin, codexArgs(opts.snapshotDir, opts.web), { cwd: opts.snapshotDir, env: codexEnv() });
       child = proc;
       let stopped: string | null = null;

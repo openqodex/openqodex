@@ -105,6 +105,8 @@
 //     never answers is not stopped at the cap it was given.
 // 42. A reviewer that stopped on a usage or plan limit reads as "stopped with
 //     an error (success)": the reason in its result is dropped.
+// 43. A secret in the reviewer's own error survives into the receipt,
+//     because the message was cut or folded onto one line before redaction.
 // 41. On Windows the reviewer loses its path (named `Path` there), its home
 //     folder or what starts a program.
 import { stagedFake, stagedAnswer } from "../../review/test/staged-fake.js";
@@ -1042,6 +1044,28 @@ describe("the reviewer process", () => {
     expect(await failure(claudeSays("API Error: 500 Internal server error"))).toBe("the reviewer stopped with an error (API Error: 500 Internal server error)");
     // With no message, the subtype is all there is.
     expect(await failure(claudeSays(""))).toBe("the reviewer stopped with an error (success)");
+  });
+  it("43. a secret in the reviewer's error is removed before the message is cut or put on one line", async () => {
+    const secret = "sk-live-0123456789abcdef0123456789";
+    const key = "-----BEGIN KEY-----\nAAAABBBBCCCCDDDD\n-----END KEY-----";
+    const bin = join(tempDir("oq-claude-secret-"), "claude");
+    // The secret starts at character 190, so a cut at 200 splits it.
+    const event = { type: "result", subtype: "success", is_error: true, result: `${"x".repeat(190)}${secret} ${key}`, num_turns: 1, modelUsage: {} };
+    writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(event)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+    chmodSync(bin, 0o755);
+    const session = claudeDriver.start({ snapshotDir: tempDir("oq-claude-secret-snap-"), deadline: Date.now() + 20_000, bin, web: false, secrets: [secret, key] });
+    const turn = await session.send("Review this.");
+    await session.close();
+    expect(turn.failure).toMatch(/^the reviewer stopped with an error \(x+/);
+    expect(turn.failure).not.toContain(secret.slice(0, 8));
+    // A short message keeps all of it, the multi-line secret removed before the lines are joined.
+    const short = { ...event, result: `failed: ${key} ${secret}` };
+    writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(short)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+    const again = claudeDriver.start({ snapshotDir: tempDir("oq-claude-secret-snap-"), deadline: Date.now() + 20_000, bin, web: false, secrets: [secret, key] });
+    const second = await again.send("Review this.");
+    await again.close();
+    expect(second.failure).not.toContain("AAAABBBB");
+    expect(second.failure).not.toContain(secret);
   });
   it("20. never runs a claude that resolves inside the repository, however PATH reaches it", async () => {
     const dir = repo();
