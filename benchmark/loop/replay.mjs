@@ -270,7 +270,10 @@ function inputsOf(folder, a, rebuilt) {
   const inventory = existsSync(inventoryPath) ? readJson(inventoryPath) : null;
   const saved = savedChange(a.brief, manifest, a.report, inventory);
   const files = new Set([...saved.change.files.map((f) => f.path), ...(inventory ?? []).map((f) => f.path), ...(scan.selection ?? []).flatMap((s) => s.paths)]);
-  return { ...saved, lineCount: (p) => saved.lineCount(p) ?? rebuilt.lengths?.get(p) ?? null, hasFile: (p) => rebuilt.lengths?.has(p) || files.has(p), rebuildReason: rebuilt.reason, manifest, scan, config: settings, submission: a.submission };
+  // A staged review's verifier ruled on duplicates, so core merges only the
+  // same finding, as it did in that review.
+  const verified = (a.report.completion.reviewer?.sessions ?? []).some((s) => /^(finder|verifier):/.test(s.role));
+  return { ...saved, lineCount: (p) => saved.lineCount(p) ?? rebuilt.lengths?.get(p) ?? null, hasFile: (p) => rebuilt.lengths?.has(p) || files.has(p), rebuildReason: rebuilt.reason, manifest, scan, config: settings, submission: a.submission, verified };
 }
 
 const counts = (scores) => {
