@@ -416,6 +416,12 @@ class Ctx {
   // The names of an import or re-export's `type` specifiers (`import { x,
   // type T }`): they bind nothing at run time, so no loader is made of them.
   typeSpecifiers = new Map<ImportFact, Set<string>>();
+  // Python: where an import outside any function stands. `top`: a statement
+  // of the module itself, which replaces an earlier binding of its names.
+  // `maybe`: under an `if`, `try` or other block, which may not run.
+  // `class`: in a class body, which binds class attributes, never the
+  // module's names.
+  pyImportPlace = new Map<ImportFact, "top" | "maybe" | "class">();
   variables = new Set<string>();
   exportedVariables = new Set<string>();
   // TypeScript and JavaScript: the name nodes already recorded as a value,
@@ -3686,18 +3692,29 @@ function pyTypingCast(ctx: Ctx, fn: Node | null): boolean {
 }
 
 // `name` is bound by an import of the typing module where it is read: an
-// import of the function or block around it, else the last import at the
-// top of the module that binds the name (a later one replaces it). An
-// import inside another function binds nothing here.
+// import of the function or block around it, else one of the module's. Of
+// those, the last statement of the module itself that binds the name
+// decides, or a typing import after it under a block that may run. An
+// import inside another function or in a class body binds nothing here.
 function pyTypingName(ctx: Ctx, name: string, imported: string, binds: (i: ImportFact) => boolean): boolean {
   const bound = ctx.lookup(ctx.top, name)?.imports?.get(name);
   if (bound) return bound.imported === imported && PY_TYPING.has(ctx.imports[bound.import]?.spec ?? "");
   if (ctx.local(name) !== undefined) return false;
   for (let k = ctx.imports.length - 1; k >= 0; k--) {
     const i = ctx.imports[k] as ImportFact;
-    if (i.scoped !== true && (i.namespace === name || i.names.some((n) => n.local === name))) return PY_TYPING.has(i.spec) && binds(i);
+    const place = ctx.pyImportPlace.get(i);
+    if (i.scoped === true || place === "class" || !(i.namespace === name || i.names.some((n) => n.local === name))) continue;
+    if (PY_TYPING.has(i.spec) && binds(i)) return true;
+    if (place === "top") return false;
   }
   return false;
+}
+
+// Where a Python import that is in no function stands (Ctx.pyImportPlace).
+function pyImportPlace(node: Node): "top" | "maybe" | "class" {
+  if (node.parent?.type === "module") return "top";
+  for (let p = node.parent; p && p.type !== "module"; p = p.parent) if (p.type === "class_definition") return "class";
+  return "maybe";
 }
 
 // A method Python never runs on an instance of a concrete class: one
@@ -3817,6 +3834,7 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
             fact.namespace = n.childForFieldName("alias")?.text ?? null;
             fact.alias = true;
           } else continue;
+          ctx.pyImportPlace.set(fact, pyImportPlace(node));
           ctx.addImport(fact);
         }
         return false;
@@ -3834,6 +3852,7 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           }
         }
         if (node.namedChildren.some((c) => c.type === "wildcard_import")) fact.star = true;
+        ctx.pyImportPlace.set(fact, pyImportPlace(node));
         ctx.addImport(fact);
         return false;
       }

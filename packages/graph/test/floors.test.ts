@@ -318,8 +318,10 @@ describe("the list floor of a function", () => {
     it("resolves 128,000 eval places before 128,000 global ones in time that grows with the count (15)", async () => {
       const quarter = places(32_000);
       const root = places(128_000);
-      const small = await stageCpuMs(() => buildGraph({ repoRoot: quarter, store: null, budgetMs: 120_000 }), "resolve");
-      const large = await stageCpuMs(() => buildGraph({ repoRoot: root, store: null, budgetMs: 120_000 }), "resolve");
+      // A build cut short resolves fewer places and times less work.
+      const whole = (at: string) => async () => { const g = await buildGraph({ repoRoot: at, store: null, budgetMs: 120_000 }); expect(g.status.status).toBe("ok"); return g; };
+      const small = await stageCpuMs(whole(quarter), "resolve");
+      const large = await stageCpuMs(whole(root), "resolve");
       expectLinear("the resolve stage of 32,000 and of 128,000 places of each kind", small, large);
     }, 600_000);
   });

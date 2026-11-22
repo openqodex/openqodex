@@ -3954,6 +3954,7 @@ export function createWorld(input: ResolveInput): World {
       const modules: string[] = [];
       let gap = false;
       for (const [name] of exportedJsNames(file, escapeWalk)) {
+        checkBudget();
         const v = index.exports(file, name, 0);
         if (v?.v === "sym") ids.push(...v.ids);
         else if (v?.v === "mod") modules.push(v.file);
@@ -4254,6 +4255,9 @@ export function createWorld(input: ResolveInput): World {
     const open = new Set<string>([root]);
     const stack: Frame[] = [ownJsNames(root)];
     for (;;) {
+      // Escape analysis stops at the build's deadline; the comparison of the
+      // change, which runs after it, has its step budget alone.
+      if (limit === escapeWalk) checkBudget();
       const top = stack[stack.length - 1] as Frame;
       if (top.next < top.stars.length) {
         const star = top.stars[top.next++] as { file: string; line: number };

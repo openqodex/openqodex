@@ -12,12 +12,16 @@
 // 4. Escape analysis, which runs after every file is resolved, runs on
 //    once the budget is spent, or stops with its escapes read as whole
 //    (issue 420).
-// 5. A caller list built from escapes the budget cut reads as whole.
+// 5. A caller list built from escapes the budget cut reads as whole, or
+//    the index of such a graph does not read back, or reads back whole.
 // 6. A budget that runs out during the last step of escape analysis, the
 //    sum of member reads, goes unnoticed, so the pass reads as whole.
 // 7. Each eval site of a file walks every definition and import of the
 //    file again, so a file of many functions and many evals takes time
 //    that grows with their product, unchecked by the budget in between.
+// 8. The walk of `export *` for escape analysis opens file after file with
+//    no check of the budget, so a build runs on past its deadline to the
+//    end of the walk.
 import { afterAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,6 +30,7 @@ import { discoverProjects } from "../src/discovery/projects.js";
 import { extract } from "../src/extract.js";
 import { parserFor } from "../src/parser.js";
 import { createWorld } from "../src/resolve.js";
+import { readIndexFrom, writeIndex } from "../src/store/graph-files.js";
 import { RepoReader } from "../src/safe-fs.js";
 import type { FileFacts } from "../src/types.js";
 import { cpuMs, expectLinear, growthTests } from "../src/test-timing.js";
@@ -167,7 +172,8 @@ describe("the limits of dispatch and function values", () => {
       return (await worldOf(() => ++asked > allowed)).resolveAll();
     };
     let allowed = 0;
-    while ((await run(allowed)).budgetFiles.length > 0) allowed++;
+    // A bounded search: a resolver that never finishes these files fails below.
+    while ((await run(allowed)).budgetFiles.length > 0 && allowed < 100) allowed++;
     const resolved = await run(allowed);
     expect(resolved.budgetFiles).toEqual([]);
     expect(resolved.escapesCut).toBe(true);
@@ -183,7 +189,13 @@ describe("the limits of dispatch and function values", () => {
     const seed = { id: symbol(g, "src/a.js", "g"), name: "g", file: "src/a.js", kind: "function" as const };
     const cut = (await worldOf(() => true)).resolveAll();
     expect(cut.escapesCut).toBe(true);
-    expect(floorReasons({ ...g, escapes: cut.escapes }, seed, new Set())).toContainEqual(expect.stringMatching(/budget ran out before every way a function escapes was found/));
+    const cutGraph = { ...g, escapes: cut.escapes };
+    expect(floorReasons(cutGraph, seed, new Set())).toContainEqual(expect.stringMatching(/budget ran out before every way a function escapes was found/));
+    const files = writeIndex(cutGraph);
+    const back = readIndexFrom((name) => files[name] ?? null, g.repoRoot);
+    expect(back?.nodes.size).toBe(g.nodes.size);
+    expect(back?.escapes.uses.size).toBe(cut.escapes.uses.size);
+    expect(floorReasons(back as typeof g, seed, new Set())).toContainEqual(expect.stringMatching(/budget ran out before every way a function escapes was found/));
   });
 
   it("cuts escape analysis when the budget runs out while member reads are summed (6)", async () => {
@@ -225,5 +237,59 @@ describe("the limits of dispatch and function values", () => {
       expect(whole.escapes.reach.get(last)).toEqual([expect.objectContaining({ why: "eval", file: "src/evals.js" })]);
       expectLinear("escape analysis of 2,000 and of 8,000 eval sites among as many functions", await cpuMs(small), await cpuMs(large));
     }, 120_000);
+  });
+
+  // Each read of a barrel's local exports is counted. The budget runs out
+  // at each of many reads near the end of escape analysis: the most
+  // barrels read after it, over all of those runs.
+  const mostReadAfterTheBudget = async (files: Record<string, string>) => {
+    const root = repo(files);
+    const parser = await parserFor("typescript");
+    const facts = Object.entries(files).map(([path, source]) => {
+      const tree = parser.parse(source);
+      if (!tree) throw new Error("no tree");
+      const f = extract(tree, path.endsWith(".js") ? "javascript" : "typescript");
+      tree.delete();
+      return { path, facts: f };
+    });
+    parser.delete();
+    const run = (expireAt: number) => {
+      let reads = 0;
+      let expiredAt: number | null = null;
+      const counted = facts.map(({ path, facts: f }) => {
+        const copy = { ...f };
+        const exportsLocal = f.exportsLocal;
+        Object.defineProperty(copy, "exportsLocal", { get: () => (++reads === expireAt && (expiredAt = reads), exportsLocal) });
+        return { path, facts: copy };
+      });
+      const resolved = createWorld({ files: counted, known: new Set(Object.keys(files)), model: discoverProjects(Object.keys(files), new RepoReader(root)), goModules: [], stop: () => expiredAt !== null }).resolveAll();
+      return { resolved, reads, after: expiredAt === null ? 0 : reads - expiredAt };
+    };
+    const whole = run(-1);
+    expect(whole.resolved.escapesCut).toBe(false);
+    let most = 0;
+    for (let back = 5; back <= 400; back += 5) {
+      const cut = run(whole.reads - back);
+      expect(cut.resolved.escapesCut).toBe(true);
+      most = Math.max(most, cut.after);
+    }
+    return most;
+  };
+
+  it("stops escape analysis soon after the budget runs out in its walk of export * (8)", async () => {
+    // A ring of 70 barrels, each re-exporting the next: no walk of it is
+    // kept, so a computed load makes escape analysis list what each barrel
+    // offers through the whole ring.
+    const ring: Record<string, string> = { "load.js": "require(process.argv[2]);\n" };
+    for (let i = 0; i < 70; i++) ring[`r${i}.ts`] = `export * from "./r${(i + 1) % 70}";\nexport function f${i}() {\n  return ${i};\n}\n`;
+    // A chain of 200 barrels, its top listed first: the first barrel escape
+    // analysis lists opens the other 199 in one walk.
+    const chain: Record<string, string> = {};
+    for (let i = 200; i >= 1; i--) chain[`c${i}.ts`] = `export * from "./c${i - 1}";\nexport function f${i}() {\n  return ${i};\n}\n`;
+    chain["c0.ts"] = "export function f0() {\n  return 0;\n}\n";
+    chain["load.js"] = "require(process.argv[2]);\n";
+    // One lookup of a name may finish its own short walk; neither walk may.
+    expect(await mostReadAfterTheBudget(ring)).toBeLessThan(10);
+    expect(await mostReadAfterTheBudget(chain)).toBeLessThan(10);
   });
 });
