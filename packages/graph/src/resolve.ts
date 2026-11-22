@@ -89,7 +89,8 @@ export const SHAPE_CAP = 20;
 // 34: a free name its project declares as plain data vouches for itself.
 // 35: a module that offers a name the graph cannot follow to one
 // definition reaches whole every module it forwards names from.
-// 36: so does a module whose walk of `export *` the step budget cut.
+// 36: a module whose walk of `export *` the step budget cut reaches the
+// names its stars may bring, past the names it gives itself.
 export const RESOLVER_VERSION = 36;
 
 // How a base written as an expression stands in a lookup order.
@@ -3914,22 +3915,34 @@ export function createWorld(input: ResolveInput): World {
     const loads = (path: string, e: EscapeFact) => e.kind === "load" && !(e.cjs === true && /\.c[jt]s$/.test(path));
     // Every definition a module offers, and the modules whole namespaces of
     // it name. A name the graph cannot follow to one definition (a chain
-    // of re-exports too deep, two stars that offer it), or one the walk of
-    // `export *` did not reach before its step budget ran out, may come
-    // from any module the file forwards names from, so each of those
-    // counts whole.
-    const offers = (file: string): { ids: string[]; modules: string[] } => {
+    // of re-exports too deep, two stars that offer it) may come from any
+    // module the file forwards names from, so each of those counts whole.
+    // A name the walk of `export *` did not reach before its step budget ran
+    // out can only come through a star: `stars` names the modules the file
+    // stars from when its walk was cut. `skip` leaves out the names a
+    // module above already gives itself, and `default`, which no star brings.
+    const offers = (file: string, skip: ReadonlySet<string> | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string> } => {
       const ids: string[] = [];
       const modules: string[] = [];
       let gap = false;
-      for (const [name] of exportedJsNames(file)) {
+      const names = exportedJsNames(file);
+      for (const [name] of names) {
+        if (skip?.has(name)) continue;
         const v = index.exports(file, name, 0);
         if (v?.v === "sym") ids.push(...v.ids);
         else if (v?.v === "mod") modules.push(v.file);
         else if (v?.v === "gap") gap = true;
       }
-      if (gap || namesCut.has(file)) modules.push(...forwards(file));
-      return { ids, modules };
+      if (gap) modules.push(...forwards(file));
+      const stars: string[] = [];
+      if (namesCut.has(file)) {
+        for (const imp of facts.get(file)?.imports ?? []) {
+          if (!imp.reexport || !imp.star) continue;
+          const mod = jsSpec(file, imp.line, imp.spec);
+          if (mod !== null && "file" in mod) stars.push(mod.file);
+        }
+      }
+      return { ids, modules, stars, names: names.keys() };
     };
     // The modules a module forwards names from: `export ... from`, and a
     // local `export { f }` or `export default f` of an imported name.
@@ -3952,19 +3965,34 @@ export function createWorld(input: ResolveInput): World {
     const modules = new Map<string, Place>();
     const offered = new Set<string>();
     const walk = (start: string, place: Place) => {
-      const queue: { file: string; whole: boolean }[] = [{ file: start, whole: true }];
+      type Visit = { file: string; whole: boolean; skip: Set<string> | null };
+      const queue: Visit[] = [{ file: start, whole: true, skip: null }];
       const seen = new Set<string>();
+      // A module a cut walk stars from, with the names it was counted
+      // without. A later visit that skips fewer names reaches more, so it
+      // runs again with only the names both skip; the set only shrinks.
+      const skipped = new Map<string, Set<string>>();
       while (queue.length > 0) {
-        const { file, whole } = queue.pop() as { file: string; whole: boolean };
+        const { file, whole, skip: asked } = queue.pop() as Visit;
         if (seen.has(`${file}\0${whole}`)) continue;
-        seen.add(`${file}\0${whole}`);
+        let skip: Set<string> | null = null;
+        if (asked) {
+          const had = skipped.get(file);
+          if (had && [...had].every((n) => asked.has(n))) continue;
+          skip = had ? new Set([...had].filter((n) => asked.has(n))) : asked;
+          skipped.set(file, skip);
+        } else seen.add(`${file}\0${whole}`);
         if (!modules.has(file)) modules.set(file, place);
         if (whole && familyOf(facts.get(file)?.lang ?? "go") === "js") {
-          const o = offers(file);
+          const o = offers(file, skip);
           for (const id of o.ids) addReach(id, { why: "module", ...place });
-          for (const m of o.modules) queue.push({ file: m, whole: true });
+          for (const m of o.modules) queue.push({ file: m, whole: true, skip: null });
+          if (o.stars.length > 0) {
+            const given = new Set([...(skip ?? []), "default", ...o.names]);
+            for (const m of o.stars) queue.push({ file: m, whole: true, skip: given });
+          }
         }
-        for (const m of forwards(file)) queue.push({ file: m, whole: false });
+        for (const m of forwards(file)) queue.push({ file: m, whole: false, skip: null });
       }
     };
     for (const [file, place] of marks) walk(file, place);

@@ -10,6 +10,9 @@
 // 4. A walk stopped by its step budget drops a name a module offers, so a
 //    function past the stop reads as having every caller listed, though
 //    the module is used as a value and a computed name may call it.
+// 5. The fix for 4 floors names the module cannot give through the cut
+//    star: a default export (no star brings it), a name the module's own
+//    export shadows, or a sibling a named re-export leaves out.
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact } from "../src/index.js";
@@ -109,17 +112,37 @@ describe("the export walk", () => {
     expect(cut?.note).toMatch(/export \*/);
   }, 300_000);
 
-  it("keeps the floor of a function the walk did not reach before its step budget ran out (4)", async () => {
-    // Eight barrels that each `export *` from the other seven: no walk
-    // through them finishes, so a walk from `r.ts` spends its whole budget
-    // there before it reaches `end.ts`.
-    const files: Record<string, string> = { "end.ts": "export function t(): void {}\n", "r.ts": 'export * from "./mesh0";\nexport * from "./end";\n' };
+  // Eight barrels that each `export *` from the other seven: no walk
+  // through them finishes, so a walk from `r.ts` spends its whole budget
+  // there before it reaches `end.ts`. `use.ts` uses `r.ts` as a value.
+  // The names `r.ts` gives itself come before its stars, so looking them
+  // up never enters the web.
+  async function cutWeb() {
+    const files: Record<string, string> = {
+      "end.ts": "export function t(): void {}\nexport function mine(): void {}\nfunction d(): void {}\nexport default d;\n",
+      "side.ts": "export function s(): void {}\nexport function sibling(): void {}\n",
+      "r.ts": 'export { s } from "./side";\nexport function mine(): void {}\nexport * from "./mesh0";\nexport * from "./end";\n',
+      "use.ts": 'import * as r from "./r";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n',
+    };
     for (let i = 0; i < 8; i++) files[`mesh${i}.ts`] = [0, 1, 2, 3, 4, 5, 6, 7].filter((j) => j !== i).map((j) => `export * from "./mesh${j}";\n`).join("") + `export function own${i}(): void {}\n`;
-    files["use.ts"] = 'import * as r from "./r";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n';
     const graph = await buildGraph({ repoRoot: makeRepo(files), store: null });
     expect(graph.status.cuts.some((c) => c.by === "export-walk"), "the walk passes its step budget").toBe(true);
-    const a = query({ graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "callers", target: { id: symbol(graph, "end.ts", "t") }, depth: 1 } as Request);
+    return (file: string, name: string) => query({ graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "callers", target: { id: symbol(graph, file, name) }, depth: 1 } as Request);
+  }
+
+  it("keeps the floor of a function the walk did not reach before its step budget ran out (4)", async () => {
+    const callers = await cutWeb();
+    const a = callers("end.ts", "t");
     expect(a.unknown.floor).toBe(true);
     expect(a.unknown.reasons.join(" ")).toContain("its module is used as a value at use.ts:3");
+    expect(callers("side.ts", "s").unknown.floor).toBe(true);
+  }, 120_000);
+
+  it("leaves whole a default export, a shadowed name and a sibling the cut module cannot give (5)", async () => {
+    const callers = await cutWeb();
+    for (const [file, name] of [["end.ts", "d"], ["end.ts", "mine"], ["side.ts", "sibling"]] as const) {
+      const a = callers(file, name);
+      expect(a.unknown.floor, `${file}#${name}: ${a.unknown.reasons.join("; ")}`).toBe(false);
+    }
   }, 120_000);
 });
