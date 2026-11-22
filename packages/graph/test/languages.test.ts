@@ -10,8 +10,8 @@
 // 4. A method call on a receiver of unknown type is bound because some
 //    imported file defines a method of that name.
 // 5. A call site's line is wrong or only the first site of a pair is kept.
-// 6. A Python decorator written without parentheses (`@wrap`, `@pkg.a.wrap`,
-//    one on a method) is not counted as a call of the function it names,
+// 6. A Python decorator written without a call (`@wrap`, `@pkg.a.wrap`,
+//    `@(wrap)`, one on a method) is not counted as a call of the function it names,
 //    though Python calls it with the decorated function.
 // 7. A method called on a local that holds a function is read as running
 //    that function though it does not (`fn.bind(x)`, `fn.toString()`,
@@ -133,7 +133,7 @@ describe("python", () => {
     expect(callSites(g, symbol(g, "pkg/a.py", "Svc"))).toEqual([at(files, "pkg/c.py", "CTOR")]);
   });
 
-  it("counts a decorator without parentheses as a call of the function it names (6)", async () => {
+  it("counts a decorator that is no call as a call of the function it names (6)", async () => {
     const deco = {
       "pkg/__init__.py": "",
       "pkg/a.py": ["def wrap(f):", "    return f"].join("\n"),
@@ -153,10 +153,16 @@ describe("python", () => {
         "    @wrap  # METHOD",
         "    def m(self):",
         "        pass",
+        "",
+        "@(wrap)  # GROUPED",
+        "def k():",
+        "    pass",
       ].join("\n"),
     };
     const g = await graphOf(deco);
-    expect(callSites(g, symbol(g, "pkg/a.py", "wrap"))).toEqual([at(deco, "pkg/f.py", "BARE"), at(deco, "pkg/f.py", "DOTTED"), at(deco, "pkg/f.py", "METHOD")].sort());
+    expect(callSites(g, symbol(g, "pkg/a.py", "wrap"))).toEqual(
+      [at(deco, "pkg/f.py", "BARE"), at(deco, "pkg/f.py", "DOTTED"), at(deco, "pkg/f.py", "METHOD"), at(deco, "pkg/f.py", "GROUPED")].sort(),
+    );
   });
 });
 

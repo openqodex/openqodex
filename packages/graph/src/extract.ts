@@ -3944,8 +3944,10 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
       }
       case "decorator": {
         // `@wrap` and `@pkg.wrap` call the name with the decorated function,
-        // from the scope around the definition, as `@wrap()` calls it.
-        const expr = node.firstNamedChild;
+        // from the scope around the definition, as `@wrap()` calls it;
+        // `@(wrap)` is the same name.
+        let expr = node.firstNamedChild;
+        while (expr?.type === "parenthesized_expression") expr = expr.firstNamedChild;
         if (expr?.type === "identifier") ctx.addCall(expr, { kind: "none" });
         else if (expr?.type === "attribute") {
           const attr = expr.childForFieldName("attribute");
