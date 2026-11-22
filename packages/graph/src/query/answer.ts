@@ -78,8 +78,11 @@ export type Answer = {
   counts: { certain: number | null; likely: number | null; possible: number | null };
   leads: Candidate[];
   // `groups`: the gaps by cause, each with how many there are and at most
-  // two examples, beside the reasons and causes it sums up.
-  unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[]; groups?: FloorGroup[] };
+  // two examples, beside the reasons and causes it sums up. `scope`, on a
+  // floor: "tests" when a callers list names every place that could hide a
+  // caller and each is in a test, fixture or benchmark file, with `note`,
+  // the sentence that says so; "all" on any other floor.
+  unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[]; groups?: FloorGroup[]; scope?: "tests" | "all"; note?: string };
   truncated: Truncated;
   // True on a floor: each row holds its tier, but rows may be missing, so
   // the counts are at least, never exactly. Set on every answer `query` gives.

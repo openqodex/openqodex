@@ -1,0 +1,25 @@
+{
+  "covers": "product code that invokes a value a test passed in keeps the floor in product code (scope all)",
+  "files": {
+    "src/run.ts": "export function run(cb: () => void): void {\n  cb();\n}\n",
+    "src/f.ts": "export function f(): void {}\n",
+    "src/f.test.ts": "import { f } from \"./f\";\nimport { run } from \"./run\";\nrun(f);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/f.ts#f",
+      "caller": "src/run.ts#run",
+      "file": "src/run.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/f.ts#f",
+      "reason": "used as a value",
+      "at": "src/f.test.ts:3",
+      "scope": "all"
+    }
+  ]
+}

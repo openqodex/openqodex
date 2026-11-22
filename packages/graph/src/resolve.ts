@@ -25,8 +25,8 @@ import { governingTsconfig, isGoStdlib, isNodeBuiltin, isPyStdlib, isRubyStdlib,
 import type { Cause, Cut, EvidenceKind, Shape, Tier, Via } from "./model/records.js";
 import { weakest } from "./model/records.js";
 import type { Lookup as PluginLookup } from "./frameworks/plugin.js";
-import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, Family, FileFacts, GraphEdge, GraphNode, GraphSite, InvocationSummary, Miss, TypeRef, UnknownSite, ValueRef } from "./types.js";
-import { CALLER_KINDS, MAX_TYPE_DEPTH, familyOf } from "./types.js";
+import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, EscapeFact, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, ImportFact, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
+import { CALLER_KINDS, MAX_TYPE_DEPTH, ambientOf, familyOf } from "./types.js";
 
 const MAX_DEPTH = 8; // re-export and base-class chains
 // Files the walk of `export *` may open in one world. Each file is walked
@@ -80,7 +80,16 @@ export const SHAPE_CAP = 20;
 // unknown whose candidates are the type's definitions.
 // 30: a value given members in place (`f.get = g`, Object.assign) and a
 // literal with a computed key keep an interface call's gap (LiteralFact).
-export const RESOLVER_VERSION = 30;
+// 31: the escape paths of each function (Resolved.escapes): its uses as a
+// value, its own body included, the modules that escape and what they
+// offer, the places a name built at run time may reach it, and the value
+// uses no rule binds; an unbound call that cannot run a plain function is
+// marked (UnknownSite.notPlain). 32: the opaque files (Escapes.opaque).
+// 33: what each opaque file reaches, and the scripts (Escapes.scripts).
+// 34: a free name its project declares as plain data vouches for itself.
+// 35: a module that offers a name the graph cannot follow to one
+// definition reaches whole every module it forwards names from.
+export const RESOLVER_VERSION = 35;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -220,6 +229,9 @@ export type ResolveInput = {
   known: ReadonlySet<string>; // every path import resolution may land on: eligible files and removed ones
   model: ProjectModel;
   goModules: [string, string][]; // module path, folder ("" for the root)
+  // The global names each declaration file (`.d.ts`, read beside the
+  // source files) declares as plain data.
+  declared?: { file: string; names: string[] }[];
   // Checked between files while calls are resolved: true stops; the files
   // left are listed in `budgetFiles`.
   stop?: () => boolean;
@@ -238,6 +250,7 @@ export type Resolved = {
   unresolvedSites: number;
   externalSites: number;
   budgetFiles: string[]; // files whose calls were not resolved: the budget ran out
+  escapes: Escapes;
 };
 
 // One call site or import binding, resolved with a record of the exports it
@@ -3285,6 +3298,68 @@ export function createWorld(input: ResolveInput): World {
     if (input.stop?.()) throw new BudgetStop("budget");
   };
 
+  // The module a name's import binds it to, when it is a file of the repository.
+  const importFileOf = (file: string, name: string, bound: BoundImport | undefined): string | null => {
+    let mod: Mod | { ns: string; ev: Ev } | undefined;
+    if (bound) {
+      const f = facts.get(file);
+      const imp = f?.imports[bound.import];
+      if (f && imp) mod = moduleOf(file, familyOf(f.lang), imp);
+    } else {
+      const b = index.bindings(file).names.get(name);
+      if (b && b.kind !== "pyns") mod = b.mod;
+    }
+    return mod && "file" in mod ? mod.file : null;
+  };
+  // A JavaScript module exports `name` as a variable (`export const LIMIT`,
+  // `export { LIMIT }`, through a re-export): an import of it binds a value,
+  // not a name the graph could not find.
+  const variablesMemo = new Map<string, { all: Set<string>; exported: Set<string> }>();
+  const variablesOf = (file: string, f: FileFacts) => {
+    let v = variablesMemo.get(file);
+    if (!v) variablesMemo.set(file, (v = { all: new Set(f.variables ?? []), exported: new Set(f.exportedVariables ?? []) }));
+    return v;
+  };
+  const exportsVariable = (file: string, name: string, depth = 0): boolean => {
+    const f = facts.get(file);
+    if (!f || familyOf(f.lang) !== "js" || depth > MAX_DEPTH) return false;
+    const vars = variablesOf(file, f);
+    if (vars.exported.has(name)) return true;
+    if (name === "default" && f.defaultExport) return vars.all.has(f.defaultExport);
+    for (const e of f.exportsLocal) {
+      if (e.exported !== name) continue;
+      if (vars.all.has(e.local)) return true;
+      const b = index.bindings(file).names.get(e.local);
+      return b?.kind === "named" && b.mod !== null && "file" in b.mod ? exportsVariable(b.mod.file, b.imported, depth + 1) : false;
+    }
+    for (const imp of f.imports) {
+      if (!imp.reexport) continue;
+      const named = imp.names.find((n) => n.local === name);
+      if (!named && !imp.star) continue;
+      const mod = jsSpec(file, imp.line, imp.spec);
+      if (mod === null || !("file" in mod)) continue;
+      if (named ? named.imported !== "*" && exportsVariable(mod.file, named.imported, depth + 1) : exportsVariable(mod.file, name, depth + 1)) return true;
+    }
+    return false;
+  };
+  // The module and the name an import binds to `head` (`import { a as head }`,
+  // or `head.name` read on `import * as head`), when the module is a file here.
+  const importedAs = (file: string, head: string, bound: BoundImport | undefined, member: string | null): { file: string; name: string } | null => {
+    let b: { kind: string; mod: Mod | { ns: string; ev: Ev }; imported?: string } | undefined;
+    if (bound) {
+      const f = facts.get(file);
+      const imp = f?.imports[bound.import];
+      if (f && imp) b = bound.imported === "*" ? { kind: "ns", mod: moduleOf(file, familyOf(f.lang), imp) } : { kind: "named", mod: moduleOf(file, familyOf(f.lang), imp), imported: bound.imported };
+    } else {
+      const found = index.bindings(file).names.get(head);
+      if (found && found.kind !== "pyns") b = found;
+    }
+    if (!b || b.mod === null || !("file" in b.mod)) return null;
+    if (b.kind === "named" && member === null && b.imported) return { file: b.mod.file, name: b.imported };
+    if (b.kind === "ns" && member !== null) return { file: b.mod.file, name: member };
+    return null;
+  };
+
   // ---------- the world ----------
   const resolveAll = (): Resolved => {
     // One edge per (from, to, kind), found by the ids themselves: building
@@ -3346,6 +3421,58 @@ export function createWorld(input: ResolveInput): World {
     let externalSites = 0;
     const budgetFiles: string[] = [];
     let stopped = false;
+
+    // ---------- escape paths ----------
+    // Uses as a value per function, value uses no rule binds per family and
+    // name, and the modules found escaping with the first place each did.
+    const uses = new Map<string, Place & { count: number }>();
+    const unbound = new Map<string, Place & { count: number }>();
+    const marks = new Map<string, Place>();
+    const countUse = (id: string, file: string, line: number) => {
+      const kept = uses.get(id);
+      if (kept) kept.count++;
+      else uses.set(id, { file, line, count: 1 });
+    };
+    const mark = (module: string, file: string, line: number) => {
+      if (!marks.has(module)) marks.set(module, { file, line });
+    };
+    // A value reference that names no function: the module it names (any
+    // read of a module but `ns.x` lets a computed call reach its exports),
+    // an import that ends in a gap or a miss, and a name no rule binds.
+    const escapedRef = (file: string, family: Family, ref: ValueRef, named: boolean) => {
+      const r = ref.recv;
+      if ((r.kind !== "none" && r.kind !== "name") || ref.local !== undefined) return;
+      if (named && (family !== "js" || ref.role === "object")) return;
+      const head = r.kind === "none" ? ref.name : r.name;
+      const bound = r.kind === "none" ? ref.bound : r.bound;
+      let v = bound ? boundValue(file, head, bound) : resolveLocal(file, head);
+      for (const p of r.kind === "name" ? [...r.path, ref.name] : []) v = attr(v, p);
+      if (family === "js" && v?.v === "mod" && ref.role !== "object") mark(v.file, file, ref.line);
+      if (named || (v !== null && v.v !== "miss" && v.v !== "gap")) return;
+      if (v === null && r.kind === "none" && BUILTINS[family].has(ref.name)) return;
+      // An imported variable: a value the graph follows, though no definition.
+      const imported = family === "js" ? importedAs(file, head, bound, r.kind === "none" ? null : r.path.length === 0 ? ref.name : "") : null;
+      if (imported && imported.name !== "" && exportsVariable(imported.file, imported.name)) return;
+      if (family === "js") {
+        const via = importFileOf(file, head, bound);
+        if (via) mark(via, file, ref.line);
+        if (v?.v === "miss" && facts.has(v.target)) mark(v.target, file, ref.line);
+      }
+      const key = `${family}:${ref.name}`;
+      const kept = unbound.get(key);
+      if (kept) kept.count++;
+      else unbound.set(key, { file, line: ref.line, count: 1 });
+    };
+    // An unbound call that cannot run a plain function of its name: a bare
+    // call of a local or a parameter, `this.x()` where `this` is proved an
+    // instance of a class, a call on a value whose class or interface the
+    // graph knows but that lacks the member (`miss`).
+    const cannotRunPlain = (file: string, family: Family, call: CallFact, caller: Def | undefined, miss: boolean): boolean => {
+      const r = call.recv;
+      if (r.kind === "none") return call.shadowed === true && call.local === undefined && call.bound === undefined;
+      if (r.kind === "self") return r.path.length === 0 && enclosingClass(file, family, caller) !== null;
+      return r.kind === "type" && miss;
+    };
 
     for (const { path, facts: f } of input.files) {
       if (!stopped && input.stop?.()) stopped = true;
@@ -3443,6 +3570,7 @@ export function createWorld(input: ResolveInput): World {
           if (out.candidates) u.candidates = out.candidates;
           const receiver = receiverHint(call);
           if (receiver) u.receiver = receiver;
+          if (cannotRunPlain(path, family, call, caller, false)) u.notPlain = true;
           // A table nothing else can change narrows the gap to its entries
           // (or a key it does not hold). One that may change elsewhere keeps
           // the gap's whole scope: a function put in it later may be called.
@@ -3466,6 +3594,7 @@ export function createWorld(input: ResolveInput): World {
           if (call.implicit) continue;
           unresolvedSites++;
           unknowns.push({
+            ...(cannotRunPlain(path, family, call, caller, true) ? { notPlain: true } : {}),
             file: path,
             line: call.line,
             column: call.column,
@@ -3550,11 +3679,17 @@ export function createWorld(input: ResolveInput): World {
         }
       }
       // Uses as a value: a function or method named where it is not called.
+      // Each is counted for the function it names, in its own body too: a
+      // function that passes itself along may be called through that value.
       f.values.forEach((ref, i) => {
         const v = valueOf(path, i);
+        escapedRef(path, family, ref, v !== null);
         if (!v) return;
         const from = callerOf(ref.caller);
-        for (const to of v.ids) if (to !== from) addEdge(from, to, "uses_value", siteOf(path, ref.line, ref.column, v.ev, "value-ref"));
+        for (const to of v.ids) {
+          countUse(to, path, ref.line);
+          if (to !== from) addEdge(from, to, "uses_value", siteOf(path, ref.line, ref.column, v.ev, "value-ref"));
+        }
       });
       // Uses as a type: a class, interface or type named in an annotation, a cast or a type test.
       if (f.typeCuts) {
@@ -3712,6 +3847,8 @@ export function createWorld(input: ResolveInput): World {
       for (const byKey of unread.values()) unknowns.push(...byKey.values());
     }
 
+    const escapes = escapePaths(uses, unbound, marks);
+
     // ---------- importers ----------
     const importers = new Map<string, GraphEdge[]>();
     for (const { path, facts: f } of input.files) {
@@ -3748,7 +3885,226 @@ export function createWorld(input: ResolveInput): World {
     const summaries = new Map<string, InvocationSummary>();
     for (const [id, d] of defById) if (d.invokes || d.returns) summaries.set(id, { params: d.params ?? [], invokes: d.invokes ?? [], returns: returnsOf(id), returnsOther: d.returnsOther === true });
 
-    return { nodes, edges: callerEdges, references: refEdges, dispatch, summaries, importers, defsByFile, misses, unknowns, unresolvedSites, externalSites, budgetFiles };
+    return { nodes, edges: callerEdges, references: refEdges, dispatch, summaries, importers, defsByFile, misses, unknowns, unresolvedSites, externalSites, budgetFiles, escapes };
+  };
+
+  // What each function's escapes reach once every file is resolved
+  // (rules E and H of the list floor). A module escapes when a mark says
+  // so: each definition it offers by its export table, recursively through
+  // a namespace re-export, may be reached by a computed name; and each
+  // module it forwards names from escapes too, for a definition a change
+  // removed there. A name built at run time: `eval` reaches its file's
+  // definitions and imports; `eval` and the global ones reach every
+  // definition of a script (a file with no import and no export) and, as
+  // they can load a module, every definition a module offers; a load by a
+  // computed path reaches every definition a module offers.
+  const escapePaths = (uses: Escapes["uses"], unbound: Escapes["unbound"], marks: Map<string, Place>): Escapes => {
+    const reach = new Map<string, Reach[]>();
+    // The first place of each kind only: the floor's reason names that one
+    // (impact.ts), so a symbol keeps at most three, however many places
+    // there are.
+    const addReach = (id: string, r: Reach) => {
+      const list = reach.get(id);
+      if (!list) reach.set(id, [r]);
+      else if (!list.some((x) => x.why === r.why)) list.push(r);
+    };
+    const jsFiles = input.files.filter((x) => familyOf(x.facts.lang) === "js");
+    // A load fact that holds in its file: one marked `cjs` holds outside a CommonJS file only.
+    const loads = (path: string, e: EscapeFact) => e.kind === "load" && !(e.cjs === true && /\.c[jt]s$/.test(path));
+    // Every definition a module offers, and the modules whole namespaces of
+    // it name. A name the graph cannot follow to one definition (a chain
+    // of re-exports too deep, two stars that offer it) may come from any
+    // module the file forwards names from, so each of those counts whole.
+    const offers = (file: string): { ids: string[]; modules: string[] } => {
+      const ids: string[] = [];
+      const modules: string[] = [];
+      let gap = false;
+      for (const [name] of exportedJsNames(file)) {
+        const v = index.exports(file, name, 0);
+        if (v?.v === "sym") ids.push(...v.ids);
+        else if (v?.v === "mod") modules.push(v.file);
+        else if (v?.v === "gap") gap = true;
+      }
+      if (gap) modules.push(...forwards(file));
+      return { ids, modules };
+    };
+    // The modules a module forwards names from: `export ... from`, and a
+    // local `export { f }` or `export default f` of an imported name.
+    const forwards = (file: string): string[] => {
+      const f = facts.get(file);
+      if (!f) return [];
+      const out: string[] = [];
+      for (const imp of f.imports) {
+        if (!imp.reexport) continue;
+        const mod = jsSpec(file, imp.line, imp.spec);
+        if (mod !== null && "file" in mod) out.push(mod.file);
+      }
+      const b = index.bindings(file).names;
+      for (const local of [...f.exportsLocal.map((e) => e.local), ...(f.defaultExport ? [f.defaultExport] : [])]) {
+        const via = importFileOf(file, local, undefined);
+        if (via && b.has(local)) out.push(via);
+      }
+      return out;
+    };
+    const modules = new Map<string, Place>();
+    const offered = new Set<string>();
+    const walk = (start: string, place: Place) => {
+      const queue: { file: string; whole: boolean }[] = [{ file: start, whole: true }];
+      const seen = new Set<string>();
+      while (queue.length > 0) {
+        const { file, whole } = queue.pop() as { file: string; whole: boolean };
+        if (seen.has(`${file}\0${whole}`)) continue;
+        seen.add(`${file}\0${whole}`);
+        if (!modules.has(file)) modules.set(file, place);
+        if (whole && familyOf(facts.get(file)?.lang ?? "go") === "js") {
+          const o = offers(file);
+          for (const id of o.ids) addReach(id, { why: "module", ...place });
+          for (const m of o.modules) queue.push({ file: m, whole: true });
+        }
+        for (const m of forwards(file)) queue.push({ file: m, whole: false });
+      }
+    };
+    for (const [file, place] of marks) walk(file, place);
+
+    // Names built at run time, from the facts of each file.
+    const loadAny: Escapes["loadAny"] = [];
+    const loadPlaces = new Set<string>();
+    const runtime: { why: "eval" | "global"; place: Place }[] = [];
+    for (const { path, facts: f } of jsFiles) {
+      for (const e of f.escapes ?? []) {
+        const place = { file: path, line: e.line };
+        if (e.kind === "module") {
+          const mod = jsSpec(path, e.line, e.spec);
+          if (mod !== null && "file" in mod && !marks.has(mod.file)) {
+            marks.set(mod.file, place);
+            walk(mod.file, place);
+          }
+        } else if (e.kind === "own") {
+          if (!marks.has(path)) {
+            marks.set(path, place);
+            walk(path, place);
+          }
+        } else if (e.kind === "load") {
+          // One place once, so "and N more places" counts places.
+          if (loads(path, e) && !loadPlaces.has(`${path}:${e.line}`)) {
+            loadPlaces.add(`${path}:${e.line}`);
+            loadAny.push({ ...place, why: "load" });
+          }
+        } else {
+          runtime.push({ why: e.kind, place });
+          if (e.kind === "eval") {
+            // Its own file's definitions and every definition the file imports.
+            for (const d of f.defs) addReach(symbolId(path, d), { why: "eval", ...place });
+            for (const imp of f.imports) {
+              const mod = jsSpec(path, imp.line, imp.spec);
+              if (mod === null || !("file" in mod)) continue;
+              const ids = imp.namespace !== null || imp.star ? offers(mod.file).ids : imp.names.flatMap((n) => { const v = index.exports(mod.file, n.imported, 0); return v?.v === "sym" ? v.ids : []; });
+              for (const id of ids) addReach(id, { why: "eval", ...place });
+            }
+          }
+        }
+      }
+    }
+    // A script's definitions are names of the global scope.
+    const script = (file: string, f: FileFacts) =>
+      !/\.(mjs|cjs|mts|cts)$/.test(file) && f.imports.length === 0 && f.exportsLocal.length === 0 && f.defaultExport === null && !f.defs.some((d) => d.exported) && !(f.escapes ?? []).some((e) => e.kind === "own" || e.kind === "module" || e.kind === "load");
+    const scripts = new Set<string>();
+    for (const { path, facts: f } of jsFiles) if (script(path, f)) scripts.add(path);
+    // The first place of each kind, as addReach keeps.
+    const firstRuntime = runtime.filter((r, i) => runtime.findIndex((x) => x.why === r.why) === i);
+    if (runtime.length > 0) {
+      for (const { path, facts: f } of jsFiles) {
+        if (!scripts.has(path)) continue;
+        for (const d of f.defs) if (d.topLevel || d.kind === "method") for (const r of firstRuntime) addReach(symbolId(path, d), { why: r.why, ...r.place });
+      }
+    }
+    // Code built at run time can load any module: each eval or global site is a load by a computed path too.
+    for (const r of runtime) loadAny.push({ ...r.place, why: r.why });
+    if (loadAny.length > 0) for (const { path } of jsFiles) for (const id of offers(path).ids) offered.add(id);
+    // What an opaque file reaches: its own definitions, the modules it
+    // imports (a named import, the module the name comes from through
+    // re-exports; a whole module, every module it re-exports), the global
+    // scope when it reads a free name or is a script, and every module when
+    // it may load any.
+    const opaque: Escapes["opaque"] = new Map();
+    // Global names declared as plain data (`declare const V: string`), per
+    // project: a read of one in the project that declares it reaches nothing.
+    const plain = new Map<string, Set<string>>();
+    const declare = (file: string, names: readonly string[]) => {
+      const project = projectFolder(model, input.goModules, file);
+      const set = plain.get(project) ?? new Set<string>();
+      for (const n of names) set.add(n);
+      plain.set(project, set);
+    };
+    for (const { path, facts: f } of jsFiles) {
+      const names = ambientOf(path, f);
+      if (names.length > 0) declare(path, names);
+    }
+    for (const d of input.declared ?? []) declare(d.file, d.names);
+    for (const { path, facts: f } of jsFiles) {
+      const own = plain.size > 0 ? plain.get(projectFolder(model, input.goModules, path)) : undefined;
+      const all = (f.opaque ?? []).filter((o) => !(o.name !== undefined && o.reach === "global" && own?.has(o.name)));
+      if (all.length === 0) continue;
+      // A load-any place is shown first: the reason says why it reaches every function.
+      const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || loads(path, e));
+      const loose = runs.map((e): OpaqueFact => ({ why: e.kind === "load" ? "loads a module by a computed path" : e.kind === "eval" ? "runs `eval`" : "builds code or a name at run time on the global scope", line: e.line, count: 1, reach: "any" }));
+      const shown = [...all, ...loose].filter((o) => o.reach === "any");
+      const any = shown.length > 0;
+      const first = (any ? shown : all).reduce((a, b) => (b.line < a.line ? b : a));
+      const seen = new Set<string>([path]);
+      const queue: string[] = [];
+      let unbound = false;
+      const take = (line: number, spec: string, names: ImportFact["names"] | null) => {
+        const mod = jsSpec(path, line, spec);
+        if (mod === null || "gap" in mod) unbound = true;
+        if (mod === null || !("file" in mod)) return;
+        if (names === null) return void queue.push(mod.file);
+        seen.add(mod.file);
+        for (const n of names) {
+          const v = index.exports(mod.file, n.imported, 0);
+          if (v?.v === "sym") for (const id of v.ids) seen.add(defById.get(id)?.file ?? mod.file);
+          else queue.push(v?.v === "mod" ? v.file : mod.file);
+        }
+      };
+      // `export ... from` binds no name the file's own code can read.
+      for (const imp of f.imports) if (!imp.typeOnly && !imp.reexport) take(imp.line, imp.spec, imp.namespace !== null || imp.star || imp.names.length === 0 ? null : imp.names);
+      for (const e of f.escapes ?? []) if (e.kind === "module") take(e.line, e.spec, null);
+      // A whole module: it and every module it re-exports.
+      const whole = new Set<string>();
+      for (let m = queue.pop(); m !== undefined; m = queue.pop()) {
+        if (whole.has(m)) continue;
+        whole.add(m);
+        seen.add(m);
+        queue.push(...forwards(m));
+      }
+      opaque.set(path, {
+        file: path, line: first.line, why: first.why, count: all.reduce((k, o) => k + o.count, 0), all,
+        any, global: scripts.has(path) || all.some((o) => o.reach === "global"), unbound, reach: [...seen].sort(),
+      });
+    }
+    const members: Escapes["members"] = new Map();
+    // A type the repository declares under a name is never plain, though
+    // the name is one of a plain type (`class Record`, `interface Buffer`).
+    let declared: Set<string> | null = null;
+    const ownType = (names: readonly string[]): boolean => {
+      declared ??= new Set(jsFiles.flatMap(({ facts: f }) => [...f.defs.map((d) => d.name), ...(f.variables ?? [])]));
+      return names.some((n) => (declared as Set<string>).has(n));
+    };
+    for (const { path, facts: f } of jsFiles) {
+      for (const m of f.looseMembers ?? []) {
+        if (m.plain && !ownType(m.plain)) continue;
+        const kept = members.get(`js:${m.why}`);
+        if (kept) kept.count += m.count;
+        else members.set(`js:${m.why}`, { file: path, line: m.line, count: m.count, ...(m.why === "*" ? { places: [] } : {}) });
+        // A read by a computed key: the first place in each file, and whether any passes its value on.
+        const all = members.get(`js:${m.why}`);
+        if (all?.places) {
+          all.places.push({ file: path, line: m.line });
+          if (m.passed) all.passed = true;
+        }
+      }
+    }
+    return { uses, unbound, reach, modules, loadAny, offered, opaque, scripts, members };
   };
 
   const trace = (files: Iterable<string>): SiteTrace[] => {

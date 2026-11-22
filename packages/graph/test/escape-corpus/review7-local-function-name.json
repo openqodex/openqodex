@@ -1,0 +1,14 @@
+{
+  "covers": "`new Function(...)` and `Function(...)` where `Function` names a local class or function make no code from a string: the repository stays whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.ts": "class Function {\n  constructor(public s: string) {}\n}\nexport function run() {\n  return new Function(\"x\");\n}\n",
+    "src/use2.ts": "function Function(s: string) {\n  return s;\n}\nexport function run2() {\n  return Function(\"x\");\n}\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
+}

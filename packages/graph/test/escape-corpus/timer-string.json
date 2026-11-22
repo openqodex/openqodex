@@ -1,0 +1,25 @@
+{
+  "covers": "a timer given a string runs it as code",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\n",
+    "tools/package.json": "{\"name\": \"tools\"}\n",
+    "tools/t.ts": "export {};\nsetTimeout(\"f()\", 1);\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "tools/t.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/a.ts#f",
+      "reason": "may load any module",
+      "at": "tools/t.ts:2"
+    }
+  ]
+}

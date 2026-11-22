@@ -31,6 +31,7 @@ import { discoverProjects } from "./discovery/projects.js";
 import { traceReads } from "./discovery/trace.js";
 import type { ProjectModel } from "./discovery/projects.js";
 import { EXTRACTOR_VERSION, extract } from "./extract.js";
+import { ambientOf } from "./types.js";
 import { frameworkReaders } from "./frameworks/facts.js";
 import { contextFingerprint, runFrameworks } from "./frameworks/stage.js";
 import { pluginsKey } from "./frameworks/registry.js";
@@ -149,6 +150,7 @@ export async function workTreeDigest(root: string, maxFileBytes: number): Promis
   const traced = traceReads(reader);
   const model = discoverProjects(inv.all, traced.reader, traced.look);
   readGoModules(traced.reader, inv.all);
+  readDeclarations(traced.reader, inv.all);
   return captureDigest({ inv, only: null, maxFileBytes, reads: traced.entries(), model });
 }
 
@@ -163,6 +165,53 @@ function readGoModules(reader: RepoReader, all: string[]): [string, string][] {
     } catch {
       // unreadable go.mod: its imports stay outside the repo
     }
+  }
+  return out;
+}
+
+// Declaration files (`.d.ts`), which the graph does not read as source, are
+// read for one fact: the global names they declare as plain data
+// (`declare const V: string`). Read through the traced reader, so their
+// contents are part of the capture's digest. Past the cap the rest are not
+// read, and the names they declare stay unknown. The cap counts every
+// file read, one that declares nothing too.
+const DECLARATION = /\.d\.[cm]?ts$/;
+const DECLARATION_FILES = 500;
+function readDeclarations(reader: RepoReader, all: string[]): [string, string][] {
+  const out: [string, string][] = [];
+  let read = 0;
+  for (const f of all) {
+    if (read >= DECLARATION_FILES) break;
+    if (!DECLARATION.test(f) || langOf(f.replace(DECLARATION, ".ts")) === null) continue;
+    read++;
+    const text = reader.read(f, MANIFEST_BYTES);
+    if (text !== null && text.includes("declare")) out.push([f, text]);
+  }
+  return out;
+}
+
+// The global names each declaration file declares as plain data, parsed and
+// extracted as a source file is, with the same limit on one parse.
+export async function declaredPlain(files: [string, string][], deadline: number): Promise<{ file: string; names: string[] }[]> {
+  if (files.length === 0) return [];
+  const out: { file: string; names: string[] }[] = [];
+  const parser = await parserFor("typescript");
+  try {
+    for (const [file, text] of files) {
+      // Past the build's budget no parse starts: the names stay unknown, a floor.
+      if (performance.now() > deadline) break;
+      const limit = Math.min(performance.now() + MAX_PARSE_MS, deadline);
+      const tree = parser.parse(text, null, { progressCallback: (() => performance.now() > limit) as unknown as (state: unknown) => void });
+      if (!tree) continue;
+      try {
+        const names = ambientOf(file, extract(tree, "typescript"));
+        if (names.length > 0) out.push({ file, names });
+      } finally {
+        tree.delete();
+      }
+    }
+  } finally {
+    parser.delete();
   }
   return out;
 }
@@ -279,6 +328,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
   const traced = traceReads(reader);
   const model = discoverProjects(inv.all, traced.reader, traced.look);
   const goModules = readGoModules(traced.reader, inv.all);
+  const declarations = readDeclarations(traced.reader, inv.all);
   stage("projects");
 
   const meta = store ? asPredictMeta(store.readMeta()?.predict ?? null) : null;
@@ -451,7 +501,8 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       if (p === undefined) projects.set(file, (p = projectFolder(model, goModules, file)));
       return p;
     };
-    const world = createWorld({ files: inputs, known, model, goModules, stop: overBudget });
+    const declared = await declaredPlain(declarations, deadline);
+    const world = createWorld({ files: inputs, known, model, goModules, declared, stop: overBudget });
     const resolved = world.resolveAll();
     if (resolved.budgetFiles.length > 0) stoppedBy ??= "budget";
     stage("resolve");
@@ -583,6 +634,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       unknowns,
       unknownNames,
       valueCalls,
+      escapes: resolved.escapes,
       model,
       goModules,
       projectOf,
@@ -642,12 +694,14 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
         reasons.push(`the capture's files were not kept: ${((error as Error).message ?? "").split("\n")[0]}`);
       }
       stage("capture");
+      // The index's own files first: this build's projects.json, which also
+      // keeps what the declaration files declare, replaces the index's.
       const files: Record<string, string> = {
+        ...(withIndex ? writeIndex(graph) : {}),
         "inventory.json": JSON.stringify({ files: Object.fromEntries([...keys].map(([p, k]) => [p, k])) }),
-        "projects.json": JSON.stringify({ model: serializeModel(model), goModules }),
+        "projects.json": JSON.stringify({ model: serializeModel(model), goModules, ...(declared.length > 0 ? { declared } : {}) }),
         "coverage.json": JSON.stringify({ notRead, cuts, budgetFiles: resolved.budgetFiles, ...(unreadLanguages.length > 0 ? { unreadLanguages } : {}) }),
       };
-      if (withIndex) Object.assign(files, writeIndex(graph));
       const published = await store.publish({
         manifest: {
           capture: { kind: args.capture === "working-tree" ? "working-tree" : args.capture === "snapshot" ? "snapshot" : "revision", treeSha, digest, dirtyPaths: null },

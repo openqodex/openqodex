@@ -1,0 +1,23 @@
+{
+  "covers": "`import.meta` passed on whole may load modules (a loader that reads `glob`)",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/b.ts": "import { f } from \"./a\";\nexport const meta = Object.keys(import.meta);\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/b.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "uses `import.meta` for more than its url or path",
+      "at": "src/b.ts:2"
+    }
+  ]
+}

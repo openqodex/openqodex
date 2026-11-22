@@ -1,0 +1,18 @@
+{
+  "covers": "a getter taken apart by a pattern from a typed value (`const { total } = c`) runs there",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/cart.ts": "export class Cart {\n  get total(): number {\n    return 1;\n  }\n  run(): void {}\n}\n",
+    "src/use.ts": "import { Cart } from \"./cart\";\nexport function go(c: Cart): unknown {\n  const { total } = c;\n  return total;\n}\ngo(new Cart());\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/cart.ts#Cart.total",
+      "caller": "src/use.ts#go",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

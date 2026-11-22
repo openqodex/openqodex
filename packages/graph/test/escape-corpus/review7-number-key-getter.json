@@ -1,0 +1,17 @@
+{
+  "covers": "a read by a number key (`c[0]`) runs a getter named by those digits (`get 0()`)",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/c.ts": "export class C {\n  get 0(): number {\n    return 1;\n  }\n}\n",
+    "src/use.ts": "export function show(c: any): unknown {\n  return c[0];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/c.ts#C.0",
+      "reason": "read of `.0` on a value of unknown type",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

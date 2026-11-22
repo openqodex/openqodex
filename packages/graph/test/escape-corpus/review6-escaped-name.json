@@ -1,0 +1,17 @@
+{
+  "covers": "a name written with an escape (`\\u0065val`) is not read as written: the file may reach any function",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.mjs": "export function run(code) {\n  return \\u0065val(code);\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "writes a name with an escape",
+      "at": "src/use.mjs:2"
+    }
+  ]
+}

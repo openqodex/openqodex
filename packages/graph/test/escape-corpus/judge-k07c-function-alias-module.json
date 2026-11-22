@@ -1,0 +1,17 @@
+{
+  "covers": "an adversarial case from the review of piece A: function alias module",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/use.ts": "const F = Function;\nexport async function go(p: string) { const m = await F(\"p\", \"return import(p)\")(p); m[\"f\"](); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/use.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

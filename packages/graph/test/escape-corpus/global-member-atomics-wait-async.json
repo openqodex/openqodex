@@ -1,0 +1,23 @@
+{
+  "covers": "`Atomics.waitAsync` gives a promise whose callbacks run later: the file stays opaque",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/b.ts": "import { f } from \"./a\";\nexport const later = Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/b.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "reads the free name `Atomics`",
+      "at": "src/b.ts:2"
+    }
+  ]
+}

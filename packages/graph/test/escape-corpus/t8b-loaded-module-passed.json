@@ -1,0 +1,26 @@
+{
+  "covers": "a module loaded with await import() and passed to a helper (test 8)",
+  "files": {
+    "src/core.ts": "export function load() {}\n",
+    "src/use.ts": "export async function main() {\n  const core = await import(\"./core\");\n  helper(core);\n}\nfunction helper(c: { load(): void }) {\n  c.load();\n}\n",
+    "src/z.ts": "export function z() {}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/core.ts#load",
+      "caller": "src/use.ts#helper",
+      "file": "src/use.ts",
+      "line": 6
+    }
+  ],
+  "whole": [
+    "src/z.ts#z"
+  ],
+  "floored": [
+    {
+      "target": "src/core.ts#load",
+      "reason": "its module is used as a value at",
+      "at": "src/use.ts:3"
+    }
+  ]
+}

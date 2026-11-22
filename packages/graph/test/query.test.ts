@@ -52,12 +52,12 @@ describe("the graph query", () => {
   it("marks zero callers on a floor as a floor with its reasons (2)", async () => {
     const { s } = await session({
       "lib.ts": "export function target() {\n  return 1;\n}\n",
-      "use.ts": "export function run(handlers: Record<string, () => void>, key: string) {\n  handlers[key]();\n}\n",
+      "use.ts": 'import { target } from "./lib";\nexport function run(handlers: Record<string, () => void>, key: string) {\n  handlers[key]();\n}\nrun({ target }, "target");\n',
     });
     const a = query(s, { apiVersion: 1, kind: "callers", target: { name: "target" } });
     expect(a.items).toEqual([]);
     expect(a.unknown.floor).toBe(true);
-    expect(a.unknown.reasons.join(" ")).toMatch(/through a value/);
+    expect(a.unknown.reasons.join(" ")).toMatch(/used as a value in 1 place, first at use\.ts:5/);
     expect(a.counts).toEqual({ certain: 0, likely: 0, possible: 0 });
     // A status the build did not count stays null.
     expect(query(s, { apiVersion: 1, kind: "status" }).counts.certain).toBeNull();

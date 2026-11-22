@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: class this call",
+  "files": {
+    "src/a.js": "exports.f = function () {};\nclass A { go() { this.f(); } }\nA.prototype.go.call(this);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": null,
+      "file": "src/a.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

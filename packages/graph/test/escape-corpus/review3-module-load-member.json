@@ -1,0 +1,24 @@
+{
+  "covers": "a member `_load` called on any value loads a module by a computed path",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.mjs": "export function boot(M) {\n  const mod = M._load(\"./a.cjs\");\n  const key = \"f\";\n  mod[key]();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.mjs#boot",
+      "file": "src/use.mjs",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

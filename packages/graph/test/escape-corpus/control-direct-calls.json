@@ -1,0 +1,19 @@
+{
+  "covers": "a function called only by name, in a package with a callback elsewhere, is answered whole (test 1)",
+  "files": {
+    "src/a.ts": "export function core() { return 1; }\nexport function run(f: () => number) { return f(); }\n",
+    "src/b.ts": "import { core } from \"./a\";\ncore();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#core",
+      "caller": "src/b.ts",
+      "file": "src/b.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "src/a.ts#core"
+  ],
+  "floored": []
+}

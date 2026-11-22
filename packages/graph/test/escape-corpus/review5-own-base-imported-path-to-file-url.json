@@ -1,0 +1,19 @@
+{
+  "covers": "a `pathToFileURL` imported from a module of the repository may return any place: any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/lib/u.mjs": "export function pathToFileURL() {\n  return new URL(\"./x.mjs\", import.meta.url);\n}\n",
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nimport { pathToFileURL } from \"./lib/u.mjs\";\nconst require = createRequire(pathToFileURL(import.meta.filename));\nconst k = \"f\";\nrequire(\"./a.cjs\")[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

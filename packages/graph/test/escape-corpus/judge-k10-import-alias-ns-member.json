@@ -1,0 +1,17 @@
+{
+  "covers": "an adversarial case from the review of piece A: import alias ns member",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/use.ts": "import * as ns from \"./a\";\nimport g = ns.f;\nfunction run(cb: () => void) { cb(); }\nrun(g);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/use.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

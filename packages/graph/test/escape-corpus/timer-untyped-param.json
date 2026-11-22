@@ -1,0 +1,25 @@
+{
+  "covers": "a timer given an untyped parameter may run a string as code",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\n",
+    "tools/package.json": "{\"name\": \"tools\"}\n",
+    "tools/t.js": "export function run(code) { setTimeout(code, 1); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "tools/t.js",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/a.ts#f",
+      "reason": "may load any module",
+      "at": "tools/t.js:1"
+    }
+  ]
+}

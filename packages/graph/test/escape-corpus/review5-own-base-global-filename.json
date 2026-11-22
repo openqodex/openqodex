@@ -1,0 +1,19 @@
+{
+  "covers": "in an ES module `__filename` is a global another file may set: `createRequire(__filename)` loads any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/setup.mjs": "import { fileURLToPath } from \"node:url\";\nglobalThis.__filename = fileURLToPath(new URL(\"./lib/x.mjs\", import.meta.url));\n",
+    "src/use.mjs": "import \"./setup.mjs\";\nimport { createRequire } from \"node:module\";\nconst require = createRequire(__filename);\nconst k = \"f\";\nrequire(\"./a.cjs\")[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

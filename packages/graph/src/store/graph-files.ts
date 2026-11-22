@@ -6,7 +6,8 @@ import type { ProjectModel } from "../discovery/projects.js";
 import { FRAMEWORK_DATA_VERSION } from "../frameworks/stage.js";
 import type { FrameworkData } from "../frameworks/stage.js";
 import { projectFolder } from "../resolve.js";
-import type { DispatchSite, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, UnknownSite } from "../types.js";
+import { NO_ESCAPES } from "../types.js";
+import type { DispatchSite, Escapes, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, OpaqueFact, Reach, UnknownSite } from "../types.js";
 import type { OpenGeneration } from "./types.js";
 
 // How an index is read back: a file of it by its name, or null when the
@@ -73,8 +74,13 @@ const parseLines = <T>(text: string | null): T[] | null => {
 // number. Measured on vscode: the plain JSON lines were 552 MB, past the
 // folder's 512 MB bound on their own. 3: the uses that are not calls
 // (references), the dispatch sites and the invocation summaries. 4: the
-// framework layer's data (index/frameworks.json).
-export const INDEX_FORMAT = 4;
+// framework layer's data (index/frameworks.json). 5: the escape paths of
+// each function (index/escapes.json), and the mark on an unbound call that
+// cannot run a plain function. 6: the files the reader cannot vouch for
+// (the opaque rows of index/escapes.json). 7: what each opaque file
+// reaches, and the scripts. 8: a read by a computed key keeps whether it
+// passes its value on and its places; a reach row holds no name.
+export const INDEX_FORMAT = 8;
 
 type Row = (number | number[])[];
 
@@ -119,7 +125,21 @@ export function writeIndex(g: Graph): Record<string, string> {
   const edges = g.edges.map(e.edge);
   const importers = [...g.importers.values()].flat().map(e.edge);
   const misses = g.misses.map((m) => [e.s(m.target), e.s(m.name), e.s(m.from), e.site(m.site)]);
-  const unknowns = g.unknowns.map((u) => [e.s(u.file), u.line, u.column, e.s(u.name), e.s(u.cause), e.s(u.shape), e.s(u.caller), u.scope === "project" ? 1 : 0, e.s(u.note), u.candidates ? u.candidates.map(e.s) : -1, ...(u.receiver ? [e.s(u.receiver)] : [])]);
+  const unknowns = g.unknowns.map((u) => [e.s(u.file), u.line, u.column, e.s(u.name), e.s(u.cause), e.s(u.shape), e.s(u.caller), u.scope === "project" ? 1 : 0, e.s(u.note), u.candidates ? u.candidates.map(e.s) : -1, ...(u.receiver || u.notPlain ? [e.s(u.receiver)] : []), ...(u.notPlain ? [1] : [])]);
+  const place = (p: { file: string; line: number }) => [e.s(p.file), p.line];
+  const x = g.escapes;
+  const escapes = {
+    uses: [...x.uses].map(([id, u]) => [e.s(id), ...place(u), u.count]),
+    unbound: [...x.unbound].map(([k, u]) => [e.s(k), ...place(u), u.count]),
+    reach: [...x.reach].map(([id, rs]) => [e.s(id), rs.map((r) => [e.s(r.why), ...place(r)])]),
+    modules: [...x.modules].map(([file, p]) => [e.s(file), ...place(p)]),
+    loadAny: x.loadAny.map((p) => [...place(p), e.s(p.why)]),
+    offered: [...x.offered].map(e.s),
+    opaque: [...x.opaque.values()].map((o) => [...place(o), e.s(o.why), o.count, o.all.map((a) => [e.s(a.why), a.line, a.count, a.reach === "any" ? 2 : a.reach === "global" ? 1 : 0]), (o.any ? 1 : 0) | (o.global ? 2 : 0) | (o.unbound ? 4 : 0), o.reach.map(e.s)]),
+    scripts: [...x.scripts].map(e.s),
+    // A read by a computed key keeps whether it passes its value on, and its places.
+    members: [...x.members].map(([k, m]) => [e.s(k), ...place(m), m.count, m.passed ? 1 : 0, ...(m.places ? [m.places.flatMap(place)] : [])]),
+  };
   const references = g.references.map(e.edge);
   const dispatch = g.dispatch.map((x) => [e.s(x.file), x.line, x.column, e.s(x.caller), e.s(x.name), x.declared.map(e.s), x.candidates.map(e.s), x.total, e.s(x.rule)]);
   const summaries = [...g.summaries].map(([id, x]) => [e.s(id), x.params.map(e.s), x.invokes, x.returns.map(e.s), x.returnsOther ? 1 : 0]);
@@ -137,6 +157,8 @@ export function writeIndex(g: Graph): Record<string, string> {
     "index/summaries.jsonl": lines(summaries),
     "index/status.json": JSON.stringify(g.status),
     "index/frameworks.json": JSON.stringify(g.frameworks ?? null),
+    // A graph without its escape facts never loads back as one that has them.
+    "index/escapes.json": x.missing ? "null" : JSON.stringify(escapes),
   };
 }
 
@@ -190,7 +212,8 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
       const note = d.n(r[8] as number);
       if (note !== null) u.note = note;
       if (Array.isArray(r[9])) u.candidates = (r[9] as number[]).map(d.s);
-      if (typeof r[10] === "number") u.receiver = d.s(r[10]);
+      if (typeof r[10] === "number" && r[10] >= 0) u.receiver = d.s(r[10]);
+      if (r[11] === 1) u.notPlain = true;
       return u;
     });
     const dispatch = dispatchRows.map((r): DispatchSite => ({
@@ -205,7 +228,30 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
       rule: d.s(r[8] as number) as DispatchSite["rule"],
     }));
     const summaries = new Map<string, InvocationSummary>(summaryRows.map((r) => [d.s(r[0] as number), { params: (r[1] as number[]).map(d.s), invokes: r[2] as number[], returns: (r[3] as number[]).map(d.s), returnsOther: r[4] === 1 }]));
-    const extra = { references: referenceRows.map(d.edge), dispatch, summaries };
+    type N = number;
+    const x = JSON.parse(read("index/escapes.json") ?? "null") as { uses: N[][]; unbound: N[][]; reach: [N, N[][]][]; modules: N[][]; loadAny: N[][]; offered: N[]; opaque: N[][]; scripts: N[]; members: N[][] } | null;
+    if (!x || !Array.isArray(x.uses) || !Array.isArray(x.unbound) || !Array.isArray(x.reach) || !Array.isArray(x.modules) || !Array.isArray(x.loadAny) || !Array.isArray(x.offered) || !Array.isArray(x.opaque) || !Array.isArray(x.scripts) || !Array.isArray(x.members)) return null;
+    const placeOf = (r: N[], at: number) => ({ file: d.s(r[at] as N), line: r[at + 1] as N });
+    const escapes: Escapes = {
+      uses: new Map(x.uses.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
+      unbound: new Map(x.unbound.map((r) => [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N }])),
+      reach: new Map(x.reach.map(([id, rs]) => [d.s(id), rs.map((r): Reach => ({ why: d.s(r[0] as N) as Reach["why"], ...placeOf(r, 1) }))])),
+      modules: new Map(x.modules.map((r) => [d.s(r[0] as N), placeOf(r, 1)])),
+      loadAny: x.loadAny.map((r) => ({ ...placeOf(r, 0), why: d.s(r[2] as N) as Escapes["loadAny"][number]["why"] })),
+      offered: new Set(x.offered.map(d.s)),
+      opaque: new Map(x.opaque.map((r) => {
+        const flags = r[5] as N;
+        const all = ((r[4] ?? []) as unknown as N[][]).map((a): OpaqueFact => ({ why: d.s(a[0] as N), line: a[1] as N, count: a[2] as N, ...(a[3] === 2 ? { reach: "any" as const } : a[3] === 1 ? { reach: "global" as const } : {}) }));
+        return [d.s(r[0] as N), { ...placeOf(r, 0), why: d.s(r[2] as N), count: r[3] as N, all, any: (flags & 1) !== 0, global: (flags & 2) !== 0, unbound: (flags & 4) !== 0, reach: ((r[6] ?? []) as unknown as N[]).map(d.s) }];
+      })),
+      scripts: new Set(x.scripts.map(d.s)),
+      members: new Map(x.members.map((r) => {
+        const places = r[5] as unknown as N[] | undefined;
+        const at = places ? Array.from({ length: places.length / 2 }, (_, i) => placeOf(places, i * 2)) : undefined;
+        return [d.s(r[0] as N), { ...placeOf(r, 1), count: r[3] as N, ...(r[4] === 1 ? { passed: true } : {}), ...(at ? { places: at } : {}) }];
+      })),
+    };
+    const extra = { references: referenceRows.map(d.edge), dispatch, summaries, escapes };
     const graph = assemble(nodes, edgeRows.map(d.edge), importerRows.map(d.edge), misses, unknowns, status, deserializeModel(projects.model), projects.goModules, extra);
     graph.repoRoot = repoRoot;
     const frameworks = JSON.parse(read("index/frameworks.json") ?? "null") as FrameworkData | null;
@@ -228,7 +274,9 @@ export function assemble(
   status: GraphStatus,
   model: ProjectModel,
   goModules: [string, string][],
-  extra: Pick<Graph, "references" | "dispatch" | "summaries"> = { references: [], dispatch: [], summaries: new Map() },
+  // Optional, as in 0.22.0. Without `escapes` the graph fails closed: it is
+  // partial, and every caller list is a floor that says why.
+  extra: Pick<Graph, "references" | "dispatch" | "summaries"> & Partial<Pick<Graph, "escapes">> = { references: [], dispatch: [], summaries: new Map() },
 ): Graph {
   const nodes = new Map<string, GraphNode>();
   const defsByFile = new Map<string, GraphNode[]>();
@@ -276,10 +324,11 @@ export function assemble(
     unknowns,
     unknownNames,
     valueCalls,
+    escapes: extra.escapes ?? { uses: new Map(), unbound: new Map(), reach: new Map(), modules: new Map(), loadAny: [], offered: new Set(), opaque: new Map(), scripts: new Set(), members: new Map(), missing: true },
     model,
     goModules,
     projectOf,
     exportChanges: [],
-    status,
+    status: extra.escapes ? status : { ...status, status: "partial", reason: status.reason ?? NO_ESCAPES, reasons: [...status.reasons, NO_ESCAPES] },
   };
 }

@@ -1,0 +1,17 @@
+{
+  "covers": "a function declaration given a string later (`f = \"g()\"`) is no proof for a timer: the string may run as code",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.js": "export function run() {\n  function f() {}\n  f = \"g()\";\n  setTimeout(f, 1);\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "runs code given to a timer",
+      "at": "src/use.js:4"
+    }
+  ]
+}

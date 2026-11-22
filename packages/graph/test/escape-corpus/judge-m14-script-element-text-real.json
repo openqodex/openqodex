@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: script element text real",
+  "files": {
+    "public/app.js": "function f() {}\nvar s = document.createElement(\"script\");\ns.text = \"f()\";\ndocument.body.appendChild(s);\nfunction run(cb) { return cb(); }\nrun(function () { return 0; });\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/app.js#f",
+      "caller": null,
+      "file": "public/app.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

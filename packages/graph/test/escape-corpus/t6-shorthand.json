@@ -1,0 +1,22 @@
+{
+  "covers": "a value use the old reader skipped: a shorthand property (test 6)",
+  "files": {
+    "src/a.ts": "export function f() {}\nexport function run() {\n  const t = { f };\n  t.f();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/a.ts#run",
+      "file": "src/a.ts",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "it is used as a value",
+      "at": "src/a.ts:3"
+    }
+  ]
+}

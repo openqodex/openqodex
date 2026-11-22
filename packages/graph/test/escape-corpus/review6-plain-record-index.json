@@ -1,0 +1,17 @@
+{
+  "covers": "a value typed `Record<string, unknown>` may hold a class with an index signature and a getter: a read of it by a computed key may run the getter",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/bag.ts": "export class Bag {\n  [k: string]: unknown;\n  get total(): number {\n    return 1;\n  }\n}\n",
+    "src/use.ts": "export function pick(bag: Record<string, unknown>, k: string): unknown {\n  return bag[k];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/bag.ts#Bag.total",
+      "reason": "by a computed key",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

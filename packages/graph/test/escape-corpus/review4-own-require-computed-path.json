@@ -1,0 +1,25 @@
+{
+  "covers": "the file's own `require` made by `createRequire(import.meta.url)` called with a computed path loads any module",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nconst require = createRequire(import.meta.url);\nconst name = \"./a.cjs\";\nconst key = \"f\";\nrequire(name)[key]();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.mjs",
+      "file": "src/use.mjs",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "may be any module of the repository",
+      "at": "src/use.mjs:5"
+    }
+  ]
+}
