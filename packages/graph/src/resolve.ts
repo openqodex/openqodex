@@ -3957,6 +3957,7 @@ export function createWorld(input: ResolveInput): World {
 
     // Names built at run time, from the facts of each file.
     const loadAny: Escapes["loadAny"] = [];
+    const loadPlaces = new Set<string>();
     const runtime: { why: "eval" | "global"; place: Place }[] = [];
     for (const { path, facts: f } of jsFiles) {
       for (const e of f.escapes ?? []) {
@@ -3974,7 +3975,10 @@ export function createWorld(input: ResolveInput): World {
           }
         } else if (e.kind === "load") {
           // One place once, so "and N more places" counts places.
-          if (loads(path, e) && !loadAny.some((l) => l.why === "load" && l.file === path && l.line === e.line)) loadAny.push({ ...place, why: "load" });
+          if (loads(path, e) && !loadPlaces.has(`${path}:${e.line}`)) {
+            loadPlaces.add(`${path}:${e.line}`);
+            loadAny.push({ ...place, why: "load" });
+          }
         } else {
           runtime.push({ why: e.kind, place });
           if (e.kind === "eval") {

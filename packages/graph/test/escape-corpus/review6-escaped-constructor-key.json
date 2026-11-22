@@ -1,0 +1,16 @@
+{
+  "covers": "a bracket key written with an escape (`[\"\\u0063onstructor\"]`) reads `constructor`: the code it builds runs",
+  "files": {
+    "public/app.js": "function f() {}\n(() => {})[\"\\u0063onstructor\"](\"f()\")();\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/app.js#f",
+      "caller": null,
+      "file": "public/app.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

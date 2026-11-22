@@ -1,0 +1,14 @@
+{
+  "covers": "`require(\"node:module\").createRequire(import.meta.url)(\"./a.cjs\")` loads that path only: the repository stays whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.ts": "const lib = require(\"node:module\").createRequire(import.meta.url)(\"./a.cjs\");\nlib.f();\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
+}

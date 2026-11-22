@@ -406,7 +406,7 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     if (read) why(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`, null);
     const anyRead = kind === "method" && family === "js" ? x.members.get("js:*") : undefined;
     // A getter runs where it is read; a method taken by a read that passes its value on may run anywhere.
-    if (anyRead) why(`${anyRead.count} ${anyRead.count === 1 ? "read" : "reads"} by a computed key on a value that is no array, string or record, first at ${at(anyRead)}, may run it (a getter) or take it as a value`, anyRead.passed ? null : (anyRead.places ?? null));
+    if (anyRead) why(`${anyRead.count} ${anyRead.count === 1 ? "read" : "reads"} by a computed key on a value that is no string, number or other primitive, first at ${at(anyRead)}, may run it (a getter) or take it as a value`, anyRead.passed ? null : (anyRead.places ?? null));
     if (kind === "method" && family && !kept) {
       const values = valueCallsOf(graph, family);
       if (values) why(`${values.count} ${values.count === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in projects that can hold its objects, first at ${at(values)}`, only(values));
