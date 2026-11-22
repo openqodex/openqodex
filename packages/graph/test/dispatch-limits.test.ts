@@ -35,7 +35,7 @@ import { RepoReader } from "../src/safe-fs.js";
 import type { FileFacts } from "../src/types.js";
 import { cpuMs, expectLinear, growthTests } from "../src/test-timing.js";
 import { makeRepo, symbol } from "./helpers.js";
-import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
+import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 // Every folder the shared helpers made for this file goes when it ends (tests/temp-guard.ts).
 afterAll(removeTempDirs);
@@ -240,10 +240,12 @@ describe("the limits of dispatch and function values", () => {
   });
 
   // Each read of a barrel's local exports is counted. The budget runs out
-  // at each of many reads near the end of escape analysis: the most
-  // barrels read after it, over all of those runs.
+  // at 40 reads spread over a whole run, so some land inside the walks:
+  // the most barrels read after it, over all of those runs.
   const mostReadAfterTheBudget = async (files: Record<string, string>) => {
-    const root = repo(files);
+    // The facts are made here, so the project model reads only an empty
+    // folder: no repository to set up.
+    const root = tempDir("oq-graph-");
     const parser = await parserFor("typescript");
     const facts = Object.entries(files).map(([path, source]) => {
       const tree = parser.parse(source);
@@ -268,8 +270,8 @@ describe("the limits of dispatch and function values", () => {
     const whole = run(-1);
     expect(whole.resolved.escapesCut).toBe(false);
     let most = 0;
-    for (let back = 5; back <= 400; back += 5) {
-      const cut = run(whole.reads - back);
+    for (let at = 1; at < whole.reads; at += Math.max(1, Math.floor(whole.reads / 40))) {
+      const cut = run(at);
       expect(cut.resolved.escapesCut).toBe(true);
       most = Math.max(most, cut.after);
     }
@@ -277,18 +279,20 @@ describe("the limits of dispatch and function values", () => {
   };
 
   it("stops escape analysis soon after the budget runs out in its walk of export * (8)", async () => {
-    // A ring of 70 barrels, each re-exporting the next: no walk of it is
-    // kept, so a computed load makes escape analysis list what each barrel
-    // offers through the whole ring.
+    // A ring of 30 barrels, each re-exporting the next: no walk of it is
+    // kept, so a computed load makes escape analysis walk the whole ring
+    // again from each barrel (the check in the walk).
     const ring: Record<string, string> = { "load.js": "require(process.argv[2]);\n" };
-    for (let i = 0; i < 70; i++) ring[`r${i}.ts`] = `export * from "./r${(i + 1) % 70}";\nexport function f${i}() {\n  return ${i};\n}\n`;
-    // A chain of 200 barrels, its top listed first: the first barrel escape
-    // analysis lists opens the other 199 in one walk.
+    for (let i = 0; i < 30; i++) ring[`r${i}.ts`] = `export * from "./r${(i + 1) % 30}";\nexport function f${i}() {\n  return ${i};\n}\n`;
+    // A chain of 60 barrels, its top listed first: the first barrel escape
+    // analysis lists offers 60 names, each looked up in turn (the check at
+    // each name).
     const chain: Record<string, string> = {};
-    for (let i = 200; i >= 1; i--) chain[`c${i}.ts`] = `export * from "./c${i - 1}";\nexport function f${i}() {\n  return ${i};\n}\n`;
+    for (let i = 60; i >= 1; i--) chain[`c${i}.ts`] = `export * from "./c${i - 1}";\nexport function f${i}() {\n  return ${i};\n}\n`;
     chain["c0.ts"] = "export function f0() {\n  return 0;\n}\n";
     chain["load.js"] = "require(process.argv[2]);\n";
-    // One lookup of a name may finish its own short walk; neither walk may.
+    // One lookup of a name may finish its own short walk; neither the walk
+    // nor the list of names may run on.
     expect(await mostReadAfterTheBudget(ring)).toBeLessThan(10);
     expect(await mostReadAfterTheBudget(chain)).toBeLessThan(10);
   });
