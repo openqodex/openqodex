@@ -37,11 +37,15 @@
 //     and it is listed twice, or the primary's possible issue stays beside
 //     the second reviewer's counted finding; or findings on lines that do
 //     not overlap merge; or a second finding with the exact key of one
-//     primary finding joins an earlier primary finding that only overlaps.
+//     primary finding joins an earlier primary finding that only overlaps;
+//     or two second findings on one broad primary finding collapse into it,
+//     losing a distinct bug; or a primary possible issue leaves for a second
+//     finding that is the same finding as a primary one, which the primary
+//     review already ruled on.
 import { DEFAULT_CONFIG } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { reviewChange } from "../src/review-change.js";
-import { mergeFindings } from "../src/second.js";
+import { mergeFindings, possibleAfterSecond } from "../src/second.js";
 import type { AuthorizeRequest, ReviewChangeOptions } from "../src/reviewer.js";
 import { fixtureModel } from "./fixture-model.js";
 import type { Finding, FixtureOptions } from "./fixture-model.js";
@@ -256,4 +260,20 @@ it("11. joins a second finding to the primary finding with its exact key before 
   const merged = mergeFindings({ name: "primary", findings: [overlapping, exact] }, { name: "second", findings: [{ ...exact, severity: "major" }] });
   expect(merged.findings.map((f) => [f.title, f.severity])).toEqual([[SUBTRACTION.title, "minor"], ["add returns a minus b", "major"]]);
   expect(merged.foundBy).toEqual([["primary"], ["primary", "second"]]);
+});
+
+it("11. keeps two second findings apart from one broad primary finding they both overlap", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 1, line_end: 10, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const merged = mergeFindings({ name: "primary", findings: [finding] }, { name: "second", findings: [{ ...finding, line_number: 2, line_end: 2, title: "add returns a minus b" }, { ...finding, line_number: 8, line_end: 8, title: "Off by one in the loop" }] });
+  expect(merged.findings.map((f) => f.title)).toEqual([SUBTRACTION.title, "add returns a minus b", "Off by one in the loop"]);
+  expect(merged.foundBy).toEqual([["primary"], ["second"], ["second"]]);
+});
+
+it("11. keeps a primary possible issue beside a second finding that is the same finding as a primary one", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 3, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const possible = { ...finding, line_number: 3, title: "Overflow on large input", confidence: 0.6 };
+  const exact = mergeFindings({ name: "primary", findings: [finding] }, { name: "second", findings: [finding] });
+  expect(possibleAfterSecond([possible], exact).map((f) => f.title)).toEqual(["Overflow on large input"]);
+  const alone = mergeFindings({ name: "primary", findings: [] }, { name: "second", findings: [finding] });
+  expect(possibleAfterSecond([possible], alone)).toEqual([]);
 });
