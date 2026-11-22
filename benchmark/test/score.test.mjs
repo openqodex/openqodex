@@ -329,6 +329,8 @@ describe("a rule constant changes without a version bump, and old and new scores
     12: "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
     // Issue 284: a health result on every review; an unhealthy one credits nothing and is failed.
     13: "157a833899f0edcb185874b856d1303c0532b22c05006ea1f6e939b7047e8e91",
+    // A run that scores nothing has no f1.
+    14: "f2644a3b484fc7e96ffea723de597b40acd59b5d0f6e52b84db2bc6cea4b28b8",
   };
 
   it("pins the hash of the rules block, constants and matching code included, to its version", () => {

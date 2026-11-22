@@ -613,7 +613,8 @@ export function regressions(oldSamples, newSamples) {
 //     denominator as a miss. A scanner-only sample has no model and no tokens
 //     to check.
 // Rules version 13: a health result on every review, gated at every scorer.
-export const RULES_VERSION = 13;
+// Rules version 14: a run that scores nothing has no f1.
+export const RULES_VERSION = 14;
 export const AACR_LINE_K = 1;
 // The order classify() tries the rules in; the first that holds decides.
 export const OUTCOME_ORDER = ["test-gap", "accepted", "hit", "wrong-kind", "near", "false"];
@@ -1103,7 +1104,7 @@ export function summarizeJobs(jobs, retries = []) {
     precision: { lower, upper: { hit: correct + unresolved, of: displayed }, unresolved },
     uniqueIssuePrecision: { lower: { hit: issuesCorrect, of: distinct }, upper: { hit: issuesCorrect + issuesUnresolved, of: distinct } },
     redundancy: { hit: displayed - distinct, of: displayed },
-    f1: p + r === 0 ? 0 : (2 * p * r) / (p + r),
+    f1: displayed === 0 || recall.of === 0 ? null : p + r === 0 ? 0 : (2 * p * r) / (p + r),
     cleanFindingsPerCase: { findings: sum(clean, (j) => j.precision.of), cases: clean.length },
     controls: total((j) => j.controls),
     location: { label: LOCATION_LABEL, precision: { hit: matches, of: generated }, recall: { hit: matches, of: expected }, matches, generated, expected, knownNoise: sum(jobs, (j) => j.location.knownNoise) },
