@@ -19,7 +19,7 @@ import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { openqodexHome } from "@openqodex/scanners";
 import { checkoutsDir } from "../checkouts.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, onAllowlist, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -294,8 +294,7 @@ export function codexStream(): { line(text: string): string | null; end(code: nu
       return null;
     }
     if (e.type === "turn.failed" || e.type === "error") {
-      const message = str((e.error as Record<string, unknown> | undefined)?.message) ?? str(e.message) ?? "unknown";
-      failed ??= `the reviewer stopped with an error (${message.split("\n")[0]?.slice(0, 200)})`;
+      failed ??= reviewerError(str((e.error as Record<string, unknown> | undefined)?.message) ?? str(e.message));
       return null;
     }
     if (e.type !== "item.completed") return null;

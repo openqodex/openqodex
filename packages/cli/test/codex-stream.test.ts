@@ -38,6 +38,8 @@
 // 17. A relative or empty PATH entry (".", "", "bin") reaches the reviewer or
 //     the probe, so a program committed in the snapshot runs in place of a
 //     system one (a `cat` that prints the inside file and skips the rest).
+// 19. A usage limit reads as any other error, so the developer cannot tell
+//     from the receipt that waiting or another reviewer would work.
 // 18. On Windows the path (named `Path` there), the home folder or what
 //     starts a program is dropped, or the path is split on ":" and loses
 //     every entry.
@@ -132,6 +134,14 @@ describe("the Codex stream reader, on a recorded run", () => {
     const { turn } = await runOnce(bin);
     expect(turn.finalText).toBe("");
     expect(turn.failure).toMatch(/stopped with an error \(stream disconnected/);
+  });
+
+  it("19. a turn that failed on a usage limit says so, with Codex's own words", async () => {
+    const failed = JSON.stringify({ type: "turn.failed", error: { message: "You've hit your usage limit. Try again at 3:05 PM.\nUpgrade to Pro" } });
+    const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"')), failed, ""].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.finalText).toBe("");
+    expect(turn.failure).toBe("the reviewer hit its usage or plan limit (You've hit your usage limit. Try again at 3:05 PM.)");
   });
 
   it("3. a stream that ends with no terminal event is no answer", async () => {

@@ -40,6 +40,20 @@ export function onAllowlist(names: string[], name: string, platform: NodeJS.Plat
   return [...names, ...WINDOWS_ENV].some((n) => n.toUpperCase() === upper);
 }
 
+// The words a reviewer uses when its login ran out of use: Claude Code's
+// "You've hit your limit" and "usage limit reached", Codex's "You've hit
+// your usage limit", and a rate limit.
+const LIMIT = /usage limit|plan limit|rate limit|limit reached|hit your (\S+ )?limit/i;
+
+// The failure of a turn the reviewer itself ended with an error, from the
+// reviewer's own message (its first line, cut at 200 characters), so the
+// receipt says what happened and, for a limit, when it resets. `fallback`
+// stands in when the reviewer sent no message.
+export function reviewerError(message: string | null, fallback = "unknown"): string {
+  const said = message?.split("\n")[0]?.trim().slice(0, 200) || fallback;
+  return LIMIT.test(said) ? `the reviewer hit its usage or plan limit (${said})` : `the reviewer stopped with an error (${said})`;
+}
+
 export type Detected = { ok: true; version: string; bin: string } | { ok: false; missing: string; fix: string };
 
 // One answer of the reviewer. `usage` is the session's total so far.

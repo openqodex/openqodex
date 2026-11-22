@@ -10,7 +10,7 @@ import type { ReviewerUsage } from "@openqodex/core";
 import { DELIVERY_ROW_BYTES, REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
 import { checkoutsDir } from "../checkouts.js";
 import { claudeHome } from "./homes.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, onAllowlist, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -219,7 +219,8 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
         cost_usd: num(e.total_cost_usd),
       };
       const answer = str(e.result) ?? "";
-      if (e.is_error === true) fail(`the reviewer stopped with an error (${str(e.subtype) ?? "unknown"})`);
+      // The reason is in `result`; `subtype` can say "success" even then.
+      if (e.is_error === true) fail(reviewerError(str(e.result), str(e.subtype) ?? undefined));
       else if (Buffer.byteLength(answer, "utf8") > MAX_ANSWER_BYTES) fail(`the reviewer stopped: its answer over ${MAX_ANSWER_BYTES / 1024 / 1024} MB`);
       else finish(answer, null);
     }

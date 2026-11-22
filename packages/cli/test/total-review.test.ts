@@ -103,6 +103,8 @@
 // 39. A review stopped at its cap does not say which cap it hit and which
 //     flag raises it, on the terminal or in the report; or a reviewer that
 //     never answers is not stopped at the cap it was given.
+// 42. A reviewer that stopped on a usage or plan limit reads as "stopped with
+//     an error (success)": the reason in its result is dropped.
 // 41. On Windows the reviewer loses its path (named `Path` there), its home
 //     folder or what starts a program.
 import { stagedFake, stagedAnswer } from "../../review/test/staged-fake.js";
@@ -1016,6 +1018,27 @@ describe("the snapshot", () => {
 });
 
 describe("the reviewer process", () => {
+  it("42. a reviewer that ends with an error shows its own message, and says so plainly for a usage limit", async () => {
+    // The result event of Claude Code 2.1.x on a login past its plan limit
+    // (#416): is_error true, subtype "success", the reason in result.
+    const claudeSays = (result: unknown) => {
+      const bin = join(tempDir("oq-claude-error-"), "claude");
+      const event = { type: "result", subtype: "success", is_error: true, terminal_reason: "api_error", result, num_turns: 1, total_cost_usd: 0, modelUsage: {} };
+      writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(event)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+      chmodSync(bin, 0o755);
+      return bin;
+    };
+    const failure = async (bin: string) => {
+      const session = claudeDriver.start({ snapshotDir: tempDir("oq-claude-error-snap-"), deadline: Date.now() + 20_000, bin, web: false });
+      const turn = await session.send("Review this.");
+      await session.close();
+      return turn.failure;
+    };
+    expect(await failure(claudeSays("You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model\nmore"))).toBe("the reviewer hit its usage or plan limit (You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model)");
+    expect(await failure(claudeSays("API Error: 500 Internal server error"))).toBe("the reviewer stopped with an error (API Error: 500 Internal server error)");
+    // With no message, the subtype is all there is.
+    expect(await failure(claudeSays(""))).toBe("the reviewer stopped with an error (success)");
+  });
   it("20. never runs a claude that resolves inside the repository, however PATH reaches it", async () => {
     const dir = repo();
     const marker = join(tempDir("oq-marker-"), "ran");
