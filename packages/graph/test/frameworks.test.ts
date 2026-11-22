@@ -188,4 +188,35 @@ describe("the framework part of the brief", () => {
     expect(literal.length).toBeLessThanOrEqual(120);
     expect(literal.endsWith("...")).toBe(true);
   }, 60_000);
+
+  // Way it could fail: a path whose head is such a value and whose member the
+  // graph cannot follow (`router.handler`) reads as a miss of the head, so a
+  // reader mounts the whole router where only its member was given.
+  it("never mounts a router where only a member of it is given, in Express, Hono and FastAPI", async () => {
+    const node = (deps: string) => `{"name":"x","version":"1.0.0","type":"module","dependencies":{${deps}}}\n`;
+    const repos: Record<string, string>[] = [
+      {
+        "package.json": node('"express":"^4.0.0"'),
+        "src/app.js": 'import express from "express";\nimport { router } from "./users.js";\nconst app = express();\napp.use("/v2", router.handler);\napp.listen(3000);\n',
+        "src/users.js": 'import express from "express";\nconst router = express.Router();\nfunction show(req, res) {\n  res.end();\n}\nrouter.get("/things", show);\nexport { router };\n',
+      },
+      {
+        "package.json": node('"hono":"^4.6.0"'),
+        "src/app.js": 'import { Hono } from "hono";\nimport { router } from "./users.js";\nexport const app = new Hono();\napp.route("/v2", router.handler);\n',
+        "src/users.js": 'import { Hono } from "hono";\nexport const router = new Hono();\nrouter.get("/things", (c) => c.json({}));\n',
+      },
+      {
+        "requirements.txt": "fastapi==0.110.0\n",
+        "main.py": 'from fastapi import FastAPI\nfrom users import router\n\napp = FastAPI()\napp.include_router(router.sub, prefix="/v2")\n',
+        "users.py": 'from fastapi import APIRouter\n\nrouter = APIRouter()\n\n\n@router.get("/things")\ndef things():\n    return 1\n',
+      },
+    ];
+    for (const files of repos) {
+      const root = makeRepo(files);
+      commitAll(root);
+      const graph = await buildGraph({ repoRoot: root, store: null });
+      const a = query({ graph, generation: "g", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "routes", limit: 50 });
+      expect((a.items as (Item & { pattern?: string })[]).map((i) => i.pattern), Object.keys(files).join(" ")).toEqual(["/things"]);
+    }
+  }, 60_000);
 });

@@ -366,7 +366,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   const fromImport = (file: string, path: readonly string[], depth: number): Val | null => {
     let found: Lookup = lookup(file, path);
     let target: { file: string; name: string } | null = null;
-    if (found.kind === "miss") target = { file: found.target, name: found.name };
+    if (found.kind === "miss") target = found.past ? null : { file: found.target, name: found.name };
     else if (found.kind === "none" && path.length === 2) {
       found = lookup(file, [path[0] as string]);
       if (found.kind === "module") target = { file: found.file, name: path[1] as string };

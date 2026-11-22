@@ -216,7 +216,10 @@ type Value =
   | { v: "pymod"; from: string; dotted: string } // Python `import a.b`: a dotted module path
   | { v: "ext" }
   | { v: "gap"; cause: Cause; note: string; candidates: string[] | null }
-  | { v: "miss"; target: string; name: string; ev: Ev };
+  // `held`: the module gives the name out as a value that is no definition
+  // (`export const router = Router()`, `export { router }`), so the name is
+  // there, though the graph does not follow the value.
+  | { v: "miss"; target: string; name: string; ev: Ev; held?: true };
 
 type Def = DefFact & { id: string; file: string; family: Family };
 
@@ -1008,14 +1011,15 @@ export function createWorld(input: ResolveInput): World {
         // The export table: exported declarations, `export { a as b }`,
         // `export default`, CommonJS assignments, then re-exports. A private
         // top-level definition is never an export. A local value that is no
-        // definition (`const router = Router(); export { router }`) is a
-        // miss in this file, as `export const router = ...` is, so a
-        // framework reader reads its own facts there.
-        const here: Value = { v: "miss", target: file, name, ev: SAME_SCOPE };
-        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? here;
+        // definition (`export const router = Router()`, `export { router }`)
+        // is a held miss in this file, so a framework reader reads its own
+        // facts there, and it shadows any `export *` that offers the name.
+        const held: Value = { v: "miss", target: file, name, ev: SAME_SCOPE, held: true };
+        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? held;
         const top = topByFile.get(file)?.get(name)?.filter((id) => defById.get(id)?.exported);
         if (top && top.length > 0) return { v: "sym", ids: top, ev: SAME_SCOPE };
-        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? here;
+        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? held;
+        if (f.exportedVariables?.includes(name)) return held;
         // Every `export *` that offers the name: one definition binds; two
         // different ones are ambiguous (JavaScript exports neither). A star
         // the graph cannot follow (a module that is not there, a package
@@ -1041,7 +1045,7 @@ export function createWorld(input: ResolveInput): World {
             const hit = withEv(index.exports(mod.file, name, depth + 1), mod.ev);
             if (hit === null) unfollowed.push({ spec: imp.spec, cause: "miss", note: `export * from ${imp.spec} could not be read` });
             else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note });
-            else if (hit.v !== "miss") starHits.push({ v: hit, spec: imp.spec });
+            else if (hit.v !== "miss" || hit.held) starHits.push({ v: hit, spec: imp.spec });
           }
         }
         return starValue(file, name, starHits, unfollowed) ?? noStarHit(unfollowed) ?? { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1101,7 +1105,8 @@ export function createWorld(input: ResolveInput): World {
   // ambiguous: every candidate at the possible tier, with a note.
   function starValue(file: string, name: string, hits: { v: Value; spec: string }[], open: Unfollowed[]): Value | null {
     if (hits.length === 0) return null;
-    const keyOf = (v: Value): string | null => (v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : null);
+    const keyOf = (v: Value): string | null =>
+      v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : v.v === "miss" && v.held ? `value:${v.target}\0${v.name}` : null;
     const distinct = new Map<string, { v: Value; spec: string }>();
     for (const h of hits) {
       const k = keyOf(h.v);
@@ -4320,8 +4325,10 @@ export function createWorld(input: ResolveInput): World {
     const [head, ...rest] = path;
     if (head === undefined) return { kind: "none" };
     let v = resolveLocal(file, head);
-    for (const name of rest) {
-      if (v === null || v.v === "ext" || v.v === "gap" || v.v === "miss") break;
+    for (const [i, name] of rest.entries()) {
+      if (v === null || v.v === "ext" || v.v === "gap") break;
+      // A miss before the last name: the names after it were never looked up.
+      if (v.v === "miss") return { kind: "miss", target: v.target, name: v.name, past: rest.slice(i) };
       const before: Value = v;
       v = attr(v, name);
       // A name a module or a class does not hold: a miss where it was looked up.

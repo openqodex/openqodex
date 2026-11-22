@@ -13,6 +13,11 @@
 // 4. A Python module's `from x import *` lines are read first-wins, though
 //    Python binds the last one, and a later star the graph cannot follow
 //    leaves the earlier binding certain.
+// 5. A barrel's two `export *` offer one name, a value that is no definition
+//    in one module (`export const x = make()` or `export { x }`) and a
+//    function in the other, and the function binds certainly, though
+//    JavaScript exports neither; or a module's own `export const x` loses to
+//    an `export *` that offers `x`, though the module's own export wins.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -106,4 +111,21 @@ describe("looking up an exported name", () => {
     expect(tiers(g, symbol(g, "pkg/two.py", "f"))).toEqual(["pkg/last.py:6 certain"]);
     expect(tiers(g, symbol(g, "pkg/one.py", "f"))).toEqual(["pkg/closed.py:6 certain", "pkg/open.py:6 possible"]);
   });
+
+  for (const [form, a] of [
+    ["export const x", "export const x = make();\nfunction make() {\n  return 1;\n}\n"],
+    ["export { x }", "const x = make();\nfunction make() {\n  return 1;\n}\nexport { x };\n"],
+  ] as const) {
+    it(`leaves a name two export * offer as a value (${form}) and a function ambiguous, and a module's own value shadows a star (5)`, async () => {
+      const g = await graphOf({
+        "a.js": a,
+        "b.js": "export function x() {\n  return 2;\n}\n",
+        "barrel.js": 'export * from "./a.js";\nexport * from "./b.js";\n',
+        "own.js": `${a}export * from "./b.js";\n`,
+        "use.js": 'import { x } from "./barrel.js";\nimport { x as y } from "./own.js";\nexport function run() {\n  return x() + y();\n}\n',
+      });
+      expect(tiers(g, symbol(g, "b.js", "x"))).toEqual([]);
+      expect(g.unknowns.filter((u) => u.file === "use.js" && u.line === 4).map((u) => `${u.name} ${u.cause}`).sort()).toEqual(["x ambiguous", "y miss"]);
+    });
+  }
 });
