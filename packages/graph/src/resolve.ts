@@ -342,8 +342,14 @@ function withName(set: NameSet | undefined, name: string, h = nameHash(name), le
   copy[i] = next;
   return copy;
 }
+const NO_NAMES: NameSet = [];
+// The work the export walk spends comparing skipped names: each name it
+// lists and each step it takes instead. Tests read it to hold that work to
+// the size of the input, which a clock on a busy runner cannot.
+export const walkWork = { steps: 0 };
 function* namesIn(set: NameSet): Generator<string> {
   for (const slot of set) {
+    walkWork.steps++;
     if (typeof slot === "string") yield slot;
     else if (slot !== undefined) yield* namesIn(slot);
   }
@@ -4017,14 +4023,71 @@ export function createWorld(input: ResolveInput): World {
       // without. A later visit that skips fewer names reaches more, so it
       // runs again with only the names both skip; the set only shrinks.
       const skipped = new Map<string, NameSet>();
+      // Comparing two skips name by name costs their size, so a long chain
+      // that meets one module many times costs the square of the chain. Most
+      // skips are made from another, so most comparisons need not list a
+      // name: `made` keeps the skip a set was made from, the names it added
+      // and its size, and `within` the pairs found one inside the other.
+      const made = new Map<NameSet, { from: NameSet | null; added: string[]; size: number }>([[NO_NAMES, { from: null, added: [], size: 0 }]]);
+      const within = new Map<NameSet, Set<NameSet>>();
+      const sizeOf = (s: NameSet): number => {
+        const m = made.get(s);
+        if (m) return m.size;
+        const size = [...namesIn(s)].length;
+        made.set(s, { from: null, added: [], size });
+        return size;
+      };
+      const known = (x: NameSet, y: NameSet) => x === y || sizeOf(x) === 0 || within.get(x)?.has(y) === true;
+      // Whether every name of x is in y: y was made, up to 32 steps back,
+      // from a set that holds x; or x was made from a set known inside y (or
+      // inside the set y was made from) and y has the names x added; or, when
+      // `list`, name by name. A found pair is kept in `within`.
+      const isWithin = (x: NameSet, y: NameSet, list: boolean): boolean => {
+        if (known(x, y)) return true;
+        if (sizeOf(x) > sizeOf(y)) return false;
+        let ok = false;
+        for (let a = made.get(y)?.from, steps = 0; !ok && a && steps < 32 && sizeOf(a) >= sizeOf(x); a = made.get(a)?.from, steps++) {
+          walkWork.steps++;
+          ok = known(x, a);
+        }
+        const mx = made.get(x);
+        const fy = made.get(y)?.from;
+        if (!ok && mx?.from && (known(mx.from, y) || (fy && known(mx.from, fy)))) ok = mx.added.every((n) => (walkWork.steps++, hasName(y, n)));
+        if (!ok && list) ok = [...namesIn(x)].every((n) => hasName(y, n));
+        if (ok) within.set(x, (within.get(x) ?? new Set()).add(y));
+        return ok;
+      };
+      // A skip with the names both skip: `asked` when it is inside `had`;
+      // the set `asked` was made from, when that is inside `had`, with the
+      // names `asked` added that `had` has; or name by name.
+      const meet = (had: NameSet, asked: NameSet): NameSet => {
+        if (isWithin(asked, had, false)) return asked;
+        const m = made.get(asked);
+        if (m?.from && isWithin(m.from, had, false)) {
+          let s = m.from;
+          const added: string[] = [];
+          for (const n of m.added) {
+            walkWork.steps++;
+            const next = hasName(had, n) ? withName(s, n) : s;
+            if (next !== s) added.push(n);
+            s = next;
+          }
+          if (added.length > 0) made.set(s, { from: m.from, added, size: sizeOf(m.from) + added.length });
+          return s;
+        }
+        const both = [...namesIn(had)].filter((n) => hasName(asked, n));
+        const s = both.reduce<NameSet>((t, n) => withName(t, n), NO_NAMES);
+        made.set(s, { from: null, added: [], size: both.length });
+        return s;
+      };
       while (queue.length > 0) {
         const { file, whole, skip: asked } = queue.pop() as Visit;
         if (seen.has(`${file}\0${whole}`)) continue;
         let skip: NameSet | null = null;
         if (asked) {
           const had = skipped.get(file);
-          if (had && [...namesIn(had)].every((n) => hasName(asked, n))) continue;
-          skip = had ? [...namesIn(had)].filter((n) => hasName(asked, n)).reduce<NameSet>((s, n) => withName(s, n), []) : asked;
+          if (had && isWithin(had, asked, true)) continue;
+          skip = had ? meet(had, asked) : asked;
           skipped.set(file, skip);
         } else seen.add(`${file}\0${whole}`);
         if (!modules.has(file)) modules.set(file, place);
@@ -4033,8 +4096,15 @@ export function createWorld(input: ResolveInput): World {
           for (const id of o.ids) addReach(id, { why: "module", ...place });
           for (const m of o.modules) queue.push({ file: m, whole: true, skip: null });
           if (o.stars.length > 0) {
-            let given = withName(skip ?? [], "default");
-            for (const n of o.names) given = withName(given, n);
+            const from = skip ?? NO_NAMES;
+            let given = from;
+            const added: string[] = [];
+            for (const n of ["default", ...o.names]) {
+              const next = withName(given, n);
+              if (next !== given) added.push(n);
+              given = next;
+            }
+            if (added.length > 0) made.set(given, { from, added, size: sizeOf(from) + added.length });
             for (const m of o.stars) queue.push({ file: m, whole: true, skip: given });
           }
         }

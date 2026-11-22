@@ -16,13 +16,17 @@
 // 6. A module two cut stars reach is counted once, without the names the
 //    first star's module gives itself, so a name only the second star
 //    brings reads as having every caller listed.
+// 7. A chain of barrels past the cut that meets one module many times (each
+//    barrel stars the same leaf, or stars back to one barrel of the chain)
+//    compares every name the chain skips at each meeting: the walk's work
+//    grows with the square of the chain, seconds at 8,000 barrels.
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact } from "../src/index.js";
 import { query } from "../src/query/engine.js";
 import type { Request } from "../src/query/answer.js";
-import { EXPORT_WALK_STEPS } from "../src/resolve.js";
-import { expectLinear, growthTests, stageCpuMs } from "../src/test-timing.js";
+import { EXPORT_WALK_STEPS, walkWork } from "../src/resolve.js";
+import { expectLinear, growthTests, MAX_GROWTH, stageCpuMs } from "../src/test-timing.js";
 import { commitAll, makeRepo, symbol, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -148,6 +152,32 @@ describe("the export walk", () => {
       expect(a.unknown.floor, `${file}#${name}: ${a.unknown.reasons.join("; ")}`).toBe(false);
     }
   }, 120_000);
+
+  it("compares the names a long cut chain skips in work that grows with the chain (7)", async () => {
+    // `r.ts` spends the step budget in the web, so each barrel's walk is cut
+    // and only star visits reach the chain. Each barrel stars `leaf.ts`;
+    // each barrel in the second half also stars the middle one. The work is
+    // counted, not timed: four times the chain does about four times the work.
+    const work = async (n: number) => {
+      const files: Record<string, string> = {
+        "r.ts": 'export * from "./mesh0";\nexport * from "./c1";\n',
+        "use.ts": 'import * as r from "./r";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n',
+        "leaf.ts": "export function lf(): void {}\n",
+      };
+      for (let i = 0; i < 8; i++) files[`mesh${i}.ts`] = [0, 1, 2, 3, 4, 5, 6, 7].filter((j) => j !== i).map((j) => `export * from "./mesh${j}";\n`).join("") + `export function own${i}(): void {}\n`;
+      const mid = n / 2;
+      for (let i = 1; i <= n; i++) files[`c${i}.ts`] = 'export * from "./leaf";\n' + (i < n ? `export * from "./c${i + 1}";\n` : "") + (i > mid + 1 ? `export * from "./c${mid}";\n` : "") + `export function f${i}(): void {}\n`;
+      const root = makeRepo(files);
+      const before = walkWork.steps;
+      const graph = await buildGraph({ repoRoot: root, store: null, budgetMs: 60_000, maxFiles: 100_000 });
+      expect(graph.status.cuts.some((c) => c.by === "export-walk"), "the walk passes its step budget").toBe(true);
+      expect(graph.escapes.reach.has(symbol(graph, "leaf.ts", "lf")), "the leaf is reached past the cut").toBe(true);
+      return walkWork.steps - before;
+    };
+    const small = await work(250);
+    const large = await work(1000);
+    expect(large / Math.max(small, 1), `the walk's work: ${small} at 250 barrels, ${large} at 1,000`).toBeLessThan(MAX_GROWTH);
+  }, 300_000);
 
   it("counts a module two cut stars reach with only the names both give (6)", async () => {
     // `a.ts`, `b.ts` and `c.ts` each star the web, so their walks are cut
