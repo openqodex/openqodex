@@ -18,10 +18,17 @@
 //  6. The process group is left running after the driver gives up on it.
 //  7. A hook runs inside the reviewer session (a wrapper around the agent
 //     or a managed setting adds one) and the review still counts as isolated.
-import { chmodSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+//  8. The output Claude Code saved for the session (a long search result,
+//     text of the reviewed code) stays in its configuration folder after the
+//     session ends, whether the turn succeeded or failed (issue 95).
+//  9. That cleanup removes something that is not this session's output:
+//     another session's folder for the same snapshot, a folder of another
+//     working folder, a folder whose name only starts like the snapshot's,
+//     or what a link in the projects folder points to.
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { claudeDriver, classify } from "@openqodex/review";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
@@ -134,4 +141,96 @@ describe("the Claude Code stream reader, on a recorded run", () => {
     expect(turn.failure).toMatch(/trace over/);
     expect(pids.filter(alive)).toEqual([]);
   }, 60_000);
+});
+
+// Claude Code's name for a working folder under <configuration folder>/projects,
+// as its 2.1.296 code writes it: every character other than a letter or a
+// digit becomes "-". The stand-in saves there the way Claude Code does.
+const claudeProjectName = (path: string) => path.replace(/[^a-zA-Z0-9]/g, "-");
+const SESSION = "36382685-600b-4b4a-963e-5930debfca89";
+const SAVE = [
+  "(() => {",
+  "  const { mkdirSync } = require('node:fs');",
+  "  const dir = require('node:path').join(process.env.CLAUDE_CONFIG_DIR, 'projects', snapshot.replace(/[^a-zA-Z0-9]/g, '-'), " + JSON.stringify(SESSION) + ", 'tool-results');",
+  "  mkdirSync(dir, { recursive: true });",
+  "  writeFileSync(require('node:path').join(dir, 'toolu_1.txt'), 'def add(a, b):');",
+  "})()",
+].join("\n");
+
+describe("the output Claude Code saved for the session", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  // A configuration folder and a home folder of the test's own, never the developer's.
+  function config(): string {
+    const home = tempDir("oq-claude-home-");
+    const dir = join(home, "claude-config");
+    mkdirSync(join(dir, "projects"), { recursive: true });
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("CLAUDE_CONFIG_DIR", dir);
+    return dir;
+  }
+  const keep = (path: string) => {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, "keep.txt"), "not this session's");
+    return join(path, "keep.txt");
+  };
+
+  it("8. is removed with the snapshot's project folder when the session closes", async () => {
+    const cfg = config();
+    const bin = standIn(`(${SAVE}, ${JSON.stringify(RECORDED)}.split('__SNAPSHOT__').join(snapshot))`);
+    const { turn, snapshotDir } = await runOnce(bin);
+    expect(turn.failure).toBeNull();
+    expect(turn.sessionId).toBe(SESSION);
+    expect(existsSync(join(cfg, "projects", claudeProjectName(snapshotDir)))).toBe(false);
+    expect(existsSync(join(cfg, "projects"))).toBe(true);
+  });
+
+  it("8. is removed also when the turn failed", async () => {
+    const cfg = config();
+    const failed = RECORDED.replace('"is_error":false,"num_turn', '"is_error":true,"num_turn');
+    expect(failed).not.toBe(RECORDED);
+    const bin = standIn(`(${SAVE}, ${JSON.stringify(failed)}.split('__SNAPSHOT__').join(snapshot))`);
+    const { turn, snapshotDir } = await runOnce(bin);
+    expect(turn.failure).toMatch(/the reviewer stopped with an error/);
+    expect(existsSync(join(cfg, "projects", claudeProjectName(snapshotDir), SESSION))).toBe(false);
+  });
+
+  it("9. leaves another session's folder, another working folder's and a look-alike name", async () => {
+    const cfg = config();
+    const projects = join(cfg, "projects");
+    const bin = standIn(`(${SAVE}, ${JSON.stringify(RECORDED)}.split('__SNAPSHOT__').join(snapshot))`);
+    // The snapshot's folder name is known only once the run made it, so the
+    // neighbours are made by the stand-in's first message, before it saves.
+    const snapshotDir = realpathSync(tempDir("oq-stream-snap-"));
+    const name = claudeProjectName(snapshotDir);
+    const kept = [
+      keep(join(projects, name, "another-session", "tool-results")),
+      keep(join(projects, "-some-other-folder", SESSION, "tool-results")),
+      keep(join(projects, `${name}-x`, SESSION, "tool-results")),
+      keep(join(projects, name.slice(0, -1), SESSION, "tool-results")),
+    ];
+    const session = claudeDriver.start({ snapshotDir, deadline: Date.now() + 30_000, bin, web: false });
+    const turn = await session.send("Review this.");
+    await session.close();
+    expect(turn.failure).toBeNull();
+    expect(existsSync(join(projects, name, SESSION))).toBe(false);
+    for (const path of kept) expect(existsSync(path), path).toBe(true);
+  });
+
+  it("9. leaves what a linked project folder points to", async () => {
+    const cfg = config();
+    const projects = join(cfg, "projects");
+    const outside = tempDir("oq-claude-outside-");
+    const kept = keep(join(outside, SESSION, "tool-results"));
+    const snapshotDir = realpathSync(tempDir("oq-stream-snap-"));
+    symlinkSync(outside, join(projects, claudeProjectName(snapshotDir)));
+    // The stand-in saves through the link, as Claude Code would.
+    const bin = standIn(`(${SAVE}, ${JSON.stringify(RECORDED)}.split('__SNAPSHOT__').join(snapshot))`);
+    const session = claudeDriver.start({ snapshotDir, deadline: Date.now() + 30_000, bin, web: false });
+    const turn = await session.send("Review this.");
+    await session.close();
+    expect(turn.failure).toBeNull();
+    expect(existsSync(kept)).toBe(true);
+    expect(existsSync(join(outside, SESSION, "tool-results", "toolu_1.txt"))).toBe(true);
+  });
 });

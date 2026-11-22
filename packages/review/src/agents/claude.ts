@@ -4,7 +4,9 @@
 // what its comment says with Claude Code 2.1.289; docs/internal-reviewer-drivers.md
 // records the runs.
 import { execFile } from "node:child_process";
+import { lstatSync, realpathSync, rmdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { DELIVERY_ROW_BYTES, REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
@@ -122,6 +124,58 @@ type Event = Record<string, unknown> & { type?: string; subtype?: string };
 
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+// Claude Code's name for a working folder under <configuration folder>/projects:
+// every character other than a letter or a digit becomes "-" (read from the
+// code of Claude Code 2.1.296). A name over 200 characters it cuts and ends
+// with a hash of its own; that name is not worked out here, so such a
+// folder is left where it is rather than guessed at.
+function projectName(folder: string): string | null {
+  const name = folder.replace(/[^a-zA-Z0-9]/g, "-");
+  return name.length <= 200 ? name : null;
+}
+
+const realFolder = (path: string): boolean => {
+  try {
+    const s = lstatSync(path);
+    return s.isDirectory() && !s.isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
+// Removes the output Claude Code saved for this session (a long tool result
+// holds text of the reviewed code, issue 95): exactly
+// <configuration folder>/projects/<the snapshot's name>/<session id>, a real
+// folder, never a link, under a real projects folder; then the snapshot's
+// project folder when that left it empty. Another session's folder, another
+// working folder's, and anything a link points to stay. The snapshot is
+// named as given and by its real path, the one Claude Code saw as its
+// working folder.
+function removeSavedOutput(configDir: string, snapshotDir: string, sessionId: string): void {
+  if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) return;
+  const projects = join(configDir, "projects");
+  if (!realFolder(projects)) return;
+  const spellings = new Set([snapshotDir]);
+  try {
+    spellings.add(realpathSync(snapshotDir));
+  } catch {
+    // the snapshot is gone already: named as given
+  }
+  for (const spelled of spellings) {
+    const name = projectName(spelled);
+    if (name === null) continue;
+    const project = join(projects, name);
+    const session = join(project, sessionId);
+    if (!realFolder(project) || !realFolder(session)) continue;
+    try {
+      rmSync(session, { recursive: true, force: true });
+      rmdirSync(project);
+    } catch {
+      // not removed, or other sessions' output still there: left
+    }
+  }
+}
 
 function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): ReviewerSession {
   const allowed = opts.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS;
@@ -281,6 +335,7 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
       // The agent may leave children of its own, also after it exited
       // itself: the whole group goes.
       killGroup(child);
+      if (sessionId !== null) removeSavedOutput(configDir, opts.snapshotDir, sessionId);
     },
   };
 }
