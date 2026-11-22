@@ -613,7 +613,8 @@ export function regressions(oldSamples, newSamples) {
 //     denominator as a miss. A scanner-only sample has no model and no tokens
 //     to check.
 // Rules version 13: a health result on every review, gated at every scorer.
-export const RULES_VERSION = 13;
+// Rules version 14: a native control review is scored as its sample row says, not failed by the missing report.
+export const RULES_VERSION = 14;
 export const AACR_LINE_K = 1;
 // The order classify() tries the rules in; the first that holds decides.
 export const OUTCOME_ORDER = ["test-gap", "accepted", "hit", "wrong-kind", "near", "false"];
@@ -987,6 +988,10 @@ export function scoreJob({ job, spec, report: saved = null, brief = null, scan =
   const report = started && job.health?.ok === false ? null : saved;
   const planted = origin === "planted";
   const base = scoreSample({ spec, report, brief, row: { ...row, config: job.config, repeat: job.repeat, attempt: 1 }, testOnly: planted });
+  // A native control attempt saves its sample row and no report.json: the
+  // row's own status is the review's status, not the "failed" the missing
+  // report reads as.
+  if (row?.reviewer === "control" && typeof row.status === "string") base.status = row.status;
   const shown = shownFindings(report);
   const places = scannerPlaces(scan);
   const raised = new Set(base.findings.map((f) => f.raised).filter((id) => typeof id === "string"));

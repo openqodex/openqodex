@@ -329,6 +329,8 @@ describe("a rule constant changes without a version bump, and old and new scores
     12: "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
     // Issue 284: a health result on every review; an unhealthy one credits nothing and is failed.
     13: "157a833899f0edcb185874b856d1303c0532b22c05006ea1f6e939b7047e8e91",
+    // A native control review is scored as its sample row says, not failed by the missing report.
+    14: "f6ef14c74d37d2273afaa2fc3aa2177522e9151a9b5aae6b86f21c225d456991",
   };
 
   it("pins the hash of the rules block, constants and matching code included, to its version", () => {
