@@ -3,11 +3,12 @@
 // installation record: a thing is changed or removed only while it is still
 // exactly what we wrote. In project scope a machine with no record (a
 // teammate's) counts a thing as ours only when it equals the current output.
+import { lstatSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { AgentId } from "./detect.js";
 import { readText, sha256 } from "./files.js";
 import type { Guard } from "./guarded-fs.js";
-import { planJsonInstall, planJsonRemoval, planTomlInstall, planTomlRemoval } from "./mcp.js";
+import { MCP_SERVER, planJsonInstall, planJsonRemoval, planTomlInstall, planTomlRemoval, TOML_START } from "./mcp.js";
 import { canonical, type InstallRecord } from "./record.js";
 import type { Scope, Target } from "./targets.js";
 import { isShippedSkill, SECTION_END, SECTION_START } from "./targets.js";
@@ -361,6 +362,48 @@ export function planInstall(t: Target, ctx: Ctx): Action {
       return planJsonInstall(t, ctx, before);
     case "mcp-toml":
       return planTomlInstall(t, ctx, before);
+  }
+}
+
+// Whether OpenQodex's part of `t` is on disk, as any version wrote it and
+// whether or not a record names it: the file, a marked section, a hook group
+// whose command runs openqodex, the openqodex MCP server entry or block.
+// Uninstall asks it of an agent that stays (init.ts). A file it cannot read
+// or parse counts as there, so a doubt keeps a shared file.
+export function setUpAt(t: Target): boolean {
+  if (t.kind === "allow-rules") return false;
+  if (t.kind === "file") {
+    try {
+      lstatSync(t.path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  let text: string | null;
+  try {
+    text = readText(t.path);
+  } catch {
+    return true;
+  }
+  if (text === null) return false;
+  switch (t.kind) {
+    case "md-section":
+      return text.includes(SECTION_START);
+    case "mcp-toml":
+      return text.includes(TOML_START);
+    case "hook-json": {
+      const data = parseSettings(text);
+      return typeof data === "string" || (data.hooks?.PreToolUse ?? []).some((g) => commandsOf(g).some((c) => c.includes("openqodex")));
+    }
+    case "mcp-json": {
+      try {
+        const data: unknown = JSON.parse(text);
+        return !isObject(data) || (isObject(data.mcpServers) && data.mcpServers[MCP_SERVER] !== undefined);
+      } catch {
+        return true;
+      }
+    }
   }
 }
 
