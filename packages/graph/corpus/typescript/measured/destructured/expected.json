@@ -1,0 +1,27 @@
+{
+  "guards": "binds a call on a name destructured from a typed parameter, in the body or in the parameter list, to the member's declared class",
+  "callers": [
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/turns.ts:9",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/session.ts#SessionHandle.createTurn",
+      "site": "src/turns.ts:13",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/turns.ts",
+      "line": 9
+    },
+    {
+      "file": "src/turns.ts",
+      "line": 13
+    }
+  ]
+}

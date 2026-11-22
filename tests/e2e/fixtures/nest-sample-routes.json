@@ -1,0 +1,374 @@
+[
+  {
+    "app": "01-cats-app/src/main.ts",
+    "method": "GET",
+    "path": "/cats",
+    "handler": "01-cats-app/src/cats/cats.controller.ts#CatsController.findAll"
+  },
+  {
+    "app": "01-cats-app/src/main.ts",
+    "method": "GET",
+    "path": "/cats/:id",
+    "handler": "01-cats-app/src/cats/cats.controller.ts#CatsController.findOne"
+  },
+  {
+    "app": "01-cats-app/src/main.ts",
+    "method": "POST",
+    "path": "/cats",
+    "handler": "01-cats-app/src/cats/cats.controller.ts#CatsController.create"
+  },
+  {
+    "app": "03-microservices/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "03-microservices/src/math/math.controller.ts#MathController.execute"
+  },
+  {
+    "app": "04-grpc/src/main.ts",
+    "method": "GET",
+    "path": "/hero",
+    "handler": "04-grpc/src/hero/hero.controller.ts#HeroController.getMany"
+  },
+  {
+    "app": "04-grpc/src/main.ts",
+    "method": "GET",
+    "path": "/hero/:id",
+    "handler": "04-grpc/src/hero/hero.controller.ts#HeroController.getById"
+  },
+  {
+    "app": "05-sql-typeorm/src/main.ts",
+    "method": "DELETE",
+    "path": "/users/:id",
+    "handler": "05-sql-typeorm/src/users/users.controller.ts#UsersController.remove"
+  },
+  {
+    "app": "05-sql-typeorm/src/main.ts",
+    "method": "GET",
+    "path": "/users",
+    "handler": "05-sql-typeorm/src/users/users.controller.ts#UsersController.findAll"
+  },
+  {
+    "app": "05-sql-typeorm/src/main.ts",
+    "method": "GET",
+    "path": "/users/:id",
+    "handler": "05-sql-typeorm/src/users/users.controller.ts#UsersController.findOne"
+  },
+  {
+    "app": "05-sql-typeorm/src/main.ts",
+    "method": "POST",
+    "path": "/users",
+    "handler": "05-sql-typeorm/src/users/users.controller.ts#UsersController.create"
+  },
+  {
+    "app": "06-mongoose/src/main.ts",
+    "method": "DELETE",
+    "path": "/cats/:id",
+    "handler": "06-mongoose/src/cats/cats.controller.ts#CatsController.delete"
+  },
+  {
+    "app": "06-mongoose/src/main.ts",
+    "method": "GET",
+    "path": "/cats",
+    "handler": "06-mongoose/src/cats/cats.controller.ts#CatsController.findAll"
+  },
+  {
+    "app": "06-mongoose/src/main.ts",
+    "method": "GET",
+    "path": "/cats/:id",
+    "handler": "06-mongoose/src/cats/cats.controller.ts#CatsController.findOne"
+  },
+  {
+    "app": "06-mongoose/src/main.ts",
+    "method": "POST",
+    "path": "/cats",
+    "handler": "06-mongoose/src/cats/cats.controller.ts#CatsController.create"
+  },
+  {
+    "app": "06-mongoose/src/main.ts",
+    "method": "POST",
+    "path": "/cats/:id",
+    "handler": "06-mongoose/src/cats/cats.controller.ts#CatsController.update"
+  },
+  {
+    "app": "07-sequelize/src/main.ts",
+    "method": "DELETE",
+    "path": "/users/:id",
+    "handler": "07-sequelize/src/users/users.controller.ts#UsersController.remove"
+  },
+  {
+    "app": "07-sequelize/src/main.ts",
+    "method": "GET",
+    "path": "/users",
+    "handler": "07-sequelize/src/users/users.controller.ts#UsersController.findAll"
+  },
+  {
+    "app": "07-sequelize/src/main.ts",
+    "method": "GET",
+    "path": "/users/:id",
+    "handler": "07-sequelize/src/users/users.controller.ts#UsersController.findOne"
+  },
+  {
+    "app": "07-sequelize/src/main.ts",
+    "method": "POST",
+    "path": "/users",
+    "handler": "07-sequelize/src/users/users.controller.ts#UsersController.create"
+  },
+  {
+    "app": "08-webpack/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "08-webpack/src/app.controller.ts#AppController.getHello"
+  },
+  {
+    "app": "09-babel-example/src/main.js",
+    "method": "GET",
+    "path": "/cats",
+    "handler": "09-babel-example/src/cats/cats.controller.js#CatsController.findAll"
+  },
+  {
+    "app": "09-babel-example/src/main.js",
+    "method": "GET",
+    "path": "/cats/:id",
+    "handler": "09-babel-example/src/cats/cats.controller.js#CatsController.findOne"
+  },
+  {
+    "app": "09-babel-example/src/main.js",
+    "method": "POST",
+    "path": "/cats",
+    "handler": "09-babel-example/src/cats/cats.controller.js#CatsController.create"
+  },
+  {
+    "app": "10-fastify/src/main.ts",
+    "method": "GET",
+    "path": "/cats",
+    "handler": "10-fastify/src/cats/cats.controller.ts#CatsController.findAll"
+  },
+  {
+    "app": "10-fastify/src/main.ts",
+    "method": "GET",
+    "path": "/cats/:id",
+    "handler": "10-fastify/src/cats/cats.controller.ts#CatsController.findOne"
+  },
+  {
+    "app": "10-fastify/src/main.ts",
+    "method": "POST",
+    "path": "/cats",
+    "handler": "10-fastify/src/cats/cats.controller.ts#CatsController.create"
+  },
+  {
+    "app": "11-swagger/src/main.ts",
+    "method": "GET",
+    "path": "/cats/:id",
+    "handler": "11-swagger/src/cats/cats.controller.ts#CatsController.findOne"
+  },
+  {
+    "app": "11-swagger/src/main.ts",
+    "method": "POST",
+    "path": "/cats",
+    "handler": "11-swagger/src/cats/cats.controller.ts#CatsController.create"
+  },
+  {
+    "app": "13-mongo-typeorm/src/main.ts",
+    "method": "GET",
+    "path": "/photo",
+    "handler": "13-mongo-typeorm/src/photo/photo.controller.ts#PhotoController.findAll"
+  },
+  {
+    "app": "14-mongoose-base/src/main.ts",
+    "method": "GET",
+    "path": "/cats",
+    "handler": "14-mongoose-base/src/cats/cats.controller.ts#CatsController.findAll"
+  },
+  {
+    "app": "14-mongoose-base/src/main.ts",
+    "method": "POST",
+    "path": "/cats",
+    "handler": "14-mongoose-base/src/cats/cats.controller.ts#CatsController.create"
+  },
+  {
+    "app": "15-mvc/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "15-mvc/src/app.controller.ts#AppController.root"
+  },
+  {
+    "app": "17-mvc-fastify/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "17-mvc-fastify/src/app.controller.ts#AppController.root"
+  },
+  {
+    "app": "19-auth-jwt/src/main.ts",
+    "method": "GET",
+    "path": "/auth/profile",
+    "handler": "19-auth-jwt/src/auth/auth.controller.ts#AuthController.getProfile"
+  },
+  {
+    "app": "19-auth-jwt/src/main.ts",
+    "method": "POST",
+    "path": "/auth/login",
+    "handler": "19-auth-jwt/src/auth/auth.controller.ts#AuthController.signIn"
+  },
+  {
+    "app": "20-cache/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "20-cache/src/app.controller.ts#AppController.findAll"
+  },
+  {
+    "app": "21-serializer/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "21-serializer/src/app.controller.ts#AppController.findOne"
+  },
+  {
+    "app": "24-serve-static/src/main.ts",
+    "method": "GET",
+    "path": "/api",
+    "handler": "24-serve-static/src/app.controller.ts#AppController.getHello"
+  },
+  {
+    "app": "25-dynamic-modules/src/main.ts",
+    "method": "GET",
+    "path": "/orders",
+    "handler": "25-dynamic-modules/src/orders/orders.controller.ts#OrdersController.findAll"
+  },
+  {
+    "app": "25-dynamic-modules/src/main.ts",
+    "method": "GET",
+    "path": "/users",
+    "handler": "25-dynamic-modules/src/users/users.controller.ts#UsersController.findAll"
+  },
+  {
+    "app": "25-dynamic-modules/src/main.ts",
+    "method": "POST",
+    "path": "/orders",
+    "handler": "25-dynamic-modules/src/orders/orders.controller.ts#OrdersController.create"
+  },
+  {
+    "app": "25-dynamic-modules/src/main.ts",
+    "method": "POST",
+    "path": "/users",
+    "handler": "25-dynamic-modules/src/users/users.controller.ts#UsersController.create"
+  },
+  {
+    "app": "26-queues/src/main.ts",
+    "method": "POST",
+    "path": "/audio/transcode",
+    "handler": "26-queues/src/audio/audio.controller.ts#AudioController.transcode"
+  },
+  {
+    "app": "28-sse/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "28-sse/src/app.controller.ts#AppController.index"
+  },
+  {
+    "app": "28-sse/src/main.ts",
+    "method": "GET",
+    "path": "/sse",
+    "handler": "28-sse/src/app.controller.ts#AppController.sse"
+  },
+  {
+    "app": "29-file-upload/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "29-file-upload/src/app.controller.ts#AppController.sayHello"
+  },
+  {
+    "app": "29-file-upload/src/main.ts",
+    "method": "POST",
+    "path": "/file",
+    "handler": "29-file-upload/src/app.controller.ts#AppController.uploadFile"
+  },
+  {
+    "app": "29-file-upload/src/main.ts",
+    "method": "POST",
+    "path": "/file/fail-validation",
+    "handler": "29-file-upload/src/app.controller.ts#AppController.uploadFileAndFailValidation"
+  },
+  {
+    "app": "29-file-upload/src/main.ts",
+    "method": "POST",
+    "path": "/file/pass-validation",
+    "handler": "29-file-upload/src/app.controller.ts#AppController.uploadFileAndPassValidation"
+  },
+  {
+    "app": "30-event-emitter/src/main.ts",
+    "method": "POST",
+    "path": "/orders",
+    "handler": "30-event-emitter/src/orders/orders.controller.ts#OrdersController.create"
+  },
+  {
+    "app": "34-hmr-esm/src/main.ts",
+    "method": "GET",
+    "path": "/cats",
+    "handler": "34-hmr-esm/src/cats/cats.controller.ts#CatsController.findAll"
+  },
+  {
+    "app": "34-hmr-esm/src/main.ts",
+    "method": "GET",
+    "path": "/cats/:id",
+    "handler": "34-hmr-esm/src/cats/cats.controller.ts#CatsController.findOne"
+  },
+  {
+    "app": "34-hmr-esm/src/main.ts",
+    "method": "POST",
+    "path": "/cats",
+    "handler": "34-hmr-esm/src/cats/cats.controller.ts#CatsController.create"
+  },
+  {
+    "app": "35-zod-validation/src/main.ts",
+    "method": "GET",
+    "path": "/cats",
+    "handler": "35-zod-validation/src/cats/cats.controller.ts#CatsController.findAll"
+  },
+  {
+    "app": "35-zod-validation/src/main.ts",
+    "method": "POST",
+    "path": "/cats",
+    "handler": "35-zod-validation/src/cats/cats.controller.ts#CatsController.create"
+  },
+  {
+    "app": "36-valibot-serializer/src/main.ts",
+    "method": "GET",
+    "path": "/",
+    "handler": "36-valibot-serializer/src/app.controller.ts#AppController.findOne"
+  },
+  {
+    "app": "37-outbox/src/main.ts",
+    "method": "DELETE",
+    "path": "/admin/outbox/dead-letters/:id",
+    "handler": "37-outbox/src/outbox-admin/outbox-admin.controller.ts#OutboxAdminController.purge"
+  },
+  {
+    "app": "37-outbox/src/main.ts",
+    "method": "GET",
+    "path": "/admin/outbox/dead-letters",
+    "handler": "37-outbox/src/outbox-admin/outbox-admin.controller.ts#OutboxAdminController.list"
+  },
+  {
+    "app": "37-outbox/src/main.ts",
+    "method": "GET",
+    "path": "/admin/outbox/stats",
+    "handler": "37-outbox/src/outbox-admin/outbox-admin.controller.ts#OutboxAdminController.stats"
+  },
+  {
+    "app": "37-outbox/src/main.ts",
+    "method": "POST",
+    "path": "/admin/outbox/dead-letters/:id/requeue",
+    "handler": "37-outbox/src/outbox-admin/outbox-admin.controller.ts#OutboxAdminController.requeue"
+  },
+  {
+    "app": "37-outbox/src/main.ts",
+    "method": "POST",
+    "path": "/orders",
+    "handler": "37-outbox/src/orders/orders.controller.ts#OrdersController.place"
+  },
+  {
+    "app": "37-outbox/src/main.ts",
+    "method": "POST",
+    "path": "/orders/:id/cancel",
+    "handler": "37-outbox/src/orders/orders.controller.ts#OrdersController.cancel"
+  }
+]

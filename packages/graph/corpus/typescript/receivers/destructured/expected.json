@@ -1,0 +1,72 @@
+{
+  "guards": "types a name bound by destructuring a typed parameter or local, renamed, nested, or with a default under an annotation, and leaves an unannotated default unknown",
+  "callers": [
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:9",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:14",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:19",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:23",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/sessions.ts#Session.stream",
+      "site": "src/use.ts:29",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:9"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:14"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:19"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:23"
+    },
+    {
+      "to": "src/sessions.ts#Other.stream",
+      "site": "src/use.ts:29"
+    },
+    {
+      "to": "src/sessions.ts#Other.close",
+      "site": "src/use.ts:36"
+    },
+    {
+      "to": "src/sessions.ts#Sessions.close",
+      "site": "src/use.ts:36"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 36,
+      "cause": "no-receiver-type"
+    }
+  ]
+}

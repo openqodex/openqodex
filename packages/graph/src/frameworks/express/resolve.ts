@@ -32,6 +32,7 @@
 // text.
 import type { Detection, Entity, FrameworkEdge, FrameworkEvidence, FrameworkEvidenceKind, FrameworkUnknown, HandlerStatus, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
 import { appId, entityId } from "../plugin.js";
+import { inlineHandler } from "../shared/inline.js";
 import type { Tier } from "../../model/records.js";
 import type { ExpressFact } from "./facts.js";
 import { HTTP_METHODS, MAX_SCOPE_CHAIN } from "./facts.js";
@@ -100,6 +101,7 @@ type FileIndex = {
   values: Map<string, Fact<"value">[]>;
   params: Map<string, Fact<"param">[]>;
   cjs: Map<string, Fact<"cjs-export">>;
+  cjsTwice: Set<string>; // export names written more than once
   functions: Map<string, Fact<"function">[]>;
   calls: Fact<"call">[];
   servers: Fact<"server">[];
@@ -184,7 +186,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   const fx = (file: string): FileIndex => {
     let f = fileIndexes.get(file);
     if (f) return f;
-    f = { values: new Map(), params: new Map(), cjs: new Map(), functions: new Map(), calls: [], servers: [], testBlocks: 0, tooLarge: null, syntaxError: null, scopes: new Map(), unread: false };
+    f = { values: new Map(), params: new Map(), cjs: new Map(), cjsTwice: new Set(), functions: new Map(), calls: [], servers: [], testBlocks: 0, tooLarge: null, syntaxError: null, scopes: new Map(), unread: false };
     fileIndexes.set(file, f);
     const list = index.factsOf(file);
     if (!take("facts", list.length)) {
@@ -200,7 +202,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
           push(f.params, fact.name, fact);
           break;
         case "cjs-export":
-          if (!f.cjs.has(fact.name)) f.cjs.set(fact.name, fact);
+          if (f.cjs.has(fact.name)) f.cjsTwice.add(fact.name);
+          else f.cjs.set(fact.name, fact);
           break;
         case "function":
           push(f.functions, fact.name, fact);
@@ -333,7 +336,12 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
       if (direct) return direct;
       // `const app = other` passes a known value on.
       if (decl.value.t === "ref" && !(decl.value.path.length === 1 && decl.value.path[0] === name)) return valueIn(file, decl.value.path, decl.scope, decl.line, depth + 1);
-      return null;
+      return fromRequire(file, decl, undefined, depth)?.val ?? null;
+    }
+    // `m.users` where `m` holds `require("./m")`.
+    if (path.length === 2 && writes.length === 1) {
+      const got = fromRequire(file, writes[0] as Fact<"value">, path[1] as string, depth);
+      if (got) return got.val;
     }
     if (at !== 0) {
       // A parameter or a local with no value the facts hold: only a parameter typed as Express says what it is.
@@ -364,15 +372,113 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
 
   const topValue = (file: string, name: string): Fact<"value"> | null => (fx(file).values.get(name) ?? []).find((v) => v.top) ?? null;
 
+  // ---------- CommonJS ----------
+  // `const m = require("./m")` and `const { a } = require("./m")` bind a name
+  // to what a module assigns to `module.exports` or `exports`. `settled`: the
+  // plugin knows what the name holds, a router, an application or a value
+  // that is none (a function, a package). A name it cannot settle may be a
+  // router, so a mount of it is an unknown, never a silent loss.
+  type Got = { val: Val | Param | null; settled: boolean; note: string };
+  const unsettled = (note: string): Got => ({ val: null, settled: false, note });
+  const isRequire = (e: Expr, file: string, scope: number): boolean => e.t === "call" && e.fn.t === "ref" && e.fn.path.length === 1 && e.fn.path[0] === "require" && bindingScope(file, scope, "require") === 0;
+  const requireBound = (file: string, decl: Fact<"value">): boolean => isRequire(decl.value.t === "member" ? decl.value.obj : decl.value, file, decl.scope);
+
+  // What a file assigns to an export name: `exports.n = x`, `module.exports.n = x`,
+  // or a member of `module.exports = { n }`; "default" is `module.exports` itself.
+  // "competing" when more than one write may give the name its value and
+  // the facts do not prove which runs last: the name written twice, an
+  // object that names it twice or holds a spread, a member written beside
+  // an object that names it, or written before `module.exports` is replaced.
+  // "replaced" when `exports.n` is written after `module.exports` is replaced:
+  // that write changes the old object, which nothing requires.
+  const cjsEntry = (file: string, name: string): { value: Expr; line: number; column: number } | "competing" | "replaced" | null => {
+    const f = fx(file);
+    if (f.cjsTwice.has(name)) return "competing";
+    const own = f.cjs.get(name);
+    const whole = name === "default" ? undefined : f.cjs.get("default");
+    if (!whole) return own ?? null;
+    if (f.cjsTwice.has("default")) return "competing";
+    const members = whole.value.t === "object" ? whole.value.props.filter((p) => p.key === name) : [];
+    const hidden = whole.value.t === "object" && (whole.value.more ?? 0) > 0;
+    // `exports.n = x` written after `module.exports` is replaced changes the old object only, unless the new value is `exports` itself.
+    const aliased = whole.value.t === "ref" && whole.value.path.length === 1 && whole.value.path[0] === "exports";
+    const stale = own?.bare === true && !aliased && !(own.line < whole.line || (own.line === whole.line && own.column < whole.column));
+    if (stale) return "replaced";
+    if (own) return members.length > 0 || hidden || own.line < whole.line || (own.line === whole.line && own.column < whole.column) ? "competing" : own;
+    if (members.length > 1 || (members.length === 1 && hidden)) return "competing";
+    const member = members[0];
+    return member ? { value: member.value, line: whole.line, column: whole.column } : null;
+  };
+  // An export that is a function: middleware or a handler, never a router.
+  const notRouter = (file: string, e: Expr): boolean => {
+    if (e.t === "fn") return true;
+    if (e.t !== "ref" || e.path.length !== 1) return false;
+    const name = e.path[0] as string;
+    return fx(file).functions.has(name) || (topValue(file, name)?.value.t === "fn");
+  };
+  const exportOf = (file: string, name: string, depth: number): Got => {
+    if (!index.languageFacts(file)) return unsettled(`${file} was not read`);
+    const val = exportedValue(file, name, depth + 1);
+    if (val) return { val, settled: true, note: "" };
+    const entry = cjsEntry(file, name);
+    if (entry === "competing") return unsettled(`${file} writes its export ${name === "default" ? "module.exports" : name} more than once, so which value it holds is not known`);
+    if (entry === "replaced") return unsettled(`${file} writes exports.${name} after it replaces module.exports, so the module does not export ${name}`);
+    if (entry && notRouter(file, entry.value)) return { val: null, settled: true, note: "" };
+    return unsettled(entry ? `${file} exports ${show(entry.value)}, which the plugin cannot read as a router` : `${file} has no export the plugin can read under that name`);
+  };
+  // `member`: the name read off the whole module (`m.users`).
+  const fromRequire = (file: string, decl: Fact<"value">, member: string | undefined, depth: number): Got | null => {
+    if (!requireBound(file, decl)) return null;
+    const imp = index.languageFacts(file)?.imports.find((i) => i.line === decl.line && i.column === decl.column && (i.namespace === decl.name || i.names.some((n) => n.local === decl.name)));
+    if (!imp) {
+      // `const r = require("./x").router`: a member of the call, as inlineRequire reads it in place.
+      if (decl.value.t === "member" && member === undefined) return inlineRequire(file, decl.value, decl.scope, depth) ?? unsettled("the module the require names is computed or not a plain string");
+      return unsettled("the module the require names is computed or not a plain string");
+    }
+    const named = imp.names.find((n) => n.local === decl.name);
+    if (named && member !== undefined) return unsettled(`${decl.name}.${member} reads a member of a destructured name`);
+    return requiredExport(file, imp.spec, named ? named.imported : (member ?? "default"), depth);
+  };
+  const requiredExport = (file: string, spec: string, name: string, depth: number): Got => {
+    if (!take("lookups")) return unsettled(`the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`);
+    const mod = index.module(file, spec);
+    if (mod.kind === "external") return { val: null, settled: true, note: "" };
+    if (mod.kind !== "module") return unsettled(`no file in the repository is named by require(${JSON.stringify(spec)})`);
+    return exportOf(mod.file, name, depth + 1);
+  };
+  // A require written where its value is used: `app.use("/x", require("./x"))`, or `require("./x").router`.
+  const inlineRequire = (file: string, a: Expr, scope: number, depth: number): Got | null => {
+    const member = a.t === "member" ? a.prop : undefined;
+    const call = a.t === "member" ? a.obj : a;
+    if (call.t !== "call" || !isRequire(call, file, scope)) return null;
+    const spec = call.args[0];
+    if (call.args.length !== 1 || spec?.t !== "str") return unsettled("the module name is computed or not a plain string");
+    return requiredExport(file, spec.v, member ?? "default", depth);
+  };
+  // What an argument of `use` holds: a name, or a require written in place.
+  const argValue = (file: string, a: Expr, scope: number, line: number): Val | Param | null =>
+    a.t === "ref" ? valueIn(file, a.path, scope, line) : (inlineRequire(file, a, scope, 0)?.val ?? null);
+  // Why a name a mount reads is not followed through a require; null when it is no require or is no router.
+  const requireGap = (file: string, path: readonly string[], scope: number): string | null => {
+    const name = path[0] as string;
+    const writes = writesOf(file, name, bindingScope(file, scope, name));
+    if (!writes.some((w) => requireBound(file, w))) return null;
+    if (writes.length > 1) return `${name} is assigned more than once`;
+    if (path.length > 2) return `${path.join(".")} reads deeper than one member of the module`;
+    const got = fromRequire(file, writes[0] as Fact<"value">, path[1], 0);
+    return got === null || got.settled ? null : got.note;
+  };
+
   const exportedValue = (file: string, name: string, depth: number): Val | Param | null => {
     if (depth > MAX_MOUNT_DEPTH) return null;
+    const cjs = cjsEntry(file, name);
+    if (cjs === "competing" || cjs === "replaced") return null;
     const lf = index.languageFacts(file);
     let local: string | null = null;
     if (name === "default") local = lf?.defaultExport ?? null;
     const direct = (fx(file).values.get(name) ?? []).find((v) => v.top && v.exported);
     if (direct) return valueIn(file, [direct.name], 0, direct.line, depth);
     local ??= lf?.exportsLocal.find((x) => x.exported === name)?.local ?? null;
-    const cjs = fx(file).cjs.get(name);
     if (!local && cjs) {
       if (cjs.value.t === "ref" && cjs.value.path.length === 1) local = cjs.value.path[0] as string;
       else return classify(file, { name, value: cjs.value, scope: 0, line: cjs.line, column: cjs.column });
@@ -517,7 +623,11 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   };
   const bindOnce = (file: string, e: Expr, scope: number, line: number, role: "handler" | "middleware"): Bound => {
     const none = (status: HandlerStatus, cause: FrameworkUnknown["cause"], note: string, name: string | null): Bound => ({ status, targets: [], tier: "certain", kind: "route-call", via: null, note: null, why: { cause, note, name } });
-    if (e.t === "fn") return none("unresolved", "unsupported-rule", `the ${role} is an inline function, which has no symbol of its own; the calls it makes are counted under the code around it`, null);
+    if (e.t === "fn") {
+      const inline = role === "handler" ? inlineHandler(index, file, e) : null;
+      if (inline) return { status: "bound", targets: [inline], tier: "certain", kind: "route-call", via: null, note: null, why: null };
+      return none("unresolved", "unsupported-rule", `the ${role} is an inline function, which has no symbol of its own; the calls it makes are counted under the code around it`, null);
+    }
     if (e.t === "call") {
       const inner = e.args.find((a) => a.t === "ref");
       const wrapper = show(e.fn);
@@ -596,8 +706,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     for (const e of list) {
       if (e.type !== "use") continue;
       for (const a of e.args) {
-        if (a.t !== "ref") continue;
-        const v = valueIn(e.file, a.path, e.scope, e.site.line);
+        const v = argValue(e.file, a, e.scope, e.site.line);
         if (v && v.kind === "router" && v.id !== id) mountedBy.set(v.id, (mountedBy.get(v.id) ?? 0) + 1);
       }
     }
@@ -627,7 +736,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
         if (e.more > 0) cutGap(e.file, e.site, e.more, "the routers and middleware");
         for (const a of e.args) {
           if (halted()) return;
-          const target = a.t === "ref" ? valueIn(e.file, a.path, e.scope, e.site.line) : null;
+          const target = argValue(e.file, a, e.scope, e.site.line);
           if (target && target.kind === "router") {
             // A mount that loops back to a router on the way here ends the loop.
             if (stack.includes(target.id)) continue;
@@ -646,6 +755,10 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
             addUnknown({ plugin: PLUGIN, site: e.site, scope: scopeOf(app, e.file), affects: ["mounts", "handles"], cause: "unsupported-rule", name: show(a), note: `${show(a)} is an application mounted here as a sub-application; the plugin lists its routes on it alone, not under this mount path`, count: null, exact: false });
             continue;
           }
+          // A router brought in by a require the plugin cannot follow is not listed under this mount.
+          const inline = target || a.t === "ref" ? null : inlineRequire(e.file, a, e.scope, 0);
+          const lost = target ? null : a.t === "ref" ? requireGap(e.file, a.path, e.scope) : inline && !inline.settled ? inline.note : null;
+          if (lost !== null) addUnknown({ plugin: PLUGIN, site: e.site, scope: scopeOf(app, e.file), affects: ["mounts", "handles"], cause: "dynamic", name: show(a), note: `${show(a)} comes from a CommonJS require the plugin cannot follow (${lost}), so it may be a router whose routes are not listed under this mount`, count: null, exact: false });
           if (mw.length >= MAX_MIDDLEWARE_CHAIN) {
             middlewareOmitted++;
             continue;

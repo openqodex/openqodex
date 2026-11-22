@@ -36,9 +36,11 @@ export type EvidenceKind =
   | "receiver-constructor" // a receiver a constructor call typed
   | "receiver-annotation" // a receiver a type annotation typed
   | "receiver-result" // a receiver a declared result type typed
+  | "receiver-inferred" // a receiver typed by what the called function's body provably returns
   | "receiver-field" // a receiver reached through a typed field
   | "receiver-self" // this, self or cls in a method of the class
   | "autoload" // a Ruby constant found by the autoload convention
+  | "fastapi-depends" // a FastAPI Depends or Security dependency, run for the route or dependency that declares it
   // Possible only: the evidence names a set, never one definition.
   | "dispatch-implements" // a call through an interface to one of its implementations
   | "dispatch-override" // a call through a base type, or this or self, to an override in a subclass
@@ -46,6 +48,7 @@ export type EvidenceKind =
   | "value-alias" // a local given one function, then called
   | "value-table" // a function in a literal table that a computed call on it may call
   | "returned-value" // a function a callee returns by name, called where it is returned
+  | "by-shape" // a TypeScript class that has every member of an interface by name, without declaring implements
   // Likely at most: a match of member names, the signatures not compared.
   | "method-set"; // a Go type or Python class that defines every member of an interface or Protocol
 
@@ -62,8 +65,10 @@ export const CERTAIN_KINDS: ReadonlySet<EvidenceKind> = new Set<EvidenceKind>([
   "receiver-constructor",
   "receiver-annotation",
   "receiver-result",
+  "receiver-inferred",
   "receiver-field",
   "receiver-self",
+  "fastapi-depends",
 ]);
 
 // What proved a binding through a module: the import line and how its
@@ -158,7 +163,7 @@ export type Cut = {
 // Checks a bound site before it is published: a certain tier needs a kind
 // in the certain set and, for a binding through a module, the import line
 // that proved it. Returns the reason it is invalid, or null.
-export const POSSIBLE_KINDS: ReadonlySet<EvidenceKind> = new Set<EvidenceKind>(["dispatch-implements", "dispatch-override", "invocation-summary", "value-alias", "value-table", "returned-value"]);
+export const POSSIBLE_KINDS: ReadonlySet<EvidenceKind> = new Set<EvidenceKind>(["dispatch-implements", "dispatch-override", "invocation-summary", "value-alias", "value-table", "returned-value", "by-shape"]);
 
 export function validateEvidence(e: Evidence): string | null {
   if (e.tier === "certain" && !CERTAIN_KINDS.has(e.kind)) return `a certain site cannot rest on ${e.kind}`;

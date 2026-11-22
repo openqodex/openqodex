@@ -1,0 +1,52 @@
+{
+  "guards": "keeps the gap of a call through an interface when an object literal written in place has the interface's methods, beside the classes listed by shape",
+  "callers": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/mem.ts#MemStore.get",
+      "site": "src/use.ts:4",
+      "tier": "possible",
+      "kind": "dispatches_to",
+      "note": "every method of Store by name"
+    },
+    {
+      "to": "src/store.ts#Maker.make",
+      "site": "src/use.ts:13",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#Lone.find",
+      "site": "src/use.ts:17",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 4,
+      "cause": "unsupported-rule"
+    },
+    {
+      "file": "src/use.ts",
+      "line": 13,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/use.ts",
+      "line": 17,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "floor": {
+    "src/mem.ts#MemStore.get": true
+  }
+}

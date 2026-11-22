@@ -119,7 +119,7 @@ export function writeIndex(g: Graph): Record<string, string> {
   const edges = g.edges.map(e.edge);
   const importers = [...g.importers.values()].flat().map(e.edge);
   const misses = g.misses.map((m) => [e.s(m.target), e.s(m.name), e.s(m.from), e.site(m.site)]);
-  const unknowns = g.unknowns.map((u) => [e.s(u.file), u.line, u.column, e.s(u.name), e.s(u.cause), e.s(u.shape), e.s(u.caller), u.scope === "project" ? 1 : 0, e.s(u.note), u.candidates ? u.candidates.map(e.s) : -1]);
+  const unknowns = g.unknowns.map((u) => [e.s(u.file), u.line, u.column, e.s(u.name), e.s(u.cause), e.s(u.shape), e.s(u.caller), u.scope === "project" ? 1 : 0, e.s(u.note), u.candidates ? u.candidates.map(e.s) : -1, ...(u.receiver ? [e.s(u.receiver)] : [])]);
   const references = g.references.map(e.edge);
   const dispatch = g.dispatch.map((x) => [e.s(x.file), x.line, x.column, e.s(x.caller), e.s(x.name), x.declared.map(e.s), x.candidates.map(e.s), x.total, e.s(x.rule)]);
   const summaries = [...g.summaries].map(([id, x]) => [e.s(id), x.params.map(e.s), x.invokes, x.returns.map(e.s), x.returnsOther ? 1 : 0]);
@@ -190,6 +190,7 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
       const note = d.n(r[8] as number);
       if (note !== null) u.note = note;
       if (Array.isArray(r[9])) u.candidates = (r[9] as number[]).map(d.s);
+      if (typeof r[10] === "number") u.receiver = d.s(r[10]);
       return u;
     });
     const dispatch = dispatchRows.map((r): DispatchSite => ({

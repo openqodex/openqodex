@@ -1,0 +1,9 @@
+{
+  "guards": "finds the Nest routes of unchanged files once a manifest change declares @nestjs/common and @nestjs/core",
+  "frameworks": {
+    "plugin": "nest",
+    "apps": 1,
+    "registrations": [{ "site": "src/ping.ts:5", "methods": ["GET"], "pattern": "/ping", "handler": "src/ping.ts#PingController.ping", "status": "bound", "mounted": true }],
+    "roles": [{ "target": "src/ping.ts#PingController.ping", "role": "route_handler", "detail": "nest" }]
+  }
+}

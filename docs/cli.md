@@ -62,11 +62,19 @@ openqodex review <branch | #number | pull request link> [--base <ref>] [--review
   One checks correctness and safety.
   The other checks interfaces and conventions.
   Each finder gets the unit's changed ranges, nearby code and matching patterns.
+  The interfaces finder also gets the callers of each changed declaration in other files.
+  The code graph's callers come first, then matches by name.
+  At most 8 callers per declaration are shown, and the brief says how many were cut.
   Finders name candidate defects with the lines that show them.
   A script checks every quoted line against the snapshot.
   Candidates without matching evidence are dropped.
   For each changed file, a fresh verifier checks the finder and scanner candidates on that file.
+  The verifier also gets the lines a candidate cites in other files, read from the snapshot.
+  A candidate whose evidence cites a path outside the snapshot is dropped.
+  A finding whose evidence rests on another file names those files and lines.
+  `report.json` holds them under the finding's `evidence`, and the report shows them as "Evidence in other files".
   Only confirmed defects become findings or possible issues.
+  So does a confirmed break of a written rule in a chosen convention file, with the rule cited; see [Convention files](config.md#convention-files).
   Style, naming, docs and test items remain observations.
   Observations never count toward the verdict.
   Half the time left after the scan is kept for the verifiers.

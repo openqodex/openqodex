@@ -1,0 +1,17 @@
+{
+  "guards": "binds a call on a class field typed by a type alias of a generic class (`type AnyBox = Box<unknown>`) to the class's method",
+  "callers": [
+    {
+      "to": "src/box.ts#Box.open",
+      "site": "src/user.ts:6",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/user.ts",
+      "line": 6
+    }
+  ]
+}

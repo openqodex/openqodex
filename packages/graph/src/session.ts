@@ -4,6 +4,7 @@
 // test/session.test.ts checks), and it needs no source byte: the bytes of a
 // capture stay readable through `git show <tree>:<path>` while the build is
 // kept (refs/openqodex/graph/<tree>).
+import { foldInline } from "./inline-fold.js";
 import { createWorld } from "./resolve.js";
 import { assemble, deserializeModel, readIndex } from "./store/graph-files.js";
 import type { GenerationManifest, GraphStore, OpenGeneration } from "./store/types.js";
@@ -17,7 +18,7 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
   if (indexed) return { ...indexed, repoRoot: store.repoRoot, status: { ...indexed.status, generation: gen.manifest.id } };
   let inventory: { files: Record<string, { key: string; lang: string }> };
   let projects: { model: Record<string, unknown>; goModules: [string, string][] };
-  let coverage: { notRead: NotRead[]; budgetFiles: string[] };
+  let coverage: { notRead: NotRead[]; budgetFiles: string[]; unreadLanguages?: { language: string; files: number }[] };
   try {
     inventory = JSON.parse(gen.read("inventory.json") ?? "null") as typeof inventory;
     projects = JSON.parse(gen.read("projects.json") ?? "null") as typeof projects;
@@ -36,6 +37,8 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
   const model = deserializeModel(projects.model);
   const known = new Set(Object.keys(inventory.files));
   const resolved = createWorld({ files, known, model, goModules: projects.goModules }).resolveAll();
+  // No framework data is kept without the index: no function written in place stays bound.
+  foldInline(resolved, files, new Set());
   const m = gen.manifest;
   const notRead = [...coverage.notRead, ...missing];
   const reasons = [...m.reasons, ...(missing.length > 0 ? [`the facts of ${missing.length} files of this build are no longer kept`] : [])];
@@ -57,6 +60,7 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
     stages: m.stages,
     cuts: [],
     notRead,
+    ...(coverage.unreadLanguages ? { unreadLanguages: coverage.unreadLanguages } : {}),
   };
   const graph = assemble([...resolved.nodes.values()], resolved.edges, [...resolved.importers.values()].flat(), resolved.misses, resolved.unknowns, status, model, projects.goModules, {
     references: resolved.references,

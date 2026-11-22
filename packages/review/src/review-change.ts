@@ -97,7 +97,7 @@ import { converse, deliverRanges, redactSnapshot } from "./conversation.js";
 import type { Conversation, CorrectionRound, Speaker } from "./conversation.js";
 import { modelSession, modelToolEntry } from "./model-loop.js";
 import type { ModelSession } from "./model-loop.js";
-import { buildNeighbourhood, renderNeighbourhoodBlock } from "./neighbourhood.js";
+import { NEIGHBOURHOOD_BLOCK_BYTES, buildNeighbourhood, renderCitedBlock, renderContractsBlock, renderNeighbourhoodBlock } from "./neighbourhood.js";
 import type { Neighbourhood } from "./neighbourhood.js";
 import { longestBrief, obligations, unitsOf } from "./units.js";
 import { runStagedReview } from "./stages.js";
@@ -560,9 +560,18 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     // The graph a model reviewer's find_callers asks, and why there is none.
     let graph: Graph | null = null;
     let neighbourhood: Neighbourhood = { symbols: [], packetPath: null, partial: null, durationMs: 0 };
-    const neighbourhoodBlock = (files?: readonly string[]) => {
-      try { return renderNeighbourhoodBlock(neighbourhood, files); }
+    const neighbourhoodBlock = (files?: readonly string[], maxBytes?: number) => {
+      try { return renderNeighbourhoodBlock(neighbourhood, files, maxBytes); }
       catch (error) { neighbourhood.partial = (error instanceof Error ? error.message : String(error)).split("\n")[0]!; return ""; }
+    };
+    // A staged brief's cross-file block (the callers of the changed
+    // declarations, or the code a candidate cites in other files) shares the
+    // neighbourhood's byte budget, so no brief grows past what units allow.
+    // A block that cannot be rendered is left out, as the neighbourhood's is.
+    const withCrossFile = (render: () => string, files: readonly string[]) => {
+      let block = "";
+      try { block = render(); } catch { /* The brief keeps the code around the change. */ }
+      return [block, neighbourhoodBlock(files, NEIGHBOURHOOD_BLOCK_BYTES - Buffer.byteLength(block))].filter(Boolean).join("\n\n");
     };
     if (prep.whole) {
       clock.enter("graph");
@@ -644,7 +653,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     // lines into fragments. They need the run's one secrets list on record.
     if (inventory.length === 0) setFragmentSource(change, (path, from, to) => snapshotByteLines(prep.snapshot.tree, path, from, to), p.secrets);
     const briefArgs = { change, scan, lenses, config, secrets: p.secrets, impactBlock: renderImpactBlock(impact), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown };
-    const findBrief = (unit: ReviewUnit, pass: import("@openqodex/core").FindPass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: neighbourhoodBlock(unit.files) }, unit, pass);
+    const findBrief = (unit: ReviewUnit, pass: import("@openqodex/core").FindPass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: pass === "contracts" ? withCrossFile(() => renderContractsBlock(neighbourhood, unit.files), unit.files) : neighbourhoodBlock(unit.files) }, unit, pass);
     const units = unitsOf(change, inventory, (unit, both) => longestBrief(unit, findBrief, both));
     const unitCount = units.length;
     const staged = config.stages && !prep.whole && refused === null && inventory.length > 0;
@@ -657,10 +666,12 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       clock.enter("reviewer");
       say(`Reviewer: ${agent ? `${agent.driver.name} ${agent.version}` : `model ${model!.reviewer.model}`}; staged review, ${unitCount} units, ${unitCount * 2} finder sessions, then verifiers; this takes several minutes`);
       const stagedRun = await runStagedReview({
-        snapshotDir: prep.snapshot.tree, change, citationChange: full, scan, config, manifest, secrets: p.secrets, deadline, now: deps.now, traced, model: model !== null, timedOut: inputs.timedOut, confidenceFloor: inputs.confidenceFloor, say, stopped: () => stopped,
+        snapshotDir: prep.snapshot.tree, change, citationChange: full, scan, config, manifest, secrets: p.secrets, deadline, now: deps.now, traced, model: model !== null, timedOut: inputs.timedOut, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files, say, stopped: () => stopped,
         inventory, units, findBrief,
         onUnits: (units) => deps.onEvent({ type: "staged-units", units }),
-        verifyBrief: (batch) => buildVerifyBrief({ ...briefArgs, neighbourhoodBlock: neighbourhoodBlock([batch.file]) }, batch),
+        // The verifier also gets the code around every changed file its
+        // candidates cite, and the cited lines of every other file.
+        verifyBrief: (batch) => buildVerifyBrief({ ...briefArgs, neighbourhoodBlock: withCrossFile(() => renderCitedBlock(prep.snapshot.tree, batch, p.secrets), [batch.file, ...batch.candidates.flatMap((c) => c.kind === "finder" ? c.candidate.evidence.filter((e) => !e.removed).map((e) => e.file_path) : [])]) }, batch),
         openSession: (role) => {
           if (stopped) throw new Error("the review stopped");
           const modelSessionForRole = model ? modelSession({ reviewer: model.reviewer, role, budget: model.budget, box, now: deps.now, deadline, shared, budgetState }) : null;
@@ -705,7 +716,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
             started: (s) => { session = register(s); say(`Second reviewer: model ${deps.model!.second!.model} started`); },
             converse: (s) => converse({ session: s, snapshotDir: prep.snapshot.tree, brief: brief.text, deadline, traced: true, say, now: deps.now,
               check: (submission, trace, delivered) => {
-                const checked = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, confidenceFloor: inputs.confidenceFloor });
+                const checked = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files });
                 return { report: checked.ok ? checked.report : null, errors: checked.ok ? [] : checked.errors, unread: singlePassModelCoverage({ change, briefSent: true, diffFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread, required: checked.required, disposed: checked.disposed };
               },
               deliver: (unread, earlier) => deliverRanges({ snapshotDir: prep.snapshot.tree, unread, earlier, secrets: p.secrets, change }),
@@ -756,7 +767,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     // The checks every answer passes, and the changed ranges a correction
     // round carries: the same for the primary and the second reviewer.
     const check: Parameters<typeof converse>[0]["check"] = (submission, trace, delivered) => {
-      const r = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, wholeRepo: prep.whole ? { lines: prep.whole.lines } : undefined, confidenceFloor: inputs.confidenceFloor });
+      const r = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, wholeRepo: prep.whole ? { lines: prep.whole.lines } : undefined, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files });
       // A model reviewer's reads count once a request carrying them was sent.
       const unread = prep.whole
         ? []
@@ -935,8 +946,11 @@ function refuseUnsupported(input: ReviewChangeInput, reviewer: Reviewer, options
   }
 }
 
-// The most the owners' instructions may hold, as on the laptop.
-const INSTRUCTIONS_MAX_BYTES = 32 * 1024;
+// The most the owners' instructions a host gives may hold. The laptop's
+// instructions file stays at 32 KB; a host keeps longer notes. Every finder
+// brief still holds to MAX_BRIEF_BYTES (units.ts): long instructions leave
+// less of it for the diff, and a part that cannot fit is named as unread.
+const INSTRUCTIONS_MAX_BYTES = 128 * 1024;
 
 // The second reviewer obeys the primary's rules: a model, in this profile.
 function refuseSecond(second: Reviewer | undefined): void {
@@ -998,6 +1012,8 @@ function resultFindings(findings: Report["findings"], foundBy: string[][]): Resu
     foundBy: foundBy[i] ?? [],
     source: f.source,
     candidate: f.candidate,
+    ...(f.evidence ? { evidence: f.evidence.map((e) => ({ file: e.file_path, line: e.line_number })) } : {}),
+    ...(f.rule ? { rule: f.rule } : {}),
   }));
 }
 

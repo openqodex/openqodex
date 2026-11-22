@@ -1,0 +1,13 @@
+{
+  "guards": "lists the zod-openapi route of the reported app (engine-routes/synth/honoz) with the method and path of its createRoute constant from another file",
+  "frameworks": {
+    "plugin": "hono",
+    "apps": 1,
+    "registrations": [
+      { "site": "src/app.ts:4", "methods": ["GET"], "pattern": "/api/v1/users/:id", "handler": "src/app.ts#<openapi getUserRoute>", "status": "bound", "mounted": true }
+    ],
+    "edges": [
+      { "kind": "mounts", "from": "fw:hono:app:src/app.ts:5", "to": "fw:hono:router:src/app.ts:3", "tier": "certain" }
+    ]
+  }
+}

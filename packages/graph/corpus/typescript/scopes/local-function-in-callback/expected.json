@@ -1,0 +1,33 @@
+{
+  "guards": "binds a call to a function-valued const declared inside an anonymous callback to that function",
+  "callers": [
+    {
+      "to": "src/run.test.ts#work",
+      "site": "src/run.test.ts:8",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/run.test.ts#run",
+      "site": "src/run.test.ts:9",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/run.test.ts#run",
+      "site": "src/run.test.ts:10",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/run.test.ts",
+      "line": 9
+    },
+    {
+      "file": "src/run.test.ts",
+      "line": 10
+    }
+  ]
+}

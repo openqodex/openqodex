@@ -315,6 +315,17 @@ function quote(text: string): string[] {
   return text.split(/\r\n|\r|\n/).map((line) => (line.trim() === "" ? ">" : `> ${line}`));
 }
 
+// How the verifier treats a convention file's written rules, and the `rule`
+// field a finding that breaks one carries.
+const RULE_WORK = [
+  "A confirmed break of a written rule in these files is a finding, not an observation, when the rule applies to the changed code and states something the code can be checked against. Set `rule` to cite it.",
+  "A defect that a rule also forbids stays a defect: keep its category and add `rule`.",
+  "A convention that is a wish or a matter of taste is an observation. Name the convention file in `problem`.",
+  "When the file states an exception that covers this code, such as \"except in tests\", check it before you confirm. A covered case is refuted with a reason starting `repo instructions:`.",
+];
+
+export const RULE_FIELD = "- `rule`: only for a broken written rule of a convention file above, else omit it or set null. `file`: the path after `From:`. `heading`: the heading or rule label the rule sits under, without `#` marks, or null. `quote`: the rule's exact words, at least three of them, copied from the file without the `> ` marks. A quote that is not in that file, or not under the heading it names, loses its citation, and the finding keeps a note saying why.";
+
 export function conventionsBlock(files: readonly InstructionFile[], stage?: "find" | "verify"): string {
   if (files.length === 0) return "";
   return [
@@ -327,7 +338,7 @@ export function conventionsBlock(files: readonly InstructionFile[], stage?: "fin
     stage === "find"
       ? "A change breaking an applicable convention is a candidate. Name the convention file in `claim`."
       : stage === "verify"
-        ? "A confirmed convention issue is an observation. Name the convention file in `problem`."
+        ? RULE_WORK.join("\n")
         : "A change breaking an applicable convention is a finding. Name the convention file in `problem`.",
     "On conflict, `.openqodex/custom-instructions.md` wins over these files. Files follow the configured order; a later file never silently overrides an earlier file.",
     `Explain unresolved conflicts in \`${stage === "find" ? "analysis" : stage === "verify" ? "reason" : "summary"}\`.`,
@@ -759,7 +770,7 @@ export function writingRules(fields: string[], namedFields = ["title", ...fields
   ];
 }
 
-function answerBlock(change: Change, whole: boolean, floor: number = GLOBAL_CONFIDENCE_FLOOR): string {
+function answerBlock(change: Change, whole: boolean, floor: number = GLOBAL_CONFIDENCE_FLOOR, rules = false): string {
   const example = {
     version: 2,
     change_id: change.shortId,
@@ -809,6 +820,7 @@ function answerBlock(change: Change, whole: boolean, floor: number = GLOBAL_CONF
     "- `suggested_change`: the literal replacement for the cited lines when the fix fits in them, else null.",
     "- `source`: null for your own finding, the candidate's token when raising a candidate, or `lens:<name>`.",
     "- `candidate`: the candidate id when the finding raises one; its token must equal `source`.",
+    ...(rules ? [RULE_FIELD] : []),
     "- `dropped`: one entry per candidate you checked and rejected: its id, the reason, and the file and line that show why.",
     "",
     ...writingRules(["problem", "consequence", "fix", "reason"], ["title", "problem", "consequence", "fix"]),
@@ -876,7 +888,7 @@ export function buildReviewerBrief(args: {
       candidatesBlockV2(scan),
       lensBlock(args.lenses, true),
       fileListBlock(change),
-      answerBlock(change, true),
+      answerBlock(change, true, GLOBAL_CONFIDENCE_FLOOR, (args.instructionFiles ?? []).length > 0),
     ];
     return { text: redactSecrets(`${blocks.filter((b) => b !== "").join("\n\n")}\n`, args.secrets), diffFiles: new Set() };
   }
@@ -894,7 +906,7 @@ export function buildReviewerBrief(args: {
     changedFilesBlock(change),
     deletionsBlock(change, "problem"),
     diff.text,
-    answerBlock(change, false, args.confidenceFloor),
+    answerBlock(change, false, args.confidenceFloor, (args.instructionFiles ?? []).length > 0),
   ];
   return { text: redactSecrets(`${blocks.filter((b) => b !== "").join("\n\n")}\n`, args.secrets), diffFiles: diff.files };
 }

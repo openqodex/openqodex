@@ -45,11 +45,12 @@ function addedLines(base: string, head: string): ReturnType<typeof makeLineSet> 
 }
 
 // A scan of `head` with `settings` changed from `base` (null: the base has
-// no such file), every line of `code` new. Returns the rule ids the scanner
+// no such file), every line of `code` new, and the `unchanged` files as they
+// are in both. Returns the rule ids the scanner
 // reported on `code` and the settings-file notes, as "<scanner>:<file>".
-async function run(scanner: BuiltinScanner, code: Record<string, string>, settings: string, base: string | null, head: string) {
+async function run(scanner: BuiltinScanner, code: Record<string, string>, settings: string, base: string | null, head: string, unchanged: Record<string, string> = {}) {
   const repo = tempDir(`oq-shared-${scanner}-`);
-  for (const [name, body] of Object.entries({ ...code, [settings]: head })) {
+  for (const [name, body] of Object.entries({ ...unchanged, ...code, [settings]: head })) {
     mkdirSync(dirname(join(repo, name)), { recursive: true });
     writeFileSync(join(repo, name), body);
   }
@@ -92,13 +93,22 @@ describe("ruff settings in pyproject.toml, by meaning", () => {
     }, 300_000);
   }
 
-  // ruff 0.8.4 takes its target version from requires-python beside a
+  // ruff takes its target version from requires-python beside a
   // [tool.ruff] table; a lower one silences the pyupgrade rules.
   it("obeys a lowered requires-python beside [tool.ruff], and the change raises the ruff note", async () => {
     const pyproject = (version: string) => `[project]\nname = "app"\nrequires-python = "${version}"\n\n[tool.ruff.lint]\nselect = ["UP"]\n`;
     const before = await run("ruff", OLD_TYPING, "pyproject.toml", pyproject(">=3.12"), pyproject(">=3.12"));
     expect(before).toEqual({ rules: ["UP006", "UP035"], notes: [] });
     expect(await run("ruff", OLD_TYPING, "pyproject.toml", pyproject(">=3.12"), pyproject(">=3.8"))).toEqual({ rules: [], notes: ["ruff:pyproject.toml"] });
+  }, 300_000);
+
+  // Since ruff 0.10 a ruff.toml with no target version takes requires-python
+  // from the pyproject.toml beside it, though that file has no [tool.ruff].
+  it("obeys a lowered requires-python in a pyproject.toml with no [tool.ruff] beside a ruff.toml, and the change raises the ruff note", async () => {
+    const pyproject = (version: string) => `${PROJECT}requires-python = "${version}"\n`;
+    const selectUp = { "ruff.toml": '[lint]\nselect = ["UP"]\n' };
+    expect(await run("ruff", OLD_TYPING, "pyproject.toml", pyproject(">=3.12"), pyproject(">=3.12"), selectUp)).toEqual({ rules: ["UP006", "UP035"], notes: [] });
+    expect(await run("ruff", OLD_TYPING, "pyproject.toml", pyproject(">=3.12"), pyproject(">=3.8"), selectUp)).toEqual({ rules: [], notes: ["ruff:pyproject.toml"] });
   }, 300_000);
 });
 

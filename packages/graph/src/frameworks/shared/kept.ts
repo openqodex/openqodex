@@ -119,8 +119,20 @@ function decoded(s: string): string {
 // longer than MAX_KEPT or its percent-decoded form holds a key.
 export function keptText(s: string): string | null {
   if (s.length > MAX_KEPT) return null;
-  if (s.includes("%") && scrub(decoded(s)) !== decoded(s)) return null;
+  if (hidesKey(s)) return null;
   return scrub(s);
+}
+
+// Whether the percent-decoded form of the text holds a key the text itself
+// does not show (`ghp%5F...`).
+export function hidesKey(s: string): boolean {
+  return s.includes("%") && scrub(decoded(s)) !== decoded(s);
+}
+
+// A whole text replaced by one marker that names it by its hash, for a line
+// of source whose encoded form hides a key.
+export function redactedWhole(s: string): string {
+  return marker(s);
 }
 
 // A name of the repository (a file path, a template's name under its

@@ -159,9 +159,9 @@ describe("a graph kept outside the graph folder through the library", () => {
 
     const search = await ask(loaded, { kind: "search", text: "charge" });
     expect(search.error).toBeNull();
-    // Search results are leads, never items: nothing counts them as callers.
-    expect(search.items).toEqual([]);
-    expect(search.leads.map((l) => l.name).sort()).toEqual(["chargeCard", "charge_card"]);
+    // Prefix matches are items, never certain and never counted as callers.
+    expect((search.items as { name: string; tier: string }[]).map((l) => `${l.name} ${l.tier}`).sort()).toEqual(["chargeCard possible", "charge_card possible"]);
+    expect(search.counts).toEqual({ certain: null, likely: null, possible: null });
 
     const python = await ask(loaded, { kind: "callers", target: { name: "charge_card" } });
     expect((python.items as Item[]).map(where)).toEqual(["billing.py:6"]);

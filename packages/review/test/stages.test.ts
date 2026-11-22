@@ -15,6 +15,9 @@
 // open, verifier abandon reasons lose either attempt, and finders use the verifier's reserved time.
 // Round 2 failures: a missing file or inverted range discards a good answer,
 // a line tie splits duplicate candidates, and refutation prose waits for assembly.
+// Cross-file evidence review: a finder candidate folded into a scanner
+// candidate as its duplicate loses the lines in other files its verifier
+// relied on, so the shown scanner finding carries none of them.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -1131,4 +1134,19 @@ it("R2.12 credits staged pages when briefs leave a long line for delivery", asyn
   const coverage = readCoverage({ change: f.change, obligations: result.obligations, briefCarried: result.briefCarried, delivered: result.delivered, trace: [] });
   expect(coverage.unread).toEqual([]);
   expect(coverage.given).toEqual([expect.objectContaining({ by: "page", fragment: expect.objectContaining({ from: 1, to: text.length }) })]);
+});
+
+it("gives the shown scanner finding the relied-on lines of a finder duplicate folded into it", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") for (const c of answer.candidates) if (c.file_path === "a.txt") c.evidence.push({ file_path: "b.txt", line_number: 1, quote: "unsafe operation" });
+    if (answer.version === "verify-1") for (const v of answer.verdicts) {
+      const c = brief.batch!.candidates.find((x) => x.id === v.id)!;
+      if (c.kind === "finder" && c.candidate.file_path === "a.txt") { v.duplicate_of = "c1"; v.relied_on = [{ file_path: "b.txt", line_number: 1 }]; }
+    }
+    return answer;
+  }, ["a.txt", "b.txt"]);
+  f.scan.candidates.push(scanner("a.txt"));
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.filter((x) => x.file_path === "a.txt")).toEqual([expect.objectContaining({ candidate: "c1", evidence: [{ file_path: "b.txt", line_number: 1 }] })]);
 });

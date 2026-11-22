@@ -1,0 +1,53 @@
+{
+  "guards": "binds gin routes, groups and middleware to their definitions with each group's prefix composed in, binds an inline handler to its own definition, lists a computed path and a group handed to a function as unknowns, and never reads a router of the repository's own or a local named gin as gin",
+  "callers": [
+    {
+      "to": "handlers/items.go#Stats",
+      "site": "main.go:25",
+      "tier": "certain"
+    }
+  ],
+  "frameworks": {
+    "plugin": "gin",
+    "apps": 1,
+    "registrations": [
+      { "site": "main.go:16", "methods": ["GET"], "pattern": "/healthz", "handler": "main.go#healthz", "status": "bound", "mounted": true },
+      { "site": "main.go:17", "methods": ["POST"], "pattern": "/login", "handler": "handlers/items.go#Login", "status": "bound" },
+      { "site": "main.go:20", "methods": ["GET"], "pattern": "/api/v1/items/:id", "handler": "handlers/items.go#GetItem", "status": "bound" },
+      { "site": "main.go:21", "methods": ["POST"], "pattern": "/api/v1/items", "handler": "handlers/items.go#CreateItem", "status": "bound" },
+      { "site": "main.go:23", "methods": ["DELETE"], "pattern": "/api/v1/staff/items/:id", "handler": "handlers/items.go#DeleteItem", "status": "bound" },
+      { "site": "main.go:24", "methods": ["GET"], "pattern": "/api/v1/staff/stats", "handler": "main.go#main.<GET /stats>", "status": "bound" },
+      { "site": "main.go:32", "methods": ["GET"], "pattern": "/me", "handler": "main.go#server.me", "status": "bound" },
+      { "site": "main.go:33", "methods": ["*"], "pattern": "/proxy", "handler": null, "status": "unresolved" },
+      { "site": "admin/admin.go:7", "methods": ["GET"], "pattern": "/users", "handler": "admin/admin.go#listUsers", "status": "bound", "mounted": false }
+    ],
+    "edges": [
+      { "kind": "applies_middleware", "from": "registration:main.go:16", "to": "middleware/mw.go#Logger", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:main.go:20", "to": "middleware/mw.go#Logger", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:main.go:20", "to": "middleware/mw.go#Auth", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:main.go:21", "to": "middleware/mw.go#Audit", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:main.go:23", "to": "middleware/mw.go#Auth", "tier": "certain" }
+    ],
+    "roles": [
+      { "target": "handlers/items.go#GetItem", "role": "route_handler", "detail": "gin" },
+      { "target": "main.go#main.<GET /stats>", "role": "route_handler", "detail": "gin" },
+      { "target": "admin/admin.go#listUsers", "role": "route_handler", "detail": "gin" },
+      { "target": "middleware/mw.go#Auth", "role": "middleware", "detail": "gin" }
+    ],
+    "unknowns": [
+      { "file": "main.go", "line": 30, "cause": "dynamic" },
+      { "file": "main.go", "line": 33, "cause": "unsupported-rule" },
+      { "file": "admin/admin.go", "line": 7, "cause": "dynamic" }
+    ],
+    "notRegistrations": ["main.go:30"],
+    "noRegistrationsIn": ["fake/fake.go"],
+    "none": ["mounts"],
+    "notEdges": [
+      { "kind": "handles", "from": "registration:main.go:33" },
+      { "kind": "applies_middleware", "from": "registration:main.go:16", "to": "middleware/mw.go#Auth" },
+      { "kind": "applies_middleware", "from": "registration:main.go:20", "to": "middleware/mw.go#Audit" },
+      { "kind": "applies_middleware", "from": "registration:main.go:17", "to": "middleware/mw.go#Auth" }
+    ],
+    "notRoles": [{ "target": "fake/fake.go#Router.GET", "role": "route_handler" }]
+  }
+}
