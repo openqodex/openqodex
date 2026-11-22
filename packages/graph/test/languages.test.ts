@@ -13,6 +13,11 @@
 // 6. A Python decorator written without parentheses (`@wrap`, `@pkg.a.wrap`,
 //    one on a method) is not counted as a call of the function it names,
 //    though Python calls it with the decorated function.
+// 7. A method called on a local that holds a function is read as running
+//    that function though it does not (`fn.bind(x)`, `fn.toString()`,
+//    `r.equals(o)`), or it hides the method of the local's declared type
+//    (`j.twice()` on a local of the interface `Job`), so that method reads
+//    as having no caller and no floor.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import { at, callSites, makeRepo, symbol } from "./helpers.js";
@@ -267,5 +272,45 @@ describe("ruby", () => {
     expect(callSites(g, symbol(g, "app/services/util.rb", "target", "Util"))).toEqual([at(files, "app/services/runner.rb", "CONST")]);
     expect(callSites(g, symbol(g, "app/services/other.rb", "target", "Other"))).toEqual([at(files, "app/services/other.rb", "OWN")]);
     expect(callSites(g, symbol(g, "app/models/svc.rb", "Svc"))).toEqual([at(files, "app/models/svc.rb", "SELFNEW"), at(files, "app/services/runner.rb", "NEW")].sort());
+  });
+});
+
+describe("callable locals", () => {
+  const files = {
+    "src/a.js": [
+      "function work() {",
+      "  return 1;",
+      "}",
+      "export function use(x) {",
+      "  const fn = work;",
+      "  fn.call(x); // CALL",
+      "  fn.apply(x, []); // APPLY",
+      "  const bound = fn.bind(x); // BIND",
+      "  fn.toString(); // STRING",
+      "  return bound;",
+      "}",
+    ].join("\n"),
+    "Job.java": ["interface Job {", "  void run();", "  default Job twice() { return this; }", "}"].join("\n"),
+    "Host.java": [
+      "class Host {",
+      "  void work() {}",
+      "  Job use(Object o) {",
+      "    Job j = this::work;",
+      "    j.run(); // RUN",
+      "    j.equals(o); // EQUALS",
+      "    return j.twice(); // TWICE",
+      "  }",
+      "}",
+    ].join("\n"),
+  };
+  const invokes = (g: Awaited<ReturnType<typeof graphOf>>, id: string) =>
+    (g.in.get(id) ?? []).filter((e) => e.kind === "may_invoke").flatMap((e) => e.sites.map((s) => `${s.file}:${s.line}`)).sort();
+
+  it("runs the held function only through a method that calls it, and binds the declared type's method too (7)", async () => {
+    const g = await graphOf(files);
+    expect(invokes(g, symbol(g, "src/a.js", "work"))).toEqual([at(files, "src/a.js", "CALL"), at(files, "src/a.js", "APPLY")].sort());
+    expect(invokes(g, symbol(g, "Host.java", "work", "Host"))).toEqual([at(files, "Host.java", "RUN"), at(files, "Host.java", "TWICE")].sort());
+    expect(callSites(g, symbol(g, "Job.java", "run", "Job"))).toEqual([at(files, "Host.java", "RUN")]);
+    expect(callSites(g, symbol(g, "Job.java", "twice", "Job"))).toEqual([at(files, "Host.java", "TWICE")]);
   });
 });

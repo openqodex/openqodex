@@ -3524,7 +3524,9 @@ export function createWorld(input: ResolveInput): World {
           if (ids.length > 0 && ref) {
             const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.aliasOf ?? call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
             for (const t of ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
-            if (held.every(([, fn]) => fn === true)) continue;
+            // A method called on a local of a declared type (`Job j = this::work;
+            // j.run()`) is also a call of that type's method.
+            if (held.every(([, fn]) => fn === true) && call.recv.kind !== "type") continue;
           }
         }
         // What a call returned, called: the functions that callee returns by name.
