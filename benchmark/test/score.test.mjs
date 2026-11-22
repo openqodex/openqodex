@@ -431,6 +431,37 @@ describe("a successful retry replaces a failed first attempt", () => {
   });
 });
 
+describe("a native control attempt's population entry", () => {
+  const controlRow = {
+    reviewer: "control",
+    status: "complete",
+    nativeBody: "the control's answer",
+    modelStatus: "known",
+    models: ["claude-4-1"],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  const controlJob = (status) => scoreJob({
+    job: { jobId: "planted/hand@abababab/c/1", caseId: "planted/hand@abababab", case: "hand", config: "c", repeat: 1 },
+    spec,
+    report: null,
+    row: status === "failed" ? { ...controlRow, status: "failed" } : controlRow,
+    brief: null,
+    origin: "planted",
+  });
+
+  it("counts a complete control review as complete, not failed", () => {
+    const j = controlJob("complete");
+    expect(j.status).toBe("complete");
+    expect(summarizeJobs([j]).population).toMatchObject({ planned: 1, complete: 1, failed: 0, unstarted: 0 });
+  });
+
+  it("counts a failed control attempt as failed, not complete", () => {
+    const j = controlJob("failed");
+    expect(j.status).toBe("failed");
+    expect(summarizeJobs([j]).population).toMatchObject({ planned: 1, failed: 1, complete: 0 });
+  });
+});
+
 describe("a planted-only precision with test requests set apart is pooled with real-suite precision", () => {
   const job = (origin, repeat) => scoreJob({ job: { jobId: `${origin}/hand@abababab/c/${repeat}`, caseId: `${origin}/hand@abababab`, config: "c", repeat }, spec, report: report([SQLI, ASK]), brief: null, origin });
 
