@@ -42,16 +42,19 @@ export function onAllowlist(names: string[], name: string, platform: NodeJS.Plat
 
 // The words a reviewer uses when its login ran out of use: Claude Code's
 // "You've hit your limit" and "usage limit reached", Codex's "You've hit
-// your usage limit", and a rate limit.
-const LIMIT = /usage limit|plan limit|rate limit|limit reached|hit your (\S+ )?limit/i;
+// your usage limit". A rate limit is a short wait instead, and checked first.
+const RATE_LIMIT = /rate limit|rate_limit|too many requests|\bHTTP 429\b/i;
+const PLAN_LIMIT = /usage limit|plan limit|limit reached|hit your (\S+ )?limit/i;
 
 // The failure of a turn the reviewer itself ended with an error, from the
-// reviewer's own message (its first line, cut at 200 characters), so the
-// receipt says what happened and, for a limit, when it resets. `fallback`
-// stands in when the reviewer sent no message.
+// reviewer's own message (on one line, cut at 200 characters), so the
+// receipt says what happened and, for a limit, when it resets, also when the
+// reset is on a later line. `fallback` stands in when the reviewer sent no
+// message.
 export function reviewerError(message: string | null, fallback = "unknown"): string {
-  const said = message?.split("\n")[0]?.trim().slice(0, 200) || fallback;
-  return LIMIT.test(said) ? `the reviewer hit its usage or plan limit (${said})` : `the reviewer stopped with an error (${said})`;
+  const said = message?.replace(/\s+/g, " ").trim().slice(0, 200) || fallback;
+  if (RATE_LIMIT.test(said)) return `the reviewer hit a rate limit (${said})`;
+  return PLAN_LIMIT.test(said) ? `the reviewer hit its usage or plan limit (${said})` : `the reviewer stopped with an error (${said})`;
 }
 
 export type Detected = { ok: true; version: string; bin: string } | { ok: false; missing: string; fix: string };
@@ -153,6 +156,18 @@ export function windowsStop(pid: number, env: NodeJS.ProcessEnv = process.env): 
   return [win32.join(root !== undefined && win32.isAbsolute(root) ? root : "C:\\Windows", "System32", "taskkill.exe"), ["/pid", String(pid), "/T", "/F"]];
 }
 
+// Why taskkill did not stop the tree, or null when it did. Exit 128 is "no
+// such process": the tree is gone already.
+export function taskkillFailure(r: { status: number | null; error?: Error }): string | null {
+  if (r.error !== undefined) return r.error.message.split("\n")[0] ?? "taskkill failed";
+  return r.status === 0 || r.status === 128 ? null : `taskkill exited ${r.status ?? "on a signal"}`;
+}
+
+const TASKKILL_TIMEOUT_MS = 10_000;
+
+// On Windows, the processes a reviewer started and left running after it
+// exited are not stopped: taskkill finds a tree by its live parent, and
+// Windows has no process group to name them by.
 export function killGroup(child: ChildProcess, platform: NodeJS.Platform = process.platform): void {
   if (child.pid === undefined) return;
   if (platform === "win32") {
@@ -160,7 +175,12 @@ export function killGroup(child: ChildProcess, platform: NodeJS.Platform = proce
     // taskkill would stop that one.
     if (child.exitCode !== null || child.signalCode !== null) return;
     const [file, args] = windowsStop(child.pid);
-    spawnSync(file, args, { stdio: "ignore", windowsHide: true });
+    const failed = taskkillFailure(spawnSync(file, args, { stdio: "ignore", windowsHide: true, timeout: TASKKILL_TIMEOUT_MS }));
+    if (failed !== null) {
+      // The reviewer itself at least, so its run ends.
+      child.kill("SIGKILL");
+      process.stderr.write(`openqodex: taskkill could not stop the reviewer (process ${child.pid}): ${failed}; the reviewer alone was stopped, and programs it started may still run\n`);
+    }
     return;
   }
   try {
@@ -226,7 +246,10 @@ export function findOnPath(name: string, forbidden: string[], path = process.env
         const bin = realpathSync.native(join(dir, file));
         if (!safe || owned(real(bin))) continue;
         const st = statSync(bin);
-        if (st.isFile() && (windows || (st.mode & 0o111) !== 0)) return bin;
+        if (!st.isFile()) continue;
+        // A .cmd that launch cannot start throws here, and the search goes on.
+        if (windows) launch(bin, [], platform);
+        if (windows || (st.mode & 0o111) !== 0) return bin;
       } catch {
         // unreadable entry: try the next
       }

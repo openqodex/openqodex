@@ -130,7 +130,14 @@ export function olderThanTested(version: string): boolean {
 
 const DETECT_TIMEOUT_MS = 20_000;
 
-async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<Detected> {
+async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Promise<Detected> {
+  // The sandbox probe runs /bin/sh and /bin/cat, which Windows does not
+  // have, and nothing else checks Codex's read boundary there. A review
+  // never runs on a boundary nobody checked, so Codex is not offered on
+  // Windows and `auto` moves on to the next reviewer.
+  if (platform === "win32") {
+    return { ok: false, missing: "Codex cannot be the reviewer on native Windows yet: openqodex cannot check there that Codex reads only the review copy", fix: "review with Claude Code, or run openqodex review from WSL" };
+  }
   // Inside a Codex sandbox (a Codex session ran `openqodex review`), a
   // nested `codex exec` stops at once: "failed to initialize in-process
   // app-server client: Operation not permitted", with or without network.

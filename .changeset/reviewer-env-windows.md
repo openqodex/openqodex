@@ -2,4 +2,4 @@
 "openqodex": patch
 ---
 
-On Windows, the separate reviewer (Claude Code or Codex) now gets its path, home folder and app data folders, and Codex keeps every absolute path entry instead of none. Finding and starting the reviewer on Windows still has open work (#207).
+On Windows, the environment given to the separate reviewer now keeps its path (named `Path` there), home folder, app data folders, system folder, temporary folder and PATHEXT, and keeps every absolute path entry instead of none. Nobody has run this on a Windows machine yet.

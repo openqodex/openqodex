@@ -1034,7 +1034,11 @@ describe("the reviewer process", () => {
       await session.close();
       return turn.failure;
     };
-    expect(await failure(claudeSays("You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model\nmore"))).toBe("the reviewer hit its usage or plan limit (You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model)");
+    expect(await failure(claudeSays("You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model\nmore"))).toBe("the reviewer hit its usage or plan limit (You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model more)");
+    // A reset time on a later line is kept.
+    expect(await failure(claudeSays("Claude usage limit reached.\n\n  Your limit resets at 5pm."))).toBe("the reviewer hit its usage or plan limit (Claude usage limit reached. Your limit resets at 5pm.)");
+    // A rate limit is a short wait, not a used-up plan.
+    expect(await failure(claudeSays("API Error: Rate limit reached for requests"))).toBe("the reviewer hit a rate limit (API Error: Rate limit reached for requests)");
     expect(await failure(claudeSays("API Error: 500 Internal server error"))).toBe("the reviewer stopped with an error (API Error: 500 Internal server error)");
     // With no message, the subtype is all there is.
     expect(await failure(claudeSays(""))).toBe("the reviewer stopped with an error (success)");

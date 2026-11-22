@@ -13,10 +13,16 @@
 //     which Windows does not have, so it keeps running; or taskkill is named
 //     bare and found in the current folder first.
 //  4. TEMP and TMP do not reach the reviewer on Windows.
+//  5. A .cmd that cannot be started, first on PATH, hides a reviewer that
+//     can be started later on PATH.
+//  6. A taskkill that fails is silent, and the reviewer keeps running.
+//  7. Codex is offered on Windows, where its sandbox probe cannot run, so
+//     `--reviewer auto` never moves on to Claude Code.
+import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
-import { codexEnv, findOnPath, launch, reviewerEnv, spawnGroup, windowsStop } from "@openqodex/review";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { codexEnv, detectCodex, findOnPath, killGroup, launch, reviewerEnv, spawnGroup, taskkillFailure, windowsStop } from "@openqodex/review";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -56,7 +62,7 @@ describe("1. finding the reviewer on Windows", () => {
     const b = tempDir("oq-win-path-b-");
     file(a, "claude", "#!/bin/sh\n", 0o755);
     file(a, "claude.js");
-    const cmd = file(a, "claude.cmd");
+    const cmd = file(a, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
     const exe = file(b, "claude.exe");
     const path = [a, b].join(";");
     expect(findOnPath("claude", [], path, "win32", ".COM;.EXE;.BAT;.CMD;.JS")).toBe(cmd);
@@ -69,11 +75,21 @@ describe("1. finding the reviewer on Windows", () => {
   it("still skips a program inside the repository, and leaves macOS and Linux as they were", () => {
     const repo = tempDir("oq-win-repo-");
     const outside = tempDir("oq-win-out-");
-    file(repo, "claude.cmd");
-    const cmd = file(outside, "claude.cmd");
+    file(repo, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
+    const cmd = file(outside, "claude.cmd", npmShim("node_modules\\x\\cli.js"));
     expect(findOnPath("claude", [repo], [repo, outside].join(";"), "win32", ".CMD")).toBe(cmd);
     const sh = file(outside, "claude", "#!/bin/sh\n", 0o755);
-    expect(findOnPath("claude", [repo], [repo, outside].join(":"), "linux", ".CMD")).toBe(sh);
+    // A POSIX path list, which a Windows host's temporary folders cannot make.
+    if (process.platform !== "win32") expect(findOnPath("claude", [repo], [repo, outside].join(":"), "linux", ".CMD")).toBe(sh);
+  });
+
+  it("5. passes over a .cmd it cannot start and finds the reviewer later on PATH", () => {
+    const a = tempDir("oq-win-yarn-");
+    const b = tempDir("oq-win-exe-");
+    file(a, "claude.cmd", '@"%~dp0\\..\\Yarn\\bin\\claude.cmd" %*\r\n');
+    const exe = file(b, "claude.exe");
+    expect(findOnPath("claude", [], [a, b].join(";"), "win32", ".EXE;.CMD")).toBe(exe);
+    expect(findOnPath("claude", [], a, "win32", ".EXE;.CMD")).toBeNull();
   });
 });
 
@@ -118,6 +134,37 @@ describe("3. stopping a reviewer on Windows", () => {
     // A missing or relative system folder never makes taskkill a bare name.
     expect(windowsStop(7, { SystemRoot: "Windows" })[0]).toBe("C:\\Windows\\System32\\taskkill.exe");
     expect(windowsStop(7, {})[0]).toBe("C:\\Windows\\System32\\taskkill.exe");
+  });
+});
+
+describe("6. a taskkill that fails", () => {
+  it("reads taskkill's exit: 0 and 128 (no such process) are a stop, anything else or an error is not", () => {
+    expect(taskkillFailure({ status: 0 })).toBeNull();
+    expect(taskkillFailure({ status: 128 })).toBeNull();
+    expect(taskkillFailure({ status: 1 })).toBe("taskkill exited 1");
+    expect(taskkillFailure({ status: null, error: new Error("spawnSync taskkill.exe ETIMEDOUT\nmore") })).toBe("spawnSync taskkill.exe ETIMEDOUT");
+  });
+
+  it("stops the reviewer itself and says so on stderr when taskkill cannot run", async () => {
+    let err = "";
+    const write = vi.spyOn(process.stderr, "write").mockImplementation((s) => ((err += String(s)), true));
+    // No C:\\Windows\\System32\\taskkill.exe here, so taskkill cannot start.
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    await new Promise((done) => child.once("spawn", done));
+    const gone = new Promise((done) => child.once("exit", done));
+    killGroup(child, "win32");
+    const stopped = await Promise.race([gone.then(() => true), new Promise((done) => setTimeout(() => done(false), 5_000))]);
+    write.mockRestore();
+    if (!stopped) child.kill("SIGKILL");
+    expect(stopped).toBe(true);
+    expect(err).toMatch(new RegExp(`^openqodex: taskkill could not stop the reviewer \\(process ${child.pid}\\): .+; the reviewer alone was stopped, and programs it started may still run\n$`));
+  });
+});
+
+describe("7. Codex on Windows", () => {
+  it("is not offered, with the reason and what to do, so auto moves on", async () => {
+    const found = await detectCodex(tempDir("oq-win-codex-"), { PATH: "" }, "win32");
+    expect(found).toEqual({ ok: false, missing: "Codex cannot be the reviewer on native Windows yet: openqodex cannot check there that Codex reads only the review copy", fix: "review with Claude Code, or run openqodex review from WSL" });
   });
 });
 

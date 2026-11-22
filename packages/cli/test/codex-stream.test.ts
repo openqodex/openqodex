@@ -141,7 +141,7 @@ describe("the Codex stream reader, on a recorded run", () => {
     const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"')), failed, ""].join("\n")));
     const { turn } = await runOnce(bin);
     expect(turn.finalText).toBe("");
-    expect(turn.failure).toBe("the reviewer hit its usage or plan limit (You've hit your usage limit. Try again at 3:05 PM.)");
+    expect(turn.failure).toBe("the reviewer hit its usage or plan limit (You've hit your usage limit. Try again at 3:05 PM. Upgrade to Pro)");
   });
 
   it("3. a stream that ends with no terminal event is no answer", async () => {
