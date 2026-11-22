@@ -61,7 +61,8 @@ export async function runSecondReviewer(args: {
 export function mergeFindings(primary: { name: string; findings: ReportFinding[] }, second: { name: string; findings: ReportFinding[] }): { findings: ReportFinding[]; foundBy: string[][] } {
   const merged = primary.findings.map((f) => ({ finding: f, foundBy: [primary.name] }));
   for (const f of second.findings) {
-    const same = merged.find((m) => sameDefect(m.finding, f) || findingKey(m.finding) === findingKey(f));
+    // The same finding first, then one defect.
+    const same = merged.find((m) => findingKey(m.finding) === findingKey(f)) ?? merged.find((m) => sameDefect(m.finding, f));
     if (!same) merged.push({ finding: f, foundBy: [second.name] });
     else {
       same.foundBy.push(second.name);

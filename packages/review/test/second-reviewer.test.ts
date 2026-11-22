@@ -36,7 +36,8 @@
 // 11. The two reviewers title one defect differently, on overlapping lines,
 //     and it is listed twice, or the primary's possible issue stays beside
 //     the second reviewer's counted finding; or findings on lines that do
-//     not overlap merge.
+//     not overlap merge; or a second finding with the exact key of one
+//     primary finding joins an earlier primary finding that only overlaps.
 import { DEFAULT_CONFIG } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { reviewChange } from "../src/review-change.js";
@@ -246,4 +247,13 @@ it("11. drops a primary possible item when the second reviewer counts the same d
   expect(result.findings).toEqual([expect.objectContaining({ title: "add returns a minus b", confidence: 0.8 })]);
   expect(result.possible).toEqual([]);
   expect(JSON.parse(result.render.json()).possible).toEqual([]);
+});
+
+it("11. joins a second finding to the primary finding with its exact key before one that only overlaps", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 3, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const exact = { ...finding, line_number: 3, title: "add returns a minus b", source: "lens:math" };
+  const overlapping = { ...finding, source: "lens:math" };
+  const merged = mergeFindings({ name: "primary", findings: [overlapping, exact] }, { name: "second", findings: [{ ...exact, severity: "major" }] });
+  expect(merged.findings.map((f) => [f.title, f.severity])).toEqual([[SUBTRACTION.title, "minor"], ["add returns a minus b", "major"]]);
+  expect(merged.foundBy).toEqual([["primary"], ["primary", "second"]]);
 });

@@ -34,7 +34,9 @@
 //     candidate cited, on overlapping lines of one file in one category: it
 //     shows twice, as two findings or as a finding and a possible issue; or
 //     the merge keeps the lower severity or the thinner text; or findings on
-//     lines that do not overlap, or from different sources, are merged.
+//     lines that do not overlap, or from different sources, are merged; or a
+//     possible issue is dropped for a counted finding the threshold hides,
+//     so the defect shows nowhere.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { checkSubmission, finalizeReview, proseErrors, scanReport, sentences, SETTINGS_RULE, SUPPRESSION_RULE } from "./finalize.js";
@@ -563,9 +565,9 @@ describe("sentence counting around code names", () => {
 });
 
 describe("one defect under two titles is shown once (16)", () => {
-  function run2(version: number, entries: Record<string, unknown>[]) {
+  function run2(version: number, entries: Record<string, unknown>[], config: Partial<Config> = {}) {
     const change = makeChange();
-    const args = { change, scan: makeScan({ candidates: [] }), manifest: makeManifest(change), config: makeConfig() };
+    const args = { change, scan: makeScan({ candidates: [] }), manifest: makeManifest(change), config: makeConfig(config) };
     const findings = entries.map((entry) => ({ ...finding({ source: null, candidate: null, category: "bug", file_path: "app/settings.py" }), ...entry }));
     if (version === 1) return finalizeReview({ ...args, submission: makeSubmission({ findings, dropped: [] }) });
     const v2 = findings.map(({ description, suggested_change: _s, ...rest }) => ({ ...rest, problem: description, consequence: "The request fails.", fix: "Open a new pool first." }));
@@ -589,6 +591,13 @@ describe("one defect under two titles is shown once (16)", () => {
     const report = run2(version, [{ ...rich, confidence: 0.9 }, { ...thin, confidence: 0.55 }]);
     expect(report.findings.map((f) => f.title)).toEqual([rich.title]);
     expect(report.possible).toEqual([]);
+  });
+
+  it.each([1, 2])("version %i shows a possible issue whose counted twin the severity threshold hides", (version) => {
+    const report = run2(version, [{ ...thin, confidence: 0.9 }, { ...rich, confidence: 0.55 }], { severityThreshold: "major" });
+    expect(report.findings).toEqual([]);
+    expect(report.below_threshold).toBe(1);
+    expect(report.possible.map((f) => f.title)).toEqual([rich.title]);
   });
 
   it.each([1, 2])("version %i keeps findings on lines that do not overlap, and findings from different sources", (version) => {

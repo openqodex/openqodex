@@ -240,8 +240,9 @@ function merged(a: ReportFinding, b: ReportFinding): ReportFinding {
   return { ...text, severity: severityRank(b.severity) > severityRank(a.severity) ? b.severity : a.severity };
 }
 
-// Two findings the staged verifier did not link (duplicate_of): never one
-// defect, so only the same finding (findingKey) merges.
+// Never one defect, so only the same finding (findingKey) matches: for two
+// findings the staged verifier did not link (duplicate_of), and for a
+// possible issue beside a counted finding the threshold hides.
 const keptApart = (): boolean => false;
 
 // Removes only duplicates: one defect (sameDefect), merged, or the same
@@ -250,7 +251,8 @@ const keptApart = (): boolean => false;
 function dedup(findings: ReportFinding[], same = sameDefect): ReportFinding[] {
   const kept: ReportFinding[] = [];
   for (const f of findings) {
-    const at = kept.findIndex((k) => same(k, f) || findingKey(k) === findingKey(f));
+    const exact = kept.findIndex((k) => findingKey(k) === findingKey(f));
+    const at = exact !== -1 ? exact : kept.findIndex((k) => same(k, f));
     if (at === -1) {
       kept.push(f);
       continue;
@@ -261,7 +263,9 @@ function dedup(findings: ReportFinding[], same = sameDefect): ReportFinding[] {
   return kept;
 }
 
-// The possible issues no counted finding already reports.
+// The possible issues no counted finding already reports. A caller passes
+// only the counted findings the report shows when it matches by one defect,
+// so a possible issue never leaves for a finding the threshold hides.
 export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect): ReportFinding[] {
   const keys = new Set(counted.map(findingKey));
   return possible.filter((p) => !keys.has(findingKey(p)) && !counted.some((c) => same(c, p)));
@@ -375,7 +379,7 @@ export function finalizeReview(args: {
   const deduped = dedup(findings);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(uncounted(possible, deduped)).filter((f) => {
+  const keptPossible = dedup(uncounted(uncounted(possible, deduped, keptApart), kept)).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
@@ -727,7 +731,7 @@ export function checkSubmission(args: {
   const deduped = dedup(findings, same);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(uncounted(possible, deduped, same), same).filter((f) => {
+  const keptPossible = dedup(uncounted(uncounted(possible, deduped, keptApart), kept, same), same).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
