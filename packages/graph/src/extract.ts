@@ -130,7 +130,9 @@ import type { TreeVisitor } from "./walk.js";
 // type's path is read with its escapes decoded; `x.total += 1` and
 // `const { 0: a } = x` read the member; a `require` given a value through
 // `<T>` stays a loader.
-export const EXTRACTOR_VERSION = 54;
+// 55: a Python decorator without parentheses (`@wrap`, `@pkg.wrap`) is a
+// call of the name it gives.
+export const EXTRACTOR_VERSION = 55;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -3628,6 +3630,7 @@ const PY_TYPES = new Set([
   "function_definition",
   "lambda",
   "assignment",
+  "decorator",
   "call",
   "return_statement",
   "dictionary",
@@ -3920,6 +3923,18 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           // parameter's annotation among them.
           const value = type ?? (right?.type === "identifier" ? (ctx.local(right.text) ?? null) : null);
           if (attr && cls) ctx.setField(cls.def, attr.text, value, annotation !== null);
+        }
+        return;
+      }
+      case "decorator": {
+        // `@wrap` and `@pkg.wrap` call the name with the decorated function,
+        // from the scope around the definition, as `@wrap()` calls it.
+        const expr = node.firstNamedChild;
+        if (expr?.type === "identifier") ctx.addCall(expr, { kind: "none" });
+        else if (expr?.type === "attribute") {
+          const attr = expr.childForFieldName("attribute");
+          const object = expr.childForFieldName("object");
+          if (attr && object) ctx.addCall(attr, pyReceiver(ctx, object));
         }
         return;
       }
