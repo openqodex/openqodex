@@ -31,6 +31,7 @@ import { discoverProjects } from "./discovery/projects.js";
 import { traceReads } from "./discovery/trace.js";
 import type { ProjectModel } from "./discovery/projects.js";
 import { EXTRACTOR_VERSION, extract } from "./extract.js";
+import { ambientOf } from "./types.js";
 import { frameworkReaders } from "./frameworks/facts.js";
 import { contextFingerprint, runFrameworks } from "./frameworks/stage.js";
 import { pluginsKey } from "./frameworks/registry.js";
@@ -191,18 +192,20 @@ function readDeclarations(reader: RepoReader, all: string[]): [string, string][]
 
 // The global names each declaration file declares as plain data, parsed and
 // extracted as a source file is, with the same limit on one parse.
-async function declaredPlain(files: [string, string][], deadline: number): Promise<{ file: string; names: string[] }[]> {
+export async function declaredPlain(files: [string, string][], deadline: number): Promise<{ file: string; names: string[] }[]> {
   if (files.length === 0) return [];
   const out: { file: string; names: string[] }[] = [];
   const parser = await parserFor("typescript");
   try {
     for (const [file, text] of files) {
+      // Past the build's budget no parse starts: the names stay unknown, a floor.
+      if (performance.now() > deadline) break;
       const limit = Math.min(performance.now() + MAX_PARSE_MS, deadline);
       const tree = parser.parse(text, null, { progressCallback: (() => performance.now() > limit) as unknown as (state: unknown) => void });
       if (!tree) continue;
       try {
-        const names = extract(tree, "typescript").ambient;
-        if (names) out.push({ file, names });
+        const names = ambientOf(file, extract(tree, "typescript"));
+        if (names.length > 0) out.push({ file, names });
       } finally {
         tree.delete();
       }

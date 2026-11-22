@@ -1,7 +1,7 @@
 {
   "covers": "an adversarial case from the review of piece A: defaultView",
   "files": {
-    "public/app.js": "function f() {}\nfunction go(name) { document.defaultView[name](); }\ngo(location.hash);\n"
+    "public/app.js": "function f() {}\nfunction go(name) { document.defaultView[name](); }\ngo(location.hash.slice(1));\n"
   },
   "mustReach": [
     {

@@ -44,6 +44,11 @@
 // 12. A floor whose hidden callers can only be in test, benchmark or script files
 //     loses its floor, so a zero reads as "unused"; or one place in product
 //     code beside them still reads as "complete in product code".
+// 13. A Ruby `respond_to?(:save)`, which only asks whether the method is
+//     there, is read as a call of `save`, so `save` reads as maybe called.
+// 14. A script's function keeps one reach row per place that builds a name
+//     at run time, so many such places make the build and its index grow
+//     with places times functions, though the reason names the first.
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact, isOutsideProduct, renderImpactBlock } from "../src/index.js";
@@ -251,6 +256,29 @@ describe("the list floor of a function", () => {
     const a = ask(s, { kind: "callers", target: { name: "PostsController.set_post" } });
     expect(a.unknown.floor, a.unknown.reasons.join("; ")).toBe(true);
     expect(a.unknown.reasons.join(" ")).toMatch(/through a value \(a callback or a computed member\) in the repository root project, and could reach it/);
+  }, 60_000);
+
+  it("reads no call in a Ruby respond_to? (13)", async () => {
+    const s = await sessionOf({
+      "app/models/store.rb": "class Store\n  def save\n    1\n  end\nend\n",
+      "app/check.rb": "def check(x)\n  x.respond_to?(:save)\nend\n",
+    });
+    const a = ask(s, { kind: "callers", target: { name: "Store.save" } });
+    expect(a.unknown.floor, a.unknown.reasons.join("; ")).toBe(false);
+  }, 60_000);
+
+  it("keeps one reach row of each kind for a script's function, however many places build a name at run time (14)", async () => {
+    const evals = Array.from({ length: 40 }, (_, i) => `window[location.hash + "${i}"]();\neval(location.hash + "${i}");\n`).join("");
+    const s = await sessionOf({ "public/a.js": "function f() {}\nfunction g() {}\n", "public/b.js": evals });
+    for (const name of ["f", "g"]) {
+      const a = ask(s, { kind: "callers", target: { name, file: "public/a.js" } } as Omit<Request, "apiVersion">);
+      expect(a.unknown.floor).toBe(true);
+      expect(a.unknown.reasons.join(" ")).toContain("public/b.js:1 reaches the global scope by a name built at run time, and it can see this function");
+      const id = (a as { target?: { id: string } }).target?.id as string;
+      const rows = s.graph.escapes.reach.get(id) ?? [];
+      expect(rows.length, JSON.stringify(rows)).toBeLessThanOrEqual(3);
+      expect(new Set(rows.map((r) => r.why)).size).toBe(rows.length);
+    }
   }, 60_000);
 
   it("keeps a removed function on the floor while its name is still passed as a value (10)", async () => {

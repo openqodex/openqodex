@@ -10,5 +10,11 @@
   "whole": [
     "src/b.ts#g"
   ],
-  "floored": []
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "its module is used as a value",
+      "at": "src/use.mjs:1"
+    }
+  ]
 }

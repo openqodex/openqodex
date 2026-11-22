@@ -26,7 +26,7 @@ import type { Cause, Cut, EvidenceKind, Shape, Tier, Via } from "./model/records
 import { weakest } from "./model/records.js";
 import type { Lookup as PluginLookup } from "./frameworks/plugin.js";
 import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, EscapeFact, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, ImportFact, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
-import { CALLER_KINDS, MAX_TYPE_DEPTH, familyOf } from "./types.js";
+import { CALLER_KINDS, MAX_TYPE_DEPTH, ambientOf, familyOf } from "./types.js";
 
 const MAX_DEPTH = 8; // re-export and base-class chains
 // Files the walk of `export *` may open in one world. Each file is walked
@@ -3898,10 +3898,13 @@ export function createWorld(input: ResolveInput): World {
   // computed path reaches every definition a module offers.
   const escapePaths = (uses: Escapes["uses"], unbound: Escapes["unbound"], marks: Map<string, Place>): Escapes => {
     const reach = new Map<string, Reach[]>();
+    // The first place of each kind only: the floor's reason names that one
+    // (impact.ts), so a symbol keeps at most three, however many places
+    // there are.
     const addReach = (id: string, r: Reach) => {
       const list = reach.get(id);
       if (!list) reach.set(id, [r]);
-      else if (!list.some((x) => x.why === r.why && x.file === r.file && x.line === r.line)) list.push(r);
+      else if (!list.some((x) => x.why === r.why)) list.push(r);
     };
     const jsFiles = input.files.filter((x) => familyOf(x.facts.lang) === "js");
     // A load fact that holds in its file: one marked `cjs` holds outside a CommonJS file only.
@@ -3999,10 +4002,12 @@ export function createWorld(input: ResolveInput): World {
       !/\.(mjs|cjs|mts|cts)$/.test(file) && f.imports.length === 0 && f.exportsLocal.length === 0 && f.defaultExport === null && !f.defs.some((d) => d.exported) && !(f.escapes ?? []).some((e) => e.kind === "own" || e.kind === "module" || e.kind === "load");
     const scripts = new Set<string>();
     for (const { path, facts: f } of jsFiles) if (script(path, f)) scripts.add(path);
+    // The first place of each kind, as addReach keeps.
+    const firstRuntime = runtime.filter((r, i) => runtime.findIndex((x) => x.why === r.why) === i);
     if (runtime.length > 0) {
       for (const { path, facts: f } of jsFiles) {
         if (!scripts.has(path)) continue;
-        for (const d of f.defs) if (d.topLevel || d.kind === "method") for (const r of runtime) addReach(symbolId(path, d), { why: r.why, ...r.place });
+        for (const d of f.defs) if (d.topLevel || d.kind === "method") for (const r of firstRuntime) addReach(symbolId(path, d), { why: r.why, ...r.place });
       }
     }
     // Code built at run time can load any module: each eval or global site is a load by a computed path too.
@@ -4023,7 +4028,10 @@ export function createWorld(input: ResolveInput): World {
       for (const n of names) set.add(n);
       plain.set(project, set);
     };
-    for (const { path, facts: f } of jsFiles) if (f.ambient) declare(path, f.ambient);
+    for (const { path, facts: f } of jsFiles) {
+      const names = ambientOf(path, f);
+      if (names.length > 0) declare(path, names);
+    }
     for (const d of input.declared ?? []) declare(d.file, d.names);
     for (const { path, facts: f } of jsFiles) {
       const own = plain.size > 0 ? plain.get(projectFolder(model, input.goModules, path)) : undefined;

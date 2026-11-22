@@ -328,9 +328,12 @@ export type FileFacts = {
   // outside a class, a `.constructor` read, a construct it does not read),
   // each with its first line and how many times it was seen.
   opaque?: OpaqueFact[];
-  // TypeScript: the global names the file declares as plain data
-  // (`declare const V: string` in a script, or in `declare global`).
+  // TypeScript: the global names the file declares as plain data in
+  // `declare global`, and (`ambientTop`) at its top when it has no import
+  // or export (`declare const V: string`): global only in a script, so
+  // never in a `.mts` or `.cts` file, which is always a module.
   ambient?: string[];
+  ambientTop?: string[];
   // TypeScript and JavaScript: member names read, not called, on a value
   // of unknown type (`c.total`, `const h = obj.save`): a getter runs there,
   // or a method is taken as a value.
@@ -518,3 +521,9 @@ export type Graph = {
 };
 
 export type HotSymbol = { symbol: GraphNode; callers: number; sites: number; files: number };
+
+// The global names a file declares as plain data: those in `declare
+// global`, and its top-level ones when its name lets it be a script.
+export function ambientOf(path: string, f: Pick<FileFacts, "ambient" | "ambientTop">): string[] {
+  return [...(f.ambient ?? []), ...(/\.[cm]ts$/.test(path) ? [] : (f.ambientTop ?? []))];
+}

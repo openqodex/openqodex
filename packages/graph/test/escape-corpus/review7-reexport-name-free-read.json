@@ -1,0 +1,17 @@
+{
+  "covers": "`export { m } from \"./a.js\"` binds no name the file's own code reads: a read of `m` is a free name",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.js": "export const m = {};\n",
+    "src/use.js": "export { m } from \"./a.js\";\nexport function f() {}\nexport function run() {\n  return m.go();\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/use.js#f",
+      "reason": "reads the free name `m`",
+      "at": "src/use.js:4"
+    }
+  ]
+}

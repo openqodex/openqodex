@@ -94,7 +94,7 @@ describe("the escape corpus", () => {
         const [file, line] = f.at.split(":") as [string, string];
         const self = g.nodes.get(idOf(g, f.target));
         const inOwnBody = self !== undefined && self.file === file && Number(line) >= self.startLine && Number(line) <= self.endLine;
-        if (f.reason.startsWith("it is used as a value") && f.at !== "" && !inOwnBody) {
+        if (hit?.startsWith("it is used as a value") && f.at !== "" && !inOwnBody) {
           const listed = (ask(g, "references", idOf(g, f.target)).items as { site: { file: string; line: number } }[]).map((i) => `${i.site.file}:${i.site.line}`);
           expect(listed, `${f.target}: graph references lists the use at ${f.at}`).toContain(f.at);
         }

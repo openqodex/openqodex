@@ -1,0 +1,13 @@
+{
+  "covers": "`typeof import(\"./m\").fn` in a cast or an annotation names a type and loads nothing: the module's functions stay whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/m.ts": "export function fn(): void {}\n",
+    "src/use.ts": "export function cast(x: unknown) {\n  return x as typeof import(\"./m\").fn;\n}\nexport let held: typeof import(\"./m\") | null = null;\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/m.ts#fn"
+  ],
+  "floored": []
+}

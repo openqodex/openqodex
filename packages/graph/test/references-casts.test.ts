@@ -10,7 +10,10 @@
 //     a same-named type of another folder is linked.
 //  4. In a .tsx file, where `<Row>x` is not a cast, a cast written with
 //     `as` stops being read, or a JSX element is taken for a cast.
-//  5. A Python `typing.cast(Foo, x)` or `cast("Foo", x)` has no row.
+//  5. A Python `typing.cast(Foo, x)` or `cast("Foo", x)` has no row; or
+//     one written with keywords (`cast(typ=Foo, val=x)`) has none; or a
+//     parameter or local named `cast` or `typing`, which hides the import,
+//     is read as the typing module's and gives a row it does not make.
 //  6. A Go type assertion (`v.(Bar)`, `v.(*Bar)`, `v.(store.Bar)`) has no row.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
@@ -75,6 +78,18 @@ const files: Record<string, string> = {
     "def by_module(x):",
     "    return typing.cast(Foo, x)  # py-typing-cast",
     "",
+    "",
+    "def by_keyword(x):",
+    "    return cast(val=x, typ=Foo)  # py-cast-keyword",
+    "",
+    "",
+    "def shadowed(cast, x):",
+    "    return cast(Foo, x)  # py-shadowed-cast",
+    "",
+    "",
+    "def shadowed_module(typing, x):",
+    "    return typing.cast(Foo, x)  # py-shadowed-module",
+    "",
   ].join("\n"),
   "go/go.mod": "module example.com/m\n\ngo 1.22\n",
   "go/store/store.go": "package store\n\ntype Bar struct{ ID string }\n",
@@ -114,9 +129,14 @@ describe("references of a type named only in a cast", () => {
     expect(r).toEqual([[at(files, "src/view.tsx", "tsx-as"), "uses_type"]]);
   });
 
-  it("lists a Python typing.cast by name, by string and through the module (5)", () => {
+  it("lists a Python typing.cast by name, by string, through the module and by keyword (5)", () => {
     const r = rows("py/models.py", "Foo");
-    for (const marker of ["py-cast", "py-cast-string", "py-typing-cast"]) expect(r).toContainEqual([at(files, "py/use.py", marker), "uses_type"]);
+    for (const marker of ["py-cast", "py-cast-string", "py-typing-cast", "py-cast-keyword"]) expect(r).toContainEqual([at(files, "py/use.py", marker), "uses_type"]);
+  });
+
+  it("lists no Python cast where a parameter hides the typing import (5)", () => {
+    const r = rows("py/models.py", "Foo").filter((x) => x[1] === "uses_type").map((x) => x[0]);
+    for (const marker of ["py-shadowed-cast", "py-shadowed-module"]) expect(r).not.toContain(at(files, "py/use.py", marker));
   });
 
   it("lists a Go type assertion to the type, its pointer and the type of another package (6)", () => {

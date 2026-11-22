@@ -2,13 +2,13 @@
   "covers": "a `require` made by `createRequire` given another folder (`new URL(\"./lib/\", import.meta.url)`) loads paths from there: any module",
   "files": {
     "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
-    "src/a.cjs": "exports.f = function () {};\n",
     "src/b.ts": "export function g(): void {}\n",
-    "src/use.mjs": "import { createRequire } from \"node:module\";\nconst require = createRequire(new URL(\"./lib/\", import.meta.url));\nconst lib = require(\"./a.cjs\");\nlib.f();\n"
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nconst require = createRequire(new URL(\"./lib/\", import.meta.url));\nconst lib = require(\"./a.cjs\");\nlib.f();\n",
+    "src/lib/a.cjs": "exports.f = function () {};\n"
   },
   "mustReach": [
     {
-      "target": "src/a.cjs#f",
+      "target": "src/lib/a.cjs#f",
       "caller": "src/use.mjs",
       "file": "src/use.mjs",
       "line": 4
