@@ -13,6 +13,9 @@
 // 4. A Python module's `from x import *` lines are read first-wins, though
 //    Python binds the last one, and a later star the graph cannot follow
 //    leaves the earlier binding certain.
+// 5. A value read of a name no barrel exports asks whether a module exports
+//    it as a variable, and that question walks every path of the diamond
+//    again, unbounded by any cache (issue 419).
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -68,6 +71,18 @@ describe("looking up an exported name", () => {
     it("binds through seven layers of 20 barrels in time that grows with the re-exports, not the paths (1)", async () => {
       // Ten barrels a layer are a quarter of the re-exports and 1/128 of the paths.
       expectLinear("the resolve stage on seven layers of 10 and of 20 barrels", await stageCpuMs(buildOf(makeRepo(diamond(7, 10))), "resolve"), await stageCpuMs(buildOf(makeRepo(diamond(7, 20))), "resolve"));
+    }, 120_000);
+
+    it("asks whether six layers of 20 barrels export a variable in time that grows with the re-exports, not the paths (5)", async () => {
+      // A read of a name no barrel exports, and one of a name only x.ts does.
+      // Ten barrels a layer are a quarter of the re-exports and 1/32 of the paths.
+      const reads = (width: number) => {
+        const files = diamond(6, width);
+        files["x.ts"] += "export const LIMIT = 1;\n";
+        files["read.ts"] = 'import { missing, LIMIT } from "./l6b0";\nexport const v = [missing, LIMIT];\n';
+        return makeRepo(files);
+      };
+      expectLinear("the resolve stage on six layers of 10 and of 20 barrels", await stageCpuMs(buildOf(reads(10)), "resolve"), await stageCpuMs(buildOf(reads(20)), "resolve"));
     }, 120_000);
 
     it("stops a web of export * cycles in time that grows with the re-exports (2)", async () => {

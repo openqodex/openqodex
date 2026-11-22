@@ -125,6 +125,20 @@ describe("budget", () => {
     }, 120_000);
   });
 
+  // Every name read once fetched the node above it, which tree-sitter finds
+  // by a walk down from the root: a file of nested reads took time that grew
+  // with the square of its depth (issue 418).
+  const nestedReads = (depth: number) => repo({ "reads.ts": `export const v = 1;\n${"{ v; ".repeat(depth)}${"}".repeat(depth)}\n` });
+  growthTests("in time that grows with the depth of its name reads", () => {
+    it("reads 20,000 nested name reads in time that grows with the depth (418)", async () => {
+      const quarter = nestedReads(n / 4);
+      const root = nestedReads(n);
+      const small = await cpuMs(() => buildGraph({ repoRoot: quarter, store: null, budgetMs: 60_000 }));
+      const large = await cpuMs(() => buildGraph({ repoRoot: root, store: null, budgetMs: 60_000 }));
+      expectLinear("a build of 5,000 and of 20,000 nested name reads", small, large);
+    }, 120_000);
+  });
+
   // Every timer given one callback once read the whole file again to prove
   // the callback a function: a file of many timers took time that grew
   // with its square.

@@ -1,0 +1,30 @@
+{
+  "covers": "a module whose only export is a variable, or `export {}` or a type, keeps its functions private: a file that reads a free name reaches the global scope, which holds a script's functions and none of theirs (issue 424)",
+  "files": {
+    "public/a.js": "function f() {}\nexport const LIMIT = 1;\n",
+    "public/b.js": "export const v = someGlobal;\n",
+    "public/c.js": "function h() {}\nexport {};\n",
+    "public/d.ts": "function k() {}\nexport type T = number;\n",
+    "public/s.js": "function s() {}\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/s.js#s",
+      "caller": null,
+      "file": "public/b.js",
+      "line": 1
+    }
+  ],
+  "whole": [
+    "public/a.js#f",
+    "public/c.js#h",
+    "public/d.ts#k"
+  ],
+  "floored": [
+    {
+      "target": "public/s.js#s",
+      "reason": "reads the free name `someGlobal` (its file reads the global scope, where a script's definitions live)",
+      "at": "public/b.js:1"
+    }
+  ]
+}

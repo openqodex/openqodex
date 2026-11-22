@@ -9,6 +9,9 @@
 //    memory.
 // 3. The time budget is checked only between files, so one file that
 //    holds such work runs past the budget with nothing recorded.
+// 4. Escape analysis, which runs after every file is resolved, runs on
+//    once the budget is spent, or stops with its escapes read as whole
+//    (issue 420).
 import { afterAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -112,5 +115,49 @@ describe("the limits of dispatch and function values", () => {
     const calls = new Set(resolved.edges.filter((e) => e.kind === "may_invoke").flatMap((e) => e.sites.map((s) => s.line)));
     expect(calls.size).toBeGreaterThan(0);
     expect(calls.size).toBeLessThan(300);
+  });
+
+  // Files whose escapes analysis reads: a computed load, an eval, a module.
+  const escaping = {
+    "src/a.js": "function f() {}\nexport function g() {\n  return f;\n}\n",
+    "src/load.js": "require(process.argv[2]);\n",
+    "src/run.js": "eval(location.hash);\n",
+  };
+  const worldOf = async (stop: () => boolean) => {
+    const root = repo(escaping);
+    const parser = await parserFor("javascript");
+    const files = Object.entries(escaping).map(([path, source]) => {
+      const tree = parser.parse(source);
+      if (!tree) throw new Error("no tree");
+      return { path, facts: extract(tree, "javascript") };
+    });
+    return createWorld({ files, known: new Set(Object.keys(escaping)), model: discoverProjects(Object.keys(escaping), new RepoReader(root)), goModules: [], stop });
+  };
+
+  it("does not start escape analysis once the budget is spent, and says its escapes are cut (4)", async () => {
+    const resolved = (await worldOf(() => true)).resolveAll();
+    expect(resolved.budgetFiles.length).toBeGreaterThan(0);
+    expect(resolved.escapesCut).toBe(true);
+    expect(resolved.escapes.loadAny).toEqual([]);
+  });
+
+  it("stops escape analysis when the budget runs out after every file is resolved, and says its escapes are cut (4)", async () => {
+    // The fewest checks the budget allows that leave no file unresolved:
+    // the next check is one escape analysis makes.
+    const run = async (allowed: number) => {
+      let asked = 0;
+      const resolved = (await worldOf(() => ++asked > allowed)).resolveAll();
+      return { resolved, asked };
+    };
+    let allowed = 0;
+    while ((await run(allowed)).resolved.budgetFiles.length > 0) allowed++;
+    const { resolved, asked } = await run(allowed);
+    expect(resolved.budgetFiles).toEqual([]);
+    expect(resolved.escapesCut).toBe(true);
+    expect(asked).toBe(allowed + 1);
+    // With a budget that never runs out, the same files are whole.
+    const whole = (await worldOf(() => false)).resolveAll();
+    expect(whole.escapesCut).toBe(false);
+    expect(whole.escapes.loadAny.length).toBeGreaterThan(0);
   });
 });

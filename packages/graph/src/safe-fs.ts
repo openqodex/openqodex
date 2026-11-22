@@ -5,7 +5,7 @@ import { isAbsolute, resolve } from "node:path";
 import { FolderReader, type EntryResult } from "@openqodex/core";
 import { isFrameworkFileFacts } from "./frameworks/facts.js";
 import type { FileFacts } from "./types.js";
-import { MAX_TYPE_DEPTH } from "./types.js";
+import { MAX_AMBIENT_NAMES, MAX_TYPE_DEPTH } from "./types.js";
 
 // Repo-relative reads, each decided by what the filesystem holds at the
 // moment of that read and by nothing kept from an earlier one. The root is
@@ -227,11 +227,12 @@ export function isFileFacts(v: unknown): v is FileFacts {
     (v.frameworks === undefined || isFrameworkFileFacts(v.frameworks)) &&
     (v.escapes === undefined || isList(v.escapes, isEscape, 200_000)) &&
     (v.opaque === undefined || isList(v.opaque, isCounted, 200_000)) &&
-    (v.ambient === undefined || isList(v.ambient, isStr, 4096)) &&
-    (v.ambientTop === undefined || isList(v.ambientTop, isStr, 4096)) &&
+    (v.ambient === undefined || isList(v.ambient, isStr, MAX_AMBIENT_NAMES)) &&
+    (v.ambientTop === undefined || isList(v.ambientTop, isStr, MAX_AMBIENT_NAMES)) &&
     (v.looseMembers === undefined || isList(v.looseMembers, isCounted, 200_000)) &&
     (v.variables === undefined || isList(v.variables, isStr, 200_000)) &&
-    (v.exportedVariables === undefined || isList(v.exportedVariables, isStr, 200_000))
+    (v.exportedVariables === undefined || isList(v.exportedVariables, isStr, 200_000)) &&
+    (v.esm === undefined || v.esm === true)
   );
 }
 

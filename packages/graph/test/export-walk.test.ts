@@ -7,6 +7,9 @@
 //    barrels never finish.
 // 3. A walk stopped by its step budget drops the names past the stop with
 //    nothing said.
+// 4. Escape analysis, which lists what every module offers when a module is
+//    loaded by a computed path, spends the step budget the comparison of
+//    the change needs, so a changed barrel is said not compared (issue 421).
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact } from "../src/index.js";
@@ -91,6 +94,20 @@ describe("the export walk", () => {
       expectLinear("the compare stage on diamonds of 500 and of 2,000 barrels", await compareCpuMs(diamond(250, own), after(250)), await compareCpuMs(diamond(1000, own), after(1000)));
     }, 300_000);
   });
+
+  it("compares a changed barrel with a step budget of its own after escape analysis walked every module (4)", async () => {
+    // A ring's walks are kept by no one (each meets the ring's cycle), so
+    // listing what each of 70 barrels offers takes 70 times 69 steps, past
+    // the budget; the comparison of top.ts needs 70 more.
+    const [files] = ring(70);
+    files["load.js"] = "const name = process.argv[2];\nrequire(name);\n";
+    files["top.ts"] = 'export * from "./r0";\nexport function mine() {\n  return 2;\n}\n';
+    expect(70 * 69).toBeGreaterThan(EXPORT_WALK_STEPS);
+    const { graph, impact } = await change(files, { "top.ts": 'export * from "./r0";\nfunction mine() {\n  return 2;\n}\n' });
+    expect(impact.exports.find((e) => e.name === "mine")).toMatchObject({ file: "top.ts", change: "removed" });
+    const notes = graph.status.cuts.filter((c) => c.by === "export-walk").map((c) => c.note);
+    expect(notes.filter((note) => note.includes("not compared")), notes.join("; ")).toEqual([]);
+  }, 300_000);
 
   it("records a cut when the walk passes its step budget (3)", async () => {
     const levels = Math.ceil(EXPORT_WALK_STEPS / 2) + 5;

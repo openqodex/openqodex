@@ -20,6 +20,12 @@ export function familyOf(lang: Lang): Family {
 // Type nesting through `on` and `args` shares one depth limit.
 export const MAX_TYPE_DEPTH = 16;
 
+// The most global names one file's facts keep as declared plain data
+// (`ambient`, `ambientTop`): the extractor writes at most this many and the
+// reader of saved facts accepts as many, so saved facts read back whole. A
+// name past it is not vouched for, which can only add a floor.
+export const MAX_AMBIENT_NAMES = 200_000;
+
 // A type named in source: `Repo`, `pkg.Repo` (qualifier "pkg"), Ruby `A::B`
 // (whole path in `name`, the lexical nesting in `qualifier`).
 // `result`: the type is what calling the function `name` returns, at that
@@ -344,6 +350,10 @@ export type FileFacts = {
   // binds a value the graph follows, not a name it could not find.
   variables?: string[];
   exportedVariables?: string[];
+  // TypeScript and JavaScript: the file has an `import` or `export`
+  // statement (`export {}` too), so it is a module, never a script whose
+  // definitions are names of the global scope.
+  esm?: true;
 };
 
 // ---------- the graph ----------
