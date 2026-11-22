@@ -306,6 +306,49 @@ function join(...parts: string[]): string {
   return j === "." ? "" : j;
 }
 
+// A set of names that shares its nodes with the set it was made from (a
+// hash trie): a set one name larger copies a few nodes of 32 slots, never
+// every name. A slot holds one name or a node of the next level; a node
+// past the hash's 32 bits is a list of the names whose hashes are equal.
+type NameSet = readonly (NameSet | string | undefined)[];
+const NAME_LEVELS = 7;
+function nameHash(name: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+function hasName(set: NameSet, name: string): boolean {
+  const h = nameHash(name);
+  let node = set;
+  for (let level = 0; level < NAME_LEVELS; level++) {
+    const slot = node[(h >>> (5 * level)) & 31];
+    if (typeof slot !== "object") return slot === name;
+    node = slot;
+  }
+  return node.includes(name);
+}
+function withName(set: NameSet | undefined, name: string, h = nameHash(name), level = 0): NameSet {
+  if (level === NAME_LEVELS) return set?.includes(name) ? set : [...(set ?? []), name];
+  const i = (h >>> (5 * level)) & 31;
+  const slot = set?.[i];
+  let next: NameSet | string = name;
+  if (slot === name) return set as NameSet;
+  if (typeof slot === "string") next = withName(withName(undefined, slot, nameHash(slot), level + 1), name, h, level + 1);
+  else if (slot !== undefined) {
+    next = withName(slot, name, h, level + 1);
+    if (next === slot) return set as NameSet;
+  }
+  const copy = set ? set.slice() : [];
+  copy[i] = next;
+  return copy;
+}
+function* namesIn(set: NameSet): Generator<string> {
+  for (const slot of set) {
+    if (typeof slot === "string") yield slot;
+    else if (slot !== undefined) yield* namesIn(slot);
+  }
+}
+
 const JS_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 
 export function resolveGraph(input: ResolveInput): Resolved {
@@ -3921,13 +3964,13 @@ export function createWorld(input: ResolveInput): World {
     // out can only come through a star: `stars` names the modules the file
     // stars from when its walk was cut. `skip` leaves out the names a
     // module above already gives itself, and `default`, which no star brings.
-    const offers = (file: string, skip: ReadonlySet<string> | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string> } => {
+    const offers = (file: string, skip: NameSet | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string> } => {
       const ids: string[] = [];
       const modules: string[] = [];
       let gap = false;
       const names = exportedJsNames(file);
       for (const [name] of names) {
-        if (skip?.has(name)) continue;
+        if (skip && hasName(skip, name)) continue;
         const v = index.exports(file, name, 0);
         if (v?.v === "sym") ids.push(...v.ids);
         else if (v?.v === "mod") modules.push(v.file);
@@ -3965,21 +4008,23 @@ export function createWorld(input: ResolveInput): World {
     const modules = new Map<string, Place>();
     const offered = new Set<string>();
     const walk = (start: string, place: Place) => {
-      type Visit = { file: string; whole: boolean; skip: Set<string> | null };
+      // A star's skip is a NameSet: each hop of a long chain of stars adds
+      // its own names to the set above it without copying it.
+      type Visit = { file: string; whole: boolean; skip: NameSet | null };
       const queue: Visit[] = [{ file: start, whole: true, skip: null }];
       const seen = new Set<string>();
       // A module a cut walk stars from, with the names it was counted
       // without. A later visit that skips fewer names reaches more, so it
       // runs again with only the names both skip; the set only shrinks.
-      const skipped = new Map<string, Set<string>>();
+      const skipped = new Map<string, NameSet>();
       while (queue.length > 0) {
         const { file, whole, skip: asked } = queue.pop() as Visit;
         if (seen.has(`${file}\0${whole}`)) continue;
-        let skip: Set<string> | null = null;
+        let skip: NameSet | null = null;
         if (asked) {
           const had = skipped.get(file);
-          if (had && [...had].every((n) => asked.has(n))) continue;
-          skip = had ? new Set([...had].filter((n) => asked.has(n))) : asked;
+          if (had && [...namesIn(had)].every((n) => hasName(asked, n))) continue;
+          skip = had ? [...namesIn(had)].filter((n) => hasName(asked, n)).reduce<NameSet>((s, n) => withName(s, n), []) : asked;
           skipped.set(file, skip);
         } else seen.add(`${file}\0${whole}`);
         if (!modules.has(file)) modules.set(file, place);
@@ -3988,7 +4033,8 @@ export function createWorld(input: ResolveInput): World {
           for (const id of o.ids) addReach(id, { why: "module", ...place });
           for (const m of o.modules) queue.push({ file: m, whole: true, skip: null });
           if (o.stars.length > 0) {
-            const given = new Set([...(skip ?? []), "default", ...o.names]);
+            let given = withName(skip ?? [], "default");
+            for (const n of o.names) given = withName(given, n);
             for (const m of o.stars) queue.push({ file: m, whole: true, skip: given });
           }
         }

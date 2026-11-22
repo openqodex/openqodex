@@ -13,6 +13,9 @@
 // 5. The fix for 4 floors names the module cannot give through the cut
 //    star: a default export (no star brings it), a name the module's own
 //    export shadows, or a sibling a named re-export leaves out.
+// 6. A module two cut stars reach is counted once, without the names the
+//    first star's module gives itself, so a name only the second star
+//    brings reads as having every caller listed.
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact } from "../src/index.js";
@@ -116,8 +119,8 @@ describe("the export walk", () => {
   // through them finishes, so a walk from `r.ts` spends its whole budget
   // there before it reaches `end.ts`. `use.ts` uses `r.ts` as a value.
   // The names `r.ts` gives itself come before its stars, so looking them
-  // up never enters the web.
-  async function cutWeb() {
+  // up never enters the web. `over` replaces or adds files.
+  async function cutWeb(over: Record<string, string> = {}) {
     const files: Record<string, string> = {
       "end.ts": "export function t(): void {}\nexport function mine(): void {}\nfunction d(): void {}\nexport default d;\n",
       "side.ts": "export function s(): void {}\nexport function sibling(): void {}\n",
@@ -125,7 +128,7 @@ describe("the export walk", () => {
       "use.ts": 'import * as r from "./r";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n',
     };
     for (let i = 0; i < 8; i++) files[`mesh${i}.ts`] = [0, 1, 2, 3, 4, 5, 6, 7].filter((j) => j !== i).map((j) => `export * from "./mesh${j}";\n`).join("") + `export function own${i}(): void {}\n`;
-    const graph = await buildGraph({ repoRoot: makeRepo(files), store: null });
+    const graph = await buildGraph({ repoRoot: makeRepo({ ...files, ...over }), store: null });
     expect(graph.status.cuts.some((c) => c.by === "export-walk"), "the walk passes its step budget").toBe(true);
     return (file: string, name: string) => query({ graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "callers", target: { id: symbol(graph, file, name) }, depth: 1 } as Request);
   }
@@ -143,6 +146,23 @@ describe("the export walk", () => {
     for (const [file, name] of [["end.ts", "d"], ["end.ts", "mine"], ["side.ts", "sibling"]] as const) {
       const a = callers(file, name);
       expect(a.unknown.floor, `${file}#${name}: ${a.unknown.reasons.join("; ")}`).toBe(false);
+    }
+  }, 120_000);
+
+  it("counts a module two cut stars reach with only the names both give (6)", async () => {
+    // `a.ts`, `b.ts` and `c.ts` each star the web, so their walks are cut
+    // too and only a star visit reaches c's names. `a.ts` and `b.ts` both
+    // star `c.ts`. Through `a.ts`, c's x is a's own; through `b.ts`, c's y
+    // is b's own; both give z.
+    const callers = await cutWeb({
+      "r.ts": 'export * from "./mesh0";\nexport * from "./a";\nexport * from "./b";\n',
+      "a.ts": 'export function x(): void {}\nexport function z(): void {}\nexport * from "./c";\nexport * from "./mesh0";\n',
+      "b.ts": 'export function y(): void {}\nexport function z(): void {}\nexport * from "./c";\nexport * from "./mesh0";\n',
+      "c.ts": 'export function x(): void {}\nexport function y(): void {}\nexport function z(): void {}\nexport * from "./mesh0";\n',
+    });
+    for (const [name, floor] of [["x", true], ["y", true], ["z", false]] as const) {
+      const a = callers("c.ts", name);
+      expect(a.unknown.floor, `c.ts#${name}: ${a.unknown.reasons.join("; ")}`).toBe(floor);
     }
   }, 120_000);
 });
