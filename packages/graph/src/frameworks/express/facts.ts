@@ -82,6 +82,20 @@ const MODULES = new Set(["express", "supertest"]);
 // specifier: the string's text without its quotes (extract.ts).
 const specifier = (n: Node | null | undefined): string | null => (n?.type === "string" ? n.text.slice(1, -1) : null);
 
+// An argument or a value as resolve reads it: `process.env["X"]` is read
+// as the name `process.env.X`, the form the member `process.env.X` gives,
+// so a mount path read from the environment is known to be a string.
+function readArg(node: Node | null): Expr {
+  if (node?.type === "subscript_expression") {
+    const obj = node.childForFieldName("object");
+    const index = node.childForFieldName("index");
+    const path = obj ? namePath(obj) : null;
+    const key = index ? stringValue(index) : null;
+    if (path?.length === 2 && path[0] === "process" && path[1] === "env" && key !== null && /^[A-Za-z_$][\w$]*$/.test(key)) return { t: "ref", path: ["process", "env", key], ...pos(node) };
+  }
+  return readExpr(node);
+}
+
 // How many functions out resolve follows a name's binding (resolve.ts).
 export const MAX_SCOPE_CHAIN = 64;
 
@@ -222,7 +236,7 @@ export function reader(root: Node): FactReader<ExpressFact> {
           const prop = fn.childForFieldName("property");
           const name = prop?.type === "property_identifier" ? identifierName(prop.text) : null;
           if (name !== null && WATCHED.has(name)) {
-            const fact: ExpressFact = { kind: "call", ...pos(node), recv: readExpr(fn.childForFieldName("object")), prop: name, args: args().slice(0, MAX_ITEMS).map((a) => readExpr(a)), scope };
+            const fact: ExpressFact = { kind: "call", ...pos(node), recv: readExpr(fn.childForFieldName("object")), prop: name, args: args().slice(0, MAX_ITEMS).map((a) => readArg(a)), scope };
             if (args().length > MAX_ITEMS) fact.more = args().length - MAX_ITEMS;
             out.push(fact);
           }
@@ -259,7 +273,7 @@ export function reader(root: Node): FactReader<ExpressFact> {
           }
           return;
         }
-        out.push({ kind: "value", ...pos(node), name: id, value: readExpr(value), scope, top, exported: exported(upType), decl });
+        out.push({ kind: "value", ...pos(node), name: id, value: readArg(value), scope, top, exported: exported(upType), decl });
         return;
       }
       case "assignment_expression": {
@@ -277,7 +291,7 @@ export function reader(root: Node): FactReader<ExpressFact> {
           return;
         }
         if (path.length === 1) {
-          out.push({ kind: "value", ...pos(node), name: path[0] as string, value: readExpr(right), scope, top: scope === 0, exported: false, decl: "assign" });
+          out.push({ kind: "value", ...pos(node), name: path[0] as string, value: readArg(right), scope, top: scope === 0, exported: false, decl: "assign" });
         }
         return;
       }
@@ -334,8 +348,12 @@ export function reader(root: Node): FactReader<ExpressFact> {
 // test agent's request), and a constant such a path names, the very
 // binding the path reads. Every other literal, in a handler, an option, a
 // header, a value, an object's key or an export, is kept as `other`, and a
-// test block keeps no title.
+// test block keeps no title. A computed string in such a path, or given to
+// a name, is kept as a computed string with no text.
 const unread = (e: Expr): Expr => ({ t: "other", line: e.line, column: e.column });
+// A computed string whose pieces are not kept: resolve still knows it is a
+// string (a mount path, never a middleware), with no text of it.
+const computed = (e: Expr): Expr => ({ t: "dyn", parts: null, line: e.line, column: e.column });
 
 // The value given to `module.exports`. An object's spreads, computed keys
 // and methods are counted in its `more`: each may write a member the
@@ -408,7 +426,7 @@ function keepRead(facts: ExpressFact[]): ExpressFact[] {
       }
       case "dyn": {
         const parts = e.parts ? keepParts(e.parts, "either", use, constantIn(at)) : null;
-        return parts === null ? unread(e) : { ...e, parts };
+        return parts === null ? computed(e) : { ...e, parts };
       }
       case "ref":
         use(e.path);
@@ -453,7 +471,7 @@ function keepRead(facts: ExpressFact[]): ExpressFact[] {
       case "server":
         return { ...f, args: f.args.map(names) };
       case "value":
-        return f.value.t === "str" ? f : { ...f, value: names(f.value) };
+        return f.value.t === "str" ? f : f.value.t === "dyn" ? { ...f, value: computed(f.value) } : { ...f, value: names(f.value) };
       case "cjs-export":
         // An object keeps the names it exports (`module.exports = { users }`), by the rule that keeps a path piece.
         return { ...f, value: f.value.t === "object" ? { ...f.value, props: f.value.props.map((p) => ({ key: eitherSegmentText(p.key) === p.key ? p.key : "", value: names(p.value) })) } : names(f.value) };

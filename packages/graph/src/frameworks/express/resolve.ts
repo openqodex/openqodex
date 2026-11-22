@@ -564,28 +564,37 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     return null;
   };
 
+  // Whether an expression is a string the graph can show: a literal, a
+  // template or a concatenation, `process.env.X`, or a name whose every
+  // write, here or in the module it is imported from, is one of those.
+  // Anything else, a parameter, a member of an object or of a required
+  // module, a value of a type the facts do not hold, is not.
+  const stringLike = (file: string, e: Expr, scope: number, depth: number): boolean => {
+    if (e.t === "str" || e.t === "dyn") return true;
+    if (e.t !== "ref" || depth > MAX_MOUNT_DEPTH) return false;
+    const name = e.path[0] as string;
+    const at = bindingScope(file, scope, name);
+    const writes = writesOf(file, name, at);
+    if (e.path.length === 3 && name === "process" && e.path[1] === "env") return at === 0 && writes.length === 0;
+    if (e.path.length !== 1) return false;
+    if (writes.length > 0) return writes.every((w) => stringLike(file, w.value, w.scope, depth + 1));
+    if (at !== 0) return false;
+    const found = lookup(file, e.path);
+    if (found.kind !== "miss" || !index.languageFacts(found.target)) return false;
+    const there = writesOf(found.target, found.name, 0);
+    return there.some((v) => v.exported) && there.every((w) => stringLike(found.target, w.value, w.scope, depth + 1));
+  };
   // Whether the first argument of a use call is a mount path the code
   // computes: `app.use(PREFIX, router)`, `app.use(process.env.PREFIX, router)`.
-  // Express takes a first argument that is not a function for the path, so
-  // a name or a member with no literal value, before a router or an
-  // application, is a computed prefix. A name bound to a definition, to a
-  // dependency's export, to a call's result or to an inline function is
-  // middleware, as is a router or an application itself.
-  const computedPrefix = (file: string, first: Expr, rest: readonly Expr[], scope: number, line: number): boolean => {
-    if (first.t !== "ref" && first.t !== "member") return false;
-    const mounts = rest.some((a) => {
+  // Express takes a first argument that is not a function for the path; it
+  // is read as one only when the graph shows it is a string and a router or
+  // an application follows it. Any other first argument is middleware.
+  const computedPrefix = (file: string, first: Expr, rest: readonly Expr[], scope: number, line: number): boolean =>
+    stringLike(file, first, scope, 0) &&
+    rest.some((a) => {
       const t = argValue(file, a, scope, line);
       return t !== null && (t.kind === "router" || t.kind === "app");
     });
-    if (!mounts) return false;
-    if (first.t === "member") return true;
-    if (argValue(file, first, scope, line) !== null) return false;
-    const name = first.path[0] as string;
-    const writes = writesOf(file, name, bindingScope(file, scope, name));
-    if (first.path.length === 1 && writes.length === 1 && (writes[0]?.value.t === "call" || writes[0]?.value.t === "fn")) return false;
-    const found = lookup(file, first.path);
-    return found.kind !== "symbol" && found.kind !== "external";
-  };
 
   for (const file of files) {
     if (fx(file).tooLarge || fx(file).unread) continue;
