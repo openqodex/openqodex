@@ -87,7 +87,9 @@ export const SHAPE_CAP = 20;
 // marked (UnknownSite.notPlain). 32: the opaque files (Escapes.opaque).
 // 33: what each opaque file reaches, and the scripts (Escapes.scripts).
 // 34: a free name its project declares as plain data vouches for itself.
-export const RESOLVER_VERSION = 34;
+// 35: a module that offers a name the graph cannot follow to one
+// definition reaches whole every module it forwards names from.
+export const RESOLVER_VERSION = 35;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -3909,15 +3911,21 @@ export function createWorld(input: ResolveInput): World {
     const jsFiles = input.files.filter((x) => familyOf(x.facts.lang) === "js");
     // A load fact that holds in its file: one marked `cjs` holds outside a CommonJS file only.
     const loads = (path: string, e: EscapeFact) => e.kind === "load" && !(e.cjs === true && /\.c[jt]s$/.test(path));
-    // Every definition a module offers, and the modules whole namespaces of it name.
+    // Every definition a module offers, and the modules whole namespaces of
+    // it name. A name the graph cannot follow to one definition (a chain
+    // of re-exports too deep, two stars that offer it) may come from any
+    // module the file forwards names from, so each of those counts whole.
     const offers = (file: string): { ids: string[]; modules: string[] } => {
       const ids: string[] = [];
       const modules: string[] = [];
+      let gap = false;
       for (const [name] of exportedJsNames(file)) {
         const v = index.exports(file, name, 0);
         if (v?.v === "sym") ids.push(...v.ids);
         else if (v?.v === "mod") modules.push(v.file);
+        else if (v?.v === "gap") gap = true;
       }
+      if (gap) modules.push(...forwards(file));
       return { ids, modules };
     };
     // The modules a module forwards names from: `export ... from`, and a

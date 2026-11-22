@@ -453,7 +453,12 @@ export type Escapes = {
   // reads by a computed key ("js:*"), the first place in each file, and
   // whether any read may pass its value on.
   members: Map<string, Place & { count: number; places?: Place[]; passed?: boolean }>;
+  // Set when the graph was assembled without its escape facts (a program
+  // calling `assemble` the 0.22.0 way): no caller list is whole then.
+  missing?: true;
 };
+// The floor reason of a graph assembled without its escape facts.
+export const NO_ESCAPES = "the escape facts were not given when the graph was assembled, so any caller list may miss callers";
 
 // An eligible file the graph did not read, and why.
 export type NotRead = { file: string; reason: "size" | "budget" | "parse-cap" | "memory" | "parse-error" | "slow-parse" | "unreadable" };

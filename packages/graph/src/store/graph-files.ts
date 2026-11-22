@@ -6,6 +6,7 @@ import type { ProjectModel } from "../discovery/projects.js";
 import { FRAMEWORK_DATA_VERSION } from "../frameworks/stage.js";
 import type { FrameworkData } from "../frameworks/stage.js";
 import { projectFolder } from "../resolve.js";
+import { NO_ESCAPES } from "../types.js";
 import type { DispatchSite, Escapes, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, OpaqueFact, Reach, UnknownSite } from "../types.js";
 import type { OpenGeneration } from "./types.js";
 
@@ -156,7 +157,8 @@ export function writeIndex(g: Graph): Record<string, string> {
     "index/summaries.jsonl": lines(summaries),
     "index/status.json": JSON.stringify(g.status),
     "index/frameworks.json": JSON.stringify(g.frameworks ?? null),
-    "index/escapes.json": JSON.stringify(escapes),
+    // A graph without its escape facts never loads back as one that has them.
+    "index/escapes.json": x.missing ? "null" : JSON.stringify(escapes),
   };
 }
 
@@ -272,7 +274,9 @@ export function assemble(
   status: GraphStatus,
   model: ProjectModel,
   goModules: [string, string][],
-  extra: Pick<Graph, "references" | "dispatch" | "summaries" | "escapes">,
+  // Optional, as in 0.22.0. Without `escapes` the graph fails closed: it is
+  // partial, and every caller list is a floor that says why.
+  extra: Pick<Graph, "references" | "dispatch" | "summaries"> & Partial<Pick<Graph, "escapes">> = { references: [], dispatch: [], summaries: new Map() },
 ): Graph {
   const nodes = new Map<string, GraphNode>();
   const defsByFile = new Map<string, GraphNode[]>();
@@ -320,11 +324,11 @@ export function assemble(
     unknowns,
     unknownNames,
     valueCalls,
-    escapes: extra.escapes,
+    escapes: extra.escapes ?? { uses: new Map(), unbound: new Map(), reach: new Map(), modules: new Map(), loadAny: [], offered: new Set(), opaque: new Map(), scripts: new Set(), members: new Map(), missing: true },
     model,
     goModules,
     projectOf,
     exportChanges: [],
-    status,
+    status: extra.escapes ? status : { ...status, status: "partial", reason: status.reason ?? NO_ESCAPES, reasons: [...status.reasons, NO_ESCAPES] },
   };
 }
