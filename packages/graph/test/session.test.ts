@@ -21,6 +21,10 @@
 // 8. A build kept as an index forgets that a read by a computed key passes
 //    its value on, or where it is, so a reopened build says only tests could
 //    hide a caller that product code may call.
+// 9. A file that declares more global names as plain data than the reader
+//    of saved facts accepts, or one longer than it accepts, is refused when
+//    reopened from its facts, so a whole build reopens as partial with the
+//    file not read (issue 426).
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readdirSync, unlinkSync } from "node:fs";
@@ -148,6 +152,26 @@ describe("reopening a kept build", () => {
     expect(await workTreeDigest(root, 1_000_000)).not.toBe(digest);
     const again = await buildGraph({ repoRoot: root, store: st });
     expect([...again.escapes.opaque.keys()]).toEqual(["app/b.ts"]);
+  });
+  it("reads back the facts of a declaration file with more than 4,096 plain global names, one of them longer than 4,096 characters (9)", async () => {
+    const names = `${Array.from({ length: 5000 }, (_, i) => `declare const V${i}: string;\n`).join("")}declare const L${"o".repeat(5000)}: string;\n`;
+    const root = makeRepo({
+      "app/package.json": '{"name": "app"}\n',
+      "app/a.ts": "export function f() {}\n",
+      "app/b.ts": 'import { f } from "./a";\nexport const v = V4999;\nf();\n',
+      "app/globals.d.ts": names,
+      "app/env.ts": `export {};\ndeclare global {\n${names.replace(/^declare /gm, "")}}\n`,
+    });
+    const st = await store(root);
+    const built = await buildGraph({ repoRoot: root, store: st, mode: "fresh" });
+    expect(built.status.status).toBe("ok");
+    const gen = st.open({ id: built.status.generation as string });
+    expect(gen?.manifest.hasIndex).toBe(false);
+    const reopened = graphOf(st, gen!) as Graph;
+    expect(reopened.status.notRead).toEqual([]);
+    expect(reopened.status.status).toBe("ok");
+    expect([...reopened.escapes.opaque.keys()]).toEqual([]);
+    expect(shape(reopened)).toEqual(shape(built));
   });
   it("keeps whether a read by a computed key passes its value on, and its places (8)", async () => {
     const root = makeRepo({

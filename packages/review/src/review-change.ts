@@ -40,7 +40,6 @@ import {
   cleanupDiffs,
   completionRecord,
   configHash,
-  findingKey,
   getChange,
   getTreeChange,
   getWholeRepo,
@@ -105,7 +104,7 @@ import { modelEvidence } from "./evidence.js";
 import { modelRecord, modelReport, reviewRender } from "./model-record.js";
 import { agentReviewer } from "./reviewer.js";
 import type { Budget, Disposition, ModelReviewer, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult } from "./reviewer.js";
-import { disagreementsOf, mergeFindings, runSecondReviewer, withSecondReviewer } from "./second.js";
+import { disagreementsOf, mergeFindings, possibleAfterSecond, runSecondReviewer, withSecondReviewer } from "./second.js";
 import type { SecondRun } from "./second.js";
 import { buildGraphRun, buildHotSpots, nothingToReviewLine, ruleCoverage, scanChange, wholeRepoLenses } from "./pipeline.js";
 import type { GraphHost, PipelineResult, ScanHost } from "./pipeline.js";
@@ -676,7 +675,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
           if (stopped) throw new Error("the review stopped");
           const modelSessionForRole = model ? modelSession({ reviewer: model.reviewer, role, budget: model.budget, box, now: deps.now, deadline, shared, budgetState }) : null;
           if (modelSessionForRole) modelSessions.push(modelSessionForRole);
-          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web }), { driver: agent.driver.name, role, now: deps.now }) : null;
+          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, secrets: p.secrets }), { driver: agent.driver.name, role, now: deps.now }) : null;
           const opened = register(modelSessionForRole ?? metered!.session);
           return {
             send: (text) => opened.send(text),
@@ -756,7 +755,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       deps.onEvent({ type: "started", driver: "model", version: model.reviewer.model, pid: null });
       say(`Reviewer: model ${model.reviewer.model} started; this takes several minutes`);
     } else if (notStarted === null && agent) {
-      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web }), { driver: agent.driver.name, now: deps.now });
+      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, secrets: p.secrets }), { driver: agent.driver.name, now: deps.now });
       session = register(metered.session);
       pid = metered.session.pid;
       deps.onEvent({ type: "started", driver: agent.driver.name, version: agent.version, pid });
@@ -1198,8 +1197,7 @@ async function reviewInScope(
       // A candidate the second reviewer raised or dropped is no longer
       // unchecked, even when the primary never answered.
       const disposed = new Set(theirs.map((d) => d.candidate));
-      const countedKeys = new Set(merged.findings.map(findingKey));
-      checked = { ...r.report, findings: merged.findings, possible: r.report.possible.filter((f) => !countedKeys.has(findingKey(f))), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
+      checked = { ...r.report, findings: merged.findings, possible: possibleAfterSecond(r.report.possible, merged), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
       foundBy = merged.foundBy;
       if (answered) disagreements = disagreementsOf({ name: model.model, dispositions }, { name: second.name, dispositions: theirs });
       dispositions.push(...theirs);

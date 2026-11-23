@@ -49,6 +49,8 @@ In `.openqodex/reviews/<time>-<id>/` in the repository: `report.html` to open in
 
 OpenQodex runs on macOS and Linux. CI runs the gate on macOS and on Ubuntu Linux. No test runs on Windows or WSL.
 
+On native Windows, `openqodex review` can find and start Claude Code as the separate reviewer, as `claude.exe` or as the `claude.cmd` file npm installs. Nobody has run that on a Windows machine yet. Codex is not offered as the reviewer on native Windows, because OpenQodex cannot yet check there that Codex reads only the review copy. When a timed-out reviewer is stopped, programs it started and left running after it exited are not stopped. Use WSL for a review you rely on.
+
 ## What is the code graph?
 
 A map of your repository that OpenQodex builds on your machine, with no model. It records every function, class and type, and every call and import between them. A review gives the reviewer what your change reaches in the graph. You or your agent can also ask it questions, such as `openqodex graph callers <name>`. `graph` describes it.

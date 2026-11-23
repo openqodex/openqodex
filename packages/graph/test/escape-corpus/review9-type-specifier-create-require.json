@@ -1,0 +1,14 @@
+{
+  "covers": "a `type` specifier named `createRequire` in a value import binds nothing at run time: the repository stays whole (issue 422)",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/m.ts": "export type createRequire = number;\nexport const x = 1;\n",
+    "src/use.ts": "import { x, type createRequire } from \"./m\";\nexport const y: createRequire = x;\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
+}

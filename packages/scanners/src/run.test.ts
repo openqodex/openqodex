@@ -87,6 +87,11 @@
 //  39. A custom adapter written for wants() alone, with no paths(), makes
 //      runScanners throw or skips the scanner, now that the scan record
 //      asks each custom scanner for its file list.
+// Added for issue #307:
+//  40. An adapter that marks its error as a failure (a Go module that could
+//      not type-check) reads as ran because another part gave findings, so
+//      the developer is never told a changed package went unchecked; or its
+//      findings are lost.
 
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
@@ -651,5 +656,22 @@ describe("candidate order", () => {
     const unwanted = (await scanWith(legacy(false))).scan;
     expect(unwanted.selection?.find((c) => c.scanner === "custom:legacy")).toEqual({ scanner: "custom:legacy", wanted: false, paths: [], projects: [], skip: "nothing to check" });
     expect(unwanted.scanners).toEqual([expect.objectContaining({ scanner: "custom:legacy", status: "no_matching_files" })]);
+  });
+
+  it("keeps a scanner failed when it marks its error as a failure beside findings, and keeps the findings (40)", async () => {
+    const dir = repo({ "a.sh": "x\n" });
+    const partial = (failed: boolean | undefined): CustomAdapter => ({
+      source: "custom:partial",
+      skipped: null,
+      wants: () => true,
+      run: async () => ({ findings: [finding({ source: "custom:partial", filePath: "a.sh" })], error: "b: could not type-check", ...(failed === undefined ? {} : { failed }), version: "1.0.0" }),
+    });
+    const scanWith = (adapter: CustomAdapter) =>
+      runScanners({ repoDir: dir, changedPaths: ["a.sh"], coverage: new Map([["a.sh", lines(1)]]), config: config(), resolveTool: notInstalled(), only: ["custom:partial"], custom: [adapter] });
+    const failed = (await scanWith(partial(true))).scan;
+    expect(failed.scanners).toEqual([expect.objectContaining({ scanner: "custom:partial", status: "failed", reason: "b: could not type-check", rawCount: 1, keptCount: 1 })]);
+    expect(failed.candidates.map((c) => c.filePath)).toEqual(["a.sh"]);
+    const noted = (await scanWith(partial(undefined))).scan;
+    expect(noted.scanners).toEqual([expect.objectContaining({ scanner: "custom:partial", status: "ran", reason: "b: could not type-check" })]);
   });
 });

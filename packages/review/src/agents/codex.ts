@@ -14,12 +14,12 @@ import { execFile } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { openqodexHome } from "@openqodex/scanners";
 import { checkoutsDir } from "../checkouts.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, namesLimit, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -93,15 +93,19 @@ export function codexArgs(snapshotDir: string, web: boolean): string[] {
 // a running Codex session (CODEX_THREAD_ID, CODEX_SANDBOX).
 const ALWAYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", "TZ", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy", "SSL_CERT_FILE"];
 
-export function codexEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function codexEnv(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
-    if (v !== undefined && (ALWAYS.includes(k) || k.startsWith("LC_"))) out[k] = v;
+    if (v !== undefined && (onAllowlist(ALWAYS, k, platform) || k.startsWith("LC_"))) out[k] = v;
   }
   // Only absolute PATH entries: an empty or relative one (".", "bin") would
   // resolve inside the snapshot, where a committed program could stand in
-  // for a system one.
-  if (out.PATH !== undefined) out.PATH = out.PATH.split(":").filter((d) => d.startsWith("/")).join(":");
+  // for a system one. Split and judged by the platform's own rules
+  // (";" and "C:\" on Windows), under whatever case the name has there.
+  const p = platform === "win32" ? win32 : posix;
+  for (const k of Object.keys(out)) {
+    if (k === "PATH" || (platform === "win32" && k.toUpperCase() === "PATH")) out[k] = (out[k] ?? "").split(p.delimiter).filter((d) => p.isAbsolute(d)).join(p.delimiter);
+  }
   out[DEPTH_ENV] = "1";
   return out;
 }
@@ -126,7 +130,14 @@ export function olderThanTested(version: string): boolean {
 
 const DETECT_TIMEOUT_MS = 20_000;
 
-async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<Detected> {
+async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Promise<Detected> {
+  // The sandbox probe runs /bin/sh and /bin/cat, which Windows does not
+  // have, and nothing else checks Codex's read boundary there. A review
+  // never runs on a boundary nobody checked, so Codex is not offered on
+  // Windows and `auto` moves on to the next reviewer.
+  if (platform === "win32") {
+    return { ok: false, missing: "Codex cannot be the reviewer on native Windows yet: openqodex cannot check there that Codex reads only the review copy", fix: "review with Claude Code, or run openqodex review from WSL" };
+  }
   // Inside a Codex sandbox (a Codex session ran `openqodex review`), a
   // nested `codex exec` stops at once: "failed to initialize in-process
   // app-server client: Operation not permitted", with or without network.
@@ -138,7 +149,7 @@ async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env): P
   const childEnv = codexEnv(env);
   let version: string | null;
   try {
-    const { stdout } = await execFileAsync(bin, ["--version"], { env: childEnv, timeout: DETECT_TIMEOUT_MS });
+    const { stdout } = await execFileAsync(...launch(bin, ["--version"]), { env: childEnv, timeout: DETECT_TIMEOUT_MS });
     version = codexVersion(stdout);
   } catch (error) {
     return { ok: false, missing: `codex --version failed: ${String((error as Error).message).split("\n")[0]}`, fix: "reinstall Codex" };
@@ -148,7 +159,7 @@ async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env): P
   // Exit 0 and "Logged in using ChatGPT" (or an API key) when logged in;
   // exit 1 and "Not logged in" when not.
   try {
-    await execFileAsync(bin, ["login", "status"], { env: childEnv, timeout: DETECT_TIMEOUT_MS });
+    await execFileAsync(...launch(bin, ["login", "status"]), { env: childEnv, timeout: DETECT_TIMEOUT_MS });
   } catch {
     return { ok: false, missing: `Codex ${version} is not logged in`, fix: "run codex login, then review again" };
   }
@@ -273,7 +284,7 @@ export type CodexRun = { finalText: string; calls: ToolCall[]; input: number | n
 
 // Reads one run's event lines, as they arrive. `line` returns a failure as
 // soon as a bound is passed, so the caller can stop the process.
-export function codexStream(): { line(text: string): string | null; end(code: number | null, signal: string | null): CodexRun } {
+export function codexStream(secrets: string[] = []): { line(text: string): string | null; end(code: number | null, signal: string | null): CodexRun } {
   let answer: string | null = null;
   let completed = false;
   let failed: string | null = null;
@@ -290,8 +301,10 @@ export function codexStream(): { line(text: string): string | null; end(code: nu
       return null;
     }
     if (e.type === "turn.failed" || e.type === "error") {
-      const message = str((e.error as Record<string, unknown> | undefined)?.message) ?? str(e.message) ?? "unknown";
-      failed ??= `the reviewer stopped with an error (${message.split("\n")[0]?.slice(0, 200)})`;
+      const said = reviewerError(str((e.error as Record<string, unknown> | undefined)?.message) ?? str(e.message), undefined, secrets);
+      // The first error, unless a later one names a limit and it does not:
+      // a reconnect notice can come before the usage limit that ends the turn.
+      if (failed === null || (namesLimit(said) && !namesLimit(failed))) failed = said;
       return null;
     }
     if (e.type !== "item.completed") return null;
@@ -347,7 +360,7 @@ export function replay(history: string[]): string {
   return out.join("\n\n").trimEnd();
 }
 
-function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): ReviewerSession {
+function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): ReviewerSession {
   // The brief, then each answer and each correction, in the order they came.
   const history: string[] = [];
   let usage: ReviewerUsage = { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null };
@@ -356,7 +369,7 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
 
   const run = (prompt: string): Promise<CodexRun> =>
     new Promise((done) => {
-      const stream = codexStream();
+      const stream = codexStream(opts.secrets);
       const proc = spawnGroup(opts.bin, codexArgs(opts.snapshotDir, opts.web), { cwd: opts.snapshotDir, env: codexEnv() });
       child = proc;
       let stopped: string | null = null;

@@ -170,6 +170,9 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
 
   const { groups, orphans } = groupGoPackagesByModule(args.repoDir, goFiles);
   const notes: string[] = [];
+  // A module that could not type-check: a failure even when another module
+  // gave findings. The timeout and cap notes stay notes.
+  let typecheckFailed = false;
   // States of the developer's machine, not failures: see the header.
   const skips: string[] = [];
   if (orphans.length > 0) {
@@ -229,7 +232,10 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
         const report = parseGolangciJson(stdout);
         findings.push(...reanchorToRunDir(report.findings, group.moduleRoot));
         const first = report.typecheckErrors[0];
-        if (first) notes.push(`${toolText(group.moduleRoot)}: could not type-check: ${toolText(inModule(first, cwd)).slice(0, 200)}`);
+        if (first) {
+          notes.push(`${toolText(group.moduleRoot)}: could not type-check: ${toolText(inModule(first, cwd)).slice(0, 200)}`);
+          typecheckFailed = true;
+        }
         return report;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -280,7 +286,7 @@ export async function runGolangci(args: GolangciRunArgs): Promise<AdapterResult>
     skips.push(notDownloadedSkip(moduleRoot, imports, linted.has(moduleRoot)));
   }
   if (notes.length > 0) {
-    return { findings, error: joinParts([...notes, ...skips]) };
+    return { findings, error: joinParts([...notes, ...skips]), ...(typecheckFailed ? { failed: true } : {}) };
   }
   if (skips.length === 0) return { findings, error: null };
   const reason = joinParts(skips);

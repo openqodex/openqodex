@@ -19,7 +19,8 @@ import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 // 11: an arrow function export is no router; a member of a require bound to a name is followed; a static method beside an exported member does not compete with it.
 // 12: a tagged template with type arguments and a cast to an import type with an array suffix are read, not a region the parser could not read.
 // 13: a handler written in place is bound to the definition the language extractor makes for it.
-export const VERSION = 13;
+// 14: a first argument of use that is a string the graph can show is a computed mount path, not middleware; a computed string keeps no text; `process.env["X"]` is read as `process.env.X`.
+export const VERSION = 14;
 
 const app = "express-app";
 

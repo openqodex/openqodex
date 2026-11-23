@@ -6,11 +6,12 @@
 //     and the answer says the list is whole (unknown.floor false). Each
 //     case's `mustReach` rows are written by hand from reading the code,
 //     never from graph output; a row passes when the caller is listed at
-//     any tier or the list is a floor.
+//     any tier at the row's file and line, or the list is a floor.
 //  2. A target no hidden path can reach is still a floor, so agents learn
 //     to ignore the warning (`whole` rows).
 //  3. A floor says a reason that does not name the escape, or names the
-//     wrong place (`floored` rows: a reason holding the text, at the place).
+//     wrong place (`floored` rows: a reason holding the text, at the place,
+//     where `a.ts:2` does not match `a.ts:20` nor `@a.ts:2`).
 //  4. A value use is the floor's reason but `graph references` does not
 //     list it, so the agent sent to read the use cannot find it (each
 //     `floored` row whose reason is a value use outside the target's own
@@ -76,8 +77,10 @@ describe("the escape corpus", () => {
       for (const row of spec.mustReach) {
         const id = idOf(g, row.target);
         const callerId = row.caller === null ? null : row.caller.includes("#") ? idOf(g, row.caller) : row.caller;
-        const listed = callerId !== null && (g.in.get(id) ?? []).some((e) => e.from === callerId);
         const a = callersOf(g, id);
+        // Listed at the row's own place: an edge from the caller elsewhere
+        // would hide a call missing here.
+        const listed = callerId !== null && (a.items as { from: string; site: { file: string; line: number } }[]).some((i) => i.from === callerId && i.site.file === row.file && i.site.line === row.line);
         expect(listed || a.unknown.floor, `${row.target} is called from ${row.caller ?? "outside the repository"} at ${row.file}:${row.line}; reasons: ${a.unknown.reasons.join("; ")}`).toBe(true);
       }
       for (const target of spec.whole) {
@@ -87,7 +90,12 @@ describe("the escape corpus", () => {
       for (const f of spec.floored) {
         const a = callersOf(g, idOf(g, f.target));
         expect(a.unknown.floor, f.target).toBe(true);
-        const hit = a.unknown.reasons.find((r) => r.includes(f.reason) && (f.at === "" || r.includes(f.at)));
+        // The place with a boundary on each side: `a.ts:2` is not `a.ts:20`,
+        // `lib/a.ts:2` nor `@a.ts:2`. A reason says a place after a space or
+        // at its start.
+        const literal = f.at.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const place = new RegExp(`(?<!\\S)${literal}(?!\\d)`);
+        const hit = a.unknown.reasons.find((r) => r.includes(f.reason) && (f.at === "" || place.test(r)));
         expect(hit, `${f.target}: a reason with "${f.reason}" at ${f.at || "any place"}; got: ${a.unknown.reasons.join("; ")}`).toBeDefined();
         // Where a hidden caller could be, when the row says.
         if (f.scope) expect(a.unknown.scope, `${f.target}: scope; note: ${a.unknown.note ?? "none"}`).toBe(f.scope);

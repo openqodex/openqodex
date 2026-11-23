@@ -89,7 +89,12 @@ export const SHAPE_CAP = 20;
 // 34: a free name its project declares as plain data vouches for itself.
 // 35: a module that offers a name the graph cannot follow to one
 // definition reaches whole every module it forwards names from.
-export const RESOLVER_VERSION = 35;
+// 36: a module whose walk of `export *` the step budget cut reaches the
+// names its stars may bring, past the names it gives itself; a file with an
+// `import` or `export` statement is no script; escape analysis walks
+// `export *` on a budget of its own and stops at the build's deadline
+// (Resolved.escapesCut).
+export const RESOLVER_VERSION = 36;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -216,7 +221,11 @@ type Value =
   | { v: "pymod"; from: string; dotted: string } // Python `import a.b`: a dotted module path
   | { v: "ext" }
   | { v: "gap"; cause: Cause; note: string; candidates: string[] | null }
-  | { v: "miss"; target: string; name: string; ev: Ev };
+  // `held`: the module gives the name out as a value that is no definition
+  // (`export const router = Router()`, `export { router }`), so the name is
+  // there, though the graph does not follow the value; it is the local name
+  // of that value, one binding under every name it is given out as.
+  | { v: "miss"; target: string; name: string; ev: Ev; held?: string };
 
 type Def = DefFact & { id: string; file: string; family: Family };
 
@@ -251,6 +260,9 @@ export type Resolved = {
   externalSites: number;
   budgetFiles: string[]; // files whose calls were not resolved: the budget ran out
   escapes: Escapes;
+  // The budget ran out before escape analysis finished (or began): its
+  // escapes are not whole, so the build is partial and every list a floor.
+  escapesCut: boolean;
 };
 
 // One call site or import binding, resolved with a record of the exports it
@@ -302,6 +314,55 @@ function dirOf(path: string): string {
 function join(...parts: string[]): string {
   const j = posix.normalize(posix.join(...parts.filter((p) => p !== "")));
   return j === "." ? "" : j;
+}
+
+// A set of names that shares its nodes with the set it was made from (a
+// hash trie): a set one name larger copies a few nodes of 32 slots, never
+// every name. A slot holds one name or a node of the next level; a node
+// past the hash's 32 bits is a list of the names whose hashes are equal.
+type NameSet = readonly (NameSet | string | undefined)[];
+const NAME_LEVELS = 7;
+function nameHash(name: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+function hasName(set: NameSet, name: string): boolean {
+  const h = nameHash(name);
+  let node = set;
+  for (let level = 0; level < NAME_LEVELS; level++) {
+    const slot = node[(h >>> (5 * level)) & 31];
+    if (typeof slot !== "object") return slot === name;
+    node = slot;
+  }
+  return node.includes(name);
+}
+function withName(set: NameSet | undefined, name: string, h = nameHash(name), level = 0): NameSet {
+  if (level === NAME_LEVELS) return set?.includes(name) ? set : [...(set ?? []), name];
+  const i = (h >>> (5 * level)) & 31;
+  const slot = set?.[i];
+  let next: NameSet | string = name;
+  if (slot === name) return set as NameSet;
+  if (typeof slot === "string") next = withName(withName(undefined, slot, nameHash(slot), level + 1), name, h, level + 1);
+  else if (slot !== undefined) {
+    next = withName(slot, name, h, level + 1);
+    if (next === slot) return set as NameSet;
+  }
+  const copy = set ? set.slice() : [];
+  copy[i] = next;
+  return copy;
+}
+const NO_NAMES: NameSet = [];
+// The work the export walk spends comparing skipped names: each name it
+// lists and each step it takes instead. Tests read it to hold that work to
+// the size of the input, which a clock on a busy runner cannot.
+export const walkWork = { steps: 0 };
+function* namesIn(set: NameSet): Generator<string> {
+  for (const slot of set) {
+    walkWork.steps++;
+    if (typeof slot === "string") yield slot;
+    else if (slot !== undefined) yield* namesIn(slot);
+  }
 }
 
 const JS_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
@@ -1007,22 +1068,27 @@ export function createWorld(input: ResolveInput): World {
       if (family === "js") {
         // The export table: exported declarations, `export { a as b }`,
         // `export default`, CommonJS assignments, then re-exports. A private
-        // top-level definition is never an export.
-        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1);
+        // top-level definition is never an export. A local value that is no
+        // definition (`export const router = Router()`, `export { router }`)
+        // is a held miss in this file, so a framework reader reads its own
+        // facts there, and it shadows any `export *` that offers the name.
+        const held = (local: string): Value => ({ v: "miss", target: file, name, ev: SAME_SCOPE, held: local });
+        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? held(f.defaultExport);
         const top = topByFile.get(file)?.get(name)?.filter((id) => defById.get(id)?.exported);
         if (top && top.length > 0) return { v: "sym", ids: top, ev: SAME_SCOPE };
-        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1);
+        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? held(e.local);
+        if (f.exportedVariables?.includes(name)) return held(name);
         // Every `export *` that offers the name: one definition binds; two
         // different ones are ambiguous (JavaScript exports neither). A star
         // the graph cannot follow (a module that is not there, a package
         // outside the repository, a gap) may bring the name too, so nothing
-        // it competes with is certain.
+        // it competes with is certain. `export *` never gives out `default`.
         const starHits: { v: Value; spec: string }[] = [];
         const unfollowed: Unfollowed[] = [];
         for (const imp of f.imports) {
           if (!imp.reexport) continue;
           const named = imp.names.find((n) => n.local === name);
-          if (!named && !imp.star) continue;
+          if (!named && (!imp.star || name === "default")) continue;
           const mod = jsSpec(file, imp.line, imp.spec);
           if (named) {
             if (mod === null) return { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1037,7 +1103,7 @@ export function createWorld(input: ResolveInput): World {
             const hit = withEv(index.exports(mod.file, name, depth + 1), mod.ev);
             if (hit === null) unfollowed.push({ spec: imp.spec, cause: "miss", note: `export * from ${imp.spec} could not be read` });
             else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note });
-            else if (hit.v !== "miss") starHits.push({ v: hit, spec: imp.spec });
+            else if (hit.v !== "miss" || hit.held) starHits.push({ v: hit, spec: imp.spec });
           }
         }
         return starValue(file, name, starHits, unfollowed) ?? noStarHit(unfollowed) ?? { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1097,7 +1163,8 @@ export function createWorld(input: ResolveInput): World {
   // ambiguous: every candidate at the possible tier, with a note.
   function starValue(file: string, name: string, hits: { v: Value; spec: string }[], open: Unfollowed[]): Value | null {
     if (hits.length === 0) return null;
-    const keyOf = (v: Value): string | null => (v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : null);
+    const keyOf = (v: Value): string | null =>
+      v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : v.v === "miss" && v.held ? `value:${v.target}\0${v.held}` : null;
     const distinct = new Map<string, { v: Value; spec: string }>();
     for (const h of hits) {
       const k = keyOf(h.v);
@@ -3320,7 +3387,20 @@ export function createWorld(input: ResolveInput): World {
     if (!v) variablesMemo.set(file, (v = { all: new Set(f.variables ?? []), exported: new Set(f.exportedVariables ?? []) }));
     return v;
   };
+  // Each answer is kept by file, name and depth (the depth bounds what is
+  // left to walk): barrels whose `export *` paths meet again are walked
+  // once, not once per path and per read. The build's deadline stops it.
+  const exportsVariableMemo = new Map<string, boolean>();
   const exportsVariable = (file: string, name: string, depth = 0): boolean => {
+    const key = `${file}\0${name}\0${depth}`;
+    let found = exportsVariableMemo.get(key);
+    if (found === undefined) {
+      checkBudget();
+      exportsVariableMemo.set(key, (found = exportsVariableAt(file, name, depth)));
+    }
+    return found;
+  };
+  const exportsVariableAt = (file: string, name: string, depth: number): boolean => {
     const f = facts.get(file);
     if (!f || familyOf(f.lang) !== "js" || depth > MAX_DEPTH) return false;
     const vars = variablesOf(file, f);
@@ -3524,7 +3604,9 @@ export function createWorld(input: ResolveInput): World {
           if (ids.length > 0 && ref) {
             const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.aliasOf ?? call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
             for (const t of ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
-            if (held.every(([, fn]) => fn === true)) continue;
+            // A method called on a local of a declared type (`Job j = this::work;
+            // j.run()`) is also a call of that type's method.
+            if (held.every(([, fn]) => fn === true) && call.recv.kind !== "type") continue;
           }
         }
         // What a call returned, called: the functions that callee returns by name.
@@ -3847,7 +3929,19 @@ export function createWorld(input: ResolveInput): World {
       for (const byKey of unread.values()) unknowns.push(...byKey.values());
     }
 
-    const escapes = escapePaths(uses, unbound, marks);
+    // Escape analysis runs once every file is resolved, within the budget:
+    // a pass the budget stops leaves no escape read as whole, and every
+    // caller list a floor.
+    let escapes: Escapes = { uses, unbound, reach: new Map(), modules: new Map(), loadAny: [], offered: new Set(), opaque: new Map(), scripts: new Set(), members: new Map(), cut: true };
+    let escapesCut = stopped;
+    if (!stopped) {
+      try {
+        escapes = escapePaths(uses, unbound, marks);
+      } catch (error) {
+        if (!(error instanceof BudgetStop)) throw error;
+        escapesCut = true;
+      }
+    }
 
     // ---------- importers ----------
     const importers = new Map<string, GraphEdge[]>();
@@ -3885,7 +3979,7 @@ export function createWorld(input: ResolveInput): World {
     const summaries = new Map<string, InvocationSummary>();
     for (const [id, d] of defById) if (d.invokes || d.returns) summaries.set(id, { params: d.params ?? [], invokes: d.invokes ?? [], returns: returnsOf(id), returnsOther: d.returnsOther === true });
 
-    return { nodes, edges: callerEdges, references: refEdges, dispatch, summaries, importers, defsByFile, misses, unknowns, unresolvedSites, externalSites, budgetFiles, escapes };
+    return { nodes, edges: callerEdges, references: refEdges, dispatch, summaries, importers, defsByFile, misses, unknowns, unresolvedSites, externalSites, budgetFiles, escapes, escapesCut };
   };
 
   // What each function's escapes reach once every file is resolved
@@ -3915,18 +4009,34 @@ export function createWorld(input: ResolveInput): World {
     // it name. A name the graph cannot follow to one definition (a chain
     // of re-exports too deep, two stars that offer it) may come from any
     // module the file forwards names from, so each of those counts whole.
-    const offers = (file: string): { ids: string[]; modules: string[] } => {
+    // A name the walk of `export *` did not reach before its step budget ran
+    // out can only come through a star: `stars` names the modules the file
+    // stars from when its walk was cut. `skip` leaves out the names a
+    // module above already gives itself, and `default`, which no star brings.
+    // Escape analysis walks on a step budget of its own (escapeWalk).
+    const offers = (file: string, skip: NameSet | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string> } => {
       const ids: string[] = [];
       const modules: string[] = [];
       let gap = false;
-      for (const [name] of exportedJsNames(file)) {
+      const names = exportedJsNames(file, escapeWalk);
+      for (const [name] of names) {
+        checkBudget();
+        if (skip && hasName(skip, name)) continue;
         const v = index.exports(file, name, 0);
         if (v?.v === "sym") ids.push(...v.ids);
         else if (v?.v === "mod") modules.push(v.file);
         else if (v?.v === "gap") gap = true;
       }
       if (gap) modules.push(...forwards(file));
-      return { ids, modules };
+      const stars: string[] = [];
+      if (namesCut.has(file)) {
+        for (const imp of facts.get(file)?.imports ?? []) {
+          if (!imp.reexport || !imp.star) continue;
+          const mod = jsSpec(file, imp.line, imp.spec);
+          if (mod !== null && "file" in mod) stars.push(mod.file);
+        }
+      }
+      return { ids, modules, stars, names: names.keys() };
     };
     // The modules a module forwards names from: `export ... from`, and a
     // local `export { f }` or `export default f` of an imported name.
@@ -3949,19 +4059,102 @@ export function createWorld(input: ResolveInput): World {
     const modules = new Map<string, Place>();
     const offered = new Set<string>();
     const walk = (start: string, place: Place) => {
-      const queue: { file: string; whole: boolean }[] = [{ file: start, whole: true }];
+      // A star's skip is a NameSet: each hop of a long chain of stars adds
+      // its own names to the set above it without copying it.
+      type Visit = { file: string; whole: boolean; skip: NameSet | null };
+      const queue: Visit[] = [{ file: start, whole: true, skip: null }];
       const seen = new Set<string>();
+      // A module a cut walk stars from, with the names it was counted
+      // without. A later visit that skips fewer names reaches more, so it
+      // runs again with only the names both skip; the set only shrinks.
+      const skipped = new Map<string, NameSet>();
+      // Comparing two skips name by name costs their size, so a long chain
+      // that meets one module many times costs the square of the chain. Most
+      // skips are made from another, so most comparisons need not list a
+      // name: `made` keeps the skip a set was made from, the names it added
+      // and its size, and `within` the pairs found one inside the other.
+      const made = new Map<NameSet, { from: NameSet | null; added: string[]; size: number }>([[NO_NAMES, { from: null, added: [], size: 0 }]]);
+      const within = new Map<NameSet, Set<NameSet>>();
+      const sizeOf = (s: NameSet): number => {
+        const m = made.get(s);
+        if (m) return m.size;
+        const size = [...namesIn(s)].length;
+        made.set(s, { from: null, added: [], size });
+        return size;
+      };
+      const known = (x: NameSet, y: NameSet) => x === y || sizeOf(x) === 0 || within.get(x)?.has(y) === true;
+      // Whether every name of x is in y: y was made, up to 32 steps back,
+      // from a set that holds x; or x was made from a set known inside y (or
+      // inside the set y was made from) and y has the names x added; or, when
+      // `list`, name by name. A found pair is kept in `within`.
+      const isWithin = (x: NameSet, y: NameSet, list: boolean): boolean => {
+        if (known(x, y)) return true;
+        if (sizeOf(x) > sizeOf(y)) return false;
+        let ok = false;
+        for (let a = made.get(y)?.from, steps = 0; !ok && a && steps < 32 && sizeOf(a) >= sizeOf(x); a = made.get(a)?.from, steps++) {
+          walkWork.steps++;
+          ok = known(x, a);
+        }
+        const mx = made.get(x);
+        const fy = made.get(y)?.from;
+        if (!ok && mx?.from && (known(mx.from, y) || (fy && known(mx.from, fy)))) ok = mx.added.every((n) => (walkWork.steps++, hasName(y, n)));
+        if (!ok && list) ok = [...namesIn(x)].every((n) => hasName(y, n));
+        if (ok) within.set(x, (within.get(x) ?? new Set()).add(y));
+        return ok;
+      };
+      // A skip with the names both skip: `asked` when it is inside `had`;
+      // the set `asked` was made from, when that is inside `had`, with the
+      // names `asked` added that `had` has; or name by name.
+      const meet = (had: NameSet, asked: NameSet): NameSet => {
+        if (isWithin(asked, had, false)) return asked;
+        const m = made.get(asked);
+        if (m?.from && isWithin(m.from, had, false)) {
+          let s = m.from;
+          const added: string[] = [];
+          for (const n of m.added) {
+            walkWork.steps++;
+            const next = hasName(had, n) ? withName(s, n) : s;
+            if (next !== s) added.push(n);
+            s = next;
+          }
+          if (added.length > 0) made.set(s, { from: m.from, added, size: sizeOf(m.from) + added.length });
+          return s;
+        }
+        const both = [...namesIn(had)].filter((n) => hasName(asked, n));
+        const s = both.reduce<NameSet>((t, n) => withName(t, n), NO_NAMES);
+        made.set(s, { from: null, added: [], size: both.length });
+        return s;
+      };
       while (queue.length > 0) {
-        const { file, whole } = queue.pop() as { file: string; whole: boolean };
+        checkBudget();
+        const { file, whole, skip: asked } = queue.pop() as Visit;
         if (seen.has(`${file}\0${whole}`)) continue;
-        seen.add(`${file}\0${whole}`);
+        let skip: NameSet | null = null;
+        if (asked) {
+          const had = skipped.get(file);
+          if (had && isWithin(had, asked, true)) continue;
+          skip = had ? meet(had, asked) : asked;
+          skipped.set(file, skip);
+        } else seen.add(`${file}\0${whole}`);
         if (!modules.has(file)) modules.set(file, place);
         if (whole && familyOf(facts.get(file)?.lang ?? "go") === "js") {
-          const o = offers(file);
+          const o = offers(file, skip);
           for (const id of o.ids) addReach(id, { why: "module", ...place });
-          for (const m of o.modules) queue.push({ file: m, whole: true });
+          for (const m of o.modules) queue.push({ file: m, whole: true, skip: null });
+          if (o.stars.length > 0) {
+            const from = skip ?? NO_NAMES;
+            let given = from;
+            const added: string[] = [];
+            for (const n of ["default", ...o.names]) {
+              const next = withName(given, n);
+              if (next !== given) added.push(n);
+              given = next;
+            }
+            if (added.length > 0) made.set(given, { from, added, size: sizeOf(from) + added.length });
+            for (const m of o.stars) queue.push({ file: m, whole: true, skip: given });
+          }
         }
-        for (const m of forwards(file)) queue.push({ file: m, whole: false });
+        for (const m of forwards(file)) queue.push({ file: m, whole: false, skip: null });
       }
     };
     for (const [file, place] of marks) walk(file, place);
@@ -3971,6 +4164,10 @@ export function createWorld(input: ResolveInput): World {
     const loadPlaces = new Set<string>();
     const runtime: { why: "eval" | "global"; place: Place }[] = [];
     for (const { path, facts: f } of jsFiles) {
+      checkBudget();
+      // Every eval site of a file sees the same definitions and imports, and
+      // addReach keeps the first eval place of each: one site reads them.
+      let evalRead = false;
       for (const e of f.escapes ?? []) {
         const place = { file: path, line: e.line };
         if (e.kind === "module") {
@@ -3992,7 +4189,8 @@ export function createWorld(input: ResolveInput): World {
           }
         } else {
           runtime.push({ why: e.kind, place });
-          if (e.kind === "eval") {
+          if (e.kind === "eval" && !evalRead) {
+            evalRead = true;
             // Its own file's definitions and every definition the file imports.
             for (const d of f.defs) addReach(symbolId(path, d), { why: "eval", ...place });
             for (const imp of f.imports) {
@@ -4005,13 +4203,15 @@ export function createWorld(input: ResolveInput): World {
         }
       }
     }
-    // A script's definitions are names of the global scope.
+    // A script's definitions are names of the global scope. A file with an
+    // `import` or `export` statement is a module, whatever it exports.
     const script = (file: string, f: FileFacts) =>
-      !/\.(mjs|cjs|mts|cts)$/.test(file) && f.imports.length === 0 && f.exportsLocal.length === 0 && f.defaultExport === null && !f.defs.some((d) => d.exported) && !(f.escapes ?? []).some((e) => e.kind === "own" || e.kind === "module" || e.kind === "load");
+      !/\.(mjs|cjs|mts|cts)$/.test(file) && f.esm !== true && f.imports.length === 0 && f.exportsLocal.length === 0 && f.defaultExport === null && !f.defs.some((d) => d.exported) && !(f.escapes ?? []).some((e) => e.kind === "own" || e.kind === "module" || e.kind === "load");
     const scripts = new Set<string>();
     for (const { path, facts: f } of jsFiles) if (script(path, f)) scripts.add(path);
-    // The first place of each kind, as addReach keeps.
-    const firstRuntime = runtime.filter((r, i) => runtime.findIndex((x) => x.why === r.why) === i);
+    // The first place of each kind, as addReach keeps, in one pass.
+    const firstRuntime: typeof runtime = [];
+    for (const r of runtime) if (!firstRuntime.some((x) => x.why === r.why)) firstRuntime.push(r);
     if (runtime.length > 0) {
       for (const { path, facts: f } of jsFiles) {
         if (!scripts.has(path)) continue;
@@ -4020,7 +4220,12 @@ export function createWorld(input: ResolveInput): World {
     }
     // Code built at run time can load any module: each eval or global site is a load by a computed path too.
     for (const r of runtime) loadAny.push({ ...r.place, why: r.why });
-    if (loadAny.length > 0) for (const { path } of jsFiles) for (const id of offers(path).ids) offered.add(id);
+    if (loadAny.length > 0) {
+      for (const { path } of jsFiles) {
+        checkBudget();
+        for (const id of offers(path).ids) offered.add(id);
+      }
+    }
     // What an opaque file reaches: its own definitions, the modules it
     // imports (a named import, the module the name comes from through
     // re-exports; a whole module, every module it re-exports), the global
@@ -4042,6 +4247,7 @@ export function createWorld(input: ResolveInput): World {
     }
     for (const d of input.declared ?? []) declare(d.file, d.names);
     for (const { path, facts: f } of jsFiles) {
+      checkBudget();
       const own = plain.size > 0 ? plain.get(projectFolder(model, input.goModules, path)) : undefined;
       const all = (f.opaque ?? []).filter((o) => !(o.name !== undefined && o.reach === "global" && own?.has(o.name)));
       if (all.length === 0) continue;
@@ -4072,6 +4278,7 @@ export function createWorld(input: ResolveInput): World {
       // A whole module: it and every module it re-exports.
       const whole = new Set<string>();
       for (let m = queue.pop(); m !== undefined; m = queue.pop()) {
+        checkBudget();
         if (whole.has(m)) continue;
         whole.add(m);
         seen.add(m);
@@ -4091,6 +4298,7 @@ export function createWorld(input: ResolveInput): World {
       return names.some((n) => (declared as Set<string>).has(n));
     };
     for (const { path, facts: f } of jsFiles) {
+      checkBudget();
       for (const m of f.looseMembers ?? []) {
         if (m.plain && !ownType(m.plain)) continue;
         const kept = members.get(`js:${m.why}`);
@@ -4104,6 +4312,8 @@ export function createWorld(input: ResolveInput): World {
         }
       }
     }
+    // Work past the deadline in the last file is not read as whole either.
+    checkBudget();
     return { uses, unbound, reach, modules, loadAny, offered, opaque, scripts, members };
   };
 
@@ -4167,8 +4377,14 @@ export function createWorld(input: ResolveInput): World {
   // step budget, so a diamond of barrels costs one visit a file and a cycle
   // ends where it closes.
   const jsNames = new Map<string, Map<string, number | null>>();
-  let walkSteps = 0;
-  let walkCut: Cut | null = null;
+  // A walk's budget of steps and the cut it met. The comparison of the
+  // change has its own, and escape analysis, which may list what every
+  // module offers first, another: neither spends the other's.
+  type WalkLimit = { steps: number; cut: Cut | null; note: string };
+  const compareWalk: WalkLimit = { steps: 0, cut: null, note: `the walk of export * stopped after ${EXPORT_WALK_STEPS} files; names re-exported past it were not compared` };
+  const escapeWalk: WalkLimit = { steps: 0, cut: null, note: `the walk of export * for escape analysis stopped after ${EXPORT_WALK_STEPS} files; a module may offer names re-exported past it that were not listed` };
+  // The modules whose last walk the step budget cut: their names miss some re-exported ones.
+  const namesCut = new Set<string>();
   type Frame = { file: string; names: Map<string, number | null>; stars: { file: string; line: number }[]; next: number; partial: boolean };
   const ownJsNames = (file: string): Frame => {
     const names = new Map<string, number | null>();
@@ -4189,7 +4405,7 @@ export function createWorld(input: ResolveInput): World {
     }
     return { file, names, stars, next: 0, partial: false };
   };
-  const exportedJsNames = (root: string): Map<string, number | null> => {
+  const exportedJsNames = (root: string, limit: WalkLimit): Map<string, number | null> => {
     const kept = jsNames.get(root);
     if (kept) return kept;
     const merge = (into: Frame, from: Map<string, number | null>, line: number) => {
@@ -4197,25 +4413,23 @@ export function createWorld(input: ResolveInput): World {
     };
     const open = new Set<string>([root]);
     const stack: Frame[] = [ownJsNames(root)];
+    let cut = false;
     for (;;) {
+      // Escape analysis stops at the build's deadline; the comparison of the
+      // change, which runs after it, has its step budget alone.
+      if (limit === escapeWalk) checkBudget();
       const top = stack[stack.length - 1] as Frame;
       if (top.next < top.stars.length) {
         const star = top.stars[top.next++] as { file: string; line: number };
         const done = jsNames.get(star.file);
         if (done) merge(top, done, star.line);
         else if (open.has(star.file)) top.partial = true;
-        else if (walkSteps >= EXPORT_WALK_STEPS) {
+        else if (limit.steps >= EXPORT_WALK_STEPS) {
           top.partial = true;
-          walkCut ??= {
-            by: "export-walk",
-            at: root,
-            omitted: null,
-            exact: false,
-            unit: "files",
-            note: `the walk of export * stopped after ${EXPORT_WALK_STEPS} files; names re-exported past it were not compared`,
-          };
+          cut = true;
+          limit.cut ??= { by: "export-walk", at: root, omitted: null, exact: false, unit: "files", note: limit.note };
         } else {
-          walkSteps++;
+          limit.steps++;
           open.add(star.file);
           stack.push(ownJsNames(star.file));
         }
@@ -4225,7 +4439,11 @@ export function createWorld(input: ResolveInput): World {
       open.delete(top.file);
       if (!top.partial) jsNames.set(top.file, top.names);
       const parent = stack[stack.length - 1];
-      if (!parent) return top.names;
+      if (!parent) {
+        if (cut) namesCut.add(root);
+        else namesCut.delete(root);
+        return top.names;
+      }
       merge(parent, top.names, (parent.stars[parent.next - 1] as { line: number }).line);
       if (top.partial) parent.partial = true;
     }
@@ -4245,7 +4463,7 @@ export function createWorld(input: ResolveInput): World {
     };
     let names = new Map<string, number | null>();
     if (family === "js") {
-      names = exportedJsNames(file);
+      names = exportedJsNames(file, compareWalk);
     } else if (family === "python") {
       for (const d of f.defs) if (d.topLevel) names.set(d.name, d.line);
       for (const [k] of index.bindings(file).names) names.set(k, null);
@@ -4314,8 +4532,10 @@ export function createWorld(input: ResolveInput): World {
     const [head, ...rest] = path;
     if (head === undefined) return { kind: "none" };
     let v = resolveLocal(file, head);
-    for (const name of rest) {
-      if (v === null || v.v === "ext" || v.v === "gap" || v.v === "miss") break;
+    for (const [i, name] of rest.entries()) {
+      if (v === null || v.v === "ext" || v.v === "gap") break;
+      // A miss before the last name: the names after it were never looked up.
+      if (v.v === "miss") return { kind: "miss", target: v.target, name: v.name, past: rest.slice(i) };
       const before: Value = v;
       v = attr(v, name);
       // A name a module or a class does not hold: a miss where it was looked up.
@@ -4329,7 +4549,7 @@ export function createWorld(input: ResolveInput): World {
     return modLookup(moduleOf(file, familyOf(f.lang), { spec, line: 0 }));
   };
 
-  return { resolveAll, trace, surface, importsOf, node, walkCuts: () => [walkCut, lookupCut].filter((c): c is Cut => c !== null), lookup, moduleLookup };
+  return { resolveAll, trace, surface, importsOf, node, walkCuts: () => [compareWalk.cut, escapeWalk.cut, lookupCut].filter((c): c is Cut => c !== null), lookup, moduleLookup };
 }
 
 // The name an unaliased Go import is used by when its package is not in the

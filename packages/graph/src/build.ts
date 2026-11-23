@@ -504,7 +504,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     const declared = await declaredPlain(declarations, deadline);
     const world = createWorld({ files: inputs, known, model, goModules, declared, stop: overBudget });
     const resolved = world.resolveAll();
-    if (resolved.budgetFiles.length > 0) stoppedBy ??= "budget";
+    if (resolved.budgetFiles.length > 0 || resolved.escapesCut) stoppedBy ??= "budget";
     stage("resolve");
 
     // ---------- frameworks ----------
@@ -579,7 +579,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     if (removalUnchecked > 0) reasons.push(`removed symbols were not checked in ${plural(removalUnchecked, "changed file")}`);
     if (stoppedBy === "budget") {
       const left = notRead.filter((n) => n.reason === "budget").length;
-      reasons.push(`the ${(budgetMs / 1000).toFixed(budgetMs < 1000 ? 3 : 0)} s budget ran out${left > 0 ? ` with ${plural(left, "file")} not read` : ""}${resolved.budgetFiles.length > 0 ? ` and the calls of ${plural(resolved.budgetFiles.length, "file")} not resolved` : ""}`);
+      reasons.push(`the ${(budgetMs / 1000).toFixed(budgetMs < 1000 ? 3 : 0)} s budget ran out${left > 0 ? ` with ${plural(left, "file")} not read` : ""}${resolved.budgetFiles.length > 0 ? ` and the calls of ${plural(resolved.budgetFiles.length, "file")} not resolved` : ""}${resolved.escapesCut ? ", before every way a function escapes was found" : ""}`);
       cuts.push({ by: "budget", at: null, omitted: left + resolved.budgetFiles.length, exact: true, unit: "files", note: `stopped ${Math.max(0, Math.round(performance.now() - deadline))} ms after the ${budgetMs} ms budget` });
     }
     if (stoppedBy === "memory") {
@@ -642,7 +642,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       frameworks,
       digest,
       status: {
-        status: skipped > 0 || removalUnchecked > 0 || resolved.budgetFiles.length > 0 || hidingGaps.length > 0 ? "partial" : "ok",
+        status: skipped > 0 || removalUnchecked > 0 || resolved.budgetFiles.length > 0 || resolved.escapesCut || hidingGaps.length > 0 ? "partial" : "ok",
         reason: reasons[0] ?? null,
         reasons,
         filesParsed: inputs.length,
@@ -671,7 +671,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // a build whose project model lacks a manifest or tsconfig that can hide
     // a relation: its index is never loaded as if nothing were missing.
     const later = new Set<NotRead["reason"]>(["budget", "parse-cap", "memory", "slow-parse", "unreadable"]);
-    const complete = !notRead.some((n) => later.has(n.reason)) && resolved.budgetFiles.length === 0 && hidingGaps.length === 0;
+    const complete = !notRead.some((n) => later.has(n.reason)) && resolved.budgetFiles.length === 0 && !resolved.escapesCut && hidingGaps.length === 0;
     // Under the five-second line too, a complete build of the work tree keeps
     // its index, so the next question on the same tree loads it (the kept
     // index above), but only when what it says is what any build of these

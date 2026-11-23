@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import type { Node, Tree } from "web-tree-sitter";
 import type { BoundImport, CallFact, DefFact, EscapeFact, FileFacts, OpaqueFact, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
-import { MAX_TYPE_DEPTH } from "./types.js";
+import { MAX_AMBIENT_NAMES, MAX_FACT_STRING, MAX_TYPE_DEPTH } from "./types.js";
 import { walkTree } from "./walk.js";
 import type { TreeVisitor } from "./walk.js";
 
@@ -130,7 +130,19 @@ import type { TreeVisitor } from "./walk.js";
 // type's path is read with its escapes decoded; `x.total += 1` and
 // `const { 0: a } = x` read the member; a `require` given a value through
 // `<T>` stays a loader.
-export const EXTRACTOR_VERSION = 54;
+// 55: a `type` specifier of an import or a re-export makes no loader; a
+// Python `cast` is typing's only where its import is seen; a file with an
+// `import` or `export` statement says so (`esm`); a file keeps at most
+// MAX_AMBIENT_NAMES global names declared as plain data, none longer than
+// MAX_FACT_STRING; a Python `cast` is typing's only when the last import at
+// the top of the module that binds its name is typing's; a Python
+// decorator without parentheses (`@wrap`, `@pkg.wrap`) is a call of the
+// name it gives; a method called on a local that holds a function aliases
+// it only when the method runs it (`fn.call`, not `fn.bind` or `r.equals`);
+// the Express facts keep a computed string, and a string given to a name no
+// path reads, as a string with no text, and read `process.env["X"]` as
+// `process.env.X`.
+export const EXTRACTOR_VERSION = 55;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -393,8 +405,8 @@ class Ctx {
   goPackage: string | null = null;
   escapes: EscapeFact[] = [];
   opaque = new Map<string, OpaqueFact>();
-  // An `import` or `export` statement: a module, strict, so `this` in a
-  // plain function is never the global object.
+  // An `import` or `export` statement at the top of the file: a module,
+  // strict, so `this` in a plain function is never the global object.
   esm = false;
   looseMembers = new Map<string, OpaqueFact>();
   // Timers given a name: `setTimeout(code)` runs a string as code unless
@@ -407,6 +419,15 @@ class Ctx {
   // top of a file (counted only when the file is a script).
   ambient = new Set<string>();
   ambientTop = new Set<string>();
+  // The names of an import or re-export's `type` specifiers (`import { x,
+  // type T }`): they bind nothing at run time, so no loader is made of them.
+  typeSpecifiers = new Map<ImportFact, Set<string>>();
+  // Python: where an import outside any function stands. `top`: a statement
+  // of the module itself, which replaces an earlier binding of its names.
+  // `maybe`: under an `if`, `try` or other block, which may not run.
+  // `class`: in a class body, which binds class attributes, never the
+  // module's names.
+  pyImportPlace = new Map<ImportFact, "top" | "maybe" | "class">();
   variables = new Set<string>();
   exportedVariables = new Set<string>();
   // TypeScript and JavaScript: the name nodes already recorded as a value,
@@ -947,7 +968,7 @@ class Ctx {
         const table = at?.tables?.get(name);
         if (table !== undefined) this.openTables.add(table);
         if (ident && (at !== ident.at || call.recv.kind === "name")) call.recv = receiverIn(at, name, ident.path, topNames);
-        if (!ident || ident.path.length === 0) bindAlias(call, at, name, true);
+        if ((!ident || ident.path.length === 0) && runsHeldValue(this.lang, call.name)) bindAlias(call, at, name, true);
         continue;
       }
       if (this.libBindings.length > 0) libRead(scope, call.name, null, call.line, `${call.line}:${call.column}`);
@@ -1032,7 +1053,7 @@ class Ctx {
     // does not name, an export of a name bound to it, or a call of such a
     // name past the depth bound. What an importer makes of it is not
     // followed, so each is a load by a computed path.
-    for (const i of this.imports) if (i.reexport && !i.typeOnly && jsLoaderSpec(i.spec) && (i.star || i.namespace !== null || i.names.some((n) => !LIB_SAFE.has(n.imported)))) this.escapes.push({ kind: "load", line: i.line });
+    for (const i of this.imports) if (i.reexport && !i.typeOnly && jsLoaderSpec(i.spec) && (i.star || i.namespace !== null || i.names.some((n) => !LIB_SAFE.has(n.imported) && !this.typeSpecifiers.get(i)?.has(n.local)))) this.escapes.push({ kind: "load", line: i.line });
     const libTop = new Set(this.libBindings.filter((b) => b.scope === null || b.scope.depth === 0).map((b) => b.name));
     for (const e of this.exportsLocal) if (libTop.has(e.local)) this.escapes.push({ kind: "load", line: e.line ?? 1 });
     if (this.defaultExport !== null && libTop.has(this.defaultExport)) this.escapes.push({ kind: "load", line: 1 });
@@ -1154,14 +1175,15 @@ class Ctx {
       ...(this.escapes.length > 0 ? { escapes: this.escapes } : {}),
       // In a script, `this` in a plain function is the global object.
       ...(this.opaque.size > 0 ? { opaque: [...this.opaque.values()].map((o) => (o.why === THIS_OUTSIDE && !this.esm ? { ...o, reach: "any" as const } : o)) } : {}),
-      ...(this.ambient.size > 0 ? { ambient: [...this.ambient].sort() } : {}),
+      ...(this.ambient.size > 0 ? { ambient: [...this.ambient].sort().slice(0, MAX_AMBIENT_NAMES) } : {}),
       // Top-level `declare` names count only in a script; whether a file
       // with no import or export is one depends on its name (a `.mts` file
       // is a module), so the resolver decides.
-      ...(!this.esm && this.ambientTop.size > 0 ? { ambientTop: [...this.ambientTop].sort() } : {}),
+      ...(!this.esm && this.ambientTop.size > 0 ? { ambientTop: [...this.ambientTop].sort().slice(0, MAX_AMBIENT_NAMES) } : {}),
       ...(this.looseMembers.size > 0 ? { looseMembers: [...this.looseMembers.values()] } : {}),
       ...(this.variables.size > 0 ? { variables: [...this.variables].filter((n) => !topNames.has(n)) } : {}),
       ...(this.exportedVariables.size > 0 ? { exportedVariables: [...this.exportedVariables].filter((n) => !topNames.has(n)) } : {}),
+      ...(this.esm ? { esm: true as const } : {}),
     };
   }
 }
@@ -1802,6 +1824,12 @@ function isExportedDecl(node: Node): boolean {
   return p?.type === "export_statement";
 }
 
+function typeSpecifier(ctx: Ctx, fact: ImportFact, local: string): void {
+  const set = ctx.typeSpecifiers.get(fact);
+  if (set) set.add(local);
+  else ctx.typeSpecifiers.set(fact, new Set([local]));
+}
+
 function jsImport(ctx: Ctx, node: Node): void {
   const source = node.childForFieldName("source") ?? node.namedChildren.find((c) => c.type === "import_require_clause")?.namedChildren.find((c) => c.type === "string");
   if (!source) return;
@@ -1837,11 +1865,13 @@ function jsImport(ctx: Ctx, node: Node): void {
         const name = s.childForFieldName("name");
         const alias = s.childForFieldName("alias");
         if (name) fact.names.push({ imported: name.text, local: (alias ?? name).text });
+        if (name && s.children.some((c) => c.type === "type")) typeSpecifier(ctx, fact, (alias ?? name).text);
       }
     }
   }
   ctx.imports.push(fact);
-  ctx.libImport(fact, null);
+  const types = ctx.typeSpecifiers.get(fact);
+  ctx.libImport(types ? { ...fact, names: fact.names.filter((n) => !types.has(n.local)) } : fact, null);
 }
 
 function jsExport(ctx: Ctx, node: Node): void {
@@ -1865,6 +1895,7 @@ function jsExport(ctx: Ctx, node: Node): void {
       const name = s.childForFieldName("name");
       const alias = s.childForFieldName("alias");
       if (name) fact.names.push({ imported: name.text, local: (alias ?? name).text });
+      if (name && s.children.some((c) => c.type === "type")) typeSpecifier(ctx, fact, (alias ?? name).text);
     }
     ctx.imports.push(fact);
     return;
@@ -2648,6 +2679,20 @@ function jsValueStays(node: Node): boolean {
 // Names of the global object: a computed member of one may be any global.
 const GLOBAL_OBJECTS = new Set(["globalThis", "window", "self", "global"]);
 const JS_LANGS: ReadonlySet<Lang> = new Set<Lang>(["typescript", "tsx", "javascript"]);
+
+// Whether a method called on a local runs the value the local holds:
+// JavaScript's `fn.call(x)` and `fn.apply(x)` (not `fn.bind(x)`, which
+// only makes a function), Python's `fn.__call__()`. In Java any method but
+// one every object has (`r.equals(o)`, `r.toString()`): a functional
+// interface's own method runs it, and a default one (`f.andThen(g)`) makes
+// a function that may.
+const OBJECT_METHODS: ReadonlySet<string> = new Set(["equals", "hashCode", "toString", "getClass", "notify", "notifyAll", "wait"]);
+function runsHeldValue(lang: Lang, method: string): boolean {
+  if (JS_LANGS.has(lang)) return method === "call" || method === "apply";
+  if (lang === "python") return method === "__call__";
+  if (lang === "java") return !OBJECT_METHODS.has(method);
+  return true;
+}
 // Free names (bound to nothing in the file) whose every use is known to
 // reach no code by a name built at run time: no global object, no way to
 // make code from a string, no loader. `require`, `module` and `exports`
@@ -2999,7 +3044,9 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         jsImport(ctx, node);
         return false;
       case "export_statement":
-        ctx.esm = true;
+        // An `export` inside a `namespace` or `declare module` block leaves a
+        // script a script: only one at the top of the file makes a module.
+        if (upType(1) === "program") ctx.esm = true;
         if (node.children.some((c) => c.type === "=")) {
           ctx.addOpaque("uses `export =` that the reader does not read", node.startPosition.row + 1);
           // `export = require`: the file's require goes wherever an importer takes it.
@@ -3470,9 +3517,12 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
         if (ctx.readAt.has(node.startIndex)) return;
         const ref = ctx.values[ctx.addValue({ name: node, recv: { kind: "none" } }, role)] as ValueRef;
         if (prop !== null) ctx.propOf.set(ref, prop);
-        // `window.setTimeout(x)`: the timer call itself is checked for what it runs.
+        // `window.setTimeout(x)`: the timer call itself is checked for what it
+        // runs. The node above is read only then: tree-sitter finds it by a
+        // walk down from the root, a cost per read that grows with the depth.
+        if (prop === null || !TIMERS.has(prop)) return;
         const member = node.parent;
-        if (prop !== null && TIMERS.has(prop) && member?.type === "member_expression" && member.parent?.type === "call_expression" && sameNode(member.parent.childForFieldName("function"), member)) ctx.timerRefs.add(ref);
+        if (member?.type === "member_expression" && member.parent?.type === "call_expression" && sameNode(member.parent.childForFieldName("function"), member)) ctx.timerRefs.add(ref);
         return;
       }
       case "member_expression": {
@@ -3573,7 +3623,7 @@ function extractJs(tree: Tree, lang: Lang, readers: readonly TreeVisitor[]): Fil
             for (const d of c.namedChildren) {
               const name = d.type === "variable_declarator" ? d.childForFieldName("name") : null;
               const type = d.childForFieldName("type")?.firstNamedChild;
-              if (name?.type === "identifier" && type?.type === "predefined_type" && PLAIN_TYPES.has(type.text)) (global ? ctx.ambient : ctx.ambientTop).add(name.text);
+              if (name?.type === "identifier" && name.text.length <= MAX_FACT_STRING && type?.type === "predefined_type" && PLAIN_TYPES.has(type.text)) (global ? ctx.ambient : ctx.ambientTop).add(name.text);
             }
           }
         }
@@ -3628,6 +3678,7 @@ const PY_TYPES = new Set([
   "function_definition",
   "lambda",
   "assignment",
+  "decorator",
   "call",
   "return_statement",
   "dictionary",
@@ -3655,10 +3706,36 @@ function pyTypeNames(node: Node | null): TypeRef[] {
 // or local of that name hides the import where the call is.
 const PY_TYPING = new Set(["typing", "typing_extensions"]);
 function pyTypingCast(ctx: Ctx, fn: Node | null): boolean {
-  if (fn?.type === "identifier") return ctx.local(fn.text) === undefined && ctx.imports.some((i) => PY_TYPING.has(i.spec) && i.names.some((n) => n.imported === "cast" && n.local === fn.text));
+  if (fn?.type === "identifier") return pyTypingName(ctx, fn.text, "cast", (i) => i.names.some((n) => n.imported === "cast" && n.local === fn.text));
   if (fn?.type !== "attribute" || fn.childForFieldName("attribute")?.text !== "cast") return false;
   const object = fn.childForFieldName("object");
-  return object?.type === "identifier" && ctx.local(object.text) === undefined && ctx.imports.some((i) => PY_TYPING.has(i.spec) && i.namespace === object.text);
+  return object?.type === "identifier" && pyTypingName(ctx, object.text, "*", (i) => i.namespace === object.text);
+}
+
+// `name` is bound by an import of the typing module where it is read: an
+// import of the function or block around it, else one of the module's. Of
+// those, the last statement of the module itself that binds the name
+// decides, or a typing import after it under a block that may run. An
+// import inside another function or in a class body binds nothing here.
+function pyTypingName(ctx: Ctx, name: string, imported: string, binds: (i: ImportFact) => boolean): boolean {
+  const bound = ctx.lookup(ctx.top, name)?.imports?.get(name);
+  if (bound) return bound.imported === imported && PY_TYPING.has(ctx.imports[bound.import]?.spec ?? "");
+  if (ctx.local(name) !== undefined) return false;
+  for (let k = ctx.imports.length - 1; k >= 0; k--) {
+    const i = ctx.imports[k] as ImportFact;
+    const place = ctx.pyImportPlace.get(i);
+    if (i.scoped === true || place === "class" || !(i.namespace === name || i.names.some((n) => n.local === name))) continue;
+    if (PY_TYPING.has(i.spec) && binds(i)) return true;
+    if (place === "top") return false;
+  }
+  return false;
+}
+
+// Where a Python import that is in no function stands (Ctx.pyImportPlace).
+function pyImportPlace(node: Node): "top" | "maybe" | "class" {
+  if (node.parent?.type === "module") return "top";
+  for (let p = node.parent; p && p.type !== "module"; p = p.parent) if (p.type === "class_definition") return "class";
+  return "maybe";
 }
 
 // A method Python never runs on an instance of a concrete class: one
@@ -3778,6 +3855,7 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
             fact.namespace = n.childForFieldName("alias")?.text ?? null;
             fact.alias = true;
           } else continue;
+          ctx.pyImportPlace.set(fact, pyImportPlace(node));
           ctx.addImport(fact);
         }
         return false;
@@ -3795,6 +3873,7 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           }
         }
         if (node.namedChildren.some((c) => c.type === "wildcard_import")) fact.star = true;
+        ctx.pyImportPlace.set(fact, pyImportPlace(node));
         ctx.addImport(fact);
         return false;
       }
@@ -3920,6 +3999,21 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           // parameter's annotation among them.
           const value = type ?? (right?.type === "identifier" ? (ctx.local(right.text) ?? null) : null);
           if (attr && cls) ctx.setField(cls.def, attr.text, value, annotation !== null);
+        }
+        return;
+      }
+      case "decorator": {
+        // `@wrap` and `@pkg.wrap` call the name with the decorated function,
+        // from the scope around the definition, as `@wrap()` calls it;
+        // `@(wrap)` is the same name.
+        const inner = (n: Node | null | undefined) => n?.namedChildren.find((c) => c.type !== "comment");
+        let expr = inner(node);
+        while (expr?.type === "parenthesized_expression") expr = inner(expr);
+        if (expr?.type === "identifier") ctx.addCall(expr, { kind: "none" });
+        else if (expr?.type === "attribute") {
+          const attr = expr.childForFieldName("attribute");
+          const object = expr.childForFieldName("object");
+          if (attr && object) ctx.addCall(attr, pyReceiver(ctx, object));
         }
         return;
       }

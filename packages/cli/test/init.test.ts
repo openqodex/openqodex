@@ -78,6 +78,11 @@
 // 29. The scanners init downloads ignore the repo's config (scanners.disable,
 //     review.paths.exclude), take a React Native app's CocoaPods Gemfile for
 //     a Rails app, give no reason line per scanner, or --dry-run downloads.
+// 30. Uninstalling one agent removes a file another agent still set up
+//     needs (the project skill Codex and Cursor share, issue 343), whether
+//     both were set up in one init or in two, or on a teammate's machine
+//     that has no record; or the file stays once neither agent is set up;
+//     or a named pipe at a file of the agent that stays hangs the uninstall.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -88,6 +93,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   statSync,
   symlinkSync,
   utimesSync,
@@ -98,7 +104,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, cli, env, git, inTerminal, promptsAsked, sandbox, snapshot, status, tree, type Sandbox } from "./init-helpers.js";
 import { gitDirs } from "../src/agents/git.js";
 import { Guard } from "../src/agents/guarded-fs.js";
-import { isShippedSkill } from "../src/agents/targets.js";
+import { isShippedSkill, teamSection } from "../src/agents/targets.js";
 import { adoptTempDir, removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -462,6 +468,84 @@ describe("init, project scope", () => {
     expect(readFileSync(join(s.repo, "AGENTS.md"), "utf8")).toBe("# Agents\n\nBe nice.\n");
     expect(git(s.repo, "ls-files", "--deleted")).not.toBe("");
     expect(existsSync(join(s.repo, ".claude/settings.json"))).toBe(false);
+  });
+
+  const SHARED_SKILL = ".agents/skills/openqodex/SKILL.md";
+  const project = (s: Sandbox, ...args: string[]) => {
+    const r = cli(s, ["init", "--yes", "--project", "--hook", "none", ...args]);
+    expect(r.status, r.stderr).toBe(0);
+  };
+
+  it("30. uninstalling Codex or Cursor keeps the skill the other still uses, set up in one init or in two", () => {
+    for (const [setup, first, second] of [
+      [[["--agent", "codex", "--agent", "cursor"]], "codex", "cursor"],
+      [[["--agent", "codex", "--agent", "cursor"]], "cursor", "codex"],
+      [[["--agent", "codex"], ["--agent", "cursor"]], "cursor", "codex"],
+      [[["--agent", "cursor"], ["--agent", "codex"]], "codex", "cursor"],
+    ] as const) {
+      const s = sandbox();
+      for (const args of setup) project(s, ...args);
+      const skill = join(s.repo, SHARED_SKILL);
+      expect(existsSync(skill)).toBe(true);
+      project(s, "--uninstall", "--agent", first);
+      expect(existsSync(skill), `${second} still set up after ${first} was removed, its skill`).toBe(true);
+      project(s, "--uninstall", "--agent", second);
+      expect(existsSync(skill), `both removed, the skill`).toBe(false);
+    }
+  });
+
+  it("30. on a teammate's machine with no record, uninstalling Codex keeps the skill Cursor still uses", () => {
+    const s = sandbox();
+    project(s, "--agent", "codex", "--agent", "cursor");
+    git(s.repo, "add", "-A");
+    git(s.repo, "commit", "-q", "-m", "openqodex");
+    const teammate = { ...s, home: join(s.root, "teammate"), oqHome: join(s.root, "teammate", ".openqodex") };
+    mkdirSync(teammate.home);
+    const skill = join(s.repo, SHARED_SKILL);
+    project(teammate, "--uninstall", "--agent", "codex");
+    expect(existsSync(skill), "Cursor still set up, its skill").toBe(true);
+    expect(existsSync(join(s.repo, ".codex/hooks.json")), "Codex's own hook file").toBe(false);
+    project(teammate, "--uninstall", "--agent", "cursor");
+    expect(existsSync(skill), "both removed, the skill").toBe(false);
+  });
+
+  it("30. a named pipe at a file of the agent that stays never hangs the uninstall, and keeps the shared skill", () => {
+    const s = sandbox();
+    project(s, "--agent", "codex", "--agent", "cursor");
+    // Cursor's rule gone, so the uninstall has to read its MCP file to tell
+    // whether Cursor is still set up; that file is a named pipe with no writer.
+    renameSync(join(s.repo, ".cursor/rules/openqodex.mdc"), join(s.root, "rule.mdc"));
+    const mcp = join(s.repo, ".cursor/mcp.json");
+    renameSync(mcp, join(s.root, "mcp.json"));
+    expect(spawnSync("mkfifo", [mcp]).status).toBe(0);
+    const r = spawnSync(process.execPath, [BIN, "init", "--yes", "--project", "--uninstall", "--agent", "codex", "--no-review"], { cwd: s.repo, env: env(s), encoding: "utf8", timeout: 15_000 });
+    expect(r.error, "the uninstall did not finish in 15 seconds").toBeUndefined();
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(s.repo, SHARED_SKILL)), "a pipe there counts as Cursor still set up").toBe(true);
+  }, 30_000);
+
+  it("30. the team section in AGENTS.md never counts as Codex set up, so uninstalling Cursor removes the skill", () => {
+    const s = sandbox();
+    const agents = join(s.repo, "AGENTS.md");
+    writeFileSync(agents, `${teamSection("0.12.0")}\n`);
+    project(s, "--agent", "cursor");
+    const skill = join(s.repo, SHARED_SKILL);
+    expect(existsSync(skill)).toBe(true);
+    project(s, "--uninstall", "--agent", "cursor");
+    expect(existsSync(skill), "only Cursor was set up, its skill").toBe(false);
+    expect(readFileSync(agents, "utf8")).toBe(`${teamSection("0.12.0")}\n`);
+  });
+
+  it("30. a file reached through a folder link the repository holds never counts as Cursor set up", () => {
+    const s = sandbox();
+    project(s, "--agent", "codex");
+    const outside = join(s.root, "outside-cursor");
+    mkdirSync(join(outside, "rules"), { recursive: true });
+    writeFileSync(join(outside, "rules", "openqodex.mdc"), "not ours\n");
+    symlinkSync(outside, join(s.repo, ".cursor"));
+    project(s, "--uninstall", "--agent", "codex");
+    expect(existsSync(join(s.repo, SHARED_SKILL)), "Cursor's files lie behind a link init never writes through, the skill").toBe(false);
+    expect(readFileSync(join(outside, "rules", "openqodex.mdc"), "utf8")).toBe("not ours\n");
   });
 
   it("keeps an AGENTS.md section the developer edited", () => {

@@ -19,7 +19,7 @@ import { readText } from "../agents/files.js";
 import { Guard } from "../agents/guarded-fs.js";
 import { claudeHome, codexHome, gooseHome } from "../agents/homes.js";
 import { excludeLine, gitDirs, gitPath, inWorkTree, planExclude, planUnexclude, repoRootOf } from "../agents/git.js";
-import { planInstall, planMcpOff, planUninstall, type Action, type Ctx } from "../agents/plan.js";
+import { planInstall, planMcpOff, planUninstall, setUpAt, type Action, type Ctx } from "../agents/plan.js";
 import { withBoundary } from "../agents/lock.js";
 import { loadRecord, saveRecord, serialize, type InstallRecord } from "../agents/record.js";
 import { commitLines, INSTRUCTIONS_LINE, planRepoFiles, planRepoFilesRemoval, ROOT_CONFIG_NOTE } from "../agents/repo-folder.js";
@@ -248,8 +248,41 @@ type Setup = {
   guard: Guard;
 };
 
+// On uninstall: the files this run would remove that an agent staying set up
+// also writes (in project scope Codex and Cursor share the skill), each with
+// the agents that keep it. An agent counts as set up when a target of its
+// own, at a path no agent being removed writes and the guard allows, is on
+// disk (setUpAt). Read from disk, never from the record, so it holds on a
+// machine with no record.
+function stillUsed(s: Setup, targets: Target[], args: { runner: string; launcher: string; clineCli: boolean }): Map<string, AgentId[]> {
+  const removed = new Set(targets.filter((t) => t.kind === "file").map((t) => t.path));
+  const touched = new Set(targets.map((t) => t.path));
+  const kept = new Map<string, AgentId[]>();
+  for (const agent of AGENTS) {
+    if (s.agents.includes(agent)) continue;
+    const own = targetsFor({ agent, scope: s.scope, home: s.home, repoRoot: s.repoRoot, version: s.version, ...args }).targets;
+    const shared = own.filter((t) => t.kind === "file" && removed.has(t.path));
+    if (shared.length === 0 || !own.some((t) => !touched.has(t.path) && guarded(s, t) && setUpAt(t))) continue;
+    for (const t of shared) kept.set(t.path, [...(kept.get(t.path) ?? []), agent]);
+  }
+  return kept;
+}
+
+// Whether init could have written `t`: a path the guard refuses (a link the
+// repository holds on the way, or outside every folder init writes) holds
+// nothing of ours, so setUpAt never reads through it. The last name is not
+// followed, so a link there still counts as there.
+function guarded(s: Setup, t: Target): boolean {
+  try {
+    s.guard.check(t.path, false);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // `mcpOn`: whether this run registers the code graph's MCP server.
-function collectTargets(s: Setup, mcpOn: boolean): { targets: Target[]; notes: string[] } {
+function collectTargets(s: Setup, mcpOn: boolean): { targets: Target[]; notes: string[]; kept: Map<string, AgentId[]> } {
   const launcher = launcherPath(s.oqHome);
   const runner = s.flags.project ? `npx -y openqodex@${s.version}` : launcherRunner(launcher);
   // A removal plans the Cline CLI's MCP file whatever is there now, so one
@@ -271,13 +304,16 @@ function collectTargets(s: Setup, mcpOn: boolean): { targets: Target[]; notes: s
       targets.push(t);
     }
   }
-  return { targets, notes };
+  const kept = s.flags.uninstall ? stillUsed(s, targets, { runner, launcher, clineCli }) : new Map<string, AgentId[]>();
+  return { targets, notes, kept };
 }
 
 // Plans one agent's targets. A file that cannot be read, or a path through
 // a link the repository holds, stops that agent with the reason. With
 // `mcpOn` false, the MCP server registrations init recorded are removed.
-async function planAgents(s: Setup, record: InstallRecord, targets: Target[], mcpOn: boolean): Promise<Action[]> {
+// `kept`: the shared files an agent staying set up still uses (stillUsed),
+// left in place and in the record.
+async function planAgents(s: Setup, record: InstallRecord, targets: Target[], mcpOn: boolean, kept: Map<string, AgentId[]>): Promise<Action[]> {
   const ctx: Ctx = { record, scope: s.scope, repoRoot: s.repoRoot, guard: s.guard };
   const excludeFile = s.repoRoot !== null && !s.flags.project ? await gitPath(s.repoRoot, "info/exclude") : null;
   const actions: Action[] = [];
@@ -286,7 +322,10 @@ async function planAgents(s: Setup, record: InstallRecord, targets: Target[], mc
     const planned: Action[] = [];
     try {
       for (const t of mine) {
-        if (s.flags.uninstall) {
+        const users = s.flags.uninstall && t.kind === "file" ? kept.get(t.path) : undefined;
+        if (users !== undefined) {
+          planned.push({ verb: "keep", path: t.path, agent, note: `${t.label}: ${users.map((a) => AGENT_NAMES[a]).join(" and ")} is still set up and uses it; left in place` });
+        } else if (s.flags.uninstall) {
           const a = planUninstall(t, ctx);
           if (a) planned.push(a);
         } else if (!mcpOn && isMcp(t)) {
@@ -366,7 +405,7 @@ async function runLocked(s: Setup): Promise<Outcome> {
   const record = loadRecord(s.oqHome);
   const recordBefore = serialize(record);
   const mcp = mcpChoiceFor(s, record);
-  const { targets, notes } = collectTargets(s, mcp.on);
+  const { targets, notes, kept } = collectTargets(s, mcp.on);
   if (!s.flags.uninstall && s.agents.includes("cursor") && s.repoRoot !== null) {
     notes.push("Cursor has no global instruction file: its rule in this repo carries the review instructions");
   }
@@ -381,7 +420,7 @@ async function runLocked(s: Setup): Promise<Outcome> {
   const teamActions: Action[] = [];
   let failed = false;
 
-  const agentActions = await planAgents(s, record, targets, mcp.on);
+  const agentActions = await planAgents(s, record, targets, mcp.on, kept);
   let rootConfig = false;
   let hookChoice: HookChoice | null = null;
   // The git pre-push hook action, when the plan holds one.

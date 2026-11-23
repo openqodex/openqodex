@@ -374,13 +374,14 @@ export type FrameworkUnknown = {
 // class key. A module-level value that is not a definition (a router
 // built by `APIRouter()`, `express.Router()`) shows as a miss whose target
 // is the module's file, so a plugin reads its own facts in that file to
-// tell a value from a real miss.
+// tell a value from a real miss. `past`: the names of the path after the
+// one that missed, never looked up (`router.handler` misses at `router`).
 export type Lookup =
   | { kind: "symbol"; ids: string[]; tier: Tier; evidence: string; via: { file: string; line: number; spec: string | null } | null; note: string | null }
   | { kind: "module"; file: string; tier: Tier; via: { file: string; line: number; spec: string | null } | null; note: string | null }
   | { kind: "external" }
   | { kind: "gap"; cause: Cause; note: string; candidates: string[] | null }
-  | { kind: "miss"; target: string; name: string }
+  | { kind: "miss"; target: string; name: string; past?: string[] }
   | { kind: "none" }; // the name is not bound at the top level of the file
 
 // Every cross-file read a plugin makes goes through this object, so a later

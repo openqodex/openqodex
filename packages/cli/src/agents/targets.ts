@@ -205,6 +205,10 @@ function fileTarget(agent: AgentId, label: string, path: string, content: string
 // The section for the repo's own CLAUDE.md and AGENTS.md, written by a
 // user-scope init so a teammate with nothing installed reviews too. It names
 // only the pinned npx command, never the skill or the launcher.
+// The heading every version of the team section opens with, after the start
+// marker: setUpAt tells it from an agent's own section by it (plan.ts).
+export const TEAM_HEADING = "## Review with OpenQodex before you push";
+
 export function teamSection(version: string): string {
   return fill(template("repo", "team-section.md"), version).trimEnd();
 }

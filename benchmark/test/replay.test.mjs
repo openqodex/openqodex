@@ -23,7 +23,7 @@ const submission = (findings) => ({ version: 2, change_id: "abcdef", summary: "C
 const input = (findings) => ({ change: { id: "abcdef", shortId: "abcdef", files: [{ path: "a.py" }], coverage: new Map([["a.py", lineSet(2)]]), deletionPoints: new Map(), baseRef: "HEAD", baseSha: "123", notReviewed: [], stats: {} }, scan, manifest, config: DEFAULT_CONFIG, submission: submission(findings), lineCount: (path) => path === "a.py" ? 3 : null });
 const write = (path, data) => writeFileSync(path, typeof data === "string" ? data : JSON.stringify(data));
 
-function savedRun(findingsByRepeat, { savedBrief = brief, argsFor = input, inventory = [{ path: "a.py", size: 30, lines: 3, language: "python", candidates: 0 }] } = {}) {
+function savedRun(findingsByRepeat, { savedBrief = brief, argsFor = input, inventory = [{ path: "a.py", size: 30, lines: 3, language: "python", candidates: 0 }], completion = { status: "complete" } } = {}) {
   const root = tempDir("oq-replay-");
   const run = join(root, "run");
   mkdirSync(join(run, "cases"), { recursive: true });
@@ -41,7 +41,7 @@ function savedRun(findingsByRepeat, { savedBrief = brief, argsFor = input, inven
     write(join(dir, "report", "submission.json"), args.submission);
     const checked = checkSubmission(args);
     expect(checked.ok).toBe(true);
-    write(join(dir, "report", "report.json"), { ...checked.report, completion: { status: "complete" } });
+    write(join(dir, "report", "report.json"), { ...checked.report, completion });
   }
   return { root, run };
 }
@@ -269,8 +269,9 @@ it("a replay changes a saved run", () => {
 });
 
 it("the union counts one bug found in two repeats twice", () => {
-  // Two titles about one truth item survive product dedup, but recall is one.
-  const { run } = savedRun([[f()], [f(), f({ title: "Zero divisor crashes" })]]);
+  // Two findings about one truth item survive product dedup (another
+  // source), but recall is one.
+  const { run } = savedRun([[f()], [f(), f({ title: "Zero divisor crashes", source: "lens:division", confidence: 0.9 })]]);
   const row = replayRun(run, { mode: "union" }).rows[0];
   expect(row.beforeHits).toBe(1);
   expect(row.hits).toBe(1);
@@ -278,6 +279,20 @@ it("the union counts one bug found in two repeats twice", () => {
   expect(row.findings).toBe(2);
   const single = savedRun([[f()]]);
   expect(replayRun(single.run, { mode: "union" }).rows[0].status).toBe("insufficient repeats");
+});
+
+// Issue 315: the product merges one defect under two titles in a single-pass
+// review, and keeps them apart in a staged one, whose verifier rules on
+// duplicates. A replay that merges a staged run's findings undercounts them.
+it("replays a staged run's two titles on one line as two findings, and a single-pass run's as one", () => {
+  const twoTitles = [[f(), f({ title: "Zero divisor crashes" })]];
+  const staged = savedRun(twoTitles, { completion: { status: "complete", reviewer: { sessions: [{ role: "finder:u1:local" }, { role: "verifier:b1" }] } } });
+  expect(replayRun(staged.run, { mode: "threshold" }).rows[0].findings).toBe(2);
+  // The model review's completion record keeps its sessions at the top.
+  const model = savedRun(twoTitles, { completion: { contract: "openqodex-model-review-1", status: "complete", reviewer: { kind: "model", model: "fixture" }, sessions: [{ role: "finder:u1:local" }, { role: "verifier:b1" }] } });
+  expect(replayRun(model.run, { mode: "threshold" }).rows[0].findings).toBe(2);
+  const single = savedRun(twoTitles, { completion: { status: "complete", reviewer: { sessions: [{ role: "primary" }] } } });
+  expect(replayRun(single.run, { mode: "threshold" }).rows[0].findings).toBe(1);
 });
 
 it("a saved submission rejected by core is scored as a successful replay", () => {

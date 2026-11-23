@@ -21,7 +21,7 @@ import type { Change, ImpactCut, ImpactEdge, ImpactKind, ImpactPath, ImpactSumma
 import { langOf } from "./capture/inventory.js";
 import { frameworkImpact } from "./frameworks/impact.js";
 import type { DispatchSite, Family, Graph, GraphEdge, GraphNode, HotSymbol, Miss, Place, UnknownSite } from "./types.js";
-import { NO_ESCAPES, familyOf } from "./types.js";
+import { ESCAPES_CUT, NO_ESCAPES, familyOf } from "./types.js";
 
 export const HUB_CALLERS = 40; // a symbol with more direct callers is a hub
 export const HUB_SHOWN = 20; // callers kept for a hub, and per caller on the second hop
@@ -37,15 +37,6 @@ const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|testdata|fixtures?)\/|[._-
 
 export function isTestPath(path: string): boolean {
   return TEST_PATH.test(path);
-}
-
-// Code that is not the product: a test or a fixture; a package's corpus
-// (the cases its tests read); a benchmark, which measures the product; and
-// the scripts of the repository or of a package (build, release, checks).
-// None of them is shipped with the product or imported by it.
-const OUTSIDE_PRODUCT = /(^|\/)benchmarks?\/|^packages\/[^/]+\/(corpus|scripts)\/|^scripts\//;
-export function isOutsideProduct(path: string): boolean {
-  return isTestPath(path) || OUTSIDE_PRODUCT.test(path);
 }
 
 // Folders between two files: 0 for the same folder.
@@ -424,6 +415,7 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
   for (const g of graph.model.unreadable) if (g.affects.length > 0 && (g.dir === "" || seed.file.startsWith(`${g.dir}/`))) why(g.note, null);
   if (cutAt.has(seed.id)) why("the walk was cut at it", null);
   if (graph.escapes.missing) why(NO_ESCAPES, null);
+  if (graph.escapes.cut) why(ESCAPES_CUT, null);
   return { reasons, places };
 }
 

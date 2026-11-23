@@ -17,7 +17,7 @@
 // answer in slices with a turn of the event loop between them, so a
 // cancellation that arrives while the work runs is seen (the MCP server).
 import { langOf, unreadNote } from "../capture/inventory.js";
-import { floorOf, isOutsideProduct, sameNameGaps, toImpactUnknown } from "../impact.js";
+import { floorOf, isTestPath, sameNameGaps, toImpactUnknown } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
 import { CALLER_KINDS } from "../types.js";
@@ -242,12 +242,12 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     let reasons: string[];
     let causes: Record<string, number | null> = {};
     let examples: Answer["unknown"]["examples"];
-    // The places that could hide a caller, when each is known and none is product code.
+    // The places that could hide a caller, when each is known and each is a test.
     let inTests: { file: string; line: number | null }[] | null = null;
     if (kind === "callers") {
       const floor = floorOf(g, { id: n.id, name: n.name, file: n.file, kind: n.kind }, new Set());
       reasons = floor.reasons;
-      if (floor.places && floor.places.length > 0 && floor.places.every((p) => isOutsideProduct(p.file))) inTests = floor.places;
+      if (floor.places && floor.places.length > 0 && floor.places.every((p) => isTestPath(p.file))) inTests = floor.places;
       const named = n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n) : unknownsNamed(g, n.name);
       for (const u of named) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = mayBe(named, n).slice(0, 5).map(toImpactUnknown);
@@ -272,12 +272,12 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
   };
 }
 
-// A floor whose every place is outside product code, said in one sentence.
+// A floor whose every place is a test, said in one sentence.
 const TESTS_SHOWN = 3;
 function testsNote(places: { file: string; line: number | null }[]): string {
   const at = [...new Set(places.map((p) => (p.line === null ? p.file : `${p.file}:${p.line}`)))];
   const more = at.length > TESTS_SHOWN ? ` and ${at.length - TESTS_SHOWN} more` : "";
-  return `Complete in product code. Only test, benchmark or script files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
+  return `Complete in product code. Only test files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
 }
 
 function changesJob(s: Session, extra: Extra): Job | Answer {

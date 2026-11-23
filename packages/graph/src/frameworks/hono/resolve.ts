@@ -382,7 +382,7 @@ function run(index: PluginIndex<HonoFact>): Analysis {
   const fromImport = (file: string, path: readonly string[]): Deref => {
     let found: Lookup = lookup(file, path);
     let target: { file: string; name: string } | null = null;
-    if (found.kind === "miss") target = { file: found.target, name: found.name };
+    if (found.kind === "miss") target = found.past ? null : { file: found.target, name: found.name };
     else if (found.kind === "none" && path.length === 1) target = importedFrom(file, path[0] as string);
     else if (found.kind === "none" && path.length === 2) {
       found = lookup(file, [path[0] as string]);

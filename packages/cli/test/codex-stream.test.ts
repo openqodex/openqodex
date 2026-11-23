@@ -38,6 +38,12 @@
 // 17. A relative or empty PATH entry (".", "", "bin") reaches the reviewer or
 //     the probe, so a program committed in the snapshot runs in place of a
 //     system one (a `cat` that prints the inside file and skips the rest).
+// 20. An earlier error hides the usage limit Codex ended the turn with.
+// 19. A usage limit reads as any other error, so the developer cannot tell
+//     from the receipt that waiting or another reviewer would work.
+// 18. On Windows the path (named `Path` there), the home folder or what
+//     starts a program is dropped, or the path is split on ":" and loses
+//     every entry.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -131,6 +137,22 @@ describe("the Codex stream reader, on a recorded run", () => {
     expect(turn.failure).toMatch(/stopped with an error \(stream disconnected/);
   });
 
+  it("20. a usage limit after an earlier error is the one the receipt shows", async () => {
+    const early = JSON.stringify({ type: "error", message: "Reconnecting... 1/5 (stream disconnected before completion)" });
+    const limit = JSON.stringify({ type: "turn.failed", error: { message: "You've hit your usage limit. Try again at 3:05 PM." } });
+    const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"')), early, limit, ""].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.failure).toBe("the reviewer hit its usage or plan limit (You've hit your usage limit. Try again at 3:05 PM.)");
+  });
+
+  it("19. a turn that failed on a usage limit says so, with Codex's own words", async () => {
+    const failed = JSON.stringify({ type: "turn.failed", error: { message: "You've hit your usage limit. Try again at 3:05 PM.\nUpgrade to Pro" } });
+    const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"')), failed, ""].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.finalText).toBe("");
+    expect(turn.failure).toBe("the reviewer hit its usage or plan limit (You've hit your usage limit. Try again at 3:05 PM. Upgrade to Pro)");
+  });
+
   it("3. a stream that ends with no terminal event is no answer", async () => {
     const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"')), ""].join("\n")));
     const { turn } = await runOnce(bin);
@@ -195,6 +217,15 @@ describe("the Codex command line and environment", () => {
 
   it("17. relative and empty PATH entries never reach the reviewer", () => {
     expect(codexEnv({ PATH: [".", "", "/usr/bin", "bin", "./x", "/bin"].join(":") }).PATH).toBe("/usr/bin:/bin");
+  });
+
+  it("18. on Windows the path, the home folder and what starts a program reach Codex, under any case, with only absolute path entries", () => {
+    const windows = { Path: ["C:\\Windows\\system32", ".", "", "bin", "C:relative", "C:\\Program Files\\nodejs", "\\\\server\\tools"].join(";"), USERPROFILE: "C:\\Users\\u", APPDATA: "C:\\Users\\u\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local", SystemRoot: "C:\\Windows", PATHEXT: ".COM;.EXE;.CMD", ComSpec: "C:\\Windows\\system32\\cmd.exe", GITHUB_TOKEN: "t", OPENAI_API_KEY: "k" };
+    const { GITHUB_TOKEN: _token, OPENAI_API_KEY: _key, ...kept } = windows;
+    expect(codexEnv(windows, "win32")).toStrictEqual({ ...kept, Path: "C:\\Windows\\system32;C:\\Program Files\\nodejs;\\\\server\\tools", [DEPTH_ENV]: "1" });
+    // Elsewhere a name keeps its case and the Windows variables stay out.
+    expect(codexEnv(windows, "linux")).toEqual({ [DEPTH_ENV]: "1" });
+    expect(codexEnv({ PATH: "/usr/bin:C:\\x", Path: "/bin" }, "darwin")).toEqual({ PATH: "/usr/bin", [DEPTH_ENV]: "1" });
   });
 
   it("9. the environment keeps what Codex needs and drops tokens and session ties", () => {
