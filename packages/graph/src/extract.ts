@@ -3791,6 +3791,8 @@ function pyStatic(fn: Node): boolean {
 
 // A name or an attribute path that may stand for a function.
 function pyValueNode(ctx: Ctx, n: Node | null): ValueNode {
+  // `(f)` and `((f))` are the value `f`.
+  while (n?.type === "parenthesized_expression") n = n.firstNamedChild;
   if (!n) return null;
   if (n.type === "identifier") return { name: n, recv: { kind: "none" } };
   if (n.type === "attribute") {
