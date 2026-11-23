@@ -104,7 +104,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, cli, env, git, inTerminal, promptsAsked, sandbox, snapshot, status, tree, type Sandbox } from "./init-helpers.js";
 import { gitDirs } from "../src/agents/git.js";
 import { Guard } from "../src/agents/guarded-fs.js";
-import { isShippedSkill } from "../src/agents/targets.js";
+import { isShippedSkill, teamSection } from "../src/agents/targets.js";
 import { adoptTempDir, removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -523,6 +523,30 @@ describe("init, project scope", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(existsSync(join(s.repo, SHARED_SKILL)), "a pipe there counts as Cursor still set up").toBe(true);
   }, 30_000);
+
+  it("30. the team section in AGENTS.md never counts as Codex set up, so uninstalling Cursor removes the skill", () => {
+    const s = sandbox();
+    const agents = join(s.repo, "AGENTS.md");
+    writeFileSync(agents, `${teamSection("0.12.0")}\n`);
+    project(s, "--agent", "cursor");
+    const skill = join(s.repo, SHARED_SKILL);
+    expect(existsSync(skill)).toBe(true);
+    project(s, "--uninstall", "--agent", "cursor");
+    expect(existsSync(skill), "only Cursor was set up, its skill").toBe(false);
+    expect(readFileSync(agents, "utf8")).toBe(`${teamSection("0.12.0")}\n`);
+  });
+
+  it("30. a file reached through a folder link the repository holds never counts as Cursor set up", () => {
+    const s = sandbox();
+    project(s, "--agent", "codex");
+    const outside = join(s.root, "outside-cursor");
+    mkdirSync(join(outside, "rules"), { recursive: true });
+    writeFileSync(join(outside, "rules", "openqodex.mdc"), "not ours\n");
+    symlinkSync(outside, join(s.repo, ".cursor"));
+    project(s, "--uninstall", "--agent", "codex");
+    expect(existsSync(join(s.repo, SHARED_SKILL)), "Cursor's files lie behind a link init never writes through, the skill").toBe(false);
+    expect(readFileSync(join(outside, "rules", "openqodex.mdc"), "utf8")).toBe("not ours\n");
+  });
 
   it("keeps an AGENTS.md section the developer edited", () => {
     const s = sandbox();

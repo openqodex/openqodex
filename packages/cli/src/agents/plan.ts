@@ -11,7 +11,7 @@ import type { Guard } from "./guarded-fs.js";
 import { MCP_SERVER, planJsonInstall, planJsonRemoval, planTomlInstall, planTomlRemoval, TOML_START } from "./mcp.js";
 import { canonical, type InstallRecord } from "./record.js";
 import type { Scope, Target } from "./targets.js";
-import { isShippedSkill, SECTION_END, SECTION_START } from "./targets.js";
+import { isShippedSkill, SECTION_END, SECTION_START, TEAM_HEADING } from "./targets.js";
 
 export type Verb = "create" | "update" | "merge" | "append" | "replace" | "remove" | "restore" | "skip" | "keep" | "refuse";
 
@@ -385,8 +385,9 @@ function readPlain(path: string): string | null | "other" {
 }
 
 // Whether OpenQodex's part of `t` is on disk, as any version wrote it and
-// whether or not a record names it: the file, a marked section, a hook group
-// whose command runs openqodex, the openqodex MCP server entry or block.
+// whether or not a record names it: the file, a marked section other than
+// the team section, a hook group whose command runs openqodex, the openqodex
+// MCP server entry or block.
 // Uninstall asks it of an agent that stays (init.ts). A file it cannot read
 // or parse, a link or anything but a regular file counts as there, so a
 // doubt keeps a shared file.
@@ -404,8 +405,11 @@ export function setUpAt(t: Target): boolean {
   if (text === "other") return true;
   if (text === null) return false;
   switch (t.kind) {
-    case "md-section":
-      return text.includes(SECTION_START);
+    case "md-section": {
+      // The team section shares the markers but is the team's, never an agent's.
+      const at = text.indexOf(SECTION_START);
+      return at !== -1 && !text.slice(at + SECTION_START.length).replace(/^\r?\n/, "").startsWith(TEAM_HEADING);
+    }
     case "mcp-toml":
       return text.includes(TOML_START);
     case "hook-json": {

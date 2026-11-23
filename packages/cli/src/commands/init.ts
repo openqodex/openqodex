@@ -251,8 +251,9 @@ type Setup = {
 // On uninstall: the files this run would remove that an agent staying set up
 // also writes (in project scope Codex and Cursor share the skill), each with
 // the agents that keep it. An agent counts as set up when a target of its
-// own, at a path no agent being removed writes, is on disk (setUpAt). Read
-// from disk, never from the record, so it holds on a machine with no record.
+// own, at a path no agent being removed writes and the guard allows, is on
+// disk (setUpAt). Read from disk, never from the record, so it holds on a
+// machine with no record.
 function stillUsed(s: Setup, targets: Target[], args: { runner: string; launcher: string; clineCli: boolean }): Map<string, AgentId[]> {
   const removed = new Set(targets.filter((t) => t.kind === "file").map((t) => t.path));
   const touched = new Set(targets.map((t) => t.path));
@@ -261,10 +262,23 @@ function stillUsed(s: Setup, targets: Target[], args: { runner: string; launcher
     if (s.agents.includes(agent)) continue;
     const own = targetsFor({ agent, scope: s.scope, home: s.home, repoRoot: s.repoRoot, version: s.version, ...args }).targets;
     const shared = own.filter((t) => t.kind === "file" && removed.has(t.path));
-    if (shared.length === 0 || !own.some((t) => !touched.has(t.path) && setUpAt(t))) continue;
+    if (shared.length === 0 || !own.some((t) => !touched.has(t.path) && guarded(s, t) && setUpAt(t))) continue;
     for (const t of shared) kept.set(t.path, [...(kept.get(t.path) ?? []), agent]);
   }
   return kept;
+}
+
+// Whether init could have written `t`: a path the guard refuses (a link the
+// repository holds on the way, or outside every folder init writes) holds
+// nothing of ours, so setUpAt never reads through it. The last name is not
+// followed, so a link there still counts as there.
+function guarded(s: Setup, t: Target): boolean {
+  try {
+    s.guard.check(t.path, false);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // `mcpOn`: whether this run registers the code graph's MCP server.
