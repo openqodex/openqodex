@@ -599,6 +599,9 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     }
     const parseErrors = notRead.filter((n) => n.reason === "parse-error" || n.reason === "unreadable").length;
     if (parseErrors > 0) reasons.push(`${plural(parseErrors, "file")} could not be read or parsed`);
+    // Named, since a floor in another project has no other reason that says it.
+    const slow = notRead.filter((n) => n.reason === "slow-parse").map((n) => n.file);
+    if (slow.length > 0) reasons.push(`${plural(slow.length, "file")} took longer than the ${MAX_PARSE_MS / 1000} s limit on one parse and ${slow.length === 1 ? "was" : "were"} not read: ${slow.slice(0, 3).join(", ")}${slow.length > 3 ? ` and ${slow.length - 3} more` : ""}`);
     const gaps = model.unreadable;
     // Only a gap that can hide a relation makes the build partial
     // (discovery/projects.ts GAP_RULES); every gap is said.
