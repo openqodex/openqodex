@@ -24,7 +24,7 @@
 // stopped job goes on where it stopped.
 import { normalisePy } from "../discovery/manifests.js";
 import { PLUGINS } from "../frameworks/registry.js";
-import { isTestPath } from "../impact.js";
+import { GAPS_SHOWN, isTestPath, joinGaps } from "../impact.js";
 import { NEXT } from "../gap.js";
 import type { GapPlace } from "../gap.js";
 import type { Cause, Tier } from "../model/records.js";
@@ -78,7 +78,9 @@ export function frameworkLayer(g: Graph): FwLayer | null {
   return { registrations, edges, unknowns, runs, apps };
 }
 
-// The framework relations that describe data and never run code.
+// The framework relations that describe data and never run code. A
+// React `renders` edge runs a component, but it repeats the JSX element
+// the core graph reads as a call, so no callers row rests on it.
 const DATA_KINDS = new Set(["renders", "declares_field", "changes_schema", "maps_to", "uses_type", "reads_config", "defines_config"]);
 
 // Whether a framework gap of each cause can drop a registration, a
@@ -133,46 +135,54 @@ function importedBy(g: Graph, file: string): Set<string> {
 
 const drops = (cause: string): boolean => (DROPS as Record<string, boolean | undefined>)[cause] ?? true;
 
-// Where the framework layer gave up in a way that may hide it running a
-// function of `file` (as a handler, a middleware, a job): each gap whose
-// cause can drop a registration (DROPS) and that names a relation that
-// runs code, or none, and reaches the function's project, and each plugin
-// that failed or stopped. A gap that names one function (`symbol`) floors
-// only that function. Its reasons and its gaps, for a caller floor.
-export function frameworkCallerGaps(g: Graph, file: string, id: string): { reasons: string[]; gaps: GapPlace[] } {
+// How a framework gap reaches a function: the one function it names, every
+// function of the build, those of a project, or those near a file (in its
+// project, or in a file it imports, as a handler imported from another
+// project is).
+type FwReach = { symbol: string } | { all: true } | { project: string } | { near: string; project: string };
+type Grouped = { reasons: string[]; ordered: FwUnknown[] };
+// What frameworkCallerGaps reads of a build, worked out once per build: a
+// deep callers question asks it for every caller it walks through. `gaps`:
+// each gap that can hide a call (DROPS) of a relation that runs code, with
+// its reach, in the layer's order. `byProject`: the reasons and the gaps in
+// order of a function that only the gaps of its project's reach.
+type Prepared = { runs: FwRun[]; gaps: { u: FwUnknown; reach: FwReach }[]; byProject: Map<string, Grouped> };
+const preparedOf = new WeakMap<Graph, Prepared | null>();
+function prepare(g: Graph): Prepared | null {
+  if (preparedOf.has(g)) return preparedOf.get(g) ?? null;
   const layer = frameworkLayer(g);
-  if (!layer) return { reasons: [], gaps: [] };
-  const project = g.projectOf(file);
-  const appFile = new Map(layer.apps.map((a) => [a.id, a.site.file]));
-  // A gap reaches the function when its place is in the function's
-  // project, or imports the function's file (a handler imported from
-  // another project), or when its plugin names code by other means.
-  let importers: Set<string> | null = null;
-  const imports = (f: string): boolean => (importers ??= importedBy(g, file)).has(f);
-  const near = (f: string): boolean => g.projectOf(f) === project || imports(f);
-  const reaches = (u: FwUnknown): boolean => {
-    if (typeof u.symbol === "string") return u.symbol === id;
-    if (!BOUND_BY_IMPORTS.has(u.plugin)) return true;
-    const scope = (u as { scope?: unknown }).scope;
-    if (isObj(scope)) {
-      if (scope.build === true) return true;
-      if (typeof scope.project === "string") return scope.project === project || [...(importers ??= importedBy(g, file))].some((f) => g.projectOf(f) === scope.project);
-      if (typeof scope.app === "string") {
-        const at = appFile.get(scope.app);
-        return at === undefined || near(at);
+  let out: Prepared | null = null;
+  if (layer) {
+    const appFile = new Map(layer.apps.map((a) => [a.id, a.site.file]));
+    const near = (f: string): FwReach => ({ near: f, project: g.projectOf(f) });
+    const reachOf = (u: FwUnknown): FwReach => {
+      if (typeof u.symbol === "string") return { symbol: u.symbol };
+      if (!BOUND_BY_IMPORTS.has(u.plugin)) return { all: true };
+      const scope = (u as { scope?: unknown }).scope;
+      if (isObj(scope)) {
+        if (scope.build === true) return { all: true };
+        if (typeof scope.project === "string") return { project: scope.project };
+        if (typeof scope.app === "string") {
+          const at = appFile.get(scope.app);
+          return at === undefined ? { all: true } : near(at);
+        }
+        if (typeof scope.file === "string") return near(scope.file);
       }
-      if (typeof scope.file === "string") return near(scope.file);
-    }
-    return u.site === null || near(u.site.file);
-  };
-  // A cap, a budget, a computed value, a file the plugin did not read: each
-  // may hide a registration, so the framework may run it there.
-  const hit = layer.unknowns.filter((u) => drops(u.cause) && (u.affects.length === 0 || u.affects.some((k) => !DATA_KINDS.has(k))) && reaches(u));
-  const runs = layer.runs.filter((r) => r.status === "failed" || r.status === "stopped");
-  const reasons = runs.map((r) => `the ${r.id} plugin ${r.status === "failed" ? "failed" : "stopped"} (${r.reason ?? r.status}), so what it runs is not listed and may call it`);
-  // One reason per plugin and cause, at the first place of each; a gap
-  // with no place (a stop for the whole build) is said before the others,
-  // and the first gap of each group leads the list, which is cut at a few.
+      return u.site === null ? { all: true } : near(u.site.file);
+    };
+    // A cap, a budget, a computed value, a file the plugin did not read: each
+    // may hide a registration, so the framework may run it there.
+    const gaps = layer.unknowns.filter((u) => drops(u.cause) && (u.affects.length === 0 || u.affects.some((k) => !DATA_KINDS.has(k)))).map((u) => ({ u, reach: reachOf(u) }));
+    out = { runs: layer.runs.filter((r) => r.status === "failed" || r.status === "stopped"), gaps, byProject: new Map() };
+  }
+  preparedOf.set(g, out);
+  return out;
+}
+
+// One reason per plugin and cause, at the first place of each; a gap with
+// no place (a stop for the whole build) is said before the others, and the
+// first gap of each group leads the list.
+function grouped(hit: readonly FwUnknown[]): Grouped {
   const ordered = [...hit].sort((a, b) => (a.site === null ? 0 : 1) - (b.site === null ? 0 : 1));
   const groups = new Map<string, FwUnknown[]>();
   for (const u of ordered) {
@@ -181,6 +191,7 @@ export function frameworkCallerGaps(g: Graph, file: string, id: string): { reaso
     if (list) list.push(u);
     else groups.set(k, [u]);
   }
+  const reasons: string[] = [];
   for (const [first, ...rest] of groups.values()) {
     const u = first as FwUnknown;
     const where = u.site ? ` at ${u.site.file}:${u.site.line}` : "";
@@ -188,12 +199,60 @@ export function frameworkCallerGaps(g: Graph, file: string, id: string): { reaso
   }
   const leading = [...groups.values()].map((list) => list[0] as FwUnknown);
   const lead = new Set(leading);
+  return { reasons, ordered: [...leading, ...ordered.filter((u) => !lead.has(u))] };
+}
+
+// Where the framework layer gave up in a way that may hide it running a
+// function of `file` (as a handler, a middleware, a job): each gap whose
+// cause can drop a registration (DROPS) and that names a relation that
+// runs code, or none, and reaches the function's project, and each plugin
+// that failed or stopped. A gap that names one function (`symbol`) floors
+// only that function. Its reasons and at most GAPS_SHOWN of its gaps, for
+// a caller floor; the reasons hold the counts.
+export function frameworkCallerGaps(g: Graph, file: string, id: string): { reasons: string[]; gaps: GapPlace[] } {
+  const prep = prepare(g);
+  if (!prep) return { reasons: [], gaps: [] };
+  const project = g.projectOf(file);
+  // A gap reaches the function when its place is in the function's
+  // project, or imports the function's file (a handler imported from
+  // another project), or when its plugin names code by other means.
+  let importers: Set<string> | null = null;
+  let importerProjects: Set<string> | null = null;
+  const imports = (): Set<string> => (importers ??= importedBy(g, file));
+  // Whether the gaps that reach the function are those of its project
+  // alone, the same for every function there.
+  let own = true;
+  const hit: FwUnknown[] = [];
+  for (const { u, reach } of prep.gaps) {
+    let reaches: boolean;
+    if ("symbol" in reach) reaches = reach.symbol === id;
+    else if ("all" in reach) reaches = true;
+    else if ("near" in reach) reaches = reach.project === project || imports().has(reach.near);
+    else reaches = reach.project === project || (importerProjects ??= new Set([...imports()].map((f) => g.projectOf(f)))).has(reach.project);
+    if (!reaches) continue;
+    hit.push(u);
+    if ("symbol" in reach || (("near" in reach || "project" in reach) && reach.project !== project)) own = false;
+  }
+  let group = own ? prep.byProject.get(project) : undefined;
+  if (!group) {
+    group = grouped(hit);
+    if (own) prep.byProject.set(project, group);
+  }
+  const runs = prep.runs;
+  const reasons = [...runs.map((r) => `the ${r.id} plugin ${r.status === "failed" ? "failed" : "stopped"} (${r.reason ?? r.status}), so what it runs is not listed and may call it`), ...group.reasons];
   // A plugin that failed or stopped names no place: its gap is said at the file asked about.
-  const gaps = [
-    ...runs.map((r): GapPlace => ({ cause: r.status === "failed" ? "unsupported-rule" : "budget", file, line: null, next: NEXT.frameworkRun })),
-    ...[...leading, ...ordered.filter((u) => !lead.has(u))].map((u): GapPlace => ({ cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: u.cause === "file-not-parsed" ? NEXT.frameworkFile : NEXT.framework })),
-  ];
-  return { reasons, gaps };
+  const gaps: GapPlace[] = runs.map((r) => ({ cause: r.status === "failed" ? "unsupported-rule" : "budget", file, line: null, next: NEXT.frameworkRun }));
+  // Each place once, the first GAPS_SHOWN: a caller floor shows no more (impact.ts, joinGaps).
+  const seen = new Set(gaps.map((x) => `${x.cause}\u0000${x.file}\u0000${x.line}\u0000${x.next}`));
+  for (const u of group.ordered) {
+    if (seen.size >= GAPS_SHOWN) break;
+    const x: GapPlace = { cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: u.cause === "file-not-parsed" ? NEXT.frameworkFile : NEXT.framework };
+    const k = `${x.cause}\u0000${x.file}\u0000${x.line}\u0000${x.next}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    gaps.push(x);
+  }
+  return { reasons, gaps: joinGaps(gaps) };
 }
 
 // The plugins of this build whose rules emit `kind` (a route
