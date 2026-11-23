@@ -1181,14 +1181,18 @@ export function createWorld(input: ResolveInput): World {
       if (k === null) return (hits[0] as { v: Value }).v; // a gap or a namespace: the first decides, as before
       if (!distinct.has(k)) distinct.set(k, h);
     }
+    // The branches each hit's own lookup left open stay open in the value
+    // made of them, from every hit, not only the first or the distinct ones.
+    const carried = [...new Set(hits.flatMap(({ v }) => (v.v === "sym" ? (v.unfollowed ?? []) : [])))];
+    const kept = carried.length > 0 ? { unfollowed: carried } : {};
     const first = hits[0] as { v: Value };
-    if (distinct.size === 1) return onlyPossible(first.v, open);
+    if (distinct.size === 1) return onlyPossible(first.v.v === "sym" ? { ...first.v, ...kept } : first.v, open);
     const syms = [...distinct.values()].filter((h): h is { v: Extract<Value, { v: "sym" }>; spec: string } => h.v.v === "sym");
     const unopened = open.length > 0 ? ` ${open.map((u) => u.note).join("; ")}.` : "";
     const note = `${file} re-exports ${name} through export * from ${distinct.size} modules (${[...distinct.values()].map((h) => h.spec).join(", ")}); JavaScript exports neither, and a bundler may pick one.${unopened}`;
     if (syms.length < 2) return { v: "gap", cause: "ambiguous", note, candidates: [...distinct.keys()] };
     const base = syms[0]?.v.ev as Ev;
-    return withOpen({ v: "sym", ids: syms.flatMap((h) => h.v.ids), ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } }, open);
+    return withOpen({ v: "sym", ids: syms.flatMap((h) => h.v.ids), ...kept, ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } }, open);
   }
 
   // A value reached through a module step keeps that step's evidence.
