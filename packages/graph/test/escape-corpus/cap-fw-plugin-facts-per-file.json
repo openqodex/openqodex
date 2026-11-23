@@ -1,0 +1,37 @@
+{
+  "covers": "a FastAPI route past the most facts a framework plugin keeps from one file; the handler is named only by its decorator (plugin.ts MAX_FACTS_PER_FILE)",
+  "caps": [
+    "frameworks/plugin.ts#MAX_FACTS_PER_FILE"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": [
+      "from fastapi import FastAPI\n\napp = FastAPI()\n\n",
+      {
+        "repeat": "@app.get(\"/r{{i}}\")\ndef h{{i}}():\n    return 1\n\n",
+        "times": 2001
+      }
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "main.py#h2001",
+      "caller": null,
+      "file": "main.py",
+      "line": 8005
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#h2001",
+      "reason": "the fastapi plugin kept the first facts of this file and left the rest out",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.py:1"
+      }
+    }
+  ]
+}

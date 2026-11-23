@@ -24,7 +24,7 @@
 import type { Detection, Entity, FrameworkEdge, FrameworkEvidence, FrameworkUnknown, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
 import { appId, entityId } from "../plugin.js";
 import type { Arg, Deco, Member, NestFact } from "./facts.js";
-import { MAX_CONSTANT_STEPS, ROUTE_DECORATORS } from "./facts.js";
+import { MAX_CONSTANT_STEPS, MAX_ITEMS, MAX_SHADOW_STEPS, ROUTE_DECORATORS } from "./facts.js";
 import { isTestFile } from "../express/js.js";
 import type { GraphNode } from "../../types.js";
 
@@ -44,6 +44,27 @@ export const MAX_MODULE_VISITS = 20_000; // modules visited, every application t
 export const MAX_LOOKUPS = 200_000;
 export const MAX_MIDDLEWARE_EDGES = 30_000;
 export const MAX_UNKNOWNS = 5000;
+
+// What each budget says once it is spent, once for the whole build: one
+// row per budget, so a budget added to `left` without a row does not
+// typecheck and none stops without an unknown the callers floor reads.
+type Budget = "registrations" | "apps" | "middleware" | "modules" | "lookups";
+export const EXITS: Record<Budget, { cause: "fan-out-capped" | "budget"; affects: FrameworkUnknown["affects"]; what: string; past: string }> = {
+  registrations: { cause: "fan-out-capped", affects: ["handles", "mounts"], what: `keeps at most ${MAX_REGISTRATIONS} registrations`, past: "were left out" },
+  apps: { cause: "fan-out-capped", affects: ["handles", "mounts"], what: `keeps at most ${MAX_APPS} applications`, past: "were left out" },
+  middleware: { cause: "fan-out-capped", affects: ["handles", "mounts"], what: `keeps at most ${MAX_MIDDLEWARE_EDGES} guard and interceptor edges`, past: "were left out" },
+  // A module past the budget may be in any project, so its controllers may be too.
+  modules: { cause: "budget", affects: ["handles", "mounts"], what: `visits at most ${MAX_MODULE_VISITS} modules`, past: "visits were refused" },
+  lookups: { cause: "budget", affects: [], what: `makes at most ${MAX_LOOKUPS} lookups`, past: "were refused" },
+};
+export function budgetUnknowns(left: Record<Budget, number>): FrameworkUnknown[] {
+  const out: FrameworkUnknown[] = [];
+  for (const [k, x] of Object.entries(EXITS) as [Budget, (typeof EXITS)[Budget]][]) {
+    const n = left[k];
+    if (n > 0) out.push({ plugin: PLUGIN, site: null, scope: { build: true }, affects: x.affects, cause: x.cause, name: null, note: `the Nest plugin ${x.what} in one build; ${n} ${x.past}`, count: n, exact: true });
+  }
+  return out;
+}
 
 type ClassFact = Extract<NestFact, { kind: "class" }>;
 type FactoryFact = Extract<NestFact, { kind: "factory" }>;
@@ -204,7 +225,7 @@ function run(index: PluginIndex<NestFact>): Analysis {
 
   // ---------- budgets and gaps ----------
   const spent = { lookups: 0, modules: 0, registrations: 0, middleware: 0, apps: 0 };
-  const left = { registrations: 0, middleware: 0, apps: 0, modules: 0, lookups: 0 };
+  const left: Record<Budget, number> = { registrations: 0, middleware: 0, apps: 0, modules: 0, lookups: 0 };
   let unknownsLeftOut = 0;
   const seen = new Set<string>();
   const addUnknown = (u: FrameworkUnknown) => {
@@ -437,7 +458,9 @@ function run(index: PluginIndex<NestFact>): Analysis {
     for (const d of [...decos].reverse()) {
       if (decoName(file, d) !== name) continue;
       const site = { file, line: d.line, column: d.column };
-      if (d.more > 0) gap(site, "dynamic", ["applies_middleware"], null, `${name} is given a spread list, so some of what it applies is not listed`);
+      // A list the reader filled to MAX_ITEMS was cut: a cap, which the callers floor reads.
+      if (d.more > 0 && d.args.length >= MAX_ITEMS) gap(site, "fan-out-capped", ["applies_middleware"], null, `${name} is given more than the ${MAX_ITEMS} entries the plugin reads, so what it applies past them is not listed`);
+      else if (d.more > 0) gap(site, "dynamic", ["applies_middleware"], null, `${name} is given a spread list, so some of what it applies is not listed`);
       for (const arg of d.args) out.push({ file, arg, site, kind: name === "UseGuards" ? "guard" : "interceptor" });
     }
     return out;
@@ -527,7 +550,8 @@ function run(index: PluginIndex<NestFact>): Analysis {
         const r = routeOf(at, m);
         if (r) {
           if (at !== cls && !namesKnown) {
-            gap({ file: at.file, line: r.deco.line, column: r.deco.column }, "unsupported-rule", ["handles"], m.name, `${name} has more members than the plugin lists, so whether it overrides ${m.name ?? "this method"} is not known`);
+            // A cap (MAX_NAMES), so a gap the callers floor reads: the route may be the target's.
+            gap({ file: at.file, line: r.deco.line, column: r.deco.column }, "fan-out-capped", ["handles"], m.name, `${name} has more members than the plugin lists, so whether it overrides ${m.name ?? "this method"} is not known`);
             continue;
           }
           routes.push(r);
@@ -1027,15 +1051,10 @@ function run(index: PluginIndex<NestFact>): Analysis {
         const why = fact.kind === "too-large" ? `the file is larger than the plugin reads (${fact.bytes} bytes)` : "the file has a syntax error, and nothing inside the broken part was read";
         addUnknown({ plugin: PLUGIN, site: { file, line: fact.line, column: fact.column }, scope: { file }, affects: [], cause: "file-not-parsed", name: null, note: `${why}, so its Nest routes and modules are not listed`, count: null, exact: false });
       }
+      if (fact.kind === "shadow-cut") addUnknown({ plugin: PLUGIN, site: { file, line: fact.line, column: fact.column }, scope: { file }, affects: ["handles", "mounts", "applies_middleware"], cause: "fan-out-capped", name: null, note: `the file names more locals than the ${MAX_SHADOW_STEPS} steps the plugin spends checking them; from here on a decorator or a NestFactory call inside a function is not read as Nest's, so its routes are not listed`, count: null, exact: false });
     }
   }
-  const capped = (n: number, what: string) => {
-    if (n > 0) addUnknown({ plugin: PLUGIN, site: null, scope: { build: true }, affects: ["handles", "mounts"], cause: "fan-out-capped", name: null, note: `the Nest plugin keeps at most ${what} in one build; ${n} were left out`, count: n, exact: true });
-  };
-  capped(left.registrations, `${MAX_REGISTRATIONS} registrations`);
-  capped(left.apps, `${MAX_APPS} applications`);
-  capped(left.middleware, `${MAX_MIDDLEWARE_EDGES} guard and interceptor edges`);
-  if (left.lookups > 0) addUnknown({ plugin: PLUGIN, site: null, scope: { build: true }, affects: [], cause: "budget", name: null, note: `the Nest plugin makes at most ${MAX_LOOKUPS} lookups in one build; ${left.lookups} were refused`, count: left.lookups, exact: true });
+  for (const u of budgetUnknowns(left)) addUnknown(u);
   if (unknownsLeftOut > 0) unknowns.push({ plugin: PLUGIN, site: null, scope: { build: true }, affects: [], cause: "fan-out-capped", name: null, note: `the Nest plugin keeps at most ${MAX_UNKNOWNS} gaps; ${unknownsLeftOut} more were left out`, count: unknownsLeftOut, exact: true });
   return { apps, output: { roles, entities, edges, unknowns } };
 }

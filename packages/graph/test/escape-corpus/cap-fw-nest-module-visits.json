@@ -1,0 +1,40 @@
+{
+  "covers": "a NestJS route served only by a module the plugin did not visit: earlier applications spent the build's module visits (nest MAX_MODULE_VISITS)",
+  "caps": [
+    "frameworks/nest/resolve.ts#MAX_MODULE_VISITS"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"@nestjs/common\": \"^10.0.0\", \"@nestjs/core\": \"^10.0.0\"}}",
+    "src/b.controller.ts": "import { Controller, Get } from \"@nestjs/common\";\n\n@Controller(\"b\")\nexport class B {\n  @Get(\"x\")\n  last() {\n    return 1;\n  }\n}\n",
+    "src/app.module.ts": "import { Module } from \"@nestjs/common\";\nimport { B } from \"./b.controller\";\n\n@Module({ imports: [M1] })\nexport class M0 {}\n@Module({ imports: [M2] })\nexport class M1 {}\n@Module({ imports: [M3] })\nexport class M2 {}\n@Module({ imports: [M4] })\nexport class M3 {}\n@Module({ imports: [M5] })\nexport class M4 {}\n@Module({ imports: [M6] })\nexport class M5 {}\n@Module({ imports: [M7] })\nexport class M6 {}\n@Module({ imports: [M8] })\nexport class M7 {}\n@Module({ imports: [M9] })\nexport class M8 {}\n@Module({ imports: [M10] })\nexport class M9 {}\n@Module({ imports: [M11] })\nexport class M10 {}\n@Module({ imports: [M12] })\nexport class M11 {}\n@Module({ imports: [M13] })\nexport class M12 {}\n@Module({ imports: [M14] })\nexport class M13 {}\n@Module({ imports: [M15] })\nexport class M14 {}\n@Module({ imports: [M16] })\nexport class M15 {}\n@Module({ imports: [M17] })\nexport class M16 {}\n@Module({ imports: [M18] })\nexport class M17 {}\n@Module({ imports: [M19] })\nexport class M18 {}\n@Module({})\nexport class M19 {}\n\n@Module({ controllers: [B] })\nexport class BModule {}\n",
+    "src/main.ts": [
+      "import { NestFactory } from \"@nestjs/core\";\nimport { M0, BModule } from \"./app.module\";\n\nasync function bootstrap() {\n",
+      {
+        "repeat": "}\nasync function a{{i}}() {\n  await NestFactory.create(M0);\n",
+        "times": 1000
+      },
+      "  await NestFactory.create(BModule);\n}\nbootstrap();\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/b.controller.ts#B.last",
+      "caller": null,
+      "file": "src/b.controller.ts",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.controller.ts#B.last",
+      "reason": "visits at most 20000 modules",
+      "at": "",
+      "gap": {
+        "cause": "budget",
+        "at": "src/main.ts:3005"
+      }
+    }
+  ]
+}

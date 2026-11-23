@@ -17,7 +17,9 @@ import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 // 7: each dependency is a call from every route handler it runs for and
 // from a dependency that declares it (fact "deps"), with evidence
 // fastapi-depends.
-export const VERSION = 7;
+// 8: an expression the reader cut at a cap says so, and a function whose
+// only dependencies are past the parameter cap keeps its deps fact.
+export const VERSION = 8;
 const SUPPORTED = "FastAPI 0.100 and later";
 
 const app = "fastapi-app";
