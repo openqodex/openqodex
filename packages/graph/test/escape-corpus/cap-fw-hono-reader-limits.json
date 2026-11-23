@@ -1,0 +1,90 @@
+{
+  "covers": "Hono routes the plugin's reader drops past its limits: a link of a method chain longer than it reads (facts.ts MAX_CHAIN), a route in a function nested deeper than bindings are followed (MAX_SCOPE_CHAIN), a route in a function declaring more names than kept (MAX_SCOPE_NAMES). The plugin records nothing there; the handler is written as a value at the route, and that value use floors its callers",
+  "caps": [
+    "frameworks/hono/facts.ts#MAX_CHAIN",
+    "frameworks/hono/facts.ts#MAX_SCOPE_CHAIN",
+    "frameworks/hono/facts.ts#MAX_SCOPE_NAMES"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"hono\": \"^4.0.0\"}}",
+    "src/h.ts": "export function h1(c: unknown) {\n  return c;\n}\nexport function h2(c: unknown) {\n  return c;\n}\nexport function h3(c: unknown) {\n  return c;\n}\nexport function h4(c: unknown) {\n  return c;\n}\n",
+    "src/app.ts": [
+      "import { Hono } from \"hono\";\n",
+      "import { h1, h2, h3, h4 } from \"./h\";\n",
+      "export const app = new Hono();\n",
+      "app",
+      {
+        "repeat": ".get(\"/c{{i}}\", h4)",
+        "times": 33
+      },
+      ".get(\"/last\", h1);\n",
+      {
+        "repeat": "function c{{i}}() {\n",
+        "times": 66
+      },
+      "app.get(\"/c\", h2);\n",
+      {
+        "repeat": "}\n",
+        "times": 66
+      },
+      "export function s() {\n",
+      {
+        "repeat": "  const v{{i}} = {{i}};\n",
+        "times": 260
+      },
+      "  app.get(\"/s\", h3);\n",
+      "}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h1",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 4
+    },
+    {
+      "target": "src/h.ts#h2",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 71
+    },
+    {
+      "target": "src/h.ts#h3",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 399
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h1",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:4",
+      "at": "src/app.ts:4",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:4"
+      }
+    },
+    {
+      "target": "src/h.ts#h2",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:71",
+      "at": "src/app.ts:71",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:71"
+      }
+    },
+    {
+      "target": "src/h.ts#h3",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:399",
+      "at": "src/app.ts:399",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:399"
+      }
+    }
+  ]
+}

@@ -42,8 +42,8 @@ export const MAX_MATCH_WORK = 4_000_000; // matcher-by-route steps
 export const MAX_ROLES = 20_000; // roles given
 export const MAX_UNKNOWNS = 5000;
 
-type Spend = "facts" | "paths" | "registrations" | "middlewareEdges" | "matchWork" | "roles";
-const LIMIT: Record<Spend, number> = { facts: MAX_FACTS_READ, paths: MAX_PATHS, registrations: MAX_REGISTRATIONS, middlewareEdges: MAX_MIDDLEWARE_EDGES, matchWork: MAX_MATCH_WORK, roles: MAX_ROLES };
+type Spend = "facts" | "paths" | "registrations" | "middlewareEdges" | "matchWork" | "roles" | "unknowns";
+const LIMIT: Record<Spend, number> = { facts: MAX_FACTS_READ, paths: MAX_PATHS, registrations: MAX_REGISTRATIONS, middlewareEdges: MAX_MIDDLEWARE_EDGES, matchWork: MAX_MATCH_WORK, roles: MAX_ROLES, unknowns: MAX_UNKNOWNS };
 
 const HTTP_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]);
 const EXTS = new Set(["js", "jsx", "ts", "tsx"]);
@@ -82,8 +82,8 @@ function run(index: PluginIndex<NextFact>): Analysis {
   const apps: Detection[] = [];
 
   // ---------- the build's budgets ----------
-  const spent: Record<Spend, number> = { facts: 0, paths: 0, registrations: 0, middlewareEdges: 0, matchWork: 0, roles: 0 };
-  const refused: Record<Spend, number> = { facts: 0, paths: 0, registrations: 0, middlewareEdges: 0, matchWork: 0, roles: 0 };
+  const spent: Record<Spend, number> = { facts: 0, paths: 0, registrations: 0, middlewareEdges: 0, matchWork: 0, roles: 0, unknowns: 0 };
+  const refused: Record<Spend, number> = { facts: 0, paths: 0, registrations: 0, middlewareEdges: 0, matchWork: 0, roles: 0, unknowns: 0 };
   const take = (k: Spend, n = 1): boolean => {
     if (spent[k] + n > LIMIT[k]) {
       refused[k] += n;
@@ -92,10 +92,8 @@ function run(index: PluginIndex<NextFact>): Analysis {
     spent[k] += n;
     return true;
   };
-  let unknownsLeftOut = 0;
   const addUnknown = (u: FrameworkUnknown) => {
-    if (unknowns.length >= MAX_UNKNOWNS) unknownsLeftOut++;
-    else unknowns.push(u);
+    if (take("unknowns")) unknowns.push(u);
   };
 
   // Each file's facts, read once against the budget.
@@ -391,15 +389,22 @@ function run(index: PluginIndex<NextFact>): Analysis {
   // A budget or a cap counted across the whole build.
   const whole = { build: true } as const;
   const cut = (affects: FrameworkUnknown["affects"], cause: FrameworkUnknown["cause"], count: number | null, note: string) => unknowns.push({ plugin: PLUGIN, site: null, scope: whole, affects, cause, name: null, note, count, exact: count !== null });
-  const unread = [...factCache.values()].filter((v) => v === null).length;
-  if (unread > 0) cut(["handles"], "budget", unread, `${unread} files were not read: the Next.js plugin reads at most ${MAX_FACTS_READ} facts in one build`);
-  if (refused.paths > 0) cut(["handles"], "budget", null, `the Next.js plugin examines at most ${MAX_PATHS} paths in one build; the routes past it are not listed`);
-  if (refused.registrations > 0) cut(["handles"], "fan-out-capped", refused.registrations, `${refused.registrations} routes were left out: the Next.js plugin keeps at most ${MAX_REGISTRATIONS} in one build`);
-  if (refused.middlewareEdges > 0) cut(["applies_middleware"], "fan-out-capped", refused.middlewareEdges, `${refused.middlewareEdges} middleware edges were left out: the Next.js plugin keeps at most ${MAX_MIDDLEWARE_EDGES} in one build`);
   if (segmentsCut > 0) cut(["handles"], "fan-out-capped", segmentsCut, `${segmentsCut} files more than ${MAX_PATTERN_SEGMENTS} folders deep were not read as routes`);
-  if (refused.matchWork > 0) cut(["applies_middleware"], "budget", null, `the plugin stopped matching middleware to routes after ${MAX_MATCH_WORK} steps in this build; the routes past it are not linked to their middleware`);
-  if (refused.roles > 0) cut(["handles"], "fan-out-capped", refused.roles, `${refused.roles} roles were left out: the Next.js plugin gives at most ${MAX_ROLES} roles in one build`);
-  if (unknownsLeftOut > 0) cut(["handles"], "fan-out-capped", unknownsLeftOut, `${unknownsLeftOut} more unknowns past the first ${MAX_UNKNOWNS} were left out`);
+  // Each build budget's record of what it cut, the only place a refused
+  // take is said: a record over every budget, so a budget added without
+  // one does not typecheck. Each floors every caller of the build
+  // (escape-corpus/cap-fw-nextjs-build-budgets.json trips one).
+  const unread = [...factCache.values()].filter((v) => v === null).length;
+  const spentOut: Record<Spend, () => void> = {
+    facts: () => cut(["handles"], "budget", unread, `${unread} files were not read: the Next.js plugin reads at most ${MAX_FACTS_READ} facts in one build`),
+    paths: () => cut(["handles"], "budget", null, `the Next.js plugin examines at most ${MAX_PATHS} paths in one build; the routes past it are not listed`),
+    registrations: () => cut(["handles"], "fan-out-capped", refused.registrations, `${refused.registrations} routes were left out: the Next.js plugin keeps at most ${MAX_REGISTRATIONS} in one build`),
+    middlewareEdges: () => cut(["applies_middleware"], "fan-out-capped", refused.middlewareEdges, `${refused.middlewareEdges} middleware edges were left out: the Next.js plugin keeps at most ${MAX_MIDDLEWARE_EDGES} in one build`),
+    matchWork: () => cut(["applies_middleware"], "budget", null, `the plugin stopped matching middleware to routes after ${MAX_MATCH_WORK} steps in this build; the routes past it are not linked to their middleware`),
+    roles: () => cut(["handles"], "fan-out-capped", refused.roles, `${refused.roles} roles were left out: the Next.js plugin gives at most ${MAX_ROLES} roles in one build`),
+    unknowns: () => cut(["handles"], "fan-out-capped", refused.unknowns, `${refused.unknowns} more unknowns past the first ${MAX_UNKNOWNS} were left out`),
+  };
+  for (const k of Object.keys(spentOut) as Spend[]) if (refused[k] > 0) spentOut[k]();
 
   return { apps, output: { roles, entities: registrations, edges, unknowns } };
 }

@@ -62,7 +62,7 @@ export const MAX_UNKNOWNS = 5000; // unknowns kept; past it one more says how ma
 export const MAX_APPS = 2000; // applications detected
 export const MAX_ROLES = 20_000; // roles given
 
-type Spend = "facts" | "lookups" | "mounts" | "registrations" | "middlewareEdges" | "requests" | "testLinks" | "matchWork" | "apps" | "roles";
+type Spend = "facts" | "lookups" | "mounts" | "registrations" | "middlewareEdges" | "requests" | "testLinks" | "matchWork" | "apps" | "roles" | "unknowns";
 const LIMIT: Record<Spend, number> = {
   facts: MAX_FACTS_READ,
   lookups: MAX_LOOKUPS,
@@ -74,6 +74,7 @@ const LIMIT: Record<Spend, number> = {
   apps: MAX_APPS,
   roles: MAX_ROLES,
   matchWork: MAX_MATCH_WORK,
+  unknowns: MAX_UNKNOWNS,
 };
 
 type Fact<K extends ExpressFact["kind"]> = Extract<ExpressFact, { kind: K }>;
@@ -146,8 +147,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   const apps: Detection[] = [];
 
   // ---------- the build's budgets ----------
-  const spent: Record<Spend, number> = { facts: 0, lookups: 0, mounts: 0, registrations: 0, middlewareEdges: 0, requests: 0, testLinks: 0, matchWork: 0, apps: 0, roles: 0 };
-  const refused: Record<Spend, number> = { facts: 0, lookups: 0, mounts: 0, registrations: 0, middlewareEdges: 0, requests: 0, testLinks: 0, matchWork: 0, apps: 0, roles: 0 };
+  const spent: Record<Spend, number> = { facts: 0, lookups: 0, mounts: 0, registrations: 0, middlewareEdges: 0, requests: 0, testLinks: 0, matchWork: 0, apps: 0, roles: 0, unknowns: 0 };
+  const refused: Record<Spend, number> = { facts: 0, lookups: 0, mounts: 0, registrations: 0, middlewareEdges: 0, requests: 0, testLinks: 0, matchWork: 0, apps: 0, roles: 0, unknowns: 0 };
   const take = (k: Spend, n = 1): boolean => {
     if (spent[k] + n > LIMIT[k]) {
       refused[k] += n;
@@ -158,14 +159,12 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   };
   // A budget is gone once it has refused some work: what it allowed was all done.
   const exhausted = (k: Spend): boolean => refused[k] > 0;
-  let unknownsLeftOut = 0;
   const seenUnknown = new Set<string>();
   const addUnknown = (u: FrameworkUnknown) => {
     const key = `${u.cause}\0${u.site ? `${u.site.file}:${u.site.line}:${u.site.column}` : JSON.stringify(u.scope)}\0${u.note}`;
     if (seenUnknown.has(key)) return;
     seenUnknown.add(key);
-    if (unknowns.length >= MAX_UNKNOWNS) unknownsLeftOut++;
-    else unknowns.push(u);
+    if (take("unknowns")) unknowns.push(u);
   };
   const lookup = (file: string, path: readonly string[]): Lookup => {
     if (!take("lookups")) return { kind: "gap", cause: "budget", note: `the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`, candidates: null };
@@ -517,13 +516,9 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   };
 
   const files = index.factFiles().filter(isEnabled);
-  let unreadFiles = 0;
   for (const file of files) {
     const fi = fx(file);
-    if (fi.unread) {
-      unreadFiles++;
-      continue;
-    }
+    if (fi.unread) continue;
     const big = fi.tooLarge;
     if (big) {
       addUnknown({ plugin: PLUGIN, site: { file, line: 1, column: 1 }, scope: { file }, affects: ["handles", "mounts", "applies_middleware", "tests"], cause: "file-not-parsed", name: null, note: `the file is ${big.bytes} bytes, over the ${MAX_SOURCE_BYTES}-byte cap of the Express plugin, so its routes were not read`, count: null, exact: false });
@@ -1058,18 +1053,26 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   for (const [root, n] of depthCut) addUnknown({ plugin: PLUGIN, site: null, scope: root.startsWith("fw:express:app:") ? { app: root } : whole, affects: ["mounts", "handles"], cause: "fan-out-capped", name: null, note: `routers mounted more than ${MAX_MOUNT_DEPTH} levels deep were not followed (${n} mounts); their routes are not listed`, count: n, exact: true });
   // These always fit: they are the record of what the caps and budgets cut.
   const cut = (affects: FrameworkUnknown["affects"], cause: FrameworkUnknown["cause"], count: number | null, note: string) => unknowns.push({ plugin: PLUGIN, site: null, scope: whole, affects, cause, name: null, note, count, exact: count !== null });
-  if (unreadFiles > 0) cut(["handles", "mounts", "applies_middleware", "tests"], "budget", unreadFiles, `${unreadFiles} files were not read: the Express plugin reads at most ${MAX_FACTS_READ} facts in one build`);
-  if (refused.lookups > 0) cut(["handles", "mounts", "applies_middleware"], "budget", refused.lookups, `${refused.lookups} names were not looked up: the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`);
-  if (refused.mounts > 0) cut(["mounts", "handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_MOUNTS} router mounts in this build; the routes past it are not listed`);
-  if (refused.registrations > 0) cut(["handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_REGISTRATIONS} registrations in this build; the routes past it are not listed`);
-  if (refused.middlewareEdges > 0) cut(["applies_middleware"], "fan-out-capped", refused.middlewareEdges, `${refused.middlewareEdges} middleware edges were left out: the Express plugin keeps at most ${MAX_MIDDLEWARE_EDGES} in one build`);
   if (middlewareOmitted > 0) cut(["applies_middleware"], "fan-out-capped", middlewareOmitted, `${middlewareOmitted} middleware entries past ${MAX_MIDDLEWARE_CHAIN} in one chain were left out`);
-  if (refused.testLinks > 0) cut(["tests"], "fan-out-capped", refused.testLinks, `${refused.testLinks} test links were left out: the Express plugin keeps at most ${MAX_TEST_LINKS} in one build`);
-  if (refused.apps > 0) cut(["handles", "mounts", "applies_middleware", "tests"], "fan-out-capped", refused.apps, `${refused.apps} applications and their routes were left out: the Express plugin keeps at most ${MAX_APPS} applications in one build`);
-  if (refused.roles > 0) cut(["handles", "applies_middleware", "tests"], "fan-out-capped", refused.roles, `${refused.roles} roles were left out: the Express plugin gives at most ${MAX_ROLES} roles in one build`);
-  if (requestsCut > 0) cut(["tests"], "fan-out-capped", requestsCut, `${requestsCut} test requests were not matched to routes: the Express plugin matches at most ${MAX_TEST_REQUESTS} requests in one build`);
-  if (stepsCut > 0) cut(["tests"], "budget", stepsCut, `${stepsCut} test requests were not matched to routes: matching stopped after ${MAX_MATCH_WORK} pattern steps in this build`);
-  if (unknownsLeftOut > 0) unknowns.push({ plugin: PLUGIN, site: null, scope: whole, affects: ["handles", "mounts", "applies_middleware", "tests"], cause: "fan-out-capped", name: null, note: `${unknownsLeftOut} more unknowns past the first ${MAX_UNKNOWNS} were left out`, count: unknownsLeftOut, exact: true });
+  // Each build budget's record of what it cut, the only place a refused
+  // take is said: a record over every budget, so a budget added without
+  // one does not typecheck. Each floors every caller of the build
+  // (escape-corpus/cap-fw-express-build-budgets.json trips one).
+  const unreadFiles = [...fileIndexes.values()].filter((f) => f.unread).length;
+  const spentOut: Record<Spend, () => void> = {
+    facts: () => cut(["handles", "mounts", "applies_middleware", "tests"], "budget", unreadFiles, `${unreadFiles} files were not read: the Express plugin reads at most ${MAX_FACTS_READ} facts in one build`),
+    lookups: () => cut(["handles", "mounts", "applies_middleware"], "budget", refused.lookups, `${refused.lookups} names were not looked up: the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`),
+    mounts: () => cut(["mounts", "handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_MOUNTS} router mounts in this build; the routes past it are not listed`),
+    registrations: () => cut(["handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_REGISTRATIONS} registrations in this build; the routes past it are not listed`),
+    middlewareEdges: () => cut(["applies_middleware"], "fan-out-capped", refused.middlewareEdges, `${refused.middlewareEdges} middleware edges were left out: the Express plugin keeps at most ${MAX_MIDDLEWARE_EDGES} in one build`),
+    testLinks: () => cut(["tests"], "fan-out-capped", refused.testLinks, `${refused.testLinks} test links were left out: the Express plugin keeps at most ${MAX_TEST_LINKS} in one build`),
+    apps: () => cut(["handles", "mounts", "applies_middleware", "tests"], "fan-out-capped", refused.apps, `${refused.apps} applications and their routes were left out: the Express plugin keeps at most ${MAX_APPS} applications in one build`),
+    roles: () => cut(["handles", "applies_middleware", "tests"], "fan-out-capped", refused.roles, `${refused.roles} roles were left out: the Express plugin gives at most ${MAX_ROLES} roles in one build`),
+    requests: () => cut(["tests"], "fan-out-capped", requestsCut, `${requestsCut} test requests were not matched to routes: the Express plugin matches at most ${MAX_TEST_REQUESTS} requests in one build`),
+    matchWork: () => cut(["tests"], "budget", stepsCut, `${stepsCut} test requests were not matched to routes: matching stopped after ${MAX_MATCH_WORK} pattern steps in this build`),
+    unknowns: () => cut(["handles", "mounts", "applies_middleware", "tests"], "fan-out-capped", refused.unknowns, `${refused.unknowns} more unknowns past the first ${MAX_UNKNOWNS} were left out`),
+  };
+  for (const k of Object.keys(spentOut) as Spend[]) if (refused[k] > 0) spentOut[k]();
   const entities: Entity[] = registrations;
   return { apps, output: { roles, entities, edges, unknowns } };
 }
