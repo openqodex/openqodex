@@ -8,7 +8,7 @@
 import type { Cause, Tier } from "../../model/records.js";
 import { weakest } from "../../model/records.js";
 import { entityId } from "../plugin.js";
-import type { Detection, Entity, FrameworkEdgeKind, FrameworkEvidence, FrameworkEvidenceKind, PluginIndex, PluginOutput, Registration, Role, Site, TestCategory } from "../plugin.js";
+import type { Detection, Entity, FrameworkEdgeKind, FrameworkEvidence, FrameworkEvidenceKind, FrameworkUnknown, PluginIndex, PluginOutput, Registration, Role, Site, TestCategory } from "../plugin.js";
 import type { AssocFact, CallbackFact, ConfigDefineFact, ConfigReadFact, DescribeFact, EnqueueFact, MailFact, MigrationOpFact, RenderFact, RequestFact, RouteNameFact, TableNameFact } from "./facts.js";
 import { camelize, classify, demodulize, singularize, tableize, underscore } from "./inflect.js";
 import type { Compiled } from "./match.js";
@@ -107,7 +107,8 @@ class Resolver {
     this.jobs();
     this.config();
     this.tests();
-    if (this.budget.spent) this.unknown(null, { project: "" }, "budget", [], null, "the Rails plugin ran out of its work budget; some routes or test links are not listed");
+    // The budget is the whole build's, so what it left out may be in any project.
+    if (this.budget.spent) this.unknown(null, { build: true }, "budget", [], null, "the Rails plugin ran out of its work budget; some routes or test links are not listed");
   }
 
   // ---------- small builders ----------
@@ -139,7 +140,7 @@ class Resolver {
     return e;
   }
 
-  private unknown(site: Site | null, scope: { file: string } | { app: string } | { project: string }, cause: Cause, affects: FrameworkEdgeKind[], name: string | null, note: string): void {
+  private unknown(site: Site | null, scope: FrameworkUnknown["scope"], cause: Cause, affects: FrameworkEdgeKind[], name: string | null, note: string): void {
     this.out.unknowns.push({ plugin: PLUGIN, site, scope, affects, cause, name, note: sentence(note), count: null, exact: false });
   }
 

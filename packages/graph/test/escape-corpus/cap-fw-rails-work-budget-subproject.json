@@ -1,0 +1,49 @@
+{
+  "covers": "a Rails action in an application in a sub-project (svc/, which a package.json makes a project of its own), routed after the route expansion used the plugin's work budget; the budget's own gap must reach that project, not only the root one (rails WORK_BUDGET)",
+  "caps": [
+    "frameworks/rails/resolve.ts#WORK_BUDGET"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"root\", \"private\": true}\n",
+    "svc/package.json": "{\"name\": \"svc\", \"private\": true}\n",
+    "svc/Gemfile": "source \"https://rubygems.org\"\n\ngem \"rails\"\n",
+    "svc/config/routes.rb": [
+      "Rails.application.routes.draw do\n",
+      {
+        "repeat": "  draw(:big)\n",
+        "times": 300
+      },
+      "  get \"deep\", to: \"users#deep\"\nend\n"
+    ],
+    "svc/config/routes/big.rb": [
+      "get \"top\", to: \"users#top\"\n",
+      {
+        "repeat": "resources :r{{i}}\n",
+        "times": 1000
+      }
+    ],
+    "svc/app/controllers/application_controller.rb": "class ApplicationController < ActionController::Base\nend\n",
+    "svc/app/controllers/users_controller.rb": "class UsersController < ApplicationController\n  def deep\n  end\n\n  def top\n  end\nend\n"
+  },
+  "mustReach": [
+    {
+      "target": "svc/app/controllers/users_controller.rb#UsersController.deep",
+      "caller": null,
+      "file": "svc/config/routes.rb",
+      "line": 302
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "svc/app/controllers/users_controller.rb#UsersController.deep",
+      "reason": "the framework plugins gave up at",
+      "at": "",
+      "gap": {
+        "cause": "budget",
+        "at": "svc/app/controllers/users_controller.rb"
+      }
+    }
+  ]
+}
