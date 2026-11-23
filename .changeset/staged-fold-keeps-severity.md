@@ -2,4 +2,4 @@
 "openqodex": patch
 ---
 
-In a staged review, a finding the verifier marks as a duplicate of another shown finding now gives that finding its severity when higher. Before, a major duplicate folded into a minor finding left only the minor one, so a review that blocks on major findings could pass.
+In a staged review, a finding the verifier marks as a duplicate of another shown finding now gives that finding its severity when higher. Before, a major duplicate folded into a minor finding left only the minor one, so a review that blocks on major findings could pass. The saved submission now carries the raised severity too, so replaying it gives the same verdict. Two findings that share a finding key and were marked as duplicates through a third finding no longer fold each other away: one of them is kept.
