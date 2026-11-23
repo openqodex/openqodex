@@ -262,9 +262,11 @@ export function sameNameGaps(graph: Graph, seed: { name: string; file: string; k
   const family = familyAt(graph, seed.file);
   const named = unknownsNamed(graph, seed.name);
   // Only TypeScript and JavaScript are narrowed to their own family. The
-  // others call by a name built at run time (Java reflection, Ruby `send`,
-  // Python `getattr`, Go `reflect`) in ways their readers do not record, so
-  // a call of the name in any language keeps the floor it kept before.
+  // others' readers record a call by a name given at run time (Java
+  // `getMethod`, Go `MethodByName`, Python `getattr`, Ruby `send`) as a call
+  // of the name or a call through a value, but not every way: a name built
+  // in another language and passed in (a config, a message) is not read,
+  // so a call of the name in any language keeps the floor it kept before.
   if (family !== "js") return named;
   const plain = seed.kind === "function";
   return named.filter((u) => familyAt(graph, u.file) === family && !(plain && u.notPlain));
@@ -316,8 +318,8 @@ function opaqueFor(graph: Graph, file: string, project: string): { file: string;
 }
 
 // Calls through a value (a callback, a computed member), per family, with the first place.
-const familyValueCalls = new WeakMap<Graph, Map<Family, Place & { count: number; first: UnknownSite }>>();
-function valueCallsOf(graph: Graph, family: Family): (Place & { count: number; first: UnknownSite }) | undefined {
+const familyValueCalls = new WeakMap<Graph, Map<Family, Place & { count: number; first: UnknownSite; all: UnknownSite[] }>>();
+function valueCallsOf(graph: Graph, family: Family): (Place & { count: number; first: UnknownSite; all: UnknownSite[] }) | undefined {
   let byFamily = familyValueCalls.get(graph);
   if (!byFamily) {
     byFamily = new Map();
@@ -326,8 +328,10 @@ function valueCallsOf(graph: Graph, family: Family): (Place & { count: number; f
       const f = familyAt(graph, u.file);
       if (!f) continue;
       const kept = byFamily.get(f);
-      if (kept) kept.count++;
-      else byFamily.set(f, { file: u.file, line: u.line, count: 1, first: u });
+      if (kept) {
+        kept.count++;
+        kept.all.push(u);
+      } else byFamily.set(f, { file: u.file, line: u.line, count: 1, first: u, all: [u] });
     }
     familyValueCalls.set(graph, byFamily);
   }
@@ -336,6 +340,39 @@ function valueCallsOf(graph: Graph, family: Family): (Place & { count: number; f
 
 const at = (p: Place) => `${p.file}:${p.line}`;
 const calls = (n: number) => `${n} ${n === 1 ? "call" : "calls"}`;
+
+// A gap of a region the parser could not read, and one of a call that
+// finds a method by a name given at run time (reflection): the reasons
+// say what they are, not only that a call could not be bound.
+const isUnread = (u: UnknownSite) => u.cause === "file-not-parsed";
+const isByName = (u: UnknownSite) => u.next === NEXT.byName;
+
+// One reason per kind of same-name gap, each with its gaps.
+function namedReasons(list: readonly UnknownSite[], name: string): [string, UnknownSite[]][] {
+  const unread = list.filter(isUnread);
+  const byName = list.filter((u) => !isUnread(u) && isByName(u));
+  const plain = list.filter((u) => !isUnread(u) && !isByName(u));
+  const out: [string, UnknownSite[]][] = [];
+  if (plain.length > 0) out.push([`${calls(plain.length)} named \`${name}\` in the repository could not be bound to one definition`, plain]);
+  const u0 = unread[0];
+  if (u0) out.push([`${unread.length} ${unread.length === 1 ? "region" : "regions"} of code the parser could not read (a syntax error) ${unread.length === 1 ? "names" : "name"} \`${name}\`, first at ${at(u0)}, and a call of it there may be missing`, unread]);
+  const b0 = byName[0];
+  if (b0) out.push([`${calls(byName.length)} ${byName.length === 1 ? "finds" : "find"} \`${name}\` by a name given at run time (reflection), first at ${at(b0)}, and may run it`, byName]);
+  return out;
+}
+
+// What a count of calls through a value holds besides callbacks and
+// computed members: regions the parser could not read and calls by a name
+// given at run time, said after it ("" when it holds neither).
+function valuesHold(list: readonly UnknownSite[]): string {
+  const unread = list.filter(isUnread).length;
+  const byName = list.filter((u) => !isUnread(u) && isByName(u)).length;
+  const parts = [
+    ...(unread > 0 ? [`${unread} ${unread === 1 ? "is a region" : "are regions"} of code the parser could not read (a syntax error)`] : []),
+    ...(byName > 0 ? [`${byName} ${byName === 1 ? "finds a method" : "find methods"} by a name given at run time (reflection)`] : []),
+  ];
+  return parts.length > 0 ? `; of them, ${parts.join(" and ")}` : "";
+}
 
 // Why a seed's caller list may be short. Empty when the graph knows it is
 // whole. A function or a method is whole only when every way it may be
@@ -394,18 +431,18 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
   const projectValues = (): boolean => {
     const values = graph.valueCalls.get(project) ?? 0;
     if (values > 0) said(reachOf(graph).values.get(project) ?? []);
-    if (values > 0) why(`${values} ${values === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in ${project === "" ? "the repository root project" : project}, and could reach it`, null);
+    if (values > 0) why(`${values} ${values === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in ${project === "" ? "the repository root project" : project}, and could reach it${valuesHold(reachOf(graph).values.get(project) ?? [])}`, null);
     return values > 0;
   };
   if (kind !== "function" && kind !== "method") {
-    const named = graph.unknownNames.get(seed.name) ?? 0;
-    if (named > 0) said(unknownsNamed(graph, seed.name));
-    if (named > 0) why(`${calls(named)} named \`${seed.name}\` in the repository could not be bound to one definition`, null);
+    const named = unknownsNamed(graph, seed.name);
+    said(named);
+    for (const [reason] of namedReasons(named, seed.name)) why(reason, null);
     projectValues();
   } else {
     const unbound = sameNameGaps(graph, { ...seed, kind });
     said(unbound);
-    if (unbound.length > 0) why(`${calls(unbound.length)} named \`${seed.name}\` in the repository could not be bound to one definition`, unbound);
+    for (const [reason, list] of namedReasons(unbound, seed.name)) why(reason, list);
     const x = graph.escapes;
     const used = x.uses.get(seed.id);
     if (used) sayAt("dynamic", used, NEXT.valueUse);
@@ -462,7 +499,7 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     if (kind === "method" && family && !kept) {
       const values = valueCallsOf(graph, family);
       if (values) said([values.first]);
-      if (values) why(`${values.count} ${values.count === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in projects that can hold its objects, first at ${at(values)}`, only(values));
+      if (values) why(`${values.count} ${values.count === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in projects that can hold its objects, first at ${at(values)}${valuesHold(values.all)}`, only(values));
     }
   }
   const unread = graph.status.notRead.filter((n) => graph.projectOf(n.file) === project);

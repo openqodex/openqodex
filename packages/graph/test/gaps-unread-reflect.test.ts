@@ -17,7 +17,14 @@
 //  5. A method found by a name given at run time (Java `getMethod`, Go
 //     `MethodByName`, Python `getattr`, Ruby `send`) is called with no
 //     caller and no floor; a servlet's own `getMethod()` floors every
-//     answer; a key given as the name is kept in the facts as a call name.
+//     answer; a key given as the name is kept in the facts as a call name
+//     (Ruby `send("sk_live_...")` too).
+//  6. The floor says "1 call named `target` could not be bound" when what
+//     hides the call is a syntax error or reflection, so the reader does
+//     not know where to look or why.
+//  7. A key in a string the parser could not close (`"sk_live_...` with
+//     no closing quote) is read as code, and its text becomes a region's
+//     names, cached and copied into the review packet.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -57,6 +64,8 @@ describe("a region the parser could not read is a gap", () => {
     expect(a.unknown.floor).toBe(true);
     const gaps = (a.unknown.gaps ?? []).filter((g) => g.cause === "file-not-parsed");
     expect(gaps).toContainEqual({ cause: "file-not-parsed", file: bad, line, next: NEXT.unread });
+    // The reason says a region the parser could not read names it (6).
+    expect(a.unknown.reasons.join(" ")).toContain(`1 region of code the parser could not read (a syntax error) names \`${name}\`, first at ${bad}:${line}`);
   }, 60_000);
 
   it("names the callee the recovery left outside the region (2)", async () => {
@@ -125,7 +134,9 @@ describe("a call by a name built at run time is a gap", () => {
     const a = callers(graph, name, file);
     expect(a.error).toBeNull();
     expect(a.unknown.floor).toBe(true);
-    expect(a.unknown.gaps ?? []).toContainEqual(expect.objectContaining({ next: reach === "names" ? NEXT.unbound : NEXT.values }));
+    expect(a.unknown.gaps ?? []).toContainEqual(expect.objectContaining({ next: NEXT.byName }));
+    // The reason says the method is found by a name given at run time, not only that a call is unbound (6).
+    expect(a.unknown.reasons.join(" ")).toMatch(reach === "names" ? new RegExp(`1 call finds \`${name}\` by a name given at run time \\(reflection\\), first at `) : /of them, 1 finds a method by a name given at run time \(reflection\)/);
     const reached = graph.unknowns.filter((u) => (reach === "names" ? typeof u.reaches === "object" && "names" in u.reaches && u.reaches.names.includes(name) : u.reaches === "values"));
     expect(reached.length).toBe(1);
   }, 60_000);
@@ -139,10 +150,53 @@ describe("a call by a name built at run time is a gap", () => {
     expect(JSON.stringify(facts)).not.toContain(KEY);
   });
 
+  it("reads a key given to Ruby's send as a name it does not know, and keeps it nowhere (5)", async () => {
+    const parser = await parserFor("ruby");
+    const tree = parser.parse(`class W\n  def go(o)\n    o.send("${KEY}")\n    o.public_send("save!")\n  end\nend\n`);
+    if (!tree) throw new Error("no tree");
+    const facts = extract(tree, "ruby");
+    expect(JSON.stringify(facts)).not.toContain(KEY);
+    expect(facts.calls.filter((c) => c.byName).map((c) => c.name)).toEqual(["", "save!"]);
+  });
+
   it("leaves a servlet's own getMethod() alone (5)", async () => {
     const graph = await build({ "D.java": "class D { static void target4() {} }\n", "E.java": "class E { String run(Req req) { return req.getMethod(); } }\ninterface Req { String getMethod(); }\n" });
     const a = callers(graph, "target4", "D.java");
     expect(a.unknown.floor).toBe(false);
     expect(graph.unknowns.filter((u) => u.reaches === "values")).toEqual([]);
   }, 60_000);
+});
+
+// A key-shaped token in a string the parser could not close, in each
+// family and each kind of quote: `sk_live_` and `sk-live-` forms, the
+// secret part starting with a letter so no word of it is a cut of it.
+const HEX = "a0b1c2d3".repeat(4);
+const UNCLOSED: Record<string, { quotes: string[]; make: (q: string, k: string) => string }> = {
+  typescript: { quotes: ['"', "'", "`"], make: (q, k) => `export function f() { return 1; }\nconst k = ${q}${k}\nfoo();\n` },
+  python: { quotes: ['"', "'", '"""'], make: (q, k) => `def f():\n    return 1\nk = ${q}${k}\nfoo()\n` },
+  go: { quotes: ['"', "'", "`"], make: (q, k) => `package main\nfunc f() int { return 1 }\nvar k = ${q}${k}\nfunc g() { foo() }\n` },
+  ruby: { quotes: ['"', "'", "`"], make: (q, k) => `def f; 1; end\nk = ${q}${k}\nfoo\n` },
+  java: { quotes: ['"', "'", '"""'], make: (q, k) => `class A { int f() { return 1; } String k = ${q}${k}; void g() { foo(); } }\n` },
+};
+const UNCLOSED_CASES = Object.entries(UNCLOSED).flatMap(([lang, c]) => c.quotes.flatMap((q) => [`sk_live_${HEX}`, `sk-live-${HEX}`].map((k): [string, string, string] => [lang, q, k])));
+
+describe("a key in a string the parser could not close is kept nowhere in a region", () => {
+  it.each(UNCLOSED_CASES)("%s, quote %s, %s (7)", async (lang, q, key) => {
+    const parser = await parserFor(lang as "typescript");
+    const tree = parser.parse((UNCLOSED[lang] as (typeof UNCLOSED)[string]).make(q, key));
+    if (!tree) throw new Error("no tree");
+    const unread = extract(tree, lang as "typescript").unread ?? [];
+    expect(unread.length).toBeGreaterThan(0);
+    expect(JSON.stringify(unread)).not.toContain(HEX);
+    // What was dropped may name a call: such a region may hide a call of anything.
+    expect(unread.some((r) => r.names === null)).toBe(true);
+  });
+
+  it("keeps the words of a region with no quote left open and no key", async () => {
+    const parser = await parserFor("typescript");
+    const tree = parser.parse('const k = "plain text";\nexport function c( { target(); }\n');
+    if (!tree) throw new Error("no tree");
+    const unread = extract(tree, "typescript").unread ?? [];
+    expect(unread.flatMap((r) => r.names ?? ["<null>"])).toEqual(expect.arrayContaining(["c", "target"]));
+  });
 });

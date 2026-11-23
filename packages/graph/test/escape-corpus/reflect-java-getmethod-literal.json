@@ -1,0 +1,27 @@
+{
+  "covers": "Java reflection that finds a method by a name written as a string: getMethod(\"target4\").invoke",
+  "files": {
+    "D.java": "class D { static void target4() {} }\n",
+    "E.java": "class E {\n  void run() throws Exception {\n    D.class.getMethod(\"target4\").invoke(null);\n  }\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "D.java#D.target4",
+      "caller": "E.java#E.run",
+      "file": "E.java",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "D.java#D.target4",
+      "reason": "finds `target4` by a name given at run time (reflection)",
+      "at": "E.java:3",
+      "gap": {
+        "cause": "no-receiver-type",
+        "at": "E.java:3"
+      }
+    }
+  ]
+}

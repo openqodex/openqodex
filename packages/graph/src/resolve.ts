@@ -3661,6 +3661,10 @@ export function createWorld(input: ResolveInput): World {
           // A call with no name goes through a value; a named one is found by its name.
           const u = gap({ cause: out.unknown, place: { file: path, line: call.line, column: call.column }, reaches: call.name === "" ? "values" : { names: [call.name] }, next: call.name === "" ? NEXT.values : NEXT.unbound, name: call.name, shape: out.shape, caller: callerId, scope: out.scope ?? "file" });
           if (out.note) u.note = out.note;
+          if (call.byName) {
+            u.next = NEXT.byName;
+            u.note = call.name === "" ? "a method found by a name given at run time (reflection), which may be any method" : `the method ${call.name} found by its name at run time (reflection)`;
+          }
           if (out.candidates) u.candidates = out.candidates;
           const receiver = receiverHint(call);
           if (receiver) u.receiver = receiver;

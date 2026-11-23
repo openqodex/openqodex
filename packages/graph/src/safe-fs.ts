@@ -175,6 +175,7 @@ export function isFileFacts(v: unknown): v is FileFacts {
     optBool(c.static) &&
     optBool(c.ctor) &&
     optBool(c.dynamic) &&
+    optBool(c.byName) &&
     (c.arity === undefined || (isInt(c.arity) && (c.arity as number) >= 0)) &&
     (c.local === undefined || (isInt(c.local) && (c.local as number) >= 0 && (c.local as number) < defs)) &&
     optBound(c.bound, imports) &&

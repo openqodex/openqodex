@@ -144,9 +144,11 @@ import type { TreeVisitor } from "./walk.js";
 // path reads, as a string with no text, and read `process.env["X"]` as
 // `process.env.X`.
 // 56: a region the parser could not read is kept with the words in and
-// around it (`unread`); Java `getMethod` and its kin, Go `MethodByName`
-// and Python `getattr` are calls of the name they are given, or computed
-// callees when it is not a plain string.
+// around it (`unread`), none of them a string's text or a key; Java
+// `getMethod` and its kin, Go `MethodByName`, Python `getattr` and Ruby
+// `send` and its kin are calls of the name they are given, or computed
+// callees when it is not a plain string or is shaped like a key, each
+// marked `byName`.
 export const EXTRACTOR_VERSION = 56;
 
 type Frame = {
@@ -400,7 +402,7 @@ function typeNodes(node: Node | null, take: (n: Node) => boolean): void {
 // copied out (frameworks/shared/kept.ts).
 const STRING_NODES = new Set(["string", "string_literal", "interpreted_string_literal", "raw_string_literal"]);
 const STRING_TEXT = new Set(["string_content", "string_fragment", "interpreted_string_literal_content", "raw_string_literal_content"]);
-const NAME = /^[\p{L}_$][\p{L}\p{N}_$]*$/u;
+const NAME = /^[\p{L}_$][\p{L}\p{N}_$]*[?!=]?$/u;
 function stringName(node: Node): string | null {
   if (!STRING_NODES.has(node.type)) return null;
   const parts = node.namedChildren.filter((c) => c.type !== "string_start" && c.type !== "string_end");
@@ -768,11 +770,17 @@ class Ctx {
   // `MethodByName(n)`, Python `getattr(o, n)`): a name written as a plain
   // string is a call of that name on a value of unknown type; any other
   // (or `arg` undefined) makes a computed callee, which may run any function.
+  // Either call is marked `byName`.
   addNameBuiltCall(node: Node, arg: Node | undefined): void {
     const name = arg ? stringName(arg) : null;
-    if (!arg || name === null) return this.addDynamicCall(node);
+    if (!arg || name === null) {
+      this.addDynamicCall(node);
+      (this.calls[this.calls.length - 1] as CallFact).byName = true;
+      return;
+    }
     const i = this.addCall(arg, { kind: "other" });
     (this.calls[i] as CallFact).name = name;
+    (this.calls[i] as CallFact).byName = true;
   }
 
   addCall(nameNode: Node, recv: Receiver, implicit = false, receiverName?: string): number {
@@ -5511,9 +5519,12 @@ function rbNamedCalls(ctx: Ctx, node: Node, method: Node): void {
   if (!RB_SENDS.has(method.text)) return;
   const first = args.find((a) => a.type !== "comment");
   if (!first) return;
-  if (first.type === "simple_symbol") named(first, first.text.slice(1));
-  else if (first.type === "string" && first.namedChildren.length === 1 && first.namedChildren[0]?.type === "string_content") named(first, first.namedChildren[0].text);
-  else ctx.addDynamicCall(node);
+  if (first.type === "simple_symbol") {
+    named(first, first.text.slice(1));
+    (ctx.calls[ctx.calls.length - 1] as CallFact).byName = true;
+  }
+  // A string names the method only when it reads as a name, never a key.
+  else ctx.addNameBuiltCall(node, first);
 }
 
 function extractRuby(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {

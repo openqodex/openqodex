@@ -241,6 +241,10 @@ export type CallFact = {
   arity?: number;
   // A computed callee (`table[key]()`): no name to bind. `name` is empty.
   dynamic?: boolean;
+  // A method found by a name given at run time (Java `getMethod(n)`, Go
+  // `MethodByName(n)`, Python `getattr(o, n)`, Ruby `send(n)`): a call of
+  // the name written, or a computed callee.
+  byName?: boolean;
   // A call of a local or its member uses the local's single callable value.
   // The alias indexes FileFacts.values.
   alias?: number;
