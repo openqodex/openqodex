@@ -675,7 +675,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
           if (stopped) throw new Error("the review stopped");
           const modelSessionForRole = model ? modelSession({ reviewer: model.reviewer, role, budget: model.budget, box, now: deps.now, deadline, shared, budgetState }) : null;
           if (modelSessionForRole) modelSessions.push(modelSessionForRole);
-          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web }), { driver: agent.driver.name, role, now: deps.now }) : null;
+          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, secrets: p.secrets }), { driver: agent.driver.name, role, now: deps.now }) : null;
           const opened = register(modelSessionForRole ?? metered!.session);
           return {
             send: (text) => opened.send(text),
@@ -755,7 +755,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       deps.onEvent({ type: "started", driver: "model", version: model.reviewer.model, pid: null });
       say(`Reviewer: model ${model.reviewer.model} started; this takes several minutes`);
     } else if (notStarted === null && agent) {
-      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web }), { driver: agent.driver.name, now: deps.now });
+      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, secrets: p.secrets }), { driver: agent.driver.name, now: deps.now });
       session = register(metered.session);
       pid = metered.session.pid;
       deps.onEvent({ type: "started", driver: agent.driver.name, version: agent.version, pid });

@@ -103,6 +103,12 @@
 // 39. A review stopped at its cap does not say which cap it hit and which
 //     flag raises it, on the terminal or in the report; or a reviewer that
 //     never answers is not stopped at the cap it was given.
+// 42. A reviewer that stopped on a usage or plan limit reads as "stopped with
+//     an error (success)": the reason in its result is dropped.
+// 43. A secret in the reviewer's own error survives into the receipt,
+//     because the message was cut or folded onto one line before redaction.
+// 41. On Windows the reviewer loses its path (named `Path` there), its home
+//     folder or what starts a program.
 import { stagedFake, stagedAnswer } from "../../review/test/staged-fake.js";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -685,6 +691,14 @@ describe("what leaves the process", () => {
     expect(Object.keys(env).sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "HOME", DEPTH_ENV, "PATH", "USER"].sort());
     expect(reviewerEnv({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "r", GITHUB_TOKEN: "g" })).toMatchObject({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "r" });
   });
+  it("41. on Windows the path, the home folder and what starts a program reach the reviewer, under any case", () => {
+    const windows = { Path: "C:\\Windows\\system32;C:\\Program Files\\nodejs", USERPROFILE: "C:\\Users\\u", AppData: "C:\\Users\\u\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local", SystemRoot: "C:\\Windows", PATHEXT: ".COM;.EXE;.CMD", ComSpec: "C:\\Windows\\system32\\cmd.exe", USERNAME: "u", GITHUB_TOKEN: "g" };
+    const env = reviewerEnv(windows, "win32");
+    expect(Object.keys(env).sort()).toEqual(["AppData", "ComSpec", DEPTH_ENV, "LOCALAPPDATA", "PATHEXT", "Path", "SystemRoot", "USERPROFILE"].sort());
+    expect(env.Path).toBe(windows.Path);
+    // Elsewhere a name keeps its case and the Windows variables stay out.
+    expect(Object.keys(reviewerEnv(windows, "linux"))).toEqual([DEPTH_ENV]);
+  });
   it("15. every file of the run folder is readable by its owner only", async () => {
     const dir = repo();
     expect(await review(dir, fake([good]))).toBe(0);
@@ -1006,6 +1020,53 @@ describe("the snapshot", () => {
 });
 
 describe("the reviewer process", () => {
+  it("42. a reviewer that ends with an error shows its own message, and says so plainly for a usage limit", async () => {
+    // The result event of Claude Code 2.1.x on a login past its plan limit
+    // (#416): is_error true, subtype "success", the reason in result.
+    const claudeSays = (result: unknown) => {
+      const bin = join(tempDir("oq-claude-error-"), "claude");
+      const event = { type: "result", subtype: "success", is_error: true, terminal_reason: "api_error", result, num_turns: 1, total_cost_usd: 0, modelUsage: {} };
+      writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(event)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+      chmodSync(bin, 0o755);
+      return bin;
+    };
+    const failure = async (bin: string) => {
+      const session = claudeDriver.start({ snapshotDir: tempDir("oq-claude-error-snap-"), deadline: Date.now() + 20_000, bin, web: false });
+      const turn = await session.send("Review this.");
+      await session.close();
+      return turn.failure;
+    };
+    expect(await failure(claudeSays("You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model\nmore"))).toBe("the reviewer hit its usage or plan limit (You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model more)");
+    // A reset time on a later line is kept.
+    expect(await failure(claudeSays("Claude usage limit reached.\n\n  Your limit resets at 5pm."))).toBe("the reviewer hit its usage or plan limit (Claude usage limit reached. Your limit resets at 5pm.)");
+    // A rate limit is a short wait, not a used-up plan.
+    expect(await failure(claudeSays("API Error: Rate limit reached for requests"))).toBe("the reviewer hit a rate limit (API Error: Rate limit reached for requests)");
+    expect(await failure(claudeSays("API Error: 500 Internal server error"))).toBe("the reviewer stopped with an error (API Error: 500 Internal server error)");
+    // With no message, the subtype is all there is.
+    expect(await failure(claudeSays(""))).toBe("the reviewer stopped with an error (success)");
+  });
+  it("43. a secret in the reviewer's error is removed before the message is cut or put on one line", async () => {
+    const secret = "sk-live-0123456789abcdef0123456789";
+    const key = "-----BEGIN KEY-----\nAAAABBBBCCCCDDDD\n-----END KEY-----";
+    const bin = join(tempDir("oq-claude-secret-"), "claude");
+    // The secret starts at character 190, so a cut at 200 splits it.
+    const event = { type: "result", subtype: "success", is_error: true, result: `${"x".repeat(190)}${secret} ${key}`, num_turns: 1, modelUsage: {} };
+    writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(event)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+    chmodSync(bin, 0o755);
+    const session = claudeDriver.start({ snapshotDir: tempDir("oq-claude-secret-snap-"), deadline: Date.now() + 20_000, bin, web: false, secrets: [secret, key] });
+    const turn = await session.send("Review this.");
+    await session.close();
+    expect(turn.failure).toMatch(/^the reviewer stopped with an error \(x+/);
+    expect(turn.failure).not.toContain(secret.slice(0, 8));
+    // A short message keeps all of it, the multi-line secret removed before the lines are joined.
+    const short = { ...event, result: `failed: ${key} ${secret}` };
+    writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(short)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+    const again = claudeDriver.start({ snapshotDir: tempDir("oq-claude-secret-snap-"), deadline: Date.now() + 20_000, bin, web: false, secrets: [secret, key] });
+    const second = await again.send("Review this.");
+    await again.close();
+    expect(second.failure).not.toContain("AAAABBBB");
+    expect(second.failure).not.toContain(secret);
+  });
   it("20. never runs a claude that resolves inside the repository, however PATH reaches it", async () => {
     const dir = repo();
     const marker = join(tempDir("oq-marker-"), "ran");

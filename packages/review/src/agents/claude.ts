@@ -12,7 +12,7 @@ import type { ReviewerUsage } from "@openqodex/core";
 import { DELIVERY_ROW_BYTES, REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqodex/core";
 import { checkoutsDir } from "../checkouts.js";
 import { claudeHome } from "./homes.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -70,12 +70,12 @@ const PROVIDERS: [string, RegExp][] = [
   ["CLAUDE_CODE_USE_FOUNDRY", /^ANTHROPIC_FOUNDRY_[A-Z_]+$/],
 ];
 
-export function reviewerEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function reviewerEnv(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) continue;
     const provider = PROVIDERS.some(([flag, re]) => env[flag] && (k === flag || re.test(k)));
-    if (ALWAYS.includes(k) || k.startsWith("LC_") || ANTHROPIC.test(k) || provider) out[k] = v;
+    if (onAllowlist(ALWAYS, k, platform) || k.startsWith("LC_") || ANTHROPIC.test(k) || provider) out[k] = v;
   }
   out[DEPTH_ENV] = "1";
   return out;
@@ -98,7 +98,7 @@ async function detect(repoRoot: string): Promise<Detected> {
   const env = reviewerEnv();
   let version: string;
   try {
-    const { stdout } = await execFileAsync(bin, ["--version"], { env, timeout: DETECT_TIMEOUT_MS });
+    const { stdout } = await execFileAsync(...launch(bin, ["--version"]), { env, timeout: DETECT_TIMEOUT_MS });
     version = /\d+\.\d+\.\d+/.exec(stdout)?.[0] ?? stdout.trim();
   } catch (error) {
     return { ok: false, missing: `claude --version failed: ${String((error as Error).message).split("\n")[0]}`, fix: "reinstall Claude Code" };
@@ -106,7 +106,7 @@ async function detect(repoRoot: string): Promise<Detected> {
   if (env.ANTHROPIC_API_KEY) return { ok: true, version, bin };
   let status: { loggedIn?: unknown } = {};
   try {
-    const { stdout } = await execFileAsync(bin, ["auth", "status"], { env, timeout: DETECT_TIMEOUT_MS });
+    const { stdout } = await execFileAsync(...launch(bin, ["auth", "status"]), { env, timeout: DETECT_TIMEOUT_MS });
     status = JSON.parse(stdout) as { loggedIn?: unknown };
   } catch (error) {
     const out = (error as { stdout?: string }).stdout;
@@ -177,7 +177,7 @@ function removeSavedOutput(configDir: string, snapshotDir: string, sessionId: st
   }
 }
 
-function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): ReviewerSession {
+function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): ReviewerSession {
   const allowed = opts.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS;
   const env = reviewerEnv();
   const child = spawnGroup(opts.bin, claudeArgs(opts.web), { cwd: opts.snapshotDir, env });
@@ -276,7 +276,8 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
         cost_usd: num(e.total_cost_usd),
       };
       const answer = str(e.result) ?? "";
-      if (e.is_error === true) fail(`the reviewer stopped with an error (${str(e.subtype) ?? "unknown"})`);
+      // The reason is in `result`; `subtype` can say "success" even then.
+      if (e.is_error === true) fail(reviewerError(str(e.result), str(e.subtype) ?? undefined, opts.secrets));
       else if (Buffer.byteLength(answer, "utf8") > MAX_ANSWER_BYTES) fail(`the reviewer stopped: its answer over ${MAX_ANSWER_BYTES / 1024 / 1024} MB`);
       else finish(answer, null);
     }
