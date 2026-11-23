@@ -359,18 +359,24 @@ export function floorReasons(graph: Graph, seed: { id: string; name: string; fil
 // to check there, at most GAPS_SHOWN; the reasons hold the counts.
 export type Floor = { reasons: string[]; places: { file: string; line: number | null }[] | null; gaps: GapPlace[] };
 export const GAPS_SHOWN = 20;
+export const WALK_CUT = "the walk was cut at it";
+
 export function floorOf(graph: Graph, seed: { id: string; name: string; file: string; kind?: ImpactKind | undefined }, cutAt: ReadonlySet<string>): Floor {
   const reasons: string[] = [];
   let places: Floor["places"] = [];
   const gaps: GapPlace[] = [];
-  const seen = new Set<Pick<UnknownSite, "cause" | "file" | "line" | "next">>();
+  const seen = new Set<string>();
   const said = (list: readonly Pick<UnknownSite, "cause" | "file" | "line" | "next">[]) => {
     for (const u of list) {
-      if (gaps.length >= GAPS_SHOWN || seen.has(u)) continue;
-      seen.add(u);
-      gaps.push(gapPlace(u));
+      if (gaps.length >= GAPS_SHOWN) return;
+      const g = gapPlace(u);
+      if (seen.has(gapKey(g))) continue;
+      seen.add(gapKey(g));
+      gaps.push(g);
     }
   };
+  // A gap at a place a reason names, made here: an escape, a file not read.
+  const sayAt = (cause: string, p: { file: string; line: number }, next: string) => said([{ cause: cause as UnknownSite["cause"], file: p.file, line: p.line, next }]);
   const why = (reason: string, at: readonly { file: string; line: number | null }[] | null) => {
     reasons.push(reason);
     places = places && at ? [...places, ...at.map((p) => ({ file: p.file, line: p.line }))] : null;
@@ -402,8 +408,10 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     if (unbound.length > 0) why(`${calls(unbound.length)} named \`${seed.name}\` in the repository could not be bound to one definition`, unbound);
     const x = graph.escapes;
     const used = x.uses.get(seed.id);
+    if (used) sayAt("dynamic", used, NEXT.valueUse);
     if (used) why(`it is used as a value in ${used.count} ${used.count === 1 ? "place" : "places"}, first at ${at(used)}; a call through that value is not listed`, null);
     const loose = family ? x.unbound.get(`${family}:${seed.name}`) : undefined;
+    if (loose) sayAt("dynamic", loose, NEXT.looseUse);
     if (loose) why(`${loose.count} ${loose.count === 1 ? "use" : "uses"} of the name \`${seed.name}\` as a value could not be bound to one definition, first at ${at(loose)}`, null);
     const reach = x.reach.get(seed.id) ?? [];
     const removed = !graph.nodes.has(seed.id);
@@ -412,15 +420,19 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     const gone = removed && family === "js" ? x.modules.get(seed.file) : undefined;
     const escaped = reach.find((r) => r.why === "module") ?? gone;
     // The build keeps only the first place each module escapes at.
+    if (escaped) sayAt("dynamic", escaped, NEXT.moduleValue);
     if (escaped) why(`its module is used as a value at ${at(escaped)}, so a call by a computed name may reach anything it exports`, null);
     // Code built at run time may pass the function to any code (`eval("run(f)")`),
     // so the call may run anywhere, not only where that code is.
     const evaluated = reach.find((r) => r.why === "eval");
+    if (evaluated) sayAt("dynamic", evaluated, NEXT.runtimeCode);
     if (evaluated) why(`${at(evaluated)} runs code by a name built at run time, and it can see this function`, null);
     const global = reach.find((r) => r.why === "global");
+    if (global) sayAt("dynamic", global, NEXT.runtimeCode);
     if (global) why(`${at(global)} reaches the global scope by a name built at run time, and it can see this function`, null);
     const any = x.loadAny[0];
     if (any && family === "js" && (x.offered.has(seed.id) || removed)) {
+      for (const p of x.loadAny) sayAt("dynamic", p, p.why === "load" ? NEXT.computedLoad : NEXT.runtimeCode);
       const more = x.loadAny.length > 1 ? ` (and ${x.loadAny.length - 1} more ${x.loadAny.length === 2 ? "place" : "places"})` : "";
       why(any.why === "load" ? `a module loaded by a computed path at ${at(any)}${more} may be any module of the repository` : `code built at run time at ${at(any)}${more} can load any module of the repository`, null);
     }
@@ -432,6 +444,7 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     // anything there may call it by a path the graph does not see.
     const dark = family === "js" ? opaqueFor(graph, seed.file, project) : [];
     if (dark.length > 0) {
+      for (const d of dark) sayAt("unsupported-rule", d, NEXT.opaque);
       // Commas between the places: the renderers join whole reasons with semicolons.
       const shown = dark.slice(0, 3).map((d) => `${at(d)} ${d.why} (its file ${d.how})`).join(", ");
       const more = dark.length > 3 ? ` and ${dark.length - 3} more` : "";
@@ -440,9 +453,11 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     }
     const kept = family !== "js" && projectValues();
     const read = kind === "method" && family === "js" ? x.members.get(`js:${seed.name}`) : undefined;
+    if (read) sayAt("dynamic", read, NEXT.memberRead);
     if (read) why(`${read.count} ${read.count === 1 ? "read" : "reads"} of \`.${seed.name}\` on a value of unknown type, first at ${at(read)}, may run it (a getter) or take it as a value`, null);
     const anyRead = kind === "method" && family === "js" ? x.members.get("js:*") : undefined;
     // A getter runs where it is read; a method taken by a read that passes its value on may run anywhere.
+    if (anyRead) for (const p of anyRead.places ?? [anyRead]) sayAt("dynamic", p, NEXT.memberRead);
     if (anyRead) why(`${anyRead.count} ${anyRead.count === 1 ? "read" : "reads"} by a computed key on a value that is no string, number or other primitive, first at ${at(anyRead)}, may run it (a getter) or take it as a value`, anyRead.passed ? null : (anyRead.places ?? null));
     if (kind === "method" && family && !kept) {
       const values = valueCallsOf(graph, family);
@@ -453,10 +468,12 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
   const unread = graph.status.notRead.filter((n) => graph.projectOf(n.file) === project);
   const notRead = unread.length;
   // A file not read, or whose calls were not resolved, may pass the function to any code too.
+  for (const n of unread) sayAt("file-not-parsed", { file: n.file, line: 0 }, NEXT.notRead);
   if (notRead > 0) why(`${notRead} ${notRead === 1 ? "file" : "files"} of its project ${notRead === 1 ? "was" : "were"} not read`, null);
   const budgetFiles = budgetFilesOf(graph);
   const unresolved = (graph.importers.get(seed.file) ?? []).filter((e) => budgetFiles.has(e.from));
   const importersUnresolved = unresolved.length;
+  for (const e of unresolved) sayAt("budget", { file: e.from, line: 0 }, NEXT.budget);
   if (importersUnresolved > 0) why(`the calls of ${importersUnresolved} ${importersUnresolved === 1 ? "file" : "files"} that import it were not resolved: the budget ran out`, null);
   // A manifest or tsconfig governing its folder that could not be read, when its loss can hide a call.
   for (const g of graph.model.unreadable) {
@@ -475,12 +492,40 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     const where = first.line > 0 ? `${first.file}:${first.line}` : first.file;
     why(list.length === 1 ? `the graph gave up at ${where} (${cause}): ${first.note ?? "a call there may reach it"}` : `the graph gave up at ${list.length} places (${cause}) where a call may reach it, first at ${where}: ${first.note ?? "a call there may reach it"}`, null);
   }
-  if (cutAt.has(seed.id)) why("the walk was cut at it", null);
+  // A cut with no place of its own is said at the seed's definition.
+  const self = { file: seed.file, line: graph.nodes.get(seed.id)?.startLine ?? 0 };
+  if (cutAt.has(seed.id)) sayAt("fan-out-capped", self, NEXT.walkCut);
+  if (cutAt.has(seed.id)) why(WALK_CUT, null);
+  if (graph.escapes.missing) sayAt("unsupported-rule", self, NEXT.noEscapes);
   if (graph.escapes.missing) why(NO_ESCAPES, null);
+  if (graph.escapes.cut) sayAt("budget", self, NEXT.escapesCut);
   if (graph.escapes.cut) why(ESCAPES_CUT, null);
   return { reasons, places, gaps };
 }
 
+const gapKey = (g: GapPlace): string => `${g.cause}\u0000${g.file}\u0000${g.line}\u0000${g.next}`;
+
+// Several lists of gaps as one: each place once, at most GAPS_SHOWN.
+export function joinGaps(...lists: readonly GapPlace[][]): GapPlace[] {
+  const out: GapPlace[] = [];
+  const seen = new Set<string>();
+  for (const g of lists.flat()) {
+    if (out.length >= GAPS_SHOWN) break;
+    if (seen.has(gapKey(g))) continue;
+    seen.add(gapKey(g));
+    out.push(g);
+  }
+  return out;
+}
+
+// The gaps of a partial build, which floors every answer: each file not
+// read and each file whose calls the budget left unresolved.
+export function partialGaps(graph: Graph): GapPlace[] {
+  if (graph.status.status !== "partial") return [];
+  const notRead = graph.status.notRead.map((n) => gapPlace({ cause: "file-not-parsed", file: n.file, line: 0, next: NEXT.notRead }));
+  const budget = graph.unknowns.filter((u) => u.cause === "budget" && u.line === 0).map(gapPlace);
+  return [...notRead, ...budget];
+}
 export function detectImpact(graph: Graph, change: Pick<Change, "files" | "coverage">): ImpactSummary {
   const s = graph.status;
   const symbols = new Map<string, ImpactSymbol>();

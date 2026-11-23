@@ -1,0 +1,39 @@
+{
+  "covers": "Hono middleware past the chain the plugin keeps for one route (hono MAX_MIDDLEWARE_CHAIN)",
+  "caps": [
+    "frameworks/hono/resolve.ts#MAX_MIDDLEWARE_CHAIN"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"hono\": \"^4.0.0\"}}",
+    "src/h.ts": "export function h(c: unknown) {\n  return c;\n}\nexport async function mw(c: unknown, next: () => Promise<void>) {\n  await next();\n}\n",
+    "src/app.ts": [
+      "import { Hono } from \"hono\";\nimport { h, mw } from \"./h\";\nexport const app = new Hono();\n",
+      {
+        "repeat": "app.use(mw);\n",
+        "times": 65
+      },
+      "app.get(\"/x\", h);\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#mw",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 68
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#mw",
+      "reason": "middleware entries past 64 in one chain were left out",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/h.ts"
+      }
+    }
+  ]
+}

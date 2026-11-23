@@ -1,0 +1,41 @@
+{
+  "covers": "a computed member of a table nothing else can change, with more entries than the graph lists as possible targets (resolve DISPATCH_CAP)",
+  "caps": [
+    "resolve.ts#DISPATCH_CAP"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/t.ts": [
+      {
+        "repeat": "function f{{i}}() { return {{i}}; }\n",
+        "times": 34
+      },
+      "const table: Record<string, () => number> = {\n",
+      {
+        "repeat": "  k{{i}}: f{{i}},\n",
+        "times": 34
+      },
+      "};\nexport function go(k: string) {\n  return table[k]();\n}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/t.ts#f34",
+      "caller": "src/t.ts#go",
+      "file": "src/t.ts",
+      "line": 72
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/t.ts#f34",
+      "reason": "of which the first 32 are listed as possible targets and 2 are not",
+      "at": "src/t.ts:72",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/t.ts:72"
+      }
+    }
+  ]
+}

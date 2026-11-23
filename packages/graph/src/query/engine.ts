@@ -17,7 +17,7 @@
 // answer in slices with a turn of the event loop between them, so a
 // cancellation that arrives while the work runs is seen (the MCP server).
 import { langOf, unreadNote } from "../capture/inventory.js";
-import { GAPS_SHOWN, floorOf, isTestPath, sameNameGaps, toImpactUnknown } from "../impact.js";
+import { floorOf, isTestPath, joinGaps, partialGaps, sameNameGaps, toImpactUnknown } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
 import { CALLER_KINDS } from "../types.js";
@@ -252,7 +252,7 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
       // The framework may run it too (a handler, a middleware): a cap of the framework layer may hide that.
       const fw = frameworkCallerGaps(g, n.file);
       reasons = [...floor.reasons, ...fw.reasons];
-      gaps = [...floor.gaps, ...fw.gaps].slice(0, GAPS_SHOWN);
+      gaps = joinGaps(floor.gaps, fw.gaps);
       if (fw.reasons.length === 0 && floor.places && floor.places.length > 0 && floor.places.every((p) => isTestPath(p.file))) inTests = floor.places;
       const named = n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n) : unknownsNamed(g, n.name);
       for (const u of named) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
@@ -266,9 +266,11 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
       causes = {};
       for (const u of inside) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = inside.slice(0, 5).map(toImpactUnknown);
-      gaps = inside.slice(0, GAPS_SHOWN).map(gapPlace);
+      gaps = joinGaps(inside.map(gapPlace));
     }
     const partial = g.status.status === "partial";
+    // A partial build floors every answer: its files not read are gaps too.
+    gaps = joinGaps(gaps, partialGaps(g));
     const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples, ...(gaps.length > 0 ? { gaps } : {}) } };
     // Only the target's floor is read: past one hop a caller of a caller may hide anywhere.
     if (inTests && !partial && depth === 1) Object.assign(answer.unknown, { scope: "tests", note: testsNote(inTests) });

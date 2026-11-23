@@ -1,0 +1,43 @@
+{
+  "covers": "net/http middleware wrapped around a handler past the chain the plugin keeps (go-http MAX_MIDDLEWARE_CHAIN)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_MIDDLEWARE_CHAIN"
+  ],
+  "commit": true,
+  "files": {
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": [
+      "package main\n\nimport \"net/http\"\n\nfunc deep(w http.ResponseWriter, r *http.Request) {}\n\nfunc mw(next http.Handler) http.Handler {\n\treturn next\n}\n\nfunc main() {\n\tm := http.NewServeMux()\n\tm.Handle(\"/x\", ",
+      {
+        "repeat": "mw(",
+        "times": 65
+      },
+      "http.HandlerFunc(deep)",
+      {
+        "repeat": ")",
+        "times": 65
+      },
+      ")\n\thttp.ListenAndServe(\":8080\", m)\n}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 13
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "the handler is wrapped in more than 64 middleware calls",
+      "at": "main.go:13",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.go:13"
+      }
+    }
+  ]
+}
