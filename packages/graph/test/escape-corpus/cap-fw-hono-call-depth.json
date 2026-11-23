@@ -1,0 +1,47 @@
+{
+  "covers": "a Hono handler reached through more function calls than the plugin follows (hono MAX_CALL_DEPTH): a name given another name's value ten times over, which the plugin stops following and records as computed, and a handler passed down through ten functions that build the router, where the mount records the cap. The first is floored by the value use where the handler is first written, the second by the cap at the mount",
+  "caps": [
+    "frameworks/hono/resolve.ts#MAX_CALL_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"hono\": \"^4.0.0\"}}",
+    "src/h.ts": "export function h1(c: unknown) {\n  return c;\n}\nexport function h2(c: unknown) {\n  return c;\n}\n",
+    "src/app.ts": "import { Hono } from \"hono\";\nimport { h1, h2 } from \"./h\";\nexport const app = new Hono();\nexport function wire() {\n  const a0 = h1;\n  const a1 = a0;\n  const a2 = a1;\n  const a3 = a2;\n  const a4 = a3;\n  const a5 = a4;\n  const a6 = a5;\n  const a7 = a6;\n  const a8 = a7;\n  const a9 = a8;\n  const a10 = a9;\n  app.get(\"/x\", a10);\n}\nfunction m0(fn: (c: unknown) => unknown) {\n  const r = new Hono();\n  r.get(\"/y\", fn);\n  return r;\n}\nfunction m1(fn: (c: unknown) => unknown) {\n  return m0(fn);\n}\nfunction m2(fn: (c: unknown) => unknown) {\n  return m1(fn);\n}\nfunction m3(fn: (c: unknown) => unknown) {\n  return m2(fn);\n}\nfunction m4(fn: (c: unknown) => unknown) {\n  return m3(fn);\n}\nfunction m5(fn: (c: unknown) => unknown) {\n  return m4(fn);\n}\nfunction m6(fn: (c: unknown) => unknown) {\n  return m5(fn);\n}\nfunction m7(fn: (c: unknown) => unknown) {\n  return m6(fn);\n}\nfunction m8(fn: (c: unknown) => unknown) {\n  return m7(fn);\n}\nfunction m9(fn: (c: unknown) => unknown) {\n  return m8(fn);\n}\nfunction m10(fn: (c: unknown) => unknown) {\n  return m9(fn);\n}\napp.route(\"/a\", m10(h2));\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h1",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 16
+    },
+    {
+      "target": "src/h.ts#h2",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 20
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h1",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:5",
+      "at": "src/app.ts:5",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:5"
+      }
+    },
+    {
+      "target": "src/h.ts#h2",
+      "reason": "the router passes through more than 8 function calls, past what the plugin follows",
+      "at": "src/app.ts:53",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/app.ts:53"
+      }
+    }
+  ]
+}

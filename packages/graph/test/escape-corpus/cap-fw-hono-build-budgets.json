@@ -1,0 +1,47 @@
+{
+  "covers": "a Hono route on an application past the applications the plugin keeps in one build (hono MAX_APPS); every build budget of the plugin is said by one end-of-run table typed over the budgets, so this case backs each of them",
+  "caps": [
+    "frameworks/hono/resolve.ts#MAX_APPS",
+    "frameworks/hono/resolve.ts#MAX_FACTS_READ",
+    "frameworks/hono/resolve.ts#MAX_LOOKUPS",
+    "frameworks/hono/resolve.ts#MAX_MIDDLEWARE_EDGES",
+    "frameworks/hono/resolve.ts#MAX_MOUNTS",
+    "frameworks/hono/resolve.ts#MAX_REGISTRATIONS",
+    "frameworks/hono/resolve.ts#MAX_ROLES",
+    "frameworks/hono/resolve.ts#MAX_STEPS",
+    "frameworks/hono/resolve.ts#MAX_UNKNOWNS"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"hono\": \"^4.0.0\"}}",
+    "src/h.ts": "export function h(c: unknown) {\n  return c;\n}\n",
+    "src/a.ts": [
+      "import { Hono } from \"hono\";\n",
+      {
+        "repeat": "export const a{{i}} = new Hono();\n",
+        "times": 2000
+      }
+    ],
+    "src/z.ts": "import { Hono } from \"hono\";\nimport { h } from \"./h\";\nexport const z = new Hono();\nz.get(\"/x\", h);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h",
+      "caller": null,
+      "file": "src/z.ts",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h",
+      "reason": "the Hono plugin keeps at most 2000 applications in one build",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/h.ts"
+      }
+    }
+  ]
+}
