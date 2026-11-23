@@ -20,6 +20,16 @@ export function familyOf(lang: Lang): Family {
 // Type nesting through `on` and `args` shares one depth limit.
 export const MAX_TYPE_DEPTH = 16;
 
+// The most global names one file's facts keep as declared plain data
+// (`ambient`, `ambientTop`): the extractor writes at most this many and the
+// reader of saved facts accepts as many, so saved facts read back whole. A
+// name past it is not vouched for, which can only add a floor.
+export const MAX_AMBIENT_NAMES = 200_000;
+// The longest string the reader of saved facts accepts. A global name
+// longer than it is not kept as declared plain data, so the facts that
+// hold it still read back.
+export const MAX_FACT_STRING = 4096;
+
 // A type named in source: `Repo`, `pkg.Repo` (qualifier "pkg"), Ruby `A::B`
 // (whole path in `name`, the lexical nesting in `qualifier`).
 // `result`: the type is what calling the function `name` returns, at that
@@ -344,6 +354,10 @@ export type FileFacts = {
   // binds a value the graph follows, not a name it could not find.
   variables?: string[];
   exportedVariables?: string[];
+  // TypeScript and JavaScript: the file has an `import` or `export`
+  // statement (`export {}` too), so it is a module, never a script whose
+  // definitions are names of the global scope.
+  esm?: true;
 };
 
 // ---------- the graph ----------
@@ -456,9 +470,14 @@ export type Escapes = {
   // Set when the graph was assembled without its escape facts (a program
   // calling `assemble` the 0.22.0 way): no caller list is whole then.
   missing?: true;
+  // Set when the build's budget ran out before escape analysis finished
+  // (Resolved.escapesCut): no caller list is whole then either.
+  cut?: true;
 };
 // The floor reason of a graph assembled without its escape facts.
 export const NO_ESCAPES = "the escape facts were not given when the graph was assembled, so any caller list may miss callers";
+// The floor reason of a graph whose escape analysis the budget cut.
+export const ESCAPES_CUT = "the budget ran out before every way a function escapes was found, so any caller list may miss callers";
 
 // An eligible file the graph did not read, and why.
 export type NotRead = { file: string; reason: "size" | "budget" | "parse-cap" | "memory" | "parse-error" | "slow-parse" | "unreadable" };

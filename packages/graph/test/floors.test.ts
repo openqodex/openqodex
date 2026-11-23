@@ -52,12 +52,19 @@
 // 14. A script's function keeps one reach row per place that builds a name
 //     at run time, so many such places make the build and its index grow
 //     with places times functions, though the reason names the first.
+// 15. Picking the first place of each kind scans every place before it, so
+//     many `eval` places before many global ones take time that grows with
+//     their square (issue 425).
+// 16. A module whose only export is a variable (or `export {}`) is read as a
+//     script, so a name built at run time on the global scope is said to
+//     see its private functions (issue 424).
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact, renderImpactBlock } from "../src/index.js";
 import { query } from "../src/query/engine.js";
 import type { Answer, Request, Session } from "../src/query/answer.js";
 import { commitAll, makeRepo, writeFiles } from "./helpers.js";
+import { expectLinear, growthTests, stageCpuMs } from "../src/test-timing.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -283,6 +290,44 @@ describe("the list floor of a function", () => {
       expect(new Set(rows.map((r) => r.why)).size).toBe(rows.length);
     }
   }, 60_000);
+
+  it("says a name built at run time sees a script's function and not a module's, whatever the module exports (16)", async () => {
+    const s = await sessionOf({
+      "public/a.js": "function f() {}\nexport const LIMIT = 1;\n",
+      "public/c.js": "function h() {}\nexport {};\n",
+      "public/s.js": "function k() {}\n",
+      "public/b.js": "window[location.hash.slice(1)]();\n",
+    });
+    const sees = "public/b.js:1 reaches the global scope by a name built at run time, and it can see this function";
+    for (const [file, name] of [["public/a.js", "f"], ["public/c.js", "h"]] as const) {
+      const a = ask(s, { kind: "callers", target: { name, file } } as Omit<Request, "apiVersion">);
+      expect(a.unknown.reasons.join(" "), file).not.toContain(sees);
+    }
+    expect(ask(s, { kind: "callers", target: { name: "k", file: "public/s.js" } } as Omit<Request, "apiVersion">).unknown.reasons.join(" ")).toContain(sees);
+    expect([...s.graph.escapes.scripts].sort()).toEqual(["public/b.js", "public/s.js"]);
+  }, 60_000);
+
+  // Files of 1,000 places each: one file of all of them is over the size cap.
+  const places = (count: number): string => {
+    const files: Record<string, string> = { "public/a.js": "function f() {}\n" };
+    for (let i = 0; i < count / 1000; i++) {
+      files[`public/e${String(i).padStart(3, "0")}.js`] = "eval(location.hash);\n".repeat(1000);
+      files[`public/w${String(i).padStart(3, "0")}.js`] = "window[location.hash]();\n".repeat(1000);
+    }
+    return makeRepo(files);
+  };
+  growthTests("in time that grows with the places that build a name at run time", () => {
+    // The resolve stage alone: the parse of every place would hide the square.
+    it("resolves 128,000 eval places before 128,000 global ones in time that grows with the count (15)", async () => {
+      const quarter = places(32_000);
+      const root = places(128_000);
+      // A build cut short resolves fewer places and times less work.
+      const whole = (at: string) => async () => { const g = await buildGraph({ repoRoot: at, store: null, budgetMs: 120_000 }); expect(g.status.status).toBe("ok"); return g; };
+      const small = await stageCpuMs(whole(quarter), "resolve");
+      const large = await stageCpuMs(whole(root), "resolve");
+      expectLinear("the resolve stage of 32,000 and of 128,000 places of each kind", small, large);
+    }, 600_000);
+  });
 
   it("keeps a removed function on the floor while its name is still passed as a value (10)", async () => {
     const impact = await changed(

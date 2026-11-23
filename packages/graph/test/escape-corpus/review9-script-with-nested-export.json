@@ -1,0 +1,23 @@
+{
+  "covers": "a script whose only `export` is inside a `declare module` block is still a script: a file that reads a free name reaches its functions (issue 424)",
+  "files": {
+    "public/b.js": "export const v = someGlobal;\n",
+    "public/s.ts": "declare module \"x\" {\n  export function g(): void;\n}\nfunction s() {}\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/s.ts#s",
+      "caller": null,
+      "file": "public/b.js",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "public/s.ts#s",
+      "reason": "reads the free name `someGlobal` (its file reads the global scope, where a script's definitions live)",
+      "at": "public/b.js:1"
+    }
+  ]
+}

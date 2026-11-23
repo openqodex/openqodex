@@ -1,0 +1,14 @@
+{
+  "covers": "a `type` specifier re-exported from Node's module library binds nothing at run time: the repository stays whole (issue 422)",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/types.ts": "export { type createRequire } from \"node:module\";\nexport const x = 1;\n",
+    "src/use.ts": "import { x } from \"./types\";\nexport const y = x;\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
+}
