@@ -287,14 +287,15 @@ function dedup(findings: ReportFinding[], same = sameDefect, parts?: Map<ReportF
 // possible issues. A caller passes only the counted findings the report
 // shows when it matches by one defect, so a possible issue never leaves for
 // a finding the threshold hides. A possible issue merged from two (`parts`)
-// leaves only for a counted finding that overlaps both, so the one the
-// counted finding never touched is not lost with it.
+// leaves only when one counted finding overlaps either part and it overlaps
+// both, so the one the counted finding never touched is not lost with it.
 export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect, parts?: Pick<ReadonlyMap<ReportFinding, ReportFinding[]>, "get">): ReportFinding[] {
   const keys = new Set(counted.map(findingKey));
   return possible.filter((p) => {
     if (keys.has(findingKey(p))) return false;
-    const near = counted.filter((c) => (parts?.get(p) ?? [p]).every((q) => same(c, q)));
-    return near.length !== 1 || possible.filter((q) => same(near[0]!, q)).length !== 1;
+    const two = parts?.get(p) ?? [p];
+    const near = counted.filter((c) => two.some((q) => same(c, q)));
+    return near.length !== 1 || !two.every((q) => same(near[0]!, q)) || possible.filter((q) => same(near[0]!, q)).length !== 1;
   });
 }
 

@@ -42,7 +42,8 @@
 //     loses the lines of the one it absorbed; or a possible issue leaves
 //     for the key of a hidden merged finding no finder submitted, or two
 //     possible issues merged into one leave for a counted finding that
-//     overlaps only one of them.
+//     overlaps only one of them, or for one of several counted findings
+//     that overlap its parts.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { checkSubmission, finalizeReview, proseErrors, scanReport, sentences, SETTINGS_RULE, SUPPRESSION_RULE } from "./finalize.js";
@@ -636,6 +637,27 @@ describe("one defect under two titles is shown once (16)", () => {
     expect(report.possible.map((f) => [f.title, f.line_number, f.line_end])).toEqual([[far.title, 1, 3]]);
     const both = run2(version, [{ ...counted, line_end: 2 }, { ...near, line_number: 1 }, { ...far, line_number: 1, line_end: 2 }]);
     expect(both.possible).toEqual([]);
+  });
+
+  // Every way counted findings can overlap two possible issues merged into
+  // one (parts a and b). Shown counted findings, then [title, lines] of each
+  // possible issue the report keeps. "overlaps one part" and "overlaps both
+  // parts, alone" are the test above.
+  const a = { ...rich, title: "Pool closed too soon", confidence: 0.55 };
+  const b = { ...rich, title: "Last put lost", description: "The last put is lost when the pool shuts, so the job never finishes.", confidence: 0.55 };
+  const at = (title: string, line_number: number, line_end: number) => ({ ...rich, title, line_number, line_end, confidence: 0.9 });
+  it.each([1, 2])("version %i keeps or drops a merged possible issue by every way counted findings overlap its parts", (version) => {
+    const cases: [string, Record<string, unknown>[], [string, number, number][]][] = [
+      ["no counted finding overlaps either part", [{ ...a, line_number: 1, line_end: 2 }, { ...b, line_number: 2, line_end: 3 }], [[b.title, 1, 3]]],
+      ["two counted findings each overlap one part", [at("First", 1, 1), at("Third", 3, 3), { ...a, line_number: 1, line_end: 2 }, { ...b, line_number: 2, line_end: 3 }], [[b.title, 1, 3]]],
+      ["one counted finding overlaps both parts and another overlaps one", [at("Second", 2, 2), at("Third", 3, 3), { ...a, line_number: 1, line_end: 2 }, { ...b, line_number: 2, line_end: 3 }], [[b.title, 1, 3]]],
+      ["two counted findings each overlap both parts", [at("First", 1, 1), at("Third", 3, 3), { ...a, line_number: 1, line_end: 3 }, { ...b, line_number: 1, line_end: 3 }], [[b.title, 1, 3]]],
+      ["the counted finding over both parts also overlaps another possible issue", [at("Broad", 1, 3), { ...a, line_number: 1, line_end: 1 }, { ...b, line_number: 1, line_end: 2 }, { ...a, title: "Lock never released", line_number: 3, line_end: 3 }], [[b.title, 1, 2], ["Lock never released", 3, 3]]],
+    ];
+    for (const [name, entries, kept] of cases) {
+      const report = run2(version, entries);
+      expect([name, report.possible.map((f) => [f.title, f.line_number, f.line_end])]).toEqual([name, kept]);
+    }
   });
 
   it.each([1, 2])("version %i keeps findings on lines that do not overlap, and findings from different sources", (version) => {
