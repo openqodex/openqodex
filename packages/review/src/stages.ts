@@ -483,11 +483,23 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         if (targetKey !== key && item.v.tier === "finding" && target.v.tier === "observation" && shownKeys.has(key) && observationKeys.has(targetKey)) supersededKeys.add(targetKey);
       }
     }
+    // A shown finding (not an observation) folded into another gives the
+    // survivor its severity when higher, so a folded major still blocks.
+    const severityOf = new Map(report.findings.map((f) => [findingKey(f), f.severity]));
+    const raised = new Map<string, ReportFinding["severity"]>();
+    for (const [key, into] of foldedInto) {
+      const severity = severityOf.get(key);
+      if (severity === undefined || observationKeys.has(key)) continue;
+      let target = keyOf(into);
+      for (const seen = new Set([key]); foldedInto.has(target) && !seen.has(target); seen.add(target)) target = keyOf(foldedInto.get(target)!);
+      const best = raised.get(target) ?? severityOf.get(target);
+      if (best === undefined || severityRank(severity) > severityRank(best)) raised.set(target, severity);
+    }
     const observations: ReportFinding[] = [];
     report.findings = report.findings.flatMap((f) => {
       const key = findingKey(f);
       if (duplicateKeys.has(key)) return [];
-      const entry = { ...f };
+      const entry = { ...f, ...(raised.has(key) ? { severity: raised.get(key)! } : {}) };
       if (observationKeys.has(key)) { if (!supersededKeys.has(key)) observations.push(entry); return []; }
       return [entry];
     });
