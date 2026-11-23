@@ -23,7 +23,7 @@
 //     program is gone hides a reviewer later on PATH.
 import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, win32 } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { codexEnv, detectCodex, findOnPath, killGroup, launch, reviewerEnv, spawnGroup, taskkillFailure, windowsStop } from "@openqodex/review";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
@@ -189,8 +189,11 @@ describe("6. a taskkill that fails", () => {
       await new Promise((done) => child.once("spawn", done));
       const gone = new Promise((done) => child.once("exit", done));
       // A system folder with no taskkill in it, so taskkill cannot start, on
-      // native Windows too.
-      vi.stubEnv("SystemRoot", tempDir("oq-win-no-taskkill-"));
+      // native Windows too. Every spelling of the name is set: windowsStop
+      // takes the first one it finds.
+      const empty = tempDir("oq-win-no-taskkill-");
+      for (const name of new Set(["SystemRoot", ...Object.keys(process.env).filter((k) => k.toUpperCase() === "SYSTEMROOT")])) vi.stubEnv(name, empty);
+      expect(windowsStop(child.pid!)[0]).toBe(win32.join(empty, "System32", "taskkill.exe"));
       killGroup(child, "win32");
       stopped = await Promise.race([gone.then(() => true), new Promise<boolean>((done) => setTimeout(() => done(false), 5_000))]);
     } finally {
