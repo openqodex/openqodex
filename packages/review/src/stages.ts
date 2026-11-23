@@ -464,6 +464,9 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     const foldedInto = new Map<string, typeof built.items[number]>();
     for (const item of built.items) {
       const key = keyOf(item);
+      // An observation never folds away a key a shown finding owns, so a
+      // shown finding folds only into another shown finding.
+      if (item.v.tier === "observation" && shownFindingTierKeys.has(key)) continue;
       // Along a chain of duplicates, the first link that is shown folds this item.
       let target = item;
       let folded = false;
@@ -486,7 +489,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     // Keys can fold in a cycle when two items share a key (A1 into B, B
     // into A2), which would fold every key in it away: the cycle's first key
     // the report shows stays.
-    for (const start of [...foldedInto.keys()]) {
+    for (const start of foldedInto.keys()) {
       const path: string[] = [];
       let key = start;
       while (foldedInto.has(key) && !path.includes(key)) { path.push(key); key = keyOf(foldedInto.get(key)!); }

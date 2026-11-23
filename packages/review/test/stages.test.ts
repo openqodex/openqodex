@@ -341,9 +341,10 @@ it("keeps one finding when duplicate links fold two items sharing a key through 
       for (const v of answer.verdicts) {
         const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
         const line = c.kind === "finder" ? c.candidate.line_number : 0;
-        if (line === 1) { v.title = "Twin"; v.line_number = 1; v.duplicate_of = byLine.get(2); }
-        if (line === 2) { v.title = "Other"; v.line_number = 2; v.severity = "minor"; v.duplicate_of = byLine.get(3); }
-        if (line === 3) { v.title = "Twin"; v.line_number = 1; }
+        // The Twin key survives the cycle at minor, so only the transfer from Other blocks.
+        if (line === 1) { v.title = "Twin"; v.line_number = 1; v.severity = "minor"; v.duplicate_of = byLine.get(2); }
+        if (line === 2) { v.title = "Other"; v.line_number = 2; v.duplicate_of = byLine.get(3); }
+        if (line === 3) { v.title = "Twin"; v.line_number = 1; v.severity = "minor"; }
       }
     }
     return answer;
@@ -358,6 +359,33 @@ it("keeps one finding when duplicate links fold two items sharing a key through 
   expect(r.report.verdict).toBe("blocked");
   expect(r.submission.findings.length).toBeGreaterThan(0);
   expect(r.submission.findings.every((finding) => finding.severity === "major")).toBe(true);
+});
+it("keeps a major finding whose key an observation shares when that observation is a duplicate of another observation", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [1, 2].map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }))
+      : [{ ...candidate("a.txt", "Claim 3"), line_number: 3, evidence: [{ file_path: "a.txt", line_number: 3, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const byLine = new Map(brief.batch!.candidates.map((c) => [c.kind === "finder" ? c.candidate.line_number : 0, c.id]));
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        const line = c.kind === "finder" ? c.candidate.line_number : 0;
+        if (line === 1) { v.title = "Shared"; v.line_number = 1; }
+        if (line === 2) { v.title = "Note"; v.line_number = 2; v.severity = "minor"; v.tier = "observation"; }
+        if (line === 3) { v.title = "Shared"; v.line_number = 1; v.severity = "minor"; v.tier = "observation"; v.duplicate_of = byLine.get(2); }
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Shared", "major"]]);
+  expect((r.report.observations ?? []).map((o) => [o.title, o.severity])).toEqual([["Note", "minor"]]);
+  expect(r.report.verdict).toBe("blocked");
 });
 it("lets a stopped session leave the budget queue while another session holds the lock", async () => {
   const budgetState = { pending: Promise.resolve(), refused: false };
