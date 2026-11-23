@@ -135,7 +135,10 @@ import type { TreeVisitor } from "./walk.js";
 // `import` or `export` statement says so (`esm`); a file keeps at most
 // MAX_AMBIENT_NAMES global names declared as plain data, none longer than
 // MAX_FACT_STRING; a Python `cast` is typing's only when the last import at
-// the top of the module that binds its name is typing's.
+// the top of the module that binds its name is typing's; a Python
+// decorator without parentheses (`@wrap`, `@pkg.wrap`) is a call of the
+// name it gives; a method called on a local that holds a function aliases
+// it only when the method runs it (`fn.call`, not `fn.bind` or `r.equals`).
 export const EXTRACTOR_VERSION = 55;
 
 type Frame = {
@@ -962,7 +965,7 @@ class Ctx {
         const table = at?.tables?.get(name);
         if (table !== undefined) this.openTables.add(table);
         if (ident && (at !== ident.at || call.recv.kind === "name")) call.recv = receiverIn(at, name, ident.path, topNames);
-        if (!ident || ident.path.length === 0) bindAlias(call, at, name, true);
+        if ((!ident || ident.path.length === 0) && runsHeldValue(this.lang, call.name)) bindAlias(call, at, name, true);
         continue;
       }
       if (this.libBindings.length > 0) libRead(scope, call.name, null, call.line, `${call.line}:${call.column}`);
@@ -2673,6 +2676,20 @@ function jsValueStays(node: Node): boolean {
 // Names of the global object: a computed member of one may be any global.
 const GLOBAL_OBJECTS = new Set(["globalThis", "window", "self", "global"]);
 const JS_LANGS: ReadonlySet<Lang> = new Set<Lang>(["typescript", "tsx", "javascript"]);
+
+// Whether a method called on a local runs the value the local holds:
+// JavaScript's `fn.call(x)` and `fn.apply(x)` (not `fn.bind(x)`, which
+// only makes a function), Python's `fn.__call__()`. In Java any method but
+// one every object has (`r.equals(o)`, `r.toString()`): a functional
+// interface's own method runs it, and a default one (`f.andThen(g)`) makes
+// a function that may.
+const OBJECT_METHODS: ReadonlySet<string> = new Set(["equals", "hashCode", "toString", "getClass", "notify", "notifyAll", "wait"]);
+function runsHeldValue(lang: Lang, method: string): boolean {
+  if (JS_LANGS.has(lang)) return method === "call" || method === "apply";
+  if (lang === "python") return method === "__call__";
+  if (lang === "java") return !OBJECT_METHODS.has(method);
+  return true;
+}
 // Free names (bound to nothing in the file) whose every use is known to
 // reach no code by a name built at run time: no global object, no way to
 // make code from a string, no loader. `require`, `module` and `exports`
@@ -3658,6 +3675,7 @@ const PY_TYPES = new Set([
   "function_definition",
   "lambda",
   "assignment",
+  "decorator",
   "call",
   "return_statement",
   "dictionary",
@@ -3978,6 +3996,21 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           // parameter's annotation among them.
           const value = type ?? (right?.type === "identifier" ? (ctx.local(right.text) ?? null) : null);
           if (attr && cls) ctx.setField(cls.def, attr.text, value, annotation !== null);
+        }
+        return;
+      }
+      case "decorator": {
+        // `@wrap` and `@pkg.wrap` call the name with the decorated function,
+        // from the scope around the definition, as `@wrap()` calls it;
+        // `@(wrap)` is the same name.
+        const inner = (n: Node | null | undefined) => n?.namedChildren.find((c) => c.type !== "comment");
+        let expr = inner(node);
+        while (expr?.type === "parenthesized_expression") expr = inner(expr);
+        if (expr?.type === "identifier") ctx.addCall(expr, { kind: "none" });
+        else if (expr?.type === "attribute") {
+          const attr = expr.childForFieldName("attribute");
+          const object = expr.childForFieldName("object");
+          if (attr && object) ctx.addCall(attr, pyReceiver(ctx, object));
         }
         return;
       }

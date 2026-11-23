@@ -16,6 +16,13 @@
 // 5. A value read of a name no barrel exports asks whether a module exports
 //    it as a variable, and that question walks every path of the diamond
 //    again, unbounded by any cache (issue 419).
+// 6. A barrel's two `export *` offer one name, a value that is no definition
+//    in one module (`export const x = make()` or `export { x }`) and a
+//    function in the other, and the function binds certainly, though
+//    JavaScript exports neither; or a module's own `export const x` loses to
+//    an `export *` that offers `x`, though the module's own export wins.
+// 7. An `export *` gives out the module's `default`, which JavaScript never
+//    does, so an import of `default` through it binds a definition.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -120,5 +127,31 @@ describe("looking up an exported name", () => {
     });
     expect(tiers(g, symbol(g, "pkg/two.py", "f"))).toEqual(["pkg/last.py:6 certain"]);
     expect(tiers(g, symbol(g, "pkg/one.py", "f"))).toEqual(["pkg/closed.py:6 certain", "pkg/open.py:6 possible"]);
+  });
+
+  for (const [form, a] of [
+    ["export const x", "export const x = make();\nfunction make() {\n  return 1;\n}\n"],
+    ["export { x }", "const x = make();\nfunction make() {\n  return 1;\n}\nexport { x };\n"],
+  ] as const) {
+    it(`leaves a name two export * offer as a value (${form}) and a function ambiguous, and a module's own value shadows a star (6)`, async () => {
+      const g = await graphOf({
+        "a.js": a,
+        "b.js": "export function x() {\n  return 2;\n}\n",
+        "barrel.js": 'export * from "./a.js";\nexport * from "./b.js";\n',
+        "own.js": `${a}export * from "./b.js";\n`,
+        "use.js": 'import { x } from "./barrel.js";\nimport { x as y } from "./own.js";\nexport function run() {\n  return x() + y();\n}\n',
+      });
+      expect(tiers(g, symbol(g, "b.js", "x"))).toEqual([]);
+      expect(g.unknowns.filter((u) => u.file === "use.js" && u.line === 4).map((u) => `${u.name} ${u.cause}`).sort()).toEqual(["x ambiguous", "y miss"]);
+    });
+  }
+
+  it("never binds a default export through export * (7)", async () => {
+    const g = await graphOf({
+      "a.js": "export default function f() {\n  return 1;\n}\n",
+      "barrel.js": 'export * from "./a.js";\n',
+      "use.js": 'import f from "./barrel.js";\nexport function run() {\n  return f();\n}\n',
+    });
+    expect(tiers(g, symbol(g, "a.js", "f"))).toEqual([]);
   });
 });

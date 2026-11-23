@@ -221,7 +221,11 @@ type Value =
   | { v: "pymod"; from: string; dotted: string } // Python `import a.b`: a dotted module path
   | { v: "ext" }
   | { v: "gap"; cause: Cause; note: string; candidates: string[] | null }
-  | { v: "miss"; target: string; name: string; ev: Ev };
+  // `held`: the module gives the name out as a value that is no definition
+  // (`export const router = Router()`, `export { router }`), so the name is
+  // there, though the graph does not follow the value; it is the local name
+  // of that value, one binding under every name it is given out as.
+  | { v: "miss"; target: string; name: string; ev: Ev; held?: string };
 
 type Def = DefFact & { id: string; file: string; family: Family };
 
@@ -1064,22 +1068,27 @@ export function createWorld(input: ResolveInput): World {
       if (family === "js") {
         // The export table: exported declarations, `export { a as b }`,
         // `export default`, CommonJS assignments, then re-exports. A private
-        // top-level definition is never an export.
-        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1);
+        // top-level definition is never an export. A local value that is no
+        // definition (`export const router = Router()`, `export { router }`)
+        // is a held miss in this file, so a framework reader reads its own
+        // facts there, and it shadows any `export *` that offers the name.
+        const held = (local: string): Value => ({ v: "miss", target: file, name, ev: SAME_SCOPE, held: local });
+        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? held(f.defaultExport);
         const top = topByFile.get(file)?.get(name)?.filter((id) => defById.get(id)?.exported);
         if (top && top.length > 0) return { v: "sym", ids: top, ev: SAME_SCOPE };
-        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1);
+        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? held(e.local);
+        if (f.exportedVariables?.includes(name)) return held(name);
         // Every `export *` that offers the name: one definition binds; two
         // different ones are ambiguous (JavaScript exports neither). A star
         // the graph cannot follow (a module that is not there, a package
         // outside the repository, a gap) may bring the name too, so nothing
-        // it competes with is certain.
+        // it competes with is certain. `export *` never gives out `default`.
         const starHits: { v: Value; spec: string }[] = [];
         const unfollowed: Unfollowed[] = [];
         for (const imp of f.imports) {
           if (!imp.reexport) continue;
           const named = imp.names.find((n) => n.local === name);
-          if (!named && !imp.star) continue;
+          if (!named && (!imp.star || name === "default")) continue;
           const mod = jsSpec(file, imp.line, imp.spec);
           if (named) {
             if (mod === null) return { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1094,7 +1103,7 @@ export function createWorld(input: ResolveInput): World {
             const hit = withEv(index.exports(mod.file, name, depth + 1), mod.ev);
             if (hit === null) unfollowed.push({ spec: imp.spec, cause: "miss", note: `export * from ${imp.spec} could not be read` });
             else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note });
-            else if (hit.v !== "miss") starHits.push({ v: hit, spec: imp.spec });
+            else if (hit.v !== "miss" || hit.held) starHits.push({ v: hit, spec: imp.spec });
           }
         }
         return starValue(file, name, starHits, unfollowed) ?? noStarHit(unfollowed) ?? { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1154,7 +1163,8 @@ export function createWorld(input: ResolveInput): World {
   // ambiguous: every candidate at the possible tier, with a note.
   function starValue(file: string, name: string, hits: { v: Value; spec: string }[], open: Unfollowed[]): Value | null {
     if (hits.length === 0) return null;
-    const keyOf = (v: Value): string | null => (v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : null);
+    const keyOf = (v: Value): string | null =>
+      v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : v.v === "miss" && v.held ? `value:${v.target}\0${v.held}` : null;
     const distinct = new Map<string, { v: Value; spec: string }>();
     for (const h of hits) {
       const k = keyOf(h.v);
@@ -3594,7 +3604,9 @@ export function createWorld(input: ResolveInput): World {
           if (ids.length > 0 && ref) {
             const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.aliasOf ?? call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
             for (const t of ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
-            if (held.every(([, fn]) => fn === true)) continue;
+            // A method called on a local of a declared type (`Job j = this::work;
+            // j.run()`) is also a call of that type's method.
+            if (held.every(([, fn]) => fn === true) && call.recv.kind !== "type") continue;
           }
         }
         // What a call returned, called: the functions that callee returns by name.
@@ -4520,8 +4532,10 @@ export function createWorld(input: ResolveInput): World {
     const [head, ...rest] = path;
     if (head === undefined) return { kind: "none" };
     let v = resolveLocal(file, head);
-    for (const name of rest) {
-      if (v === null || v.v === "ext" || v.v === "gap" || v.v === "miss") break;
+    for (const [i, name] of rest.entries()) {
+      if (v === null || v.v === "ext" || v.v === "gap") break;
+      // A miss before the last name: the names after it were never looked up.
+      if (v.v === "miss") return { kind: "miss", target: v.target, name: v.name, past: rest.slice(i) };
       const before: Value = v;
       v = attr(v, name);
       // A name a module or a class does not hold: a miss where it was looked up.
