@@ -21,6 +21,9 @@
 //  8. A question stopped by its time budget, a language the build does not
 //     read, or the review walk cut at its limit floors the answer with no
 //     place in `gaps`.
+//  9. The gaps of a whole project, grouped once for every seed an impact
+//     query asks about, drop a seed's own gaps of the same cause from the
+//     count or the first place, or change the order of the reasons.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, floorOf } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -178,5 +181,25 @@ describe("a give-up reaches the floors it can hide a caller from", () => {
     expect(i.error).toBeNull();
     expect(i.unknown.reasons.join(" ")).toMatch(/the walk stopped at 200 symbols/);
     expect(i.unknown.gaps).toContainEqual({ cause: "fan-out-capped", file: "s.ts", line: 1, next: NEXT.walkCut });
+  }, 60_000);
+
+  it("counts a seed's own gaps and its project's under one reason per cause, its own first (9)", async () => {
+    const g = await build({ "one.ts": "export function one() {}\n", "two.ts": "export function two() {}\n" });
+    const one = symbol(g, "one.ts", "one");
+    g.unknowns.push(
+      gap({ cause: "unsupported-rule", place: { file: "two.ts", line: 1 }, reaches: "scope", next: NEXT.unbound }),
+      gap({ cause: "budget", place: { file: "two.ts", line: 0 }, reaches: "scope", next: NEXT.budget }),
+      gap({ cause: "budget", place: { file: "one.ts", line: 1 }, reaches: { ids: [one] }, next: NEXT.budget }),
+    );
+    const gaveUp = (id: string, name: string, file: string) => floorOf(g, { id, name, file, kind: "function" }, new Set()).reasons.filter((r) => r.startsWith("the graph gave up"));
+    expect(gaveUp(one, "one", "one.ts")).toEqual([
+      "the graph gave up at 2 places (budget) where a call may reach it, first at one.ts:1: a call there may reach it",
+      "the graph gave up at two.ts:1 (unsupported-rule): a call there may reach it",
+    ]);
+    // Another seed of the project, asked after the first: the project's gaps alone, in their order.
+    expect(gaveUp(symbol(g, "two.ts", "two"), "two", "two.ts")).toEqual([
+      "the graph gave up at two.ts:1 (unsupported-rule): a call there may reach it",
+      "the graph gave up at two.ts (budget): a call there may reach it",
+    ]);
   }, 60_000);
 });

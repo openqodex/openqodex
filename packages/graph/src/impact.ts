@@ -245,10 +245,24 @@ function reachOf(graph: Graph): ReachIndex {
   return ix;
 }
 
-// The gaps that reach a seed by its id, its file or its project, each once.
-function gapsReaching(graph: Graph, seed: { id: string; file: string }, project: string): UnknownSite[] {
+// The gaps that reach a seed by its id or its file, each once (`own`), and
+// those that reach its whole project (`wide`), grouped by cause once per
+// project: a project may hold a gap for each file the budget left, and an
+// impact query asks for every changed symbol. A gap reaches one way only,
+// so no gap is in both.
+const scopeCauses = new WeakMap<Graph, Map<string, Map<string, UnknownSite[]>>>();
+function gapsReaching(graph: Graph, seed: { id: string; file: string }, project: string): { own: UnknownSite[]; wide: UnknownSite[]; wideByCause: Map<string, UnknownSite[]> } {
   const ix = reachOf(graph);
-  return [...new Set([...(ix.ids.get(seed.id) ?? []), ...(ix.files.get(seed.file) ?? []), ...(ix.scope.get(project) ?? [])])];
+  const wide = ix.scope.get(project) ?? [];
+  let byProject = scopeCauses.get(graph);
+  if (!byProject) scopeCauses.set(graph, (byProject = new Map()));
+  let wideByCause = byProject.get(project);
+  if (!wideByCause) {
+    wideByCause = new Map();
+    for (const u of wide) push(wideByCause, u.cause, u);
+    byProject.set(project, wideByCause);
+  }
+  return { own: [...new Set([...(ix.ids.get(seed.id) ?? []), ...(ix.files.get(seed.file) ?? [])])], wide, wideByCause };
 }
 
 // The calls of a seed's name no rule could bind that may be its callers
@@ -363,8 +377,16 @@ function namedReasons(list: readonly UnknownSite[], name: string): [string, Unkn
 
 // What a count of calls through a value holds besides callbacks and
 // computed members: regions the parser could not read and calls by a name
-// given at run time, said after it ("" when it holds neither).
+// given at run time, said after it ("" when it holds neither). The lists
+// are the indexes' own, shared by every seed of a project or a family, so
+// each is counted once.
+const holds = new WeakMap<readonly UnknownSite[], string>();
 function valuesHold(list: readonly UnknownSite[]): string {
+  let said = holds.get(list);
+  if (said === undefined) holds.set(list, (said = countHolds(list)));
+  return said;
+}
+function countHolds(list: readonly UnknownSite[]): string {
   const unread = list.filter(isUnread).length;
   const byName = list.filter((u) => !isUnread(u) && isByName(u)).length;
   const parts = [
@@ -520,14 +542,19 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
   }
   // Every other place the graph gave up that reaches the seed by its id,
   // its file or its project, one reason per cause.
-  const reached = gapsReaching(graph, seed, project);
-  said(reached);
+  const { own, wide, wideByCause } = gapsReaching(graph, seed, project);
+  said(own);
+  said(wide);
+  // Causes in the order they first come, the seed's own gaps first.
   const byCause = new Map<string, UnknownSite[]>();
-  for (const u of reached) push(byCause, u.cause, u);
-  for (const [cause, list] of byCause) {
-    const first = list[0] as UnknownSite;
+  for (const u of own) push(byCause, u.cause, u);
+  for (const cause of wideByCause.keys()) if (!byCause.has(cause)) byCause.set(cause, []);
+  for (const [cause, mine] of byCause) {
+    const more = wideByCause.get(cause) ?? [];
+    const count = mine.length + more.length;
+    const first = (mine[0] ?? more[0]) as UnknownSite;
     const where = first.line > 0 ? `${first.file}:${first.line}` : first.file;
-    why(list.length === 1 ? `the graph gave up at ${where} (${cause}): ${first.note ?? "a call there may reach it"}` : `the graph gave up at ${list.length} places (${cause}) where a call may reach it, first at ${where}: ${first.note ?? "a call there may reach it"}`, null);
+    why(count === 1 ? `the graph gave up at ${where} (${cause}): ${first.note ?? "a call there may reach it"}` : `the graph gave up at ${count} places (${cause}) where a call may reach it, first at ${where}: ${first.note ?? "a call there may reach it"}`, null);
   }
   // A cut with no place of its own is said at the seed's definition.
   const self = { file: seed.file, line: graph.nodes.get(seed.id)?.startLine ?? 0 };
