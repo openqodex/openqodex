@@ -25,6 +25,7 @@ const UNDER_COMPUTED = [
   ["app.use(IMPORTED, byImport);", "/by-import", "IMPORTED"],
   ["app.use(CLAUSE, byClause);", "/by-clause", "CLAUSE"],
   ["app.use(WRAPPED, byWrapped);", "/by-wrapped", "WRAPPED"],
+  ["app.use(DEFAULTED, byDefault);", "/by-default", "DEFAULTED"],
   ["app.use(String(process.env.API_PREFIX), byString);", "/by-string", "String(process.env.API_PREFIX)"],
 ] as const;
 // A literal prefix, a template with no substitution, and first arguments
@@ -44,6 +45,7 @@ const COMPUTED = [
   'import { chooseAuth, h } from "./h.js";',
   'import { PREFIX as IMPORTED } from "./config.js";',
   'import { CLAUSE } from "./clause.js";',
+  'import DEFAULTED from "./default-prefix.js";',
   'const WRAPPED = (process.env["API_PREFIX"] as string)!;',
   'const guard = require("./guard.js");',
   'const PREFIX = "/" + process.env.API_PREFIX;',
@@ -71,6 +73,12 @@ const files: Record<string, string> = {
   // requests the path each route would have with no prefix.
   "src/config.ts": "export const PREFIX = process.env.API_PREFIX;\n",
   "src/clause.ts": "const BASE = process.env.API_BASE;\nexport { BASE as CLAUSE };\n",
+  "src/default-prefix.ts": "const prefix = process.env.API_PREFIX;\nexport default prefix;\n",
+  // Module-level names String and process that a destructuring declares:
+  // the module's own, so String() is a call of middleware and
+  // process.env is no environment.
+  "src/destructured.ts": ['import express, { Router } from "express";', H, 'import { helpers } from "./helpers.js";', "const { String, process } = helpers;", "export const app = express();", "const called = Router();", 'called.get("/by-call", h);', "const env = Router();", 'env.get("/by-env", h);', "app.use(String(), called);", "app.use(process.env.guard, env);"].join("\n"),
+  "src/helpers.ts": [H, "export const helpers = { String: () => h, process: { env: { guard: h } } };"].join("\n"),
   // An object of the repository's own named process: its env is no environment.
   "src/own-process.ts": ['import express, { Router } from "express";', H, 'import { process } from "./process-like.js";', "export const app = express();", "const r = Router();", 'r.get("/own", h);', "app.use(process.env.guard, r);"].join("\n"),
   "src/process-like.ts": ['import { h } from "./h.js";', "export const process = { env: { guard: h } };"].join("\n"),
@@ -147,6 +155,11 @@ describe("the Express plugin on what a review found", () => {
 
   it("reads process.env as the environment only when no name of the file's own is called process", () => {
     expect(regs("src/own-process.ts").map((r) => r.pattern)).toEqual(["/own"]);
+  });
+
+  it("reads String and process as the globals only when no module-level destructuring of the file declares them", () => {
+    expect(regs("src/destructured.ts").map((r) => r.pattern).sort()).toEqual(["/by-call", "/by-env"]);
+    expect(gaps("src/destructured.ts").filter((u) => u.affects.includes("mounts"))).toEqual([]);
   });
 
   it("does not apply middleware given under a prefix from the environment to a route outside that prefix", () => {
