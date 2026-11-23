@@ -483,6 +483,19 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         if (targetKey !== key && item.v.tier === "finding" && target.v.tier === "observation" && shownKeys.has(key) && observationKeys.has(targetKey)) supersededKeys.add(targetKey);
       }
     }
+    // Keys can fold in a cycle when two items share a key (A1 into B, B
+    // into A2), which would fold every key in it away: the cycle's first key
+    // the report shows stays.
+    for (const start of [...foldedInto.keys()]) {
+      const path: string[] = [];
+      let key = start;
+      while (foldedInto.has(key) && !path.includes(key)) { path.push(key); key = keyOf(foldedInto.get(key)!); }
+      if (!path.includes(key)) continue;
+      const cycle = new Set(path.slice(path.indexOf(key)));
+      const keep = report.findings.map(findingKey).find((k) => cycle.has(k)) ?? key;
+      foldedInto.delete(keep);
+      duplicateKeys.delete(keep);
+    }
     // A shown finding (not an observation) folded into another gives the
     // survivor its severity when higher, so a folded major still blocks.
     const severityOf = new Map(report.findings.map((f) => [findingKey(f), f.severity]));
@@ -491,7 +504,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       const severity = severityOf.get(key);
       if (severity === undefined || observationKeys.has(key)) continue;
       let target = keyOf(into);
-      for (const seen = new Set([key]); foldedInto.has(target) && !seen.has(target); seen.add(target)) target = keyOf(foldedInto.get(target)!);
+      while (foldedInto.has(target)) target = keyOf(foldedInto.get(target)!);
       const best = raised.get(target) ?? severityOf.get(target);
       if (best === undefined || severityRank(severity) > severityRank(best)) raised.set(target, severity);
     }
@@ -624,6 +637,10 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       if (item.c.kind === "scanner") return true;
       const key = findingKey({ ...item.finding, line_end: item.finding.line_end ?? item.finding.line_number, candidate: null });
       return item.v.tier === "finding" && !duplicateKeys.has(key);
+    }).map((finding) => {
+      // A survivor keeps the severity it was raised to, so a replay blocks too.
+      const severity = raised.get(findingKey({ ...finding, line_end: finding.line_end ?? finding.line_number, candidate: finding.candidate ?? null }));
+      return severity ? { ...finding, severity } : finding;
     }) };
     const sent = runs.filter((r) => (r.session.sentRounds ?? r.talk.rounds) > 0);
     const digested = new Set(sent.filter((r) => r.digestCarried.length).map((r) => r.unit));

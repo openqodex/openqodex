@@ -327,6 +327,37 @@ it("carries a folded major duplicate's severity to its minor survivor, so the re
   const r = await runStagedReview(f.args);
   expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Survivor", "major"]]);
   expect(r.report.verdict).toBe("blocked");
+  // The saved submission a replay finalizes again carries the same severity.
+  expect(r.submission.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Survivor", "major"]]);
+});
+it("keeps one finding when duplicate links fold two items sharing a key through another, so the review still blocks", async () => {
+  // A1 folds into B and B into A2, and A1 and A2 share a finding key.
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [1, 2].map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }))
+      : [{ ...candidate("a.txt", "Claim 3"), line_number: 3, evidence: [{ file_path: "a.txt", line_number: 3, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const byLine = new Map(brief.batch!.candidates.map((c) => [c.kind === "finder" ? c.candidate.line_number : 0, c.id]));
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        const line = c.kind === "finder" ? c.candidate.line_number : 0;
+        if (line === 1) { v.title = "Twin"; v.line_number = 1; v.duplicate_of = byLine.get(2); }
+        if (line === 2) { v.title = "Other"; v.line_number = 2; v.severity = "minor"; v.duplicate_of = byLine.get(3); }
+        if (line === 3) { v.title = "Twin"; v.line_number = 1; }
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((finding) => finding.severity)).toEqual(["major"]);
+  expect(r.report.verdict).toBe("blocked");
+  expect(r.submission.findings.length).toBeGreaterThan(0);
+  expect(r.submission.findings.every((finding) => finding.severity === "major")).toBe(true);
 });
 it("lets a stopped session leave the budget queue while another session holds the lock", async () => {
   const budgetState = { pending: Promise.resolve(), refused: false };
