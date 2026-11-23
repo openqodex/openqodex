@@ -450,8 +450,25 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     const report = built.checked.report;
     const shownKeys = new Set(report.findings.map(findingKey));
     const keyOf = (item: typeof built.items[number]) => findingKey({ ...item.finding, line_end: item.finding.line_end ?? item.finding.line_number, candidate: item.finding.candidate ?? null });
-    // A key a shown finding owns stays a finding, whatever tier another item with that key was given.
-    const shownFindingTierKeys = new Set(built.items.filter((item) => item.v.tier === "finding").map(keyOf).filter((key) => shownKeys.has(key)));
+    const lowConfidenceOf = (f: FindingV2) => {
+      if (f.source && config.disabledRules.some((glob) => matchesGlob(f.source!, glob))) return null;
+      const lens = f.source?.startsWith("lens:") ? args.manifest.lenses.find((l) => l.name === f.source!.slice("lens:".length)) : undefined;
+      const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lens?.confidenceFloor ?? 0);
+      if (f.confidence >= floor) return null;
+      return { title: redactByFingerprint(f.title, scan.secretFingerprints), file_path: redactByFingerprint(f.file_path, scan.secretFingerprints), confidence: f.confidence, floor };
+    };
+    // A key a shown finding owns stays a finding, whatever tier another item
+    // with that key was given, at the highest severity of its finding-tier
+    // items that count (at or above the floor): an observation sharing the
+    // key never sets it.
+    const countedSeverity = new Map<string, ReportFinding["severity"]>();
+    for (const item of built.items) {
+      const key = keyOf(item);
+      if (item.v.tier !== "finding" || !shownKeys.has(key) || lowConfidenceOf(item.finding) !== null) continue;
+      const best = countedSeverity.get(key);
+      if (best === undefined || severityRank(item.finding.severity) > severityRank(best)) countedSeverity.set(key, item.finding.severity);
+    }
+    const shownFindingTierKeys = new Set(countedSeverity.keys());
     const observationKeys = new Set(built.items.filter((item) => item.v.tier === "observation").map(keyOf).filter((key) => !shownFindingTierKeys.has(key)));
     const shownObservationKeys = new Set((built.visible?.ok ? built.visible.report.findings : report.findings)
       .filter((f) => observationKeys.has(findingKey(f)))
@@ -499,23 +516,23 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       foldedInto.delete(keep);
       duplicateKeys.delete(keep);
     }
-    // A shown finding (not an observation) folded into another gives the
-    // survivor its severity when higher, so a folded major still blocks.
-    const severityOf = new Map(report.findings.map((f) => [findingKey(f), f.severity]));
+    // A counted key folded into another gives the survivor its counted
+    // severity when higher, so a folded major still blocks.
     const raised = new Map<string, ReportFinding["severity"]>();
     for (const [key, into] of foldedInto) {
-      const severity = severityOf.get(key);
-      if (severity === undefined || observationKeys.has(key)) continue;
+      const severity = countedSeverity.get(key);
+      if (severity === undefined) continue;
       let target = keyOf(into);
       while (foldedInto.has(target)) target = keyOf(foldedInto.get(target)!);
-      const best = raised.get(target) ?? severityOf.get(target);
+      const best = raised.get(target) ?? countedSeverity.get(target);
       if (best === undefined || severityRank(severity) > severityRank(best)) raised.set(target, severity);
     }
     const observations: ReportFinding[] = [];
     report.findings = report.findings.flatMap((f) => {
       const key = findingKey(f);
       if (duplicateKeys.has(key)) return [];
-      const entry = { ...f, ...(raised.has(key) ? { severity: raised.get(key)! } : {}) };
+      const severity = raised.get(key) ?? countedSeverity.get(key);
+      const entry = { ...f, ...(severity ? { severity } : {}) };
       if (observationKeys.has(key)) { if (!supersededKeys.has(key)) observations.push(entry); return []; }
       return [entry];
     });
@@ -550,13 +567,6 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       }
     };
     ownComponent(owned, [...owned]);
-    const lowConfidenceOf = (f: FindingV2) => {
-      if (f.source && config.disabledRules.some((glob) => matchesGlob(f.source!, glob))) return null;
-      const lens = f.source?.startsWith("lens:") ? args.manifest.lenses.find((l) => l.name === f.source!.slice("lens:".length)) : undefined;
-      const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lens?.confidenceFloor ?? 0);
-      if (f.confidence >= floor) return null;
-      return { title: redactByFingerprint(f.title, scan.secretFingerprints), file_path: redactByFingerprint(f.file_path, scan.secretFingerprints), confidence: f.confidence, floor };
-    };
     const matchesLow = (low: Report["low_confidence"][number], entry: Report["low_confidence"][number]) => low.title === entry.title && low.file_path === entry.file_path && low.confidence === entry.confidence && low.floor === entry.floor;
     const removeLow = (entry: Report["low_confidence"][number]) => {
       const index = report.low_confidence.findIndex((low) => matchesLow(low, entry));
