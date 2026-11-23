@@ -63,6 +63,7 @@ export const NEXT = {
   typeCut: "Read the long type annotations in this file: the types past the cut are not recorded as used, so a type's references may miss this file.",
   unreadImport: "Search this file for uses of the imported type that the graph did not read.",
   dynamicBase: "Read the base expression to learn which class this one extends; a call through that base may run this class's methods.",
+  unread: "Read the code here, which the parser could not read (a syntax error, or a shape the grammar does not know): a call in it may run the target.",
   budget: "Build again with a larger budget (`openqodex graph build`) so the calls of this file are resolved.",
   metadata: "Fix or restore this manifest so the graph can read it, then build again.",
   framework: "Read the framework registrations near this place: a handler, middleware or job past the plugin's limit may be the target.",

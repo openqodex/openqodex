@@ -3798,6 +3798,11 @@ export function createWorld(input: ResolveInput): World {
         // `references` reads by file, and no caller.
         unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: 0 }, reaches: { ids: [] }, next: NEXT.typeCut, note: `${f.typeCuts} type ${f.typeCuts === 1 ? "annotation is" : "annotations are"} too large to read whole (over 4,096 parts); the types past the cut are not recorded as type uses` }));
       }
+      // A region the parser could not read may hide a call of any name
+      // written in or around it, or one through a value (scope "project").
+      for (const r of f.unread ?? []) {
+        unknowns.push(gap({ cause: "file-not-parsed", place: { file: path, line: r.line, column: r.column }, reaches: r.names === null ? "scope" : { names: r.names }, next: NEXT.unread, name: "", scope: "project", note: "the parser could not read the code here, so a call in it may be missing" }));
+      }
       for (const t of f.types) {
         const k = typeKey(path, family, t.ref, 0, true, family === "java" && t.caller >= 0 ? javaNestingOf(defById.get(callerOf(t.caller))) : null);
         if (k === null || k === "ext") continue;

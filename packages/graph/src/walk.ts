@@ -33,6 +33,8 @@
 // not make (a type the reader did not name in `keep`): it is found from
 // the nearest node made below it, once, and kept on the path.
 import type { Language, Node, Tree } from "web-tree-sitter";
+import { MAX_FACT_STRING, MAX_UNREAD_NAMES } from "./types.js";
+import type { UnreadRegion } from "./types.js";
 
 // The node's ancestors: `up(1)` its parent, `up(2)` the one above.
 export type Up = (k: number) => Node | null;
@@ -141,6 +143,76 @@ function regionsOf(tree: Tree): Regions {
   regions = { starts: found.map((r) => r[0]), ends: found.map((r) => r[1]) };
   regionsByTree.set(tree, regions);
   return regions;
+}
+
+// What each region the parser could not read may hide (FileFacts.unread):
+// its line and column, and every word written from its previous named
+// sibling to its next one, but in a comment or the text of a string. A
+// call there may be read as something else or not at all, and the
+// parser's recovery may leave the callee in a neighbour (`F(` in Go leaves
+// `F` a value before the region), so the neighbours' words count too. A
+// call that names no word there goes through a value (a string's text
+// names a function only to code that runs a name built at run time); the
+// facts are cached and feed the review packet, so a string's text, which
+// may hold a key, is never kept. Regions whose spans overlap are one.
+// `names` is null past MAX_UNREAD_NAMES words: then the region may hide a
+// call of anything.
+const WORD = /[\p{L}_$][\p{L}\p{N}_$]*[?!]?/gu;
+const isComment = (n: Node) => n.type.includes("comment");
+// A leaf that holds a literal's text, not code: a string's piece, a
+// character, an escape (an interpolation's code is no leaf of this kind).
+const isText = (n: Node) => /string|heredoc|character|rune|escape/.test(n.type);
+export function unreadRegions(tree: Tree): UnreadRegion[] {
+  if (!tree.rootNode.hasError) return [];
+  const spans: { start: number; end: number; line: number; column: number; nodes: Node[] }[] = [];
+  const stack: Node[] = [tree.rootNode];
+  while (stack.length > 0) {
+    const parent = stack.pop() as Node;
+    const kids = parent.children.filter((c): c is Node => c !== null);
+    kids.forEach((n, i) => {
+      if (n.type === "ERROR" || (n.isMissing && !graceful(n))) {
+        let from = i;
+        for (let k = i - 1; k >= 0 && from === i; k--) if ((kids[k] as Node).isNamed && !isComment(kids[k] as Node)) from = k;
+        let to = i;
+        for (let k = i + 1; k < kids.length && to === i; k++) if ((kids[k] as Node).isNamed && !isComment(kids[k] as Node)) to = k;
+        const nodes = kids.slice(from, to + 1);
+        spans.push({ start: (nodes[0] as Node).startIndex, end: (nodes[nodes.length - 1] as Node).endIndex, line: n.startPosition.row + 1, column: n.startPosition.column, nodes });
+      } else if (n.hasError) stack.push(n);
+    });
+  }
+  spans.sort((a, b) => a.start - b.start);
+  const out: UnreadRegion[] = [];
+  let open: { end: number; region: UnreadRegion; words: Set<string> } | null = null;
+  const close = () => {
+    if (!open) return;
+    open.region.names = open.words.size > MAX_UNREAD_NAMES ? null : [...open.words];
+    out.push(open.region);
+  };
+  for (const s of spans) {
+    if (!open || s.start > open.end) {
+      close();
+      open = { end: s.end, region: { line: s.line, column: s.column, names: [] }, words: new Set() };
+    } else open.end = Math.max(open.end, s.end);
+    const words = open.words;
+    const below: Node[] = [...s.nodes];
+    while (below.length > 0) {
+      const n = below.pop() as Node;
+      if (isComment(n)) continue;
+      if (n.childCount > 0) {
+        for (const c of n.children) if (c) below.push(c);
+        continue;
+      }
+      if (isText(n)) continue;
+      for (const w of n.text.match(WORD) ?? []) {
+        if (w.length > MAX_FACT_STRING) continue;
+        words.add(w);
+        // `save!` and `valid?` are Ruby names; the same word bare may be another.
+        if (w.endsWith("?") || w.endsWith("!")) words.add(w.slice(0, -1));
+      }
+    }
+  }
+  close();
+  return out;
 }
 
 // Whether a node holds a region the parser could not read: `hasError`,

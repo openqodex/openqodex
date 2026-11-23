@@ -9,7 +9,8 @@ import { createHash } from "node:crypto";
 import type { Node, Tree } from "web-tree-sitter";
 import type { BoundImport, CallFact, DefFact, EscapeFact, FileFacts, OpaqueFact, ImportFact, Lang, LiteralFact, Receiver, TableFact, TypeRef, TypeUse, ValueRef } from "./types.js";
 import { MAX_AMBIENT_NAMES, MAX_FACT_STRING, MAX_TYPE_DEPTH } from "./types.js";
-import { walkTree } from "./walk.js";
+import { keyShaped } from "./frameworks/shared/kept.js";
+import { unreadRegions, walkTree } from "./walk.js";
 import type { TreeVisitor } from "./walk.js";
 
 // Bump when the facts change shape or meaning: every cached file is re-parsed.
@@ -142,7 +143,11 @@ import type { TreeVisitor } from "./walk.js";
 // the Express facts keep a computed string, and a string given to a name no
 // path reads, as a string with no text, and read `process.env["X"]` as
 // `process.env.X`.
-export const EXTRACTOR_VERSION = 55;
+// 56: a region the parser could not read is kept with the words in and
+// around it (`unread`); Java `getMethod` and its kin, Go `MethodByName`
+// and Python `getattr` are calls of the name they are given, or computed
+// callees when it is not a plain string.
+export const EXTRACTOR_VERSION = 56;
 
 type Frame = {
   def: number; // the definition this frame belongs to, -1 for none
@@ -387,6 +392,20 @@ function typeNodes(node: Node | null, take: (n: Node) => boolean): void {
       if (c) stack.push(c);
     }
   }
+}
+
+// The name a string literal gives, when it has no escape or interpolation
+// and reads as a name, else null. A literal shaped like a key is no name:
+// the facts are cached and feed the review packet, so a key there would be
+// copied out (frameworks/shared/kept.ts).
+const STRING_NODES = new Set(["string", "string_literal", "interpreted_string_literal", "raw_string_literal"]);
+const STRING_TEXT = new Set(["string_content", "string_fragment", "interpreted_string_literal_content", "raw_string_literal_content"]);
+const NAME = /^[\p{L}_$][\p{L}\p{N}_$]*$/u;
+function stringName(node: Node): string | null {
+  if (!STRING_NODES.has(node.type)) return null;
+  const parts = node.namedChildren.filter((c) => c.type !== "string_start" && c.type !== "string_end");
+  const text = parts.length === 1 && STRING_TEXT.has((parts[0] as Node).type) ? (parts[0] as Node).text : null;
+  return text !== null && text.length <= MAX_FACT_STRING && NAME.test(text) && !keyShaped(text) ? text : null;
 }
 
 class Ctx {
@@ -743,6 +762,17 @@ class Ctx {
   addDynamicCall(node: Node): void {
     const { line, column } = pos(node);
     this.calls.push({ name: "", line, column, caller: this.caller(), recv: { kind: "other" }, dynamic: true });
+  }
+
+  // A call by a name built at run time (Java `getMethod(n)`, Go
+  // `MethodByName(n)`, Python `getattr(o, n)`): a name written as a plain
+  // string is a call of that name on a value of unknown type; any other
+  // (or `arg` undefined) makes a computed callee, which may run any function.
+  addNameBuiltCall(node: Node, arg: Node | undefined): void {
+    const name = arg ? stringName(arg) : null;
+    if (!arg || name === null) return this.addDynamicCall(node);
+    const i = this.addCall(arg, { kind: "other" });
+    (this.calls[i] as CallFact).name = name;
   }
 
   addCall(nameNode: Node, recv: Receiver, implicit = false, receiverName?: string): number {
@@ -4048,6 +4078,11 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           if (v) ctx.addValue(v, "arg", known ? { call, arg: i } : {});
           i++;
         }
+        // getattr(o, name): a call of the method it may take, by that name.
+        if (fn?.type === "identifier" && fn.text === "getattr") {
+          const all = args?.namedChildren.filter((a) => a.type !== "comment") ?? [];
+          if (all.length >= 2) ctx.addNameBuiltCall(node, all[1]?.type === "keyword_argument" || all[1]?.type === "list_splat" ? undefined : all[1]);
+        }
         // isinstance(x, Repo) and issubclass: the classes are type uses.
         if (fn?.type === "identifier" && (fn.text === "isinstance" || fn.text === "issubclass")) {
           for (const r of pyTypeNames(args?.namedChildren[1] ?? null)) ctx.addTypeUse(r, ctx.caller());
@@ -4503,6 +4538,8 @@ function extractGo(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           const field = fn.childForFieldName("field");
           const operand = fn.childForFieldName("operand");
           if (field && operand) ctx.addCall(field, goReceiver(ctx, operand), false, operand.type === "identifier" ? operand.text : undefined);
+          // reflect's v.MethodByName(name): a call of the method of that name.
+          if (field?.text === "MethodByName") ctx.addNameBuiltCall(node, node.childForFieldName("arguments")?.namedChildren.find((a) => a.type !== "comment"));
         } else if (fn?.type === "index_expression") {
           // handlers[key](x): a computed callee, maybe on a literal table.
           ctx.addDynamicCall(fn);
@@ -4568,6 +4605,13 @@ const JAVA_TYPES = new Set([
   "method_reference",
   "assignment_expression",
 ]);
+
+// Java reflection that finds a method by a name given at run time, with
+// the argument that names it: `c.getMethod(name, ...)`,
+// `lookup.findVirtual(c, name, type)`. -1: no name, every method
+// (`c.getMethods()`). `getMethod` with no argument is another method
+// (a servlet request's).
+const JAVA_REFLECT = new Map([["getMethod", 0], ["getDeclaredMethod", 0], ["findVirtual", 1], ["findStatic", 1], ["findSpecial", 1], ["getMethods", -1], ["getDeclaredMethods", -1]]);
 
 // The keywords of a declaration's modifiers (`public`, `static`, `abstract`, `default`).
 function javaModifiers(node: Node): Set<string> {
@@ -5386,6 +5430,10 @@ function extractJava(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
         const recv: Receiver = object ? javaReceiver(ctx, object) : ctx.cls() ? { kind: "self", path: [] } : { kind: "other" };
         addCall(name, recv, node.childForFieldName("arguments"), node);
         if (object?.type === "identifier" && javaLocalValue(ctx, object.text) !== undefined) paramCalls.push({ name: object.text, scope: ctx.top });
+        // Reflection: a method found by a name given at run time.
+        const at = JAVA_REFLECT.get(name.text);
+        const args = node.childForFieldName("arguments")?.namedChildren.filter((c) => c.type !== "line_comment" && c.type !== "block_comment") ?? [];
+        if (at !== undefined && args.length > at) ctx.addNameBuiltCall(node, args[at]);
         return;
       }
       case "object_creation_expression": {
@@ -5599,10 +5647,11 @@ function extractRuby(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
 // `readers`: the framework plugins' fact readers of the same file
 // (frameworks/facts.ts), shown the tree on the extractor's own walk, so a
 // file is walked once for everything read from it.
+// A region the parser could not read is kept (`unread`): a call in it may
+// be missing from the calls.
 export function extract(tree: Tree, lang: Lang, readers: readonly TreeVisitor[] = []): FileFacts {
-  if (lang === "python") return extractPython(tree, readers);
-  if (lang === "go") return extractGo(tree, readers);
-  if (lang === "ruby") return extractRuby(tree, readers);
-  if (lang === "java") return extractJava(tree, readers);
-  return extractJs(tree, lang, readers);
+  const facts = lang === "python" ? extractPython(tree, readers) : lang === "go" ? extractGo(tree, readers) : lang === "ruby" ? extractRuby(tree, readers) : lang === "java" ? extractJava(tree, readers) : extractJs(tree, lang, readers);
+  const unread = unreadRegions(tree);
+  if (unread.length > 0) facts.unread = unread;
+  return facts;
 }

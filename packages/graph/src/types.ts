@@ -29,6 +29,9 @@ export const MAX_AMBIENT_NAMES = 200_000;
 // longer than it is not kept as declared plain data, so the facts that
 // hold it still read back.
 export const MAX_FACT_STRING = 4096;
+// The most words one region the parser could not read keeps
+// (UnreadRegion.names); past it the region may hide a call of anything.
+export const MAX_UNREAD_NAMES = 4096;
 
 // A type named in source: `Repo`, `pkg.Repo` (qualifier "pkg"), Ruby `A::B`
 // (whole path in `name`, the lexical nesting in `qualifier`).
@@ -302,6 +305,11 @@ export type EscapeFact =
 // these names.
 export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any"; name?: string; passed?: boolean; plain?: string[] };
 
+// A region of a file the parser could not read (walk.ts, unreadRegions):
+// where it starts, and the words written in and around it, which name
+// what a call hidden there may run; null when there are too many to keep.
+export type UnreadRegion = { line: number; column: number; names: string[] | null };
+
 export type FileFacts = {
   lang: Lang;
   defs: DefFact[];
@@ -309,6 +317,9 @@ export type FileFacts = {
   values: ValueRef[];
   types: TypeUse[];
   typeCuts?: number; // annotations too large to read whole: their types past the cut are not type uses
+  // The regions the parser could not read (a syntax error, or a shape the
+  // grammar does not know): a call there may be missing from `calls`.
+  unread?: UnreadRegion[];
   tables: TableFact[];
   // TypeScript and JavaScript: each object literal that is no definition of
   // the graph (an argument, a returned object, a local) and names a member
