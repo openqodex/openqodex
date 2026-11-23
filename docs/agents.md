@@ -249,7 +249,7 @@ npx openqodex init --uninstall
 
 Add `--project` to remove project files. `init` records what it wrote in `~/.openqodex/install.json`. `--uninstall` removes only what that record holds:
 
-- A skill or rule file is removed only when it is unchanged since `init` wrote it.
+- A skill or rule file is removed only when it is unchanged since `init` wrote it, and no agent that stays set up uses it. In project scope Codex and Cursor share `.agents/skills/openqodex/SKILL.md`: `--uninstall --agent codex` leaves it for Cursor.
 - The instruction section is removed from each file; your own text in that file stays.
 - In the repository you run it in: the git pre-push hook, when it is still the one OpenQodex wrote, and the `.openqodex/config.yaml` and `.openqodex/custom-instructions.md` that `init` created, when they are unchanged and not committed.
 - The hook entry is removed from the settings file. Other settings stay. When `init` saved a backup and nothing else changed, the backup is put back.
