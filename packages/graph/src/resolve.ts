@@ -179,7 +179,8 @@ const LOOKUP_CUT = {
 
 // A branch of an `export *` set the graph could not follow: what it was
 // and why. It may bring the name too.
-type Unfollowed = { spec: string; cause: Cause; note: string };
+// `file`: the repository module of an `export *` whose lookup gave up.
+type Unfollowed = { spec: string; cause: Cause; note: string; file?: string };
 
 // A step through a module: the outer binding (the import the call read)
 // keeps its kind and line; the tier is the weaker of the two and the notes
@@ -214,11 +215,11 @@ type Mod =
   | null; // a path specifier that names nothing here: a miss
 
 // What a name or an expression stands for.
-// `unfollowed` on a sym: a branch that may also bring the name (an
-// `export *` too deep or not read) was not followed, so escape analysis
-// treats it as a gap (`offers`).
+// `unfollowed` on a sym: the repository modules of `export *` branches
+// that may also bring the name and whose lookup gave up (too deep), so
+// escape analysis visits them whole (`offers`, issue 448).
 type Value =
-  | { v: "sym"; ids: string[]; ev: Ev; unfollowed?: true }
+  | { v: "sym"; ids: string[]; ev: Ev; unfollowed?: string[] }
   | { v: "mod"; file: string; ev: Ev }
   | { v: "pkg"; dir: string; ev: Ev }
   | { v: "pyns"; dir: string; ev: Ev } // a Python namespace package: a folder without __init__.py
@@ -1106,7 +1107,7 @@ export function createWorld(input: ResolveInput): World {
           else {
             const hit = withEv(index.exports(mod.file, name, depth + 1), mod.ev);
             if (hit === null) unfollowed.push({ spec: imp.spec, cause: "miss", note: `export * from ${imp.spec} could not be read` });
-            else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note });
+            else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note, file: mod.file });
             else if (hit.v !== "miss" || hit.held) starHits.push({ v: hit, spec: imp.spec });
           }
         }
@@ -1150,11 +1151,12 @@ export function createWorld(input: ResolveInput): World {
   function onlyPossible(v: Value, open: Unfollowed[]): Value {
     if (open.length === 0 || v.v !== "sym") return v;
     const why = `${open.map((u) => u.note).join("; ")}, so the name may come from there instead.`;
-    return { ...v, ev: { ...v.ev, tier: weakest(v.ev.tier, "possible"), note: [v.ev.note, why].filter(Boolean).join(" ") }, ...(leftOpen(open) ? { unfollowed: true as const } : {}) };
+    return withOpen({ ...v, ev: { ...v.ev, tier: weakest(v.ev.tier, "possible"), note: [v.ev.note, why].filter(Boolean).join(" ") } }, open);
   }
-  // A branch other than a package outside the repository was not followed.
-  function leftOpen(open: Unfollowed[]): boolean {
-    return open.some((u) => u.cause !== "external");
+  // A sym with the repository modules of the branches its lookup left open.
+  function withOpen<V extends Extract<Value, { v: "sym" }>>(v: V, open: Unfollowed[]): V {
+    const files = open.flatMap((u) => (u.file !== undefined ? [u.file] : []));
+    return files.length === 0 ? v : { ...v, unfollowed: [...(v.unfollowed ?? []), ...files] };
   }
 
   // No branch brought the name: the first branch that could not be
@@ -1186,7 +1188,7 @@ export function createWorld(input: ResolveInput): World {
     const note = `${file} re-exports ${name} through export * from ${distinct.size} modules (${[...distinct.values()].map((h) => h.spec).join(", ")}); JavaScript exports neither, and a bundler may pick one.${unopened}`;
     if (syms.length < 2) return { v: "gap", cause: "ambiguous", note, candidates: [...distinct.keys()] };
     const base = syms[0]?.v.ev as Ev;
-    return { v: "sym", ids: syms.flatMap((h) => h.v.ids), ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" }, ...(leftOpen(open) ? { unfollowed: true as const } : {}) };
+    return withOpen({ v: "sym", ids: syms.flatMap((h) => h.v.ids), ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } }, open);
   }
 
   // A value reached through a module step keeps that step's evidence.
@@ -4036,9 +4038,14 @@ export function createWorld(input: ResolveInput): World {
     // stars from when its walk was cut. `skip` leaves out the names a
     // module above already gives itself, and `default`, which no star brings.
     // Escape analysis walks on a step budget of its own (escapeWalk).
-    const offers = (file: string, skip: NameSet | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string> } => {
+    // `open`: the modules of `export *` branches a lookup gave up on (too
+    // deep) though another branch gave the name, and `openNames` those
+    // names: such a branch may bring the name from elsewhere (issue 448).
+    const offers = (file: string, skip: NameSet | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string>; open: string[]; openNames: Set<string> } => {
       const ids: string[] = [];
       const modules: string[] = [];
+      const open: string[] = [];
+      const openNames = new Set<string>();
       let gap = false;
       const names = exportedJsNames(file, escapeWalk);
       for (const [name] of names) {
@@ -4047,8 +4054,10 @@ export function createWorld(input: ResolveInput): World {
         const v = index.exports(file, name, 0);
         if (v?.v === "sym") {
           ids.push(...v.ids);
-          // A branch left unfollowed may bring the name from elsewhere (issue 448).
-          if (v.unfollowed) gap = true;
+          if (v.unfollowed) {
+            open.push(...v.unfollowed);
+            openNames.add(name);
+          }
         } else if (v?.v === "mod") modules.push(v.file);
         else if (v?.v === "gap") gap = true;
       }
@@ -4061,7 +4070,7 @@ export function createWorld(input: ResolveInput): World {
           if (mod !== null && "file" in mod) stars.push(mod.file);
         }
       }
-      return { ids, modules, stars, names: names.keys() };
+      return { ids, modules, stars, names: names.keys(), open, openNames };
     };
     // The modules a module forwards names from: `export ... from`, and a
     // local `export { f }` or `export default f` of an imported name.
@@ -4083,6 +4092,7 @@ export function createWorld(input: ResolveInput): World {
     };
     const modules = new Map<string, Place>();
     const offered = new Set<string>();
+    const NO_KEEP: ReadonlySet<string> = new Set();
     const walk = (start: string, place: Place) => {
       // A star's skip is a NameSet: each hop of a long chain of stars adds
       // its own names to the set above it without copying it.
@@ -4166,17 +4176,29 @@ export function createWorld(input: ResolveInput): World {
           const o = offers(file, skip);
           for (const id of o.ids) addReach(id, { why: "module", ...place });
           for (const m of o.modules) queue.push({ file: m, whole: true, skip: null });
-          if (o.stars.length > 0) {
+          const listed = o.stars.length > 0 || o.open.length > 0 ? ["default", ...o.names] : [];
+          // A star visit skips the names given above it and, but for `keep`, the module's own.
+          const skipOwn = (keep: ReadonlySet<string>): NameSet => {
             const from = skip ?? NO_NAMES;
             let given = from;
             const added: string[] = [];
-            for (const n of ["default", ...o.names]) {
+            for (const n of listed) {
+              if (keep.has(n)) continue;
               const next = withName(given, n);
               if (next !== given) added.push(n);
               given = next;
             }
             if (added.length > 0) made.set(given, { from, added, size: sizeOf(from) + added.length });
+            return given;
+          };
+          if (o.stars.length > 0) {
+            const given = skipOwn(NO_KEEP);
             for (const m of o.stars) queue.push({ file: m, whole: true, skip: given });
+          }
+          // A branch a lookup gave up on is visited for the names it may bring instead.
+          if (o.open.length > 0) {
+            const given = skipOwn(o.openNames);
+            for (const m of new Set(o.open)) queue.push({ file: m, whole: true, skip: given });
           }
         }
         for (const m of forwards(file)) queue.push({ file: m, whole: false, skip: null });

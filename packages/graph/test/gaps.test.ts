@@ -63,23 +63,22 @@ describe("a give-up reaches the floors it can hide a caller from", () => {
     expect(a.unknown.floor).toBe(true);
   }, 60_000);
 
-  it("floors a handler's callers when the framework plugin stopped at its registration cap (3)", async () => {
+  it("floors an action's callers when the framework plugin stopped at a cap, where nothing else would (3)", async () => {
+    // A Rails route names its action by a string, so no use as a value floors it.
+    const nest = (body: string, depth: number): string => (depth === 0 ? body : `namespace :n${depth} do\n${nest(body, depth - 1)}end\n`);
     const root = makeRepo({
-      "requirements.txt": "Django==5.0\n",
-      "mysite/__init__.py": "",
-      "mysite/settings.py": 'INSTALLED_APPS = []\nROOT_URLCONF = "mysite.urls"\n',
-      "mysite/urls.py": `from django.urls import include, path\n\nurlpatterns = [\n${Array.from({ length: 20 }, (_, i) => `    path("p${i}/", include("mysite.table")),\n`).join("")}]\n`,
-      "mysite/table.py": `from django.urls import path\n\nfrom mysite import views\n\nurlpatterns = [\n${Array.from({ length: 600 }, (_, i) => `    path("r${i}/", views.page),\n`).join("")}]\n`,
-      "mysite/views.py": "def page(request):\n    return None\n",
+      Gemfile: 'source "https://rubygems.org"\n\ngem "rails"\n',
+      "config/routes.rb": `Rails.application.routes.draw do\n${nest('get "deep", to: "users#deep"\n', 9)}get "top", to: "users#top"\nend\n`,
+      "app/controllers/users_controller.rb": "class UsersController < ApplicationController\n  def deep\n  end\n\n  def top\n  end\nend\n",
     });
     commitAll(root);
     const graph = await buildGraph({ repoRoot: root, store: null });
-    const a = ask(graph, { kind: "callers", target: { name: "page", file: "mysite/views.py" } });
+    const a = ask(graph, { kind: "callers", target: { name: "deep", file: "app/controllers/users_controller.rb" } });
     expect(a.error).toBeNull();
     expect(a.unknown.floor).toBe(true);
-    expect(a.unknown.reasons.join(" ")).toMatch(/the django plugin gave up/);
-    expect(a.unknown.gaps).toContainEqual(expect.objectContaining({ cause: "fan-out-capped", next: NEXT.framework }));
-  }, 120_000);
+    expect(a.unknown.reasons.join(" ")).toMatch(/the rails plugin gave up at config\/routes\.rb:\d+ \(fan-out-capped\): route blocks nested deeper than eight levels are not read/);
+    expect(a.unknown.gaps).toContainEqual(expect.objectContaining({ cause: "fan-out-capped", file: "config/routes.rb", next: NEXT.framework }));
+  }, 60_000);
 
   it("joins a gap on what it reaches: ids, a file, the whole project, a name (4)", async () => {
     const files = {
