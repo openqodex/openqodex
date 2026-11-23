@@ -573,8 +573,10 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   // required module, a value of a type the facts do not hold, is not.
   type Binding = { file: string; at: number; name: string };
   const NOT = -1;
-  // A name no binding of the file holds: the global of that name.
-  const isGlobal = (file: string, scope: number, name: string): boolean => bindingScope(file, scope, name) === 0 && writesOf(file, name, 0).length === 0 && lookup(file, [name]).kind === "none";
+  // A name no binding of the file holds: the global of that name. A
+  // module-level destructuring (`const { String } = helpers`) writes no
+  // value fact, so the file's module-level variables are checked too.
+  const isGlobal = (file: string, scope: number, name: string): boolean => bindingScope(file, scope, name) === 0 && writesOf(file, name, 0).length === 0 && !index.languageFacts(file)?.variables?.includes(name) && lookup(file, [name]).kind === "none";
   // The module and the name a module-level name is imported as: the index's
   // own answer, or, for a name the module exports with an export clause
   // (which the index binds to no definition), the import that names it.
@@ -602,8 +604,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     const target = importTarget(file, name);
     const lf = target ? index.languageFacts(target.file) : null;
     if (!target || !lf) return NOT;
-    // `export const X = ...`, or `const Y = ...; export { Y as X }`.
-    const local = writesOf(target.file, target.name, 0).some((v) => v.exported) ? target.name : (lf.exportsLocal.find((x) => x.exported === target.name)?.local ?? null);
+    // `export default Y`, `export const X = ...`, or `const Y = ...; export { Y as X }`.
+    const local = (target.name === "default" ? lf.defaultExport : null) ?? (writesOf(target.file, target.name, 0).some((v) => v.exported) ? target.name : (lf.exportsLocal.find((x) => x.exported === target.name)?.local ?? null));
     return local !== null && writesOf(target.file, local, 0).length > 0 ? { file: target.file, at: 0, name: local } : NOT;
   };
   // How many names a binding is from a string (1 when every write is
