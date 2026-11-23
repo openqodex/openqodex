@@ -1,0 +1,82 @@
+{
+  "covers": "a gin or net/http call with more arguments than the Go fact reader keeps (go-http/facts MAX_ARGS)",
+  "caps": [
+    "frameworks/go-http/facts.ts#MAX_ARGS"
+  ],
+  "commit": true,
+  "files": {
+    "route/go.mod": "module example.com/route\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "route/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/x\", m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, deep)\n\tr.Run()\n}\n",
+    "use/go.mod": "module example.com/use\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "use/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.Use(m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, deep)\n\tr.GET(\"/x\", m)\n\tr.Run()\n}\n",
+    "group/go.mod": "module example.com/group\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "group/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tg := r.Group(\"/g\", m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, deep)\n\tg.GET(\"/x\", m)\n\tr.Run()\n}\n",
+    "mux/go.mod": "module example.com/mux\n\ngo 1.22\n",
+    "mux/main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm := n.NewServeMux()\n\tm.HandleFunc(\"/x\", deep, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "route/main.go#deep",
+      "caller": null,
+      "file": "route/main.go",
+      "line": 11
+    },
+    {
+      "target": "use/main.go#deep",
+      "caller": null,
+      "file": "use/main.go",
+      "line": 11
+    },
+    {
+      "target": "group/main.go#deep",
+      "caller": null,
+      "file": "group/main.go",
+      "line": 11
+    },
+    {
+      "target": "mux/main.go#deep",
+      "caller": null,
+      "file": "mux/main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "route/main.go#deep",
+      "reason": "the call has more than 24 arguments",
+      "at": "route/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "route/main.go:11"
+      }
+    },
+    {
+      "target": "use/main.go#deep",
+      "reason": "the Use call has more than 24 arguments",
+      "at": "use/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "use/main.go:11"
+      }
+    },
+    {
+      "target": "group/main.go#deep",
+      "reason": "the Group call has more than 24 arguments",
+      "at": "group/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "group/main.go:11"
+      }
+    },
+    {
+      "target": "mux/main.go#deep",
+      "reason": "the call has more than 24 arguments",
+      "at": "mux/main.go:9",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "mux/main.go:9"
+      }
+    }
+  ]
+}

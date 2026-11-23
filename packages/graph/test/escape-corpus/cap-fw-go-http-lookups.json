@@ -1,0 +1,167 @@
+{
+  "covers": "a net/http handler met after the plugin's name lookups for one build ran out (go-http MAX_LOOKUPS)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_LOOKUPS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc h(w n.ResponseWriter, r *n.Request) {}\n\nfunc rega() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "b.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regb() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "c.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regc() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "d.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regd() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "e.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc rege() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "f.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regf() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "g.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regg() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "h.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regh() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "i.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regi() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "j.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regj() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "k.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regk() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "l.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regl() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "m.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regm() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "n.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regn() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "o.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc rego() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "p.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regp() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "q.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\t\"strings\"\n)\n\nfunc regq() {\n",
+      {
+        "repeat": "\tstrings.X.HandleFunc(\"/x\", h)\n",
+        "times": 1990
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm := n.NewServeMux()\n\tm.HandleFunc(\"/y\", deep)\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped looking names up after 100000",
+      "at": "q.go:1",
+      "gap": {
+        "cause": "budget",
+        "at": "q.go:1"
+      }
+    }
+  ]
+}

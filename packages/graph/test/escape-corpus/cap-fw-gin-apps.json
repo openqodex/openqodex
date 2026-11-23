@@ -1,0 +1,55 @@
+{
+  "covers": "a Gin route on an engine past the engines the plugin lists in one build (gin MAX_APPS)",
+  "caps": [
+    "frameworks/gin/resolve.ts#MAX_APPS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\n",
+      {
+        "repeat": "var a{{i}} = gin.Default()\n",
+        "times": 1667
+      },
+      ""
+    ],
+    "b.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\n",
+      {
+        "repeat": "var b{{i}} = gin.Default()\n",
+        "times": 1667
+      },
+      ""
+    ],
+    "c.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\n",
+      {
+        "repeat": "var c{{i}} = gin.Default()\n",
+        "times": 1667
+      },
+      ""
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/x\", deep)\n\tr.Run()\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped listing applications after 5000",
+      "at": "c.go:1671",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "c.go:1671"
+      }
+    }
+  ]
+}
