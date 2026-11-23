@@ -192,9 +192,11 @@ export function unreadRegions(tree: Tree): UnreadRegion[] {
       } else if (n.hasError) stack.push(n);
     });
   }
-  spans.sort((a, b) => a.start - b.start);
+  // Outer spans first: a span inside one already walked is not walked
+  // again, so nested regions cost one walk of what they cover.
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
   const out: UnreadRegion[] = [];
-  let open: { end: number; region: UnreadRegion; words: Set<string>; blind: boolean } | null = null;
+  let open: { end: number; walked: number; region: UnreadRegion; words: Set<string>; blind: boolean } | null = null;
   const close = () => {
     if (!open) return;
     open.region.names = open.blind || open.words.size > MAX_UNREAD_NAMES ? null : [...open.words];
@@ -203,11 +205,14 @@ export function unreadRegions(tree: Tree): UnreadRegion[] {
   for (const s of spans) {
     if (!open || s.start > open.end) {
       close();
-      open = { end: s.end, region: { line: s.line, column: s.column, names: [] }, words: new Set(), blind: false };
+      open = { end: s.end, walked: s.start, region: { line: s.line, column: s.column, names: [] }, words: new Set(), blind: false };
     } else open.end = Math.max(open.end, s.end);
     const region = open;
+    // Past the cap, or blind, the region keeps no names: nothing more to read.
+    if (region.blind || region.words.size > MAX_UNREAD_NAMES) continue;
     // The leaves in the order they are written, each with its parent.
-    const below: [Node, Node | null][] = s.nodes.map((n): [Node, Node | null] => [n, null]).reverse();
+    const below: [Node, Node | null][] = s.nodes.filter((n) => n.endIndex > region.walked).map((n): [Node, Node | null] => [n, null]).reverse();
+    region.walked = Math.max(region.walked, s.end);
     while (below.length > 0) {
       const [n, parent] = below.pop() as [Node, Node | null];
       if (isComment(n)) continue;
@@ -218,12 +223,13 @@ export function unreadRegions(tree: Tree): UnreadRegion[] {
         }
         continue;
       }
-      if (isText(n)) continue;
-      // An unmatched quote: what follows it in the span may be a string's text.
+      // An unmatched quote (Python's `string_start` too, before it is read
+      // as a string's piece): what follows it may be a string's text.
       if ((parent === null ? n.type === "ERROR" : parent.type === "ERROR") && QUOTE.test(n.text)) {
         region.blind = true;
         break;
       }
+      if (isText(n)) continue;
       for (const run of n.text.match(RUN) ?? []) {
         if (keyShaped(run)) {
           region.blind = true;
@@ -240,6 +246,7 @@ export function unreadRegions(tree: Tree): UnreadRegion[] {
           if (w.endsWith("?") || w.endsWith("!")) region.words.add(w.slice(0, -1));
         }
       }
+      if (region.blind || region.words.size > MAX_UNREAD_NAMES) break;
     }
   }
   close();
