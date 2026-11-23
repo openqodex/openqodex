@@ -138,7 +138,10 @@ import type { TreeVisitor } from "./walk.js";
 // the top of the module that binds its name is typing's; a Python
 // decorator without parentheses (`@wrap`, `@pkg.wrap`) is a call of the
 // name it gives; a method called on a local that holds a function aliases
-// it only when the method runs it (`fn.call`, not `fn.bind` or `r.equals`).
+// it only when the method runs it (`fn.call`, not `fn.bind` or `r.equals`);
+// the Express facts keep a computed string, and a string given to a name no
+// path reads, as a string with no text, and read `process.env["X"]` as
+// `process.env.X`.
 export const EXTRACTOR_VERSION = 55;
 
 type Frame = {

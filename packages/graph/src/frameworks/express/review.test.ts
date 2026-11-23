@@ -9,11 +9,56 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../../index.js";
 import type { FrameworkUnknown, Graph, Registration } from "../../index.js";
-import { MAX_APPS, MAX_MATCH_WORK, MAX_TEST_REQUESTS } from "./resolve.js";
+import { MAX_APPS, MAX_MATCH_WORK, MAX_MOUNT_DEPTH, MAX_STRING_WRITES, MAX_TEST_REQUESTS } from "./resolve.js";
 
 const H = 'import { h } from "./h.js";';
 const many = (n: number) => Array.from({ length: n }, () => "h").join(", ");
 const deep = (n: number) => Array.from({ length: n }, (_, i) => `s${i}`).join("/");
+// Each router's mount line, the path its route is requested at with no
+// prefix and, under a computed prefix, the name the unknown gives it.
+const UNDER_COMPUTED = [
+  ["app.use(PREFIX, byName);", "/by-name", "PREFIX"],
+  ["app.use(process.env.API_PREFIX, byEnv);", "/by-env", "process.env.API_PREFIX"],
+  ['app.use(process.env["API_PREFIX"], byIndex);', "/by-index", "process.env.API_PREFIX"],
+  ["app.use(`/${version}`, byTemplate);", "/by-template", "`/${version}`"],
+  ["app.use(`/${Date.now()}`, byCallTemplate);", "/by-call-template", "a computed string"],
+  ["app.use(IMPORTED, byImport);", "/by-import", "IMPORTED"],
+  ["app.use(CLAUSE, byClause);", "/by-clause", "CLAUSE"],
+  ["app.use(WRAPPED, byWrapped);", "/by-wrapped", "WRAPPED"],
+  ["app.use(String(process.env.API_PREFIX), byString);", "/by-string", "String(process.env.API_PREFIX)"],
+] as const;
+// A literal prefix, a template with no substitution, and first arguments
+// that may be middleware: a function, a name holding a call's result, a
+// member of a required module and a parameter. Each keeps its pattern.
+const KEPT = [
+  ['app.use("/v1", literal);', "/v1/by-literal"],
+  ["app.use(`/v2`, plain);", "/v2/by-plain"],
+  ["app.use(h, guarded);", "/by-guard"],
+  ["app.use(auth, byCall);", "/by-call"],
+  ["app.use(guard.required, byRequired);", "/by-required"],
+  ["  app.use(requireAuth, byParam);", "/by-param"],
+] as const;
+const routerOf = (mount: string) => /, (\w+)\);$/.exec(mount)?.[1] as string;
+const COMPUTED = [
+  'import express, { Router } from "express";',
+  'import { chooseAuth, h } from "./h.js";',
+  'import { PREFIX as IMPORTED } from "./config.js";',
+  'import { CLAUSE } from "./clause.js";',
+  'const WRAPPED = (process.env["API_PREFIX"] as string)!;',
+  'const guard = require("./guard.js");',
+  'const PREFIX = "/" + process.env.API_PREFIX;',
+  "const version = process.env.VERSION;",
+  "const auth = chooseAuth();",
+  "export const app = express();",
+  ...[...UNDER_COMPUTED, ...KEPT].flatMap(([mount, path]) => [`const ${routerOf(mount)} = Router();`, `${routerOf(mount)}.get("${path.replace(/^\/v\d/, "")}", h);`]),
+  ...UNDER_COMPUTED.map(([mount]) => mount),
+  ...KEPT.slice(0, -1).map(([mount]) => mount),
+  "export function mountWith(requireAuth: unknown): void {",
+  KEPT[KEPT.length - 1][0],
+  "}",
+];
+const lineOf = (text: string) => COMPUTED.indexOf(text) + 1;
+
 const files: Record<string, string> = {
   "package.json": JSON.stringify({ name: "review", private: true, type: "module", dependencies: { express: "^4.21.2", supertest: "^7.1.0" }, devDependencies: { vitest: "^3.2.4" } }),
   "src/h.ts": "export function h(_req: unknown, _res: unknown, next?: () => void): void {\n  next?.();\n}\nexport function last(_req: unknown, _res: unknown): void {}\nexport function chooseAuth(): (req: unknown, res: unknown, next: () => void) => void {\n  return (_q, _s, next) => next();\n}\n",
@@ -21,6 +66,22 @@ const files: Record<string, string> = {
   "src/shadow.ts": ['import express from "express";', H, "export function build(express: () => { get(p: string, f: unknown): void }) {", "  const app = express();", '  app.get("/shadowed", h);', "  return app;", "}", "export const real = express();"].join("\n"),
   // A mount under a computed prefix, then a literal mount below it.
   "src/nested.ts": ['import express, { Router } from "express";', H, "const tenant = process.env.TENANT;", "export const app = express();", "const r = Router();", "const child = Router();", 'child.get("/x", h);', 'r.use("/v1", child);', "app.use(`/${tenant}`, r);"].join("\n"),
+  // Routers mounted under prefixes the code computes, beside the first
+  // arguments that are no prefix the graph can show, and a test that
+  // requests the path each route would have with no prefix.
+  "src/config.ts": "export const PREFIX = process.env.API_PREFIX;\n",
+  "src/clause.ts": "const BASE = process.env.API_BASE;\nexport { BASE as CLAUSE };\n",
+  // An object of the repository's own named process: its env is no environment.
+  "src/own-process.ts": ['import express, { Router } from "express";', H, 'import { process } from "./process-like.js";', "export const app = express();", "const r = Router();", 'r.get("/own", h);', "app.use(process.env.guard, r);"].join("\n"),
+  "src/process-like.ts": ['import { h } from "./h.js";', "export const process = { env: { guard: h } };"].join("\n"),
+  // Middleware alone under a prefix from the environment, then a route outside it.
+  "src/env-middleware.ts": ['import express from "express";', H, "export const app = express();", "app.use(process.env.ADMIN, h);", 'app.get("/health", h);'].join("\n"),
+  // An alias chain longer than the depth the plugin follows, mounted before
+  // a mount of one of its short tails: each mount's answer is its own.
+  "src/order.ts": ['import express, { Router } from "express";', H, ...Array.from({ length: 10 }, (_, i) => `const a${i} = ${i === 9 ? "process.env.API_PREFIX" : `a${i + 1}`};`), "export const app = express();", "const long = Router();", 'long.get("/long", h);', "const short = Router();", 'short.get("/short", h);', "app.use(a0, long);", "app.use(a8, short);"].join("\n"),
+  "src/guard.js": "exports.required = function required(_req, _res, next) {\n  next();\n};\n",
+  "src/computed.ts": COMPUTED.join("\n"),
+  "src/computed.test.ts": ['import request from "supertest";', 'import { it } from "vitest";', 'import { app } from "./computed.js";', 'it("requests each route without its prefix", async () => {', ...[...UNDER_COMPUTED, ...KEPT].map(([, path]) => `  await request(app).get("${path}");`), "});"].join("\n"),
   // A path held in a binding that changes: no literal proves which path is registered.
   "src/mutable.ts": ['import express from "express";', H, "export const app = express();", 'let path = "/old";', 'path = "/new";', "app.get(path, h);", 'const FIXED = "/fixed";', "export function inner(FIXED: string) {", "  app.get(FIXED, h);", "}", "app.get(FIXED, h);"].join("\n"),
   // A route with more arguments than the reader keeps: the handler is past the cut.
@@ -64,6 +125,47 @@ describe("the Express plugin on what a review found", () => {
   it("keeps the pattern unknown under every mount below a computed prefix, never restarting from the literal mount", () => {
     const x = regs("src/nested.ts");
     expect(x.map((r) => r.pattern)).toEqual([null]);
+  });
+
+  it("never states a pattern without its prefix for a router mounted under a computed prefix, and says the prefix is computed", () => {
+    const byPath = new Map(regs("src/computed.ts").map((r) => [r.written, r]));
+    for (const [mount, path, name] of UNDER_COMPUTED) {
+      expect(byPath.get(path)?.pattern, mount).toBeNull();
+      const gap = gaps("src/computed.ts").find((u) => u.site?.line === lineOf(mount) && u.affects.includes("mounts"));
+      expect(gap?.cause, mount).toBe("dynamic");
+      expect(gap?.name, mount).toBe(name);
+    }
+  });
+
+  it("keeps the pattern of a route under a literal prefix, or under a first argument the graph cannot show is a string", () => {
+    const byPath = new Map(regs("src/computed.ts").map((r) => [r.written, r]));
+    for (const [mount, path] of KEPT) {
+      expect(byPath.get(path.replace(/^\/v\d/, ""))?.pattern, mount).toBe(path);
+      expect(gaps("src/computed.ts").filter((u) => u.site?.line === lineOf(mount) && u.affects.includes("mounts")), mount).toEqual([]);
+    }
+  });
+
+  it("reads process.env as the environment only when no name of the file's own is called process", () => {
+    expect(regs("src/own-process.ts").map((r) => r.pattern)).toEqual(["/own"]);
+  });
+
+  it("does not apply middleware given under a prefix from the environment to a route outside that prefix", () => {
+    const [health] = regs("src/env-middleware.ts");
+    expect(health?.pattern).toBe("/health");
+    expect((graph.frameworks?.edges ?? []).filter((e) => e.kind === "applies_middleware" && e.from === health?.id)).toEqual([]);
+  });
+
+  it("gives a mount the same answer whatever mount of the same names was read before it", () => {
+    const byPath = new Map(regs("src/order.ts").map((r) => [r.written, r.pattern]));
+    // a8 is two names from a string, inside the depth the plugin follows; a0 is ten, past it.
+    expect(byPath.get("/short")).toBeNull();
+    expect(byPath.get("/long")).toBe("/long");
+  });
+
+  it("links a test request only to a route whose whole pattern is known, never to one under a computed prefix", () => {
+    const linked = new Set((graph.frameworks?.edges ?? []).filter((e) => e.kind === "tests" && e.plugin === "express" && e.evidence.site.file === "src/computed.test.ts").map((e) => e.to));
+    const patterns = regs("src/computed.ts").filter((r) => linked.has(r.id)).map((r) => r.pattern);
+    expect(patterns.sort()).toEqual(KEPT.map(([, path]) => path).sort());
   });
 
   it("does not take a path from a binding that is reassigned or shadowed: each such route is a dynamic unknown", () => {
@@ -166,6 +268,27 @@ describe("the Express plugin on what a review found", () => {
     expect(cut[0]?.note).toContain(String(MAX_TEST_REQUESTS));
     expect(cut[0]?.note).not.toContain(String(MAX_MATCH_WORK));
   }, 120_000);
+
+  it("reads a prefix through names written many times each in steps that grow with the writes, and reads no name past the write cap", async () => {
+    // Each name is written 20 times with the next one, down to a string: read
+    // path by path, that is 20 to the power of the layers.
+    const layers = MAX_MOUNT_DEPTH;
+    const chain = Array.from({ length: layers }, (_, i) => {
+      const value = i === layers - 1 ? '"/p"' : `x${i + 1}`;
+      return [`let x${i} = ${value};`, ...Array.from({ length: 19 }, () => `x${i} = ${value};`)];
+    }).flat();
+    const wide = ['let wide = "/w";', ...Array.from({ length: MAX_STRING_WRITES }, () => 'wide = "/w";')];
+    const app = ['import express, { Router } from "express";', H, ...chain, ...wide, "export const app = express();", "const deep = Router();", 'deep.get("/deep", h);', "const many = Router();", 'many.get("/many", h);', "app.use(x0, deep);", "app.use(wide, many);"];
+    const g = await buildRepo("oq-express-fanout-", { "src/app.ts": app.join("\n") });
+    const reg = (written: string) => (g.frameworks?.entities ?? []).find((e): e is Registration => e.kind === "registration" && e.written === written);
+    const mountGap = (text: string) => (g.frameworks?.unknowns ?? []).find((u) => u.plugin === "express" && u.site?.line === app.indexOf(text) + 1 && u.affects.includes("mounts"));
+    // The chain ends in a string: a computed prefix, so the route has no pattern.
+    expect(reg("/deep")?.pattern).toBeNull();
+    expect(mountGap("app.use(x0, deep);")?.name).toBe("x0");
+    // A name written more often than the cap is not read: middleware, as before this rule.
+    expect(reg("/many")?.pattern).toBe("/many");
+    expect(mountGap("app.use(wide, many);")).toBeUndefined();
+  }, 60_000);
 
   it("says when a test request could not be matched because the route or the request is beyond what the matcher reads", () => {
     const atRequests = gaps("src/long.test.ts").filter((u) => u.affects.includes("tests"));

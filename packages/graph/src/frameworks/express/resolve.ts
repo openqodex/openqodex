@@ -47,6 +47,7 @@ const rule = (id: string) => ({ id, version: RULE_VERSION });
 export const MAX_MOUNT_DEPTH = 8; // routers deep under an application: past it that branch stops
 export const MAX_MIDDLEWARE_CHAIN = 64; // middleware kept for one route
 export const MAX_PATTERN_SEGMENTS = 64; // segments of one pattern or request path matched
+export const MAX_STRING_WRITES = 32; // writes of one name read to tell whether it holds a string; past it, it does not
 
 // Budgets for the whole build.
 export const MAX_FACTS_READ = 400_000; // facts of every file together
@@ -564,6 +565,104 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     return null;
   };
 
+  // ---------- the strings a mount path may be ----------
+  // Whether an expression is a string the graph can show: a literal, a
+  // template or a concatenation, `process.env.X`, `String(x)`, or a name
+  // whose every write, here or in the module it is imported from, is one of
+  // those. Anything else, a parameter, a member of an object or of a
+  // required module, a value of a type the facts do not hold, is not.
+  type Binding = { file: string; at: number; name: string };
+  const NOT = -1;
+  // A name no binding of the file holds: the global of that name.
+  const isGlobal = (file: string, scope: number, name: string): boolean => bindingScope(file, scope, name) === 0 && writesOf(file, name, 0).length === 0 && lookup(file, [name]).kind === "none";
+  // The module and the name a module-level name is imported as: the index's
+  // own answer, or, for a name the module exports with an export clause
+  // (which the index binds to no definition), the import that names it.
+  const importTarget = (file: string, name: string): { file: string; name: string } | null => {
+    const found = lookup(file, [name]);
+    if (found.kind === "miss") return { file: found.target, name: found.name };
+    if (found.kind !== "none") return null;
+    const imp = index.languageFacts(file)?.imports.find((i) => i.names.some((n) => n.local === name));
+    const imported = imp?.names.find((n) => n.local === name)?.imported;
+    if (!imp || imported === undefined || !take("lookups")) return null;
+    const mod = index.module(file, imp.spec);
+    return mod.kind === "module" ? { file: mod.file, name: imported } : null;
+  };
+  // One expression for the string check: a string (0), no string (NOT), or the binding of a name, to read.
+  const stringStep = (file: string, e: Expr, scope: number): number | Binding => {
+    if (e.t === "str" || e.t === "dyn") return 0;
+    if (e.t === "call") return e.fn.t === "ref" && e.fn.path.length === 1 && e.fn.path[0] === "String" && isGlobal(file, scope, "String") ? 0 : NOT;
+    if (e.t !== "ref") return NOT;
+    const name = e.path[0] as string;
+    if (e.path.length === 3 && name === "process" && e.path[1] === "env") return isGlobal(file, scope, "process") ? 0 : NOT;
+    if (e.path.length !== 1) return NOT;
+    const at = bindingScope(file, scope, name);
+    if (writesOf(file, name, at).length > 0) return { file, at, name };
+    if (at !== 0) return NOT;
+    const target = importTarget(file, name);
+    const lf = target ? index.languageFacts(target.file) : null;
+    if (!target || !lf) return NOT;
+    // `export const X = ...`, or `const Y = ...; export { Y as X }`.
+    const local = writesOf(target.file, target.name, 0).some((v) => v.exported) ? target.name : (lf.exportsLocal.find((x) => x.exported === target.name)?.local ?? null);
+    return local !== null && writesOf(target.file, local, 0).length > 0 ? { file: target.file, at: 0, name: local } : NOT;
+  };
+  // How many names a binding is from a string (1 when every write is
+  // one), or NOT: a write that is no string, more than MAX_STRING_WRITES
+  // writes, more than MAX_MOUNT_DEPTH names to a string, or a name that
+  // reaches itself. Each is a property of the binding alone, so the answer
+  // is the same whichever mount asks first; each binding is read once per
+  // build, without recursion, and each write read is charged to the lookup
+  // budget.
+  const stringHeight = new Map<string, number>();
+  const keyOf = (b: Binding): string => `${b.file}\0${b.at}\0${b.name}`;
+  const heightOf = (root: Binding): number => {
+    const known = stringHeight.get(keyOf(root));
+    if (known !== undefined) return known;
+    type Frame = { key: string; steps: (number | Binding)[]; next: number; height: number };
+    const frames: Frame[] = [];
+    const reading = new Set<string>();
+    const open = (b: Binding): void => {
+      const key = keyOf(b);
+      const writes = writesOf(b.file, b.name, b.at);
+      const read = writes.length > 0 && writes.length <= MAX_STRING_WRITES && take("lookups", writes.length);
+      frames.push({ key, steps: read ? writes.map((w) => stringStep(b.file, w.value, w.scope)) : [NOT], next: 0, height: 0 });
+      reading.add(key);
+    };
+    open(root);
+    let out = NOT;
+    while (frames.length > 0) {
+      const f = frames[frames.length - 1] as Frame;
+      let opened = false;
+      while (f.height !== NOT && f.next < f.steps.length) {
+        const step = f.steps[f.next] as number | Binding;
+        const h = typeof step === "number" ? step : (stringHeight.get(keyOf(step)) ?? (reading.has(keyOf(step)) ? NOT : null));
+        if (h === null) {
+          open(step as Binding);
+          opened = true;
+          break;
+        }
+        f.height = h === NOT ? NOT : Math.max(f.height, h + 1);
+        f.next++;
+      }
+      if (opened) continue;
+      out = f.height !== NOT && f.height <= MAX_MOUNT_DEPTH ? f.height : NOT;
+      stringHeight.set(f.key, out);
+      reading.delete(f.key);
+      frames.pop();
+    }
+    return out;
+  };
+  const stringLike = (file: string, e: Expr, scope: number): boolean => {
+    const step = stringStep(file, e, scope);
+    return typeof step === "number" ? step !== NOT : heightOf(step) !== NOT;
+  };
+  // Whether the first argument of a use call is a mount path the code
+  // computes: `app.use(PREFIX, router)`, `app.use(process.env.PREFIX, auth)`.
+  // Express takes a first argument that is not a function for the path; it
+  // is read as one only when the graph shows it is a string. Any other
+  // first argument is middleware.
+  const computedPrefix = (file: string, first: Expr, rest: readonly Expr[], scope: number): boolean => rest.length > 0 && stringLike(file, first, scope);
+
   for (const file of files) {
     if (fx(file).tooLarge || fx(file).unread) continue;
     for (const f of fx(file).calls) {
@@ -582,7 +681,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
       if (f.prop === "use") {
         if (base.route || v.kind === "param") continue;
         const first = f.args[0];
-        const isPrefix = first !== undefined && (first.t === "str" || first.t === "dyn" || (first.t === "ref" && evaluate(first, constant(file, f.scope)) !== null));
+        const isPath = first !== undefined && (first.t === "str" || first.t === "dyn" || (first.t === "ref" && evaluate(first, constant(file, f.scope)) !== null));
+        const isPrefix = isPath || (first !== undefined && computedPrefix(file, first, f.args.slice(1), f.scope));
         addEvent(v, { type: "use", file, site, prefix: isPrefix ? (first as Expr) : null, args: isPrefix ? f.args.slice(1) : f.args, scope: f.scope, more: cutIn(f.args, f.more) });
         continue;
       }
