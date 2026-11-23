@@ -1,0 +1,31 @@
+{
+  "covers": "a gin route path named by a longer chain than the Go fact reader reads (go-http/facts MAX_NAME_PARTS)",
+  "caps": [
+    "frameworks/go-http/facts.ts#MAX_NAME_PARTS"
+  ],
+  "commit": true,
+  "files": {
+    "names/go.mod": "module example.com/names\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "names/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.s, deep)\n\tr.Run()\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "names/main.go#deep",
+      "caller": null,
+      "file": "names/main.go",
+      "line": 11
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "names/main.go#deep",
+      "reason": "the route path is longer than the plugin reads",
+      "at": "names/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "names/main.go:11"
+      }
+    }
+  ]
+}

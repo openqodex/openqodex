@@ -557,6 +557,7 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
         return done(fail("external", "external", `the handler is ${show(call)}, which the standard library builds`, show(call), call));
       }
       const w = wrapperOf(file, call, line);
+      if (!w && isCut(call.fn)) return done(fail("unresolved", "fan-out-capped", "the function this handler is wrapped by is longer than the plugin reads, so neither the handler nor any middleware it applies is listed", null, call, WRAPPED));
       if (!w) {
         // A call no rule binds as a wrapper may be middleware of its own: it
         // hides the middleware edge as well as the handler.
@@ -638,6 +639,10 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
       const r = resultOf(file, recv);
       return r === "mux" ? resultMux(file, recv, line) : r;
     }
+    if (isCut(recv)) {
+      gap({ plugin: PLUGIN, site: { file, line: recv.line, column: recv.column }, scope: { file }, affects: ["handles", "mounts"], cause: "fan-out-capped", name: null, note: "the receiver here is longer than the plugin reads; if it is a net/http mux, the route on it is not listed", count: null, exact: false });
+      return null;
+    }
     if (recv.t !== "ref") return null;
     const direct = muxOfRef(file, recv, line, false, create, 0);
     if (direct) return direct;
@@ -656,6 +661,10 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
       if (v.t === "call") {
         const r = resultOf(d.file, v);
         return r === "mux" ? resultMux(d.file, v, d.fact.line) : r;
+      }
+      if (isCut(v)) {
+        gap({ plugin: PLUGIN, site: { file: d.file, line: v.line, column: v.column }, scope: { file: d.file }, affects: ["handles", "mounts"], cause: "fan-out-capped", name: d.fact.name, note: `the value of ${d.fact.name} is longer than the plugin reads; if it is a net/http mux, the routes on it are not listed`, count: null, exact: false });
+        return null;
       }
       return v.t === "ref" || v.t === "other" ? null : "other";
     }

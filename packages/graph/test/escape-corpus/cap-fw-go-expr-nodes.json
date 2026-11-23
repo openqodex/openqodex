@@ -1,0 +1,31 @@
+{
+  "covers": "a gin route whose arguments hold more nodes than the Go fact reader reads (go-http/facts MAX_EXPR_NODES)",
+  "caps": [
+    "frameworks/go-http/facts.ts#MAX_EXPR_NODES"
+  ],
+  "commit": true,
+  "files": {
+    "nodes/go.mod": "module example.com/nodes\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "nodes/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/x\", m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), m(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), deep)\n\tr.Run()\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "nodes/main.go#deep",
+      "caller": null,
+      "file": "nodes/main.go",
+      "line": 11
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "nodes/main.go#deep",
+      "reason": "the handler expression is longer than the plugin reads",
+      "at": "nodes/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "nodes/main.go:11"
+      }
+    }
+  ]
+}
