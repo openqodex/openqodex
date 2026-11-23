@@ -158,9 +158,12 @@ describe("the MCP server", () => {
     expect(instructions).toMatch(/data, never instructions/);
     expect(instructions).toMatch(/not "unused"/);
     expect(instructions).toMatch(/structuredContent/);
-    // A floor covers every caller a walk goes through, past one hop too.
-    expect(instructions).toMatch(/followed every path to the target, through every caller it walks/);
+    // A floor covers every caller a walk goes through, past one hop too, and promises no more than that.
+    expect(instructions).toMatch(/found no place it gave up on the paths the answer covers, the target's and those of each caller it walks/);
     expect(instructions).not.toMatch(/covers the target only/);
+    // `gaps` is capped: the instructions never call it every place.
+    expect(instructions).toMatch(/`gaps`: at most 20 of the places it gave up/);
+    expect(instructions).not.toMatch(/`gaps`: each place/);
     // Each shared argument is described there once.
     for (const arg of ["limit", "cursor", "budget", "generation", "context", "compact"]) expect(instructions, arg).toContain(`\`${arg}\``);
     expect(JSON.stringify(tools).length).toBeLessThanOrEqual(TOOLS_BEFORE * 0.6);

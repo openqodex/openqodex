@@ -19,6 +19,7 @@ import { familyOf } from "../types.js";
 import type { Family, Graph, GraphEdge, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { candidate, counts, empty, fail, isAnswer, listing, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Extra, Job, Request, Session } from "./answer.js";
+import { frameworkCallerGaps } from "./frameworks.js";
 import { edgeId } from "./ids.js";
 import { byItem, Cycles, definesEdge, holderOf, importCount, importEdges, importsFrom, Pass, PathSearch, RANK, sortWithin, spent, toItem, Walk } from "./traverse.js";
 import type { Budget, HopEdge, Item } from "./traverse.js";
@@ -466,10 +467,10 @@ const LISTED_CUTS = new Set(["hub", "second-hop", "walk-limit", "export-walk"]);
 // place of each cut the answer lists (a cut with no place says only its reason).
 function impactGaps(g: Graph, sum: ReturnType<typeof detectImpact>): GapPlace[] {
   // A first-hop caller whose callers the walk lists gives its gaps too (detectImpact, impactThrough).
-  const through = impactThrough(g, [...sum.callers, ...(sum.possible ?? [])], new Set(sum.unknown.seeds.filter((x) => x.reasons.includes(WALK_CUT)).map((x) => x.seed)));
+  const through = impactThrough(g, [...sum.callers, ...(sum.possible ?? [])], new Set(sum.unknown.seeds.filter((x) => x.reasons.includes(WALK_CUT)).map((x) => x.seed)), frameworkCallerGaps);
   const seeds = sum.unknown.seeds.flatMap((x) => {
     const sym = sum.symbols.find((y) => y.id === x.seed);
-    return x.floor && sym ? [...floorOf(g, { id: x.seed, name: sym.name, file: sym.file, kind: sym.kind }, new Set(x.reasons.includes(WALK_CUT) ? [x.seed] : [])).gaps, ...through(x.seed).gaps] : [];
+    return x.floor && sym ? [...floorOf(g, { id: x.seed, name: sym.name, file: sym.file, kind: sym.kind }, new Set(x.reasons.includes(WALK_CUT) ? [x.seed] : [])).gaps, ...frameworkCallerGaps(g, sym.file, x.seed).gaps, ...through(x.seed).gaps] : [];
   });
   const cuts = sum.cuts.flatMap((c): GapPlace[] => {
     if (!LISTED_CUTS.has(c.by) || c.at === null) return [];
@@ -489,7 +490,7 @@ function heldBy(g: Graph, sum: ReturnType<typeof detectImpact>, hop: (e: HopEdge
   const walkOf = (holder: GraphNode) => {
     let w = walks.get(holder.id);
     if (!w) {
-      w = detectImpact(g, { files: [{ path: holder.file, status: "modified", oldPath: null, binary: false }], coverage: new Map([[holder.file, new LineSet().add(holder.startLine)]]) });
+      w = detectImpact(g, { files: [{ path: holder.file, status: "modified", oldPath: null, binary: false }], coverage: new Map([[holder.file, new LineSet().add(holder.startLine)]]) }, frameworkCallerGaps);
       walks.set(holder.id, w);
       for (const x of w.unknown.seeds) if (x.seed === holder.id) for (const r of x.reasons) reasons.push(`callers of ${holder.name}, which holds the changed code: ${r}`);
       for (const c of w.cuts) if (LISTED_CUTS.has(c.by)) reasons.push(`callers of ${holder.name}, which holds the changed code: ${c.note}`);
@@ -531,7 +532,8 @@ export function impact(s: Session, req: Request, extra: Extra): Job | Answer {
       change = { files: [{ path: n.file, status: "modified", oldPath: null, binary: false }], coverage: new Map([[n.file, new LineSet().add(n.startLine)]]) };
     }
     if (spent(budget)) return stoppedAt(base, [], [], null);
-    const sum = detectImpact(g, change as NonNullable<typeof change>);
+    // The framework may run a seed or a caller the walk goes through too.
+    const sum = detectImpact(g, change as NonNullable<typeof change>, frameworkCallerGaps);
     const hop = (e: { from: string; to: string; kind: string; sites: GraphSite[] }, depth: number): Item => toItem(g, e, e.sites[0] as GraphSite, depth);
     const held = heldBy(g, sum, hop);
     const all: unknown[] = [

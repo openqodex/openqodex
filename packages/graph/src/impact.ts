@@ -601,9 +601,15 @@ export function throughFloors(floored: readonly Through[]): { reasons: string[];
   return { reasons, gaps: joinGaps(...floored.map((t) => [...t.gaps])) };
 }
 
+// What may hide a caller of a symbol besides the gaps of the core graph:
+// the framework layer's, which the query layer gives (query/frameworks.ts,
+// frameworkCallerGaps). The review's own walk reads the framework layer
+// apart, in its packet, and gives none.
+export type ExtraFloor = (graph: Graph, file: string, id: string) => { reasons: string[]; gaps: GapPlace[] };
+
 // Per seed of an impact walk, the floors of its first-hop callers, whose
 // callers the walk lists as the second hop. Each caller's floor is read once.
-export function impactThrough(graph: Graph, paths: readonly ImpactPath[], cutAt: ReadonlySet<string>): (seed: string) => { reasons: string[]; gaps: GapPlace[] } {
+export function impactThrough(graph: Graph, paths: readonly ImpactPath[], cutAt: ReadonlySet<string>, extra?: ExtraFloor): (seed: string) => { reasons: string[]; gaps: GapPlace[] } {
   const bySeed = new Map<string, Set<string>>();
   for (const p of paths) {
     const from = p.edges.length === 1 ? p.edges[0].from : null;
@@ -617,7 +623,8 @@ export function impactThrough(graph: Graph, paths: readonly ImpactPath[], cutAt:
     if (floors.has(id)) return floors.get(id) ?? null;
     const m = graph.nodes.get(id);
     const f = m ? floorOf(graph, { id, name: m.name, file: m.file, kind: m.kind }, cutAt) : null;
-    const t = m && f && f.reasons.length > 0 ? { name: m.name, file: m.file, line: m.startLine, reasons: f.reasons, gaps: f.gaps } : null;
+    const x = m && extra ? extra(graph, m.file, id) : { reasons: [], gaps: [] };
+    const t = m && f && f.reasons.length + x.reasons.length > 0 ? { name: m.name, file: m.file, line: m.startLine, reasons: [...f.reasons, ...x.reasons], gaps: joinGaps(f.gaps, x.gaps) } : null;
     floors.set(id, t);
     return t;
   };
@@ -632,7 +639,7 @@ export function partialGaps(graph: Graph): GapPlace[] {
   const budget = graph.unknowns.filter((u) => u.cause === "budget" && u.line === 0).map(gapPlace);
   return [...notRead, ...budget];
 }
-export function detectImpact(graph: Graph, change: Pick<Change, "files" | "coverage">): ImpactSummary {
+export function detectImpact(graph: Graph, change: Pick<Change, "files" | "coverage">, extra?: ExtraFloor): ImpactSummary {
   const s = graph.status;
   const symbols = new Map<string, ImpactSymbol>();
   const note = (id: string) => {
@@ -848,10 +855,10 @@ export function detectImpact(graph: Graph, change: Pick<Change, "files" | "cover
 
   // What the graph could not see, per seed and near the change.
   // A caller the walk lists the callers of may have callers missing too.
-  const through = impactThrough(graph, [...callers, ...possible], cutAt);
+  const through = impactThrough(graph, [...callers, ...possible], cutAt, extra);
   const seeds = [...touched, ...removed].map((id) => {
     const sym = symbols.get(id);
-    const own = sym ? floorReasons(graph, { id, name: sym.name, file: sym.file, kind: sym.kind }, cutAt) : ["the symbol is not in the graph"];
+    const own = sym ? [...floorReasons(graph, { id, name: sym.name, file: sym.file, kind: sym.kind }, cutAt), ...(extra ? extra(graph, sym.file, id).reasons : [])] : ["the symbol is not in the graph"];
     const reasons = [...own, ...through(id).reasons];
     return { seed: id, floor: reasons.length > 0, reasons };
   });
