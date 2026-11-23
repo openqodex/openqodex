@@ -213,26 +213,84 @@ function checkInRepo(sub: AgentSubmission, lines: Map<string, number>, clean: (t
   });
 }
 
-// What makes two findings the same finding, for dedup here and for merging
-// two reviewers' findings: the file, the range, the category, and the
-// candidate, or the source when no candidate is cited, or the title when
-// neither is.
+// What makes two findings the same finding, for merging two reviewers'
+// findings, and for dedup here beside sameDefect: the file, the range, the
+// category, and the candidate, or the source when no candidate is cited, or
+// the title when neither is.
 export function findingKey(f: Pick<ReportFinding, "file_path" | "line_number" | "line_end" | "category" | "candidate" | "source" | "title">): string {
   const what = f.candidate ? `candidate\0${f.candidate}` : f.source ? `source\0${f.source}` : `title\0${f.title}`;
   return [f.file_path, f.line_number, f.line_end, f.category, what].join("\0");
 }
 
-// Removes only true duplicates: same file, range and category, and the same
-// candidate, or the same source when no candidate is cited, or the same title
-// when neither is. Keeps the higher severity, then the first.
-function dedup(findings: ReportFinding[]): ReportFinding[] {
-  const kept = new Map<string, ReportFinding>();
+// One defect two finders titled differently (issue 315): neither cites a
+// candidate, both cite the same source or none, and they share the file and
+// the category on overlapping lines. The title does not count. Lines that
+// only share a file, or a different source, keep two findings apart; two
+// real defects of one category on the same lines merge, the accepted cost.
+export function sameDefect(a: ReportFinding, b: ReportFinding): boolean {
+  return a.candidate === null && b.candidate === null && a.source === b.source && a.file_path === b.file_path
+    && a.category === b.category && a.line_number <= b.line_end && b.line_number <= a.line_end;
+}
+
+// One finding for one defect: the text of the one that says more, the lines
+// of both, and the higher severity of the two.
+function merged(a: ReportFinding, b: ReportFinding): ReportFinding {
+  const says = (f: ReportFinding) => f.description.length + (f.suggested_change?.length ?? 0);
+  const text = says(b) > says(a) ? b : a;
+  return {
+    ...text,
+    severity: severityRank(b.severity) > severityRank(a.severity) ? b.severity : a.severity,
+    line_number: Math.min(a.line_number, b.line_number),
+    line_end: Math.max(a.line_end, b.line_end),
+  };
+}
+
+// Never one defect, so only the same finding (findingKey) matches: for two
+// findings the staged verifier did not link (duplicate_of), and for a
+// possible issue beside a counted finding the threshold hides.
+const keptApart = (): boolean => false;
+
+// Removes only duplicates, in two steps. First the same finding
+// (findingKey): one defect merges, and one citing a candidate keeps the
+// higher severity, then the first. Then one defect (sameDefect), only for two
+// findings that are each other's one overlap: a broad finding over two
+// findings on lines apart is three defects, all kept, whatever the order.
+function dedup(findings: ReportFinding[], same = sameDefect): ReportFinding[] {
+  const byKey = new Map<string, ReportFinding>();
   for (const f of findings) {
     const key = findingKey(f);
-    const prev = kept.get(key);
-    if (!prev || severityRank(f.severity) > severityRank(prev.severity)) kept.set(key, f);
+    const prev = byKey.get(key);
+    byKey.set(key, !prev ? f : same(prev, f) ? merged(prev, f) : severityRank(f.severity) > severityRank(prev.severity) ? f : prev);
   }
-  return [...kept.values()];
+  const kept = [...byKey.values()];
+  if (same === keptApart) return kept;
+  const overlaps = kept.map((a) => kept.filter((b) => b !== a && same(a, b)));
+  const gone = new Set<ReportFinding>();
+  const out: ReportFinding[] = [];
+  kept.forEach((a, i) => {
+    if (gone.has(a)) return;
+    const twin = overlaps[i]!.length === 1 ? overlaps[i]![0]! : null;
+    if (twin && overlaps[kept.indexOf(twin)]!.length === 1) {
+      gone.add(twin);
+      out.push(merged(a, twin));
+    } else out.push(a);
+  });
+  return out;
+}
+
+// The possible issues no counted finding already reports: one with the key
+// of a counted finding, or one that is one defect with a counted finding
+// when each is the other's one overlap, so a broad finding never takes two
+// possible issues. A caller passes only the counted findings the report
+// shows when it matches by one defect, so a possible issue never leaves for
+// a finding the threshold hides.
+export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect): ReportFinding[] {
+  const keys = new Set(counted.map(findingKey));
+  return possible.filter((p) => {
+    if (keys.has(findingKey(p))) return false;
+    const near = counted.filter((c) => same(c, p));
+    return near.length !== 1 || possible.filter((q) => same(near[0]!, q)).length !== 1;
+  });
 }
 
 // One redaction pass over every string value in a finished report, run after
@@ -341,10 +399,9 @@ export function finalizeReview(args: {
     .map((c) => ({ candidate: c, reason: droppedIds.get(c.id) ?? "" }));
 
   const deduped = dedup(findings);
-  const countedKeys = new Set(deduped.map(findingKey));
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(possible.filter((f) => !countedKeys.has(findingKey(f)))).filter((f) => {
+  const keptPossible = uncounted(dedup(uncounted(possible, deduped, keptApart)), kept).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
@@ -576,6 +633,11 @@ export function checkSubmission(args: {
   confidenceFloor?: number;
   // The instruction files the brief quoted: a finding's rule must quote one.
   instructionFiles?: readonly InstructionFile[];
+  // Set by the staged review. Its verifier rules which findings are one
+  // defect (duplicate_of), and two it did not link stay apart here, whatever
+  // their lines: merging them could move a counted finding into the
+  // observations.
+  verified?: boolean;
 }): SubmissionCheck {
   const { change, scan, manifest, config } = args;
   const clean = (text: string) => redactByFingerprint(text, scan.secretFingerprints);
@@ -687,11 +749,11 @@ export function checkSubmission(args: {
     });
   }
   const droppedBy = new Map(sub.dropped.map((d) => [d.candidate, d]));
-  const deduped = dedup(findings);
-  const countedKeys = new Set(deduped.map(findingKey));
+  const same = args.verified ? keptApart : sameDefect;
+  const deduped = dedup(findings, same);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = dedup(possible.filter((f) => !countedKeys.has(findingKey(f)))).filter((f) => {
+  const keptPossible = uncounted(dedup(uncounted(possible, deduped, keptApart), same), kept, same).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);

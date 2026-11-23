@@ -40,7 +40,6 @@ import {
   cleanupDiffs,
   completionRecord,
   configHash,
-  findingKey,
   getChange,
   getTreeChange,
   getWholeRepo,
@@ -105,7 +104,7 @@ import { modelEvidence } from "./evidence.js";
 import { modelRecord, modelReport, reviewRender } from "./model-record.js";
 import { agentReviewer } from "./reviewer.js";
 import type { Budget, Disposition, ModelReviewer, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult } from "./reviewer.js";
-import { disagreementsOf, mergeFindings, runSecondReviewer, withSecondReviewer } from "./second.js";
+import { disagreementsOf, mergeFindings, possibleAfterSecond, runSecondReviewer, withSecondReviewer } from "./second.js";
 import type { SecondRun } from "./second.js";
 import { buildGraphRun, buildHotSpots, nothingToReviewLine, ruleCoverage, scanChange, wholeRepoLenses } from "./pipeline.js";
 import type { GraphHost, PipelineResult, ScanHost } from "./pipeline.js";
@@ -1198,8 +1197,7 @@ async function reviewInScope(
       // A candidate the second reviewer raised or dropped is no longer
       // unchecked, even when the primary never answered.
       const disposed = new Set(theirs.map((d) => d.candidate));
-      const countedKeys = new Set(merged.findings.map(findingKey));
-      checked = { ...r.report, findings: merged.findings, possible: r.report.possible.filter((f) => !countedKeys.has(findingKey(f))), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
+      checked = { ...r.report, findings: merged.findings, possible: possibleAfterSecond(r.report.possible, merged), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
       foundBy = merged.foundBy;
       if (answered) disagreements = disagreementsOf({ name: model.model, dispositions }, { name: second.name, dispositions: theirs });
       dispositions.push(...theirs);

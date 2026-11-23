@@ -661,8 +661,9 @@ function skippedOutcome(
 }
 
 // A scanner that ran. An error with no findings is a failure; an error next
-// to findings (one Go module of several failed, one .sql file unreadable)
-// keeps the findings and the note. A note (a folder held back) is the reason
+// to findings (one Go module of several timed out, one .sql file unreadable)
+// keeps the findings and the note, unless the adapter marks the error
+// failed (a Go module that could not type-check), which keeps both. A note (a folder held back) is the reason
 // of a scanner that ran. An adapter that chose not to run is disabled, with
 // its reason. The rule packs it consumed (semgrep) go on its summary.
 function ranOutcome(
@@ -674,7 +675,7 @@ function ranOutcome(
   errorIsFailure = false,
 ): Outcome {
   if (result.skipped) return skippedOutcome(scanner, "disabled", result.skipped, started, cost);
-  const failed = result.error !== null && (result.findings.length === 0 || errorIsFailure);
+  const failed = result.error !== null && (result.findings.length === 0 || errorIsFailure || result.failed === true);
   return {
     summary: {
       scanner,

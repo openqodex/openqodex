@@ -18,6 +18,9 @@
 // Cross-file evidence review: a finder candidate folded into a scanner
 // candidate as its duplicate loses the lines in other files its verifier
 // relied on, so the shown scanner finding carries none of them.
+// Issue 315 follow-up: finalize merges a finding and an observation on the
+// same lines that the verifier did not link, and the merged finding is moved
+// out of the counted findings into the observations.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -240,6 +243,22 @@ it("keeps a duplicate finding when its confirmed survivor is only an observation
   expect(r.report.findings.map((finding) => finding.title)).toEqual(["Second claim", "Second claim"]);
   // The survivor is shown once, as the kept finding, not again as an observation.
   expect(r.report.observations).toHaveLength(0);
+  expect(r.report.verdict).toBe("blocked");
+});
+it("keeps a finding counted beside an observation on its lines that the verifier did not link (315)", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = [candidate("a.txt", brief.pass === "local" ? "Counted" : "Style note")];
+    if (answer.version === "verify-1") {
+      const note = answer.verdicts.find((v) => v.title === "Style note")!;
+      note.tier = "observation";
+      note.problem = "The changed operation accepts unsafe input, and its name does not say so.";
+    }
+    return answer;
+  }, ["a.txt"]);
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings.map((finding) => finding.title)).toEqual(["Counted"]);
+  expect((r.report.observations ?? []).map((o) => o.title)).toEqual(["Style note"]);
   expect(r.report.verdict).toBe("blocked");
 });
 it("keeps a finding whose key an observation below the floor shares", async () => {
