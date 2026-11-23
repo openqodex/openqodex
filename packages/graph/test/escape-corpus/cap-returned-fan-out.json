@@ -17,12 +17,12 @@
         "repeat": "h{{i}}, ",
         "times": 40
       },
-      "h1 } from \"./h\";\nexport function pick(k: number) {\n",
+      " } from \"./h\";\nexport function pick(k: number) {\n",
       {
         "repeat": "  if (k === {{i}}) return h{{i}};\n",
         "times": 39
       },
-      "  return h40;\n}\nexport function go() {\n  return pick(3)();\n}\n"
+      "  return h40;\n}\nexport function go(k: number) {\n  return pick(k)();\n}\n"
     ]
   },
   "mustReach": [

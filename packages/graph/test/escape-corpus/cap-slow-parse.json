@@ -5,7 +5,8 @@
   ],
   "build": {
     "maxFileBytes": 2097152,
-    "budgetMs": 60000
+    "budgetMs": 60000,
+    "maxParseMs": 2000
   },
   "files": {
     "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",

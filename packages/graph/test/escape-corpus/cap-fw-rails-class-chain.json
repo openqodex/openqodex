@@ -9,23 +9,45 @@
     "config/routes.rb": "Rails.application.routes.draw do\n  get \"deep\", to: \"users#deep\"\nend\n",
     "app/controllers/application_controller.rb": "class ApplicationController < ActionController::Base\nend\n",
     "app/controllers/users_controller.rb": "class UsersController < C1\nend\n",
-    "app/controllers/chain.rb": "class C1 < C2\nend\nclass C2 < C3\nend\nclass C3 < C4\nend\nclass C4 < C5\nend\nclass C5 < C6\nend\nclass C6 < C7\nend\nclass C7 < C8\nend\nclass C8 < ApplicationController\n  def deep\n  end\nend\n",
     "app/controllers/hooked_controller.rb": "class HookedController < ApplicationController\n  before_action :hook\nend\n",
-    "app/controllers/down.rb": "class D1 < HookedController\nend\nclass D2 < D1\nend\nclass D3 < D2\nend\nclass D4 < D3\nend\nclass D5 < D4\nend\nclass D6 < D5\nend\nclass D7 < D6\nend\nclass D8 < D7\nend\nclass D9 < D8\n  def hook\n  end\nend\n",
     "app/jobs/application_job.rb": "class ApplicationJob < ActiveJob::Base\nend\n",
-    "app/jobs/chain_jobs.rb": "class J1 < J2\nend\nclass J2 < J3\nend\nclass J3 < J4\nend\nclass J4 < J5\nend\nclass J5 < J6\nend\nclass J6 < J7\nend\nclass J7 < J8\nend\nclass J8 < ApplicationJob\nend\n",
     "app/jobs/deep_job.rb": "class DeepJob < J1\n  def perform\n  end\nend\n",
-    "app/services/kick.rb": "class Kick\n  def run\n    DeepJob.perform_later\n  end\nend\n"
+    "app/services/kick.rb": "class Kick\n  def run\n    DeepJob.perform_later\n  end\nend\n",
+    "app/controllers/c1.rb": "class C1 < C2\nend\n",
+    "app/controllers/c2.rb": "class C2 < C3\nend\n",
+    "app/controllers/c3.rb": "class C3 < C4\nend\n",
+    "app/controllers/c4.rb": "class C4 < C5\nend\n",
+    "app/controllers/c5.rb": "class C5 < C6\nend\n",
+    "app/controllers/c6.rb": "class C6 < C7\nend\n",
+    "app/controllers/c7.rb": "class C7 < C8\nend\n",
+    "app/controllers/c8.rb": "class C8 < ApplicationController\n  def deep\n  end\nend\n",
+    "app/controllers/d1.rb": "class D1 < HookedController\nend\n",
+    "app/controllers/d2.rb": "class D2 < D1\nend\n",
+    "app/controllers/d3.rb": "class D3 < D2\nend\n",
+    "app/controllers/d4.rb": "class D4 < D3\nend\n",
+    "app/controllers/d5.rb": "class D5 < D4\nend\n",
+    "app/controllers/d6.rb": "class D6 < D5\nend\n",
+    "app/controllers/d7.rb": "class D7 < D6\nend\n",
+    "app/controllers/d8.rb": "class D8 < D7\nend\n",
+    "app/controllers/d9.rb": "class D9 < D8\n  def hook\n  end\nend\n",
+    "app/jobs/j1.rb": "class J1 < J2\nend\n",
+    "app/jobs/j2.rb": "class J2 < J3\nend\n",
+    "app/jobs/j3.rb": "class J3 < J4\nend\n",
+    "app/jobs/j4.rb": "class J4 < J5\nend\n",
+    "app/jobs/j5.rb": "class J5 < J6\nend\n",
+    "app/jobs/j6.rb": "class J6 < J7\nend\n",
+    "app/jobs/j7.rb": "class J7 < J8\nend\n",
+    "app/jobs/j8.rb": "class J8 < ApplicationJob\nend\n"
   },
   "mustReach": [
     {
-      "target": "app/controllers/chain.rb#C8.deep",
+      "target": "app/controllers/c8.rb#C8.deep",
       "caller": null,
       "file": "config/routes.rb",
       "line": 2
     },
     {
-      "target": "app/controllers/down.rb#D9.hook",
+      "target": "app/controllers/d9.rb#D9.hook",
       "caller": null,
       "file": "app/controllers/hooked_controller.rb",
       "line": 2
@@ -40,7 +62,7 @@
   "whole": [],
   "floored": [
     {
-      "target": "app/controllers/chain.rb#C8.deep",
+      "target": "app/controllers/c8.rb#C8.deep",
       "reason": "the class chain of UsersController is deeper than 8 classes",
       "at": "config/routes.rb:2",
       "gap": {
@@ -49,7 +71,7 @@
       }
     },
     {
-      "target": "app/controllers/down.rb#D9.hook",
+      "target": "app/controllers/d9.rb#D9.hook",
       "reason": "the rails plugin gave up at 3 places (fan-out-capped)",
       "at": "",
       "gap": {

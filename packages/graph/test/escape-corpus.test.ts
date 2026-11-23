@@ -38,6 +38,9 @@
 // of pieces: a string, or `{ repeat, times }`, the text written `times`
 // times with `{{i}}` read as 1, 2, 3 and so on. `commit` commits the files
 // first, for a framework plugin that reads the repository's history.
+// `build` sets build options. The build's time budget and the limit on one
+// parse are lifted unless a case sets them, so a case gives the same answer
+// on a loaded machine: a cap that counts work, not time, trips first.
 import { afterAll, describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -60,7 +63,7 @@ type Case = {
   whole: string[];
   floored: { target: string; reason: string; at: string; scope?: "tests" | "all"; gap?: { cause: string; at: string } }[];
   caps?: string[];
-  build?: { budgetMs?: number; maxFiles?: number; maxFileBytes?: number; maxHeapMb?: number };
+  build?: { budgetMs?: number; maxParseMs?: number; maxFiles?: number; maxFileBytes?: number; maxHeapMb?: number };
   commit?: boolean;
 };
 
@@ -86,6 +89,9 @@ const ask = (g: Graph, kind: "callers" | "references", id: string): Answer => {
 };
 const callersOf = (g: Graph, id: string): Answer => ask(g, "callers", id);
 
+// A time limit no case reaches: a case that tests a time limit sets its own.
+const UNTIMED_MS = 600_000;
+
 describe("the escape corpus", () => {
   const graphs = new Map<string, Promise<Graph>>();
   const graphOf = (name: string, spec: Case) => {
@@ -93,7 +99,7 @@ describe("the escape corpus", () => {
     if (!g) {
       const root = makeRepo(Object.fromEntries(Object.entries(spec.files).map(([path, f]) => [path, textOf(f)])));
       if (spec.commit) commitAll(root);
-      graphs.set(name, (g = buildGraph({ repoRoot: root, store: null, ...spec.build })));
+      graphs.set(name, (g = buildGraph({ repoRoot: root, store: null, budgetMs: UNTIMED_MS, maxParseMs: UNTIMED_MS, ...spec.build })));
     }
     return g;
   };
@@ -139,7 +145,7 @@ describe("the escape corpus", () => {
           expect(listed, `${f.target}: graph references lists the use at ${f.at}`).toContain(f.at);
         }
       }
-    }, 60_000);
+    }, 180_000);
   }
 
   it("counts a value use for every function a value may call: a consistency check, not a proof of completeness (14b)", async () => {

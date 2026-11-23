@@ -6,7 +6,7 @@
   "commit": true,
   "files": {
     "names/go.mod": "module example.com/names\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
-    "names/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.s, deep)\n\tr.Run()\n}\n"
+    "names/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nvar a struct{ b struct{ c struct{ d struct{ e struct{ f struct{ g struct{ h struct{ i struct{ j struct{ k struct{ l struct{ m struct{ n struct{ o struct{ p struct{ q struct{ s string } } } } } } } } } } } } } } } } }; func init() { a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.s = \"/x\" }\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.s, deep)\n\tr.Run()\n}\n"
   },
   "mustReach": [
     {

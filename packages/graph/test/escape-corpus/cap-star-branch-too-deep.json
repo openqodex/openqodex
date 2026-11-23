@@ -21,14 +21,7 @@
     "src/t.ts": "export function x(): void {}\n",
     "src/use.ts": "import * as r from \"./f\";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n"
   },
-  "mustReach": [
-    {
-      "target": "src/t.ts#x",
-      "caller": null,
-      "file": "src/use.ts",
-      "line": 3
-    }
-  ],
+  "mustReach": [],
   "whole": [],
   "floored": [
     {
