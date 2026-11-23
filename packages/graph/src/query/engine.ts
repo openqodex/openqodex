@@ -250,7 +250,7 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     if (kind === "callers") {
       const floor = floorOf(g, { id: n.id, name: n.name, file: n.file, kind: n.kind }, new Set());
       // The framework may run it too (a handler, a middleware): a cap of the framework layer may hide that.
-      const fw = frameworkCallerGaps(g, n.file);
+      const fw = frameworkCallerGaps(g, n.file, n.id);
       reasons = [...floor.reasons, ...fw.reasons];
       gaps = joinGaps(floor.gaps, fw.gaps);
       if (fw.reasons.length === 0 && floor.places && floor.places.length > 0 && floor.places.every((p) => isTestPath(p.file))) inTests = floor.places;

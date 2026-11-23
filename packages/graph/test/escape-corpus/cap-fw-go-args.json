@@ -32,12 +32,6 @@
       "caller": null,
       "file": "group/main.go",
       "line": 11
-    },
-    {
-      "target": "mux/main.go#deep",
-      "caller": null,
-      "file": "mux/main.go",
-      "line": 9
     }
   ],
   "whole": [],

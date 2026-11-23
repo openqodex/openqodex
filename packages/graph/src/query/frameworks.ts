@@ -52,7 +52,7 @@ type FwRegistration = {
   handler: { written: string; status: string; targets: string[] };
 };
 type FwEdge = { from: string; to: string; kind: string; plugin: string; app: string | null; evidence: FwEvidence; category?: string; order?: number };
-type FwUnknown = { plugin: string; site: FwSite | null; affects: string[]; cause: string; name: string | null; note: string; count: number | null; exact: boolean };
+type FwUnknown = { plugin: string; site: FwSite | null; affects: string[]; cause: string; name: string | null; note: string; count: number | null; exact: boolean; symbol?: string };
 type FwRun = { id: string; status: string; reason: string | null; apps?: number };
 type FwApp = { id: string; site: FwSite };
 type FwLayer = { registrations: FwRegistration[]; edges: FwEdge[]; unknowns: FwUnknown[]; runs: FwRun[]; apps: FwApp[] };
@@ -137,8 +137,9 @@ const drops = (cause: string): boolean => (DROPS as Record<string, boolean | und
 // function of `file` (as a handler, a middleware, a job): each gap whose
 // cause can drop a registration (DROPS) and that names a relation that
 // runs code, or none, and reaches the function's project, and each plugin
-// that failed or stopped. Its reasons and its gaps, for a caller floor.
-export function frameworkCallerGaps(g: Graph, file: string): { reasons: string[]; gaps: GapPlace[] } {
+// that failed or stopped. A gap that names one function (`symbol`) floors
+// only that function. Its reasons and its gaps, for a caller floor.
+export function frameworkCallerGaps(g: Graph, file: string, id: string): { reasons: string[]; gaps: GapPlace[] } {
   const layer = frameworkLayer(g);
   if (!layer) return { reasons: [], gaps: [] };
   const project = g.projectOf(file);
@@ -150,6 +151,7 @@ export function frameworkCallerGaps(g: Graph, file: string): { reasons: string[]
   const imports = (f: string): boolean => (importers ??= importedBy(g, file)).has(f);
   const near = (f: string): boolean => g.projectOf(f) === project || imports(f);
   const reaches = (u: FwUnknown): boolean => {
+    if (typeof u.symbol === "string") return u.symbol === id;
     if (!BOUND_BY_IMPORTS.has(u.plugin)) return true;
     const scope = (u as { scope?: unknown }).scope;
     if (isObj(scope)) {

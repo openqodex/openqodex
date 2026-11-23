@@ -353,7 +353,10 @@ export type FrameworkEdge = {
 // (`{ build: true }`: a budget or a cap a plugin counts across every
 // application, which may hide anything past the point it stopped).
 // `affects` the framework relations it can hide; empty means every one. A
-// count that cannot be known is null, never zero.
+// count that cannot be known is null, never zero. `symbol`, when set, is the
+// one function the gap is about, already linked to what runs it (a
+// middleware whose matcher is computed): the gap may hide where it runs,
+// never that it runs, so it floors that function's callers and no other's.
 export type FrameworkUnknown = {
   plugin: string;
   site: Site | null;
@@ -364,6 +367,7 @@ export type FrameworkUnknown = {
   note: string;
   count: number | null;
   exact: boolean;
+  symbol?: string;
 };
 
 // ---------- the read API a plugin resolves through ----------

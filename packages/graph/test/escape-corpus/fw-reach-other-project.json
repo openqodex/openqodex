@@ -2,8 +2,8 @@
   "covers": "a FastAPI route in one project (api/) whose path is computed, registering a handler defined in another project (lib/) that api imports: the gap is at a file of api, and must floor the handler in lib",
   "commit": true,
   "files": {
-    "api/pyproject.toml": "[project]\nname = \"api\"\ndependencies = [\"fastapi\"]\n",
-    "lib/pyproject.toml": "[project]\nname = \"lib\"\n",
+    "api/pyproject.toml": "[project]\nname = \"api\"\ndependencies = [\"fastapi\", \"lib\"]\n",
+    "lib/pyproject.toml": "[project]\nname = \"lib\"\n\n[tool.setuptools]\npy-modules = [\"handlers\"]\n",
     "lib/handlers.py": "def index():\n    return 1\n",
     "api/main.py": "from fastapi import FastAPI\nfrom handlers import index\n\napp = FastAPI()\nversion = \"v1\"\napp.add_api_route(f\"/{version}/x\", index)\n"
   },

@@ -7,7 +7,7 @@
   "files": {
     "Gemfile": "source \"https://rubygems.org\"\n\ngem \"rails\"\n",
     "app/controllers/users_controller.rb": "class UsersController < ApplicationController\n  def deep\n  end\n\n  def top\n  end\nend\n",
-    "config/routes.rb": "Rails.application.routes.draw do\nnamespace :n9 do\nnamespace :n8 do\nnamespace :n7 do\nnamespace :n6 do\nnamespace :n5 do\nnamespace :n4 do\nnamespace :n3 do\nnamespace :n2 do\nnamespace :n1 do\nget \"deep\", to: \"users#deep\"\nend\nend\nend\nend\nend\nend\nend\nend\nend\nget \"top\", to: \"users#top\"\nend\n"
+    "config/routes.rb": "Rails.application.routes.draw do\nscope \"n9\" do\nscope \"n8\" do\nscope \"n7\" do\nscope \"n6\" do\nscope \"n5\" do\nscope \"n4\" do\nscope \"n3\" do\nscope \"n2\" do\nscope \"n1\" do\nget \"deep\", to: \"users#deep\"\nend\nend\nend\nend\nend\nend\nend\nend\nend\nget \"top\", to: \"users#top\"\nend\n"
   },
   "mustReach": [
     {
