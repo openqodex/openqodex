@@ -1,0 +1,39 @@
+{
+  "covers": "a NestJS guard past the arguments the plugin's reader reads from one UseGuards; the guard is named only in that list (nest facts MAX_ITEMS)",
+  "caps": [
+    "frameworks/nest/facts.ts#MAX_ITEMS"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"@nestjs/common\": \"^10.0.0\", \"@nestjs/core\": \"^10.0.0\"}}",
+    "src/g.ts": [
+      {
+        "repeat": "export class G{{i}} {\n  canActivate() {\n    return true;\n  }\n}\n",
+        "times": 65
+      }
+    ],
+    "src/c.controller.ts": "import { Controller, Get, UseGuards } from \"@nestjs/common\";\nimport { G1, G2, G3, G4, G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20, G21, G22, G23, G24, G25, G26, G27, G28, G29, G30, G31, G32, G33, G34, G35, G36, G37, G38, G39, G40, G41, G42, G43, G44, G45, G46, G47, G48, G49, G50, G51, G52, G53, G54, G55, G56, G57, G58, G59, G60, G61, G62, G63, G64, G65 } from \"./g\";\n\n@Controller(\"c\")\nexport class C {\n  @UseGuards(G1, G2, G3, G4, G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20, G21, G22, G23, G24, G25, G26, G27, G28, G29, G30, G31, G32, G33, G34, G35, G36, G37, G38, G39, G40, G41, G42, G43, G44, G45, G46, G47, G48, G49, G50, G51, G52, G53, G54, G55, G56, G57, G58, G59, G60, G61, G62, G63, G64, G65)\n  @Get(\"x\")\n  h() {\n    return 1;\n  }\n}\n",
+    "src/app.module.ts": "import { Module } from \"@nestjs/common\";\nimport { C } from \"./c.controller\";\n\n@Module({ controllers: [C] })\nexport class AppModule {}\n",
+    "src/main.ts": "import { NestFactory } from \"@nestjs/core\";\nimport { AppModule } from \"./app.module\";\n\nasync function bootstrap() {\n  const app = await NestFactory.create(AppModule);\n  await app.listen(3000);\n}\nbootstrap();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/g.ts#G65",
+      "caller": null,
+      "file": "src/c.controller.ts",
+      "line": 6
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/g.ts#G65",
+      "reason": "UseGuards is given more than the 64 entries the plugin reads",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/c.controller.ts:6"
+      }
+    }
+  ]
+}

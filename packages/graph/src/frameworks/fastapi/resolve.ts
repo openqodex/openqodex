@@ -40,7 +40,7 @@ import type { DefFact, GraphNode } from "../../types.js";
 import type { Detection, FrameworkCall, FrameworkEdge, FrameworkEvidence, FrameworkUnknown, HandlerStatus, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
 import { appId, entityId } from "../plugin.js";
 import type { FastApiFact, ParamDep } from "./facts.js";
-import { MAX_SOURCE_BYTES, ROUTE_METHODS } from "./facts.js";
+import { MAX_PARAMS, MAX_SOURCE_BYTES, ROUTE_METHODS } from "./facts.js";
 import type { Expr, Kw } from "./py.js";
 import { evaluate, show } from "./py.js";
 
@@ -134,6 +134,10 @@ export function analyse(index: PluginIndex<FastApiFact>): Analysis {
 }
 
 const kwOf = (c: { kw: { key: string; value: Expr }[] }, key: string): Expr | undefined => c.kw.find((k) => k.key === key)?.value;
+// Whether the reader stopped inside an expression at one of its caps: then
+// it may be a name or a literal the plugin reads, so a gap there is a cap.
+const cutIn = (e: Expr): boolean => (e.t === "other" || e.t === "dyn" ? e.cut === true : e.t === "call" ? cutIn(e.fn) || e.args.some(cutIn) || e.kw.some((k) => cutIn(k.value)) : e.t === "list" ? e.items.some(cutIn) : false);
+const CUT = "longer or deeper than the plugin reads";
 const DEP_NOTE = "a FastAPI dependency: it runs before the handler on every request to this route";
 
 function run(index: PluginIndex<FastApiFact>): Analysis {
@@ -431,7 +435,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   // local the plugin does not follow; only module-level names are looked up.
   const bindRef = (file: string, e: Expr, role: "handler" | "dependency", scope: number): Bound => {
     if (e.t === "call") return none("unresolved", "unsupported-rule", `the ${role} is the value ${show(e)} returns, which is not followed`, show(e));
-    if (e.t !== "ref") return none("dynamic", "dynamic", `the ${role} is computed (${show(e)})`, null);
+    if (e.t !== "ref") return cutIn(e) ? none("dynamic", "fan-out-capped", `the ${role} is ${CUT} (${show(e)})`, null) : none("dynamic", "dynamic", `the ${role} is computed (${show(e)})`, null);
     const b = binder(file, scope, e.path[0] as string);
     if (b && b.line !== 0) return none("dynamic", "dynamic", `the ${role} ${show(e)} is a name of the function around it, which the plugin does not follow`, show(e));
     const found = lookup(file, e.path);
@@ -510,7 +514,8 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
     const written = path ? evaluate(path, constant(e.file, e.scope)) : null;
     const handler = e.handler.kind === "def" ? e.handler.fn : show(e.handler.expr);
     if (written === null) {
-      siteGap(e.site, "dynamic", ["handles"], handler, `the route path ${path ? show(path) : "(none)"} of ${handler} is computed at run time, so the route is not listed`);
+      if (path && cutIn(path)) siteGap(e.site, "fan-out-capped", ["handles"], handler, `the route path of ${handler} is ${CUT}, so the route is not listed`);
+      else siteGap(e.site, "dynamic", ["handles"], handler, `the route path ${path ? show(path) : "(none)"} of ${handler} is computed at run time, so the route is not listed`);
       return;
     }
     vals.set(base.id, base);
@@ -601,7 +606,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   const depsOfList = (file: string, list: Expr | undefined, scope: number): { deps: Dep[]; omitted: number } => {
     if (!list) return { deps: [], omitted: 0 };
     if (list.t !== "list") {
-      siteGap({ file, line: list.line, column: list.column }, "dynamic", ["applies_middleware"], show(list), `the dependencies ${show(list)} are computed at run time`);
+      siteGap({ file, line: list.line, column: list.column }, cutIn(list) ? "fan-out-capped" : "dynamic", ["applies_middleware"], show(list), cutIn(list) ? `the dependencies are ${CUT}` : `the dependencies ${show(list)} are computed at run time`);
       return { deps: [], omitted: 0 };
     }
     return { deps: list.items.map((call) => ({ call, file, type: null, scope, list: true })), omitted: list.omitted };
@@ -666,6 +671,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
       const n = index.node(id);
       const fact = n ? factsIn(n.file).deps.get(`${n.name}@${n.startLine}`) : undefined;
       if (!n || !fact) continue;
+      if (fact.omitted > 0) siteGap({ file: n.file, line: fact.line, column: fact.column }, "fan-out-capped", ["applies_middleware"], fact.fn, `${fact.fn} has ${fact.omitted} parameters past the ${MAX_PARAMS} the plugin reads, so the dependencies they declare are not listed`);
       for (const p of fact.params) {
         const b = bindDep({ call: p.call, file: n.file, type: p.type, scope: fact.scope, list: false });
         for (const t of b?.targets ?? []) {

@@ -29,14 +29,16 @@ export type Part = { s: string } | { ref: string[] };
 // `ref` is a name or a dotted name. `call` a call with its positional and
 // keyword arguments, `omitted` the arguments past MAX_ARGS (a keyword not
 // found may be among them). `list` a list or tuple, with `omitted` the
-// items past the read cap. `other` anything else.
+// items past the read cap. `other` anything else. `cut` on `dyn` and
+// `other`: the reader stopped at one of its caps, so the expression may be
+// a plain name or literal the plugin would have read.
 export type Expr =
   | ({ t: "str"; v: string } & Pos)
-  | ({ t: "dyn"; parts: Part[] | null } & Pos)
+  | ({ t: "dyn"; parts: Part[] | null; cut?: true } & Pos)
   | ({ t: "ref"; path: string[] } & Pos)
   | ({ t: "call"; fn: Expr; args: Expr[]; kw: Kw[]; omitted: number } & Pos)
   | ({ t: "list"; items: Expr[]; omitted: number } & Pos)
-  | ({ t: "other" } & Pos);
+  | ({ t: "other"; cut?: true } & Pos);
 
 export type Kw = { key: string; value: Expr };
 
@@ -165,7 +167,7 @@ function stringValue(node: Node): string | "computed" | "not-str" {
 // concatenation), as an expression: a literal only when every piece is one.
 function readString(node: Node, p: Pos): Expr {
   const strings = node.type === "concatenated_string" ? node.namedChildren.filter((c) => c.type === "string") : [node];
-  if (strings.length > MAX_STRING_PIECES) return { t: "dyn", parts: null, ...p };
+  if (strings.length > MAX_STRING_PIECES) return { t: "dyn", parts: null, cut: true, ...p };
   let v = "";
   for (const s of strings) {
     const piece = stringValue(s);
@@ -179,37 +181,48 @@ function readString(node: Node, p: Pos): Expr {
 // The pieces of a `+` concatenation when every leaf is a string literal or
 // a name; null when some leaf is anything else (an f-string with a field, a
 // call), which leaves the string computed.
-function concatParts(node: Node, depth: number): Part[] | null {
-  if (depth > MAX_DEPTH) return null;
+function concatParts(node: Node, depth: number, cut: { at: boolean }): Part[] | null {
+  if (depth > MAX_DEPTH) {
+    cut.at = true;
+    return null;
+  }
   if (node.type === "string" || node.type === "concatenated_string") {
     const e = readString(node, pos(node));
+    if (e.t === "dyn" && e.cut) cut.at = true;
     return e.t === "str" ? [{ s: e.v }] : null;
   }
-  if (node.type === "parenthesized_expression" && node.firstNamedChild) return concatParts(node.firstNamedChild, depth + 1);
+  if (node.type === "parenthesized_expression" && node.firstNamedChild) return concatParts(node.firstNamedChild, depth + 1, cut);
   const path = namePath(node);
   if (path) return [{ ref: path }];
   if (node.type === "binary_operator" && node.childForFieldName("operator")?.text === "+") {
     const left = node.childForFieldName("left");
     const right = node.childForFieldName("right");
     if (!left || !right) return null;
-    const l = concatParts(left, depth + 1);
+    const l = concatParts(left, depth + 1, cut);
     if (!l) return null;
-    const r = concatParts(right, depth + 1);
-    if (!r || l.length + r.length > MAX_STRING_PIECES) return null;
+    const r = concatParts(right, depth + 1, cut);
+    if (!r) return null;
+    if (l.length + r.length > MAX_STRING_PIECES) {
+      cut.at = true;
+      return null;
+    }
     return [...l, ...r];
   }
   return null;
 }
 
 // Whether a `+` expression is a string by its leaves: some leaf is a string literal.
-function stringish(node: Node, depth: number): boolean {
-  if (depth > MAX_DEPTH) return false;
+function stringish(node: Node, depth: number, cut: { at: boolean }): boolean {
+  if (depth > MAX_DEPTH) {
+    cut.at = true;
+    return false;
+  }
   if (node.type === "string" || node.type === "concatenated_string") return true;
-  if (node.type === "parenthesized_expression" && node.firstNamedChild) return stringish(node.firstNamedChild, depth + 1);
+  if (node.type === "parenthesized_expression" && node.firstNamedChild) return stringish(node.firstNamedChild, depth + 1, cut);
   if (node.type === "binary_operator" && node.childForFieldName("operator")?.text === "+") {
     const left = node.childForFieldName("left");
     const right = node.childForFieldName("right");
-    return (left !== null && stringish(left, depth + 1)) || (right !== null && stringish(right, depth + 1));
+    return (left !== null && stringish(left, depth + 1, cut)) || (right !== null && stringish(right, depth + 1, cut));
   }
   return false;
 }
@@ -219,7 +232,7 @@ const named = (node: Node | null): Node[] => (node ? node.namedChildren.filter((
 export function readExpr(node: Node | null, budget: Budget = { left: MAX_EXPR_NODES }, depth = 0): Expr {
   if (!node) return { t: "other", line: 1, column: 1 };
   const p = pos(node);
-  if (depth > MAX_DEPTH || budget.left <= 0) return { t: "other", ...p };
+  if (depth > MAX_DEPTH || budget.left <= 0) return { t: "other", cut: true, ...p };
   budget.left--;
   switch (node.type) {
     case "parenthesized_expression":
@@ -229,14 +242,22 @@ export function readExpr(node: Node | null, budget: Budget = { left: MAX_EXPR_NO
     case "concatenated_string":
       return readString(node, p);
     case "binary_operator": {
-      if (node.childForFieldName("operator")?.text !== "+" || !stringish(node, 0)) return { t: "other", ...p };
-      return { t: "dyn", parts: concatParts(node, 0), ...p };
+      if (node.childForFieldName("operator")?.text !== "+") return { t: "other", ...p };
+      const deep = { at: false };
+      if (!stringish(node, 0, deep)) return deep.at ? { t: "other", cut: true, ...p } : { t: "other", ...p };
+      const cut = { at: false };
+      const parts = concatParts(node, 0, cut);
+      return parts === null && cut.at ? { t: "dyn", parts, cut: true, ...p } : { t: "dyn", parts, ...p };
     }
     case "identifier":
       return { t: "ref", path: [node.text], ...p };
     case "attribute": {
       const path = namePath(node);
-      return path ? { t: "ref", path, ...p } : { t: "other", ...p };
+      if (path) return { t: "ref", path, ...p };
+      // A plain dotted name past MAX_NAME_PARTS parts is cut, not computed.
+      let at: Node | null = node;
+      while (at?.type === "attribute" && at.childForFieldName("attribute")?.type === "identifier") at = at.childForFieldName("object");
+      return at?.type === "identifier" ? { t: "other", cut: true, ...p } : { t: "other", ...p };
     }
     case "call": {
       const fn = readExpr(node.childForFieldName("function"), budget, depth + 1);
@@ -342,6 +363,7 @@ export function isExpr(v: unknown, depth = 0): v is Expr {
     case "str":
       return typeof e.v === "string";
     case "dyn":
+      if (e.cut !== undefined && e.cut !== true) return false;
       return e.parts === null || (Array.isArray(e.parts) && e.parts.every((p) => typeof p === "object" && p !== null && (typeof (p as { s?: unknown }).s === "string" || strings((p as { ref?: unknown }).ref))));
     case "ref":
       return strings(e.path) && e.path.length > 0;
@@ -350,7 +372,7 @@ export function isExpr(v: unknown, depth = 0): v is Expr {
     case "list":
       return Array.isArray(e.items) && e.items.every((a) => isExpr(a, depth + 1)) && Number.isInteger(e.omitted);
     case "other":
-      return true;
+      return e.cut === undefined || e.cut === true;
     default:
       return false;
   }

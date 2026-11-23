@@ -24,7 +24,7 @@
 import type { Detection, Entity, FrameworkEdge, FrameworkEvidence, FrameworkUnknown, Lookup, PluginIndex, PluginOutput, Registration, RoleAssignment, Site } from "../plugin.js";
 import { appId, entityId } from "../plugin.js";
 import type { Arg, Deco, Member, NestFact } from "./facts.js";
-import { MAX_CONSTANT_STEPS, ROUTE_DECORATORS } from "./facts.js";
+import { MAX_CONSTANT_STEPS, MAX_ITEMS, MAX_SHADOW_STEPS, ROUTE_DECORATORS } from "./facts.js";
 import { isTestFile } from "../express/js.js";
 import type { GraphNode } from "../../types.js";
 
@@ -458,7 +458,9 @@ function run(index: PluginIndex<NestFact>): Analysis {
     for (const d of [...decos].reverse()) {
       if (decoName(file, d) !== name) continue;
       const site = { file, line: d.line, column: d.column };
-      if (d.more > 0) gap(site, "dynamic", ["applies_middleware"], null, `${name} is given a spread list, so some of what it applies is not listed`);
+      // A list the reader filled to MAX_ITEMS was cut: a cap, which the callers floor reads.
+      if (d.more > 0 && d.args.length >= MAX_ITEMS) gap(site, "fan-out-capped", ["applies_middleware"], null, `${name} is given more than the ${MAX_ITEMS} entries the plugin reads, so what it applies past them is not listed`);
+      else if (d.more > 0) gap(site, "dynamic", ["applies_middleware"], null, `${name} is given a spread list, so some of what it applies is not listed`);
       for (const arg of d.args) out.push({ file, arg, site, kind: name === "UseGuards" ? "guard" : "interceptor" });
     }
     return out;
@@ -548,7 +550,8 @@ function run(index: PluginIndex<NestFact>): Analysis {
         const r = routeOf(at, m);
         if (r) {
           if (at !== cls && !namesKnown) {
-            gap({ file: at.file, line: r.deco.line, column: r.deco.column }, "unsupported-rule", ["handles"], m.name, `${name} has more members than the plugin lists, so whether it overrides ${m.name ?? "this method"} is not known`);
+            // A cap (MAX_NAMES), so a gap the callers floor reads: the route may be the target's.
+            gap({ file: at.file, line: r.deco.line, column: r.deco.column }, "fan-out-capped", ["handles"], m.name, `${name} has more members than the plugin lists, so whether it overrides ${m.name ?? "this method"} is not known`);
             continue;
           }
           routes.push(r);
@@ -1048,6 +1051,7 @@ function run(index: PluginIndex<NestFact>): Analysis {
         const why = fact.kind === "too-large" ? `the file is larger than the plugin reads (${fact.bytes} bytes)` : "the file has a syntax error, and nothing inside the broken part was read";
         addUnknown({ plugin: PLUGIN, site: { file, line: fact.line, column: fact.column }, scope: { file }, affects: [], cause: "file-not-parsed", name: null, note: `${why}, so its Nest routes and modules are not listed`, count: null, exact: false });
       }
+      if (fact.kind === "shadow-cut") addUnknown({ plugin: PLUGIN, site: { file, line: fact.line, column: fact.column }, scope: { file }, affects: ["handles", "mounts", "applies_middleware"], cause: "fan-out-capped", name: null, note: `the file names more locals than the ${MAX_SHADOW_STEPS} steps the plugin spends checking them; from here on a decorator or a NestFactory call inside a function is not read as Nest's, so its routes are not listed`, count: null, exact: false });
     }
   }
   for (const u of budgetUnknowns(left)) addUnknown(u);

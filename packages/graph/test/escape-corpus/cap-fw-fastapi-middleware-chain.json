@@ -1,5 +1,5 @@
 {
-  "covers": "a FastAPI dependency past the chain the plugin keeps for one route; the dependency is named only in the route's dependency list (fastapi MAX_MIDDLEWARE_CHAIN)",
+  "covers": "a FastAPI dependency past the chain the plugin keeps for one route, the application's dependencies first; the dependency is named only in the route's list (fastapi MAX_MIDDLEWARE_CHAIN)",
   "caps": [
     "frameworks/fastapi/resolve.ts#MAX_MIDDLEWARE_CHAIN"
   ],
@@ -7,36 +7,45 @@
   "files": {
     "requirements.txt": "fastapi\n",
     "main.py": [
-      "from fastapi import Depends, FastAPI\n\napp = FastAPI()\n\n",
+      "from fastapi import Depends, FastAPI\n\n",
+      {
+        "repeat": "def a{{i}}():\n    return 1\n\n",
+        "times": 40
+      },
       {
         "repeat": "def d{{i}}():\n    return 1\n\n",
-        "times": 65
+        "times": 40
       },
-      "@app.get(\"/x\", dependencies=[",
+      "app = FastAPI(dependencies=[",
+      {
+        "repeat": "Depends(a{{i}}), ",
+        "times": 40
+      },
+      "])\n\n@app.get(\"/x\", dependencies=[",
       {
         "repeat": "Depends(d{{i}}), ",
-        "times": 65
+        "times": 40
       },
       "])\ndef index():\n    return 1\n"
     ]
   },
   "mustReach": [
     {
-      "target": "main.py#d65",
+      "target": "main.py#d40",
       "caller": null,
       "file": "main.py",
-      "line": 200
+      "line": 245
     }
   ],
   "whole": [],
   "floored": [
     {
-      "target": "main.py#d65",
+      "target": "main.py#d40",
       "reason": "dependency chain is longer than the 64 dependencies the plugin keeps",
       "at": "",
       "gap": {
         "cause": "fan-out-capped",
-        "at": "main.py:200"
+        "at": "main.py:245"
       }
     }
   ]
