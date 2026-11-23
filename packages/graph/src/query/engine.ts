@@ -25,7 +25,7 @@ import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Extra, FloorGroup, Job, Listing, Request, Session } from "./answer.js";
 import { frameworkCallerGaps, frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
-import { gapPlace, namesReached } from "../gap.js";
+import { gapPlace, namesReached, NEXT } from "../gap.js";
 import type { GapPlace } from "../gap.js";
 import { edgeId, isShortEdgeId, longEdgeId, readEdgeId } from "./ids.js";
 import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, pagingNote, readCursor } from "./page.js";
@@ -371,6 +371,19 @@ function jobFor(s: Session, req: Request, extra: Extra, tiers: ReadonlySet<Tier>
   }
 }
 
+// The answers that carry `gaps`, and a floor's gaps at the points it
+// names (node ids), or at the target's definition when none is a node.
+const GAP_KINDS: ReadonlySet<string> = new Set(["callers", "callees", "impact"]);
+function gapsAt(g: Graph, points: readonly string[], target: Answer["target"], cause: string, next: string): GapPlace[] {
+  const at = points.flatMap((id) => {
+    const n = g.nodes.get(id);
+    return n ? [{ cause, file: n.file, line: n.startLine, next }] : [];
+  });
+  if (at.length > 0) return joinGaps(at);
+  const ends = target === null ? [] : Array.isArray(target) ? target : [target];
+  return joinGaps(ends.map((c) => ({ cause, file: c.file, line: c.line, next })));
+}
+
 // What a question's work gave, as its answer. Stopped: its work is kept,
 // the answer is a floor with what it found and where it stopped, and the
 // cursor goes on from there. Whole: the list is kept for the next page.
@@ -380,11 +393,13 @@ function settle(s: Session, req: Request, job: Job, out: Listing | Answer, offse
     const id = keepJob(s.graph, job);
     const a = out.answer;
     const cursor = cursorFor(s.generation, req, offset, id);
+    // Where it stopped is a gap: each point of the frontier, else the target.
+    const stoppedGaps = GAP_KINDS.has(a.kind) ? joinGaps(a.unknown.gaps ?? [], gapsAt(s.graph, out.stopped.frontier, a.target, "budget", NEXT.questionStopped)) : [];
     return {
       ...a,
       [out.into]: out.all.slice(offset, offset + limitOf(req)),
       counts: { certain: null, likely: null, possible: null },
-      unknown: { ...a.unknown, floor: true, reasons: [out.stopped.note, ...a.unknown.reasons] },
+      unknown: { ...a.unknown, floor: true, reasons: [out.stopped.note, ...a.unknown.reasons], ...(stoppedGaps.length > 0 ? { gaps: stoppedGaps } : {}) },
       truncated: {
         by: "budget",
         omitted: null,
@@ -481,7 +496,9 @@ function finish(s: Session, a: Answer): Answer {
   const files = langs.reduce((k, u) => k + u.files, 0);
   if (langs.length > 0) {
     const notes = langs.map(unreadNote).filter((r) => !unknown.reasons.includes(r));
-    unknown = { ...unknown, floor: true, reasons: [...unknown.reasons, ...notes], causes: { ...unknown.causes, "language-not-read": files } };
+    // The build keeps no path of an unread file: the gap is said at the target.
+    const gaps = GAP_KINDS.has(a.kind) && a.error === null ? joinGaps(unknown.gaps ?? [], gapsAt(s.graph, [], a.target, "language-not-read", NEXT.unreadLanguage)) : [];
+    unknown = { ...unknown, floor: true, reasons: [...unknown.reasons, ...notes], causes: { ...unknown.causes, "language-not-read": files }, ...(gaps.length > 0 ? { gaps } : {}) };
   }
   const groups: FloorGroup[] = unknown.groups
     ? [...unknown.groups]

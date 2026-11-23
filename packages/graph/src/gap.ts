@@ -81,4 +81,6 @@ export const NEXT = {
   walkCut: "Ask `openqodex graph callers` about this symbol: the review's walk stopped here, so its callers past the cut are not listed.",
   escapesCut: "Build again with a larger budget (`openqodex graph build`): the search for the ways a function escapes stopped before it finished.",
   noEscapes: "Build the graph with `buildGraph` or `openqodex graph build`: it was put together without its escape facts.",
+  unreadLanguage: "Search the files in the languages the graph does not read for uses of the target: a call there is not listed.",
+  questionStopped: "Ask again with this answer's cursor, or with a larger time budget: the question stopped here, and what lies past this point is not counted.",
 } as const;

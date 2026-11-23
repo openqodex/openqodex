@@ -195,7 +195,7 @@ const EXCUSED: Record<string, Excuse> = {
   "frameworks/render.ts#MAX_LITERAL": { kind: "no-caller", why: "what the framework block of the brief shows or keeps as text; no relation is dropped" },
   "frameworks/render.ts#MAX_ROWS": { kind: "no-caller", why: "what the framework block of the brief shows or keeps as text; no relation is dropped" },
   "frameworks/shared/kept.ts#MAX_KEPT": { kind: "no-caller", why: "what the framework block of the brief shows or keeps as text; no relation is dropped" },
-  "impact.ts#WALK_LIMIT": { kind: "no-row", why: "the review's change-impact walk only: its cut floors the impact answer (relations.ts LISTED_CUTS), and no test trips it; the corpus asks `callers`" },
+  "impact.ts#WALK_LIMIT": { kind: "elsewhere", why: "gaps.test.ts (8): the review's change-impact walk only; its cut floors the impact answer with a gap at the cut seed's definition; the corpus asks `callers`" },
   "query/context.ts#MAX_CONTEXT": { kind: "no-caller", why: "source lines shown beside a row; no row is dropped" },
   "query/context.ts#MAX_LINE": { kind: "no-caller", why: "source lines shown beside a row; no row is dropped" },
   "query/ids.ts#MAX_EDGE_ID": { kind: "no-caller", why: "the longest edge id a question accepts back; no row is dropped" },
