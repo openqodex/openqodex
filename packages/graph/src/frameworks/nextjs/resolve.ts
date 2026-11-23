@@ -215,7 +215,8 @@ function run(index: PluginIndex<NextFact>): Analysis {
     const router = routers.find((r) => path.startsWith(`${r.dir}/`));
     if (!router) continue;
     const parts = path.slice(router.dir.length + 1).split("/");
-    if (parts.length > MAX_PATTERN_SEGMENTS) {
+    // The folders are the route's segments; the last part is the file.
+    if (parts.length - 1 > MAX_PATTERN_SEGMENTS) {
       segmentsCut++;
       continue;
     }

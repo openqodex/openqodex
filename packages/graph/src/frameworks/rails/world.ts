@@ -15,7 +15,8 @@ export const PLUGIN = "rails";
 // 3: a route keeps only the options it reads, and no query string or URL user.
 // 4: a kept literal is bounded, with key-shaped text redacted; a target only as controller#action.
 // 5: a literal over the bound is not kept, and a redacted run is named by its hash.
-export const VERSION = 5;
+// 6: a route cap says which limit stopped it: the nesting of route blocks or the syntax depth.
+export const VERSION = 6;
 
 export type App = {
   id: string;

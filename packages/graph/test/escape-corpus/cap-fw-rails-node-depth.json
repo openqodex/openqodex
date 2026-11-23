@@ -34,7 +34,7 @@
   "floored": [
     {
       "target": "app/controllers/users_controller.rb#UsersController.deep",
-      "reason": "are not read",
+      "reason": "route calls nested more than 200 syntax levels deep are not read",
       "at": "config/routes.rb:102",
       "gap": {
         "cause": "fan-out-capped",
