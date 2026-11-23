@@ -30,8 +30,11 @@
 // survivor, also along a chain), counted into an observation (never folds),
 // observation into counted (never raises it), observation into observation
 // (never raises it), an observation sharing a counted key (never folds it,
-// never raises it, folded or not), a key cycle (one key stays), an id cycle
-// (rejected by the verifier answer check, evidence-check.test.ts).
+// never raises it, folded or not, and never lists it when only the
+// observation's severity clears the threshold), counted into a below-floor
+// finding whose key an observation shares (never folds: that key does not
+// count), a key cycle (one key stays), an id cycle (rejected by the
+// verifier answer check, evidence-check.test.ts).
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -401,7 +404,7 @@ it("keeps a major finding whose key an observation shares when that observation 
 // Three finder candidates on lines 1 to 3 of a.txt, verified in one batch.
 // Each verdict starts as a hidden nitpick finding titled by its line; `edit`
 // shapes it, with `id` giving the verdict id of another line.
-async function foldCase(edit: (v: VerifyVerdict, line: number, id: (line: number) => string) => void) {
+async function foldCase(edit: (v: VerifyVerdict, line: number, id: (line: number) => string) => void, threshold: "minor" | "major" = "minor") {
   const f = setup((answer, _request, brief) => {
     if (answer.version === "find-1") answer.candidates = (brief.pass === "local" ? [1, 2] : [3]).map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }));
     if (answer.version === "verify-1") {
@@ -417,7 +420,7 @@ async function foldCase(edit: (v: VerifyVerdict, line: number, id: (line: number
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
   f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
-  f.config.severityThreshold = "minor";
+  f.config.severityThreshold = threshold;
   f.config.blockOnSeverity = "major";
   const r = await runStagedReview(f.args);
   expect(r.missing).toEqual([]);
@@ -461,6 +464,26 @@ it.each([false, true])("never raises a counted finding with the severity of an o
   expect(findings).toEqual(folded ? [["Claim 2", "minor"]] : [["Shared", "minor"]]);
   expect(observations).toEqual([]);
   expect(saved).toEqual(folded ? [["Claim 2", "minor"]] : [["Shared", "minor"]]);
+  expect(r.report.verdict).toBe("passed");
+});
+it("never folds a counted major into a below-floor finding whose key an observation shares", async () => {
+  const { r, findings } = await foldCase((v, line, id) => {
+    if (line === 1) { v.severity = "major"; v.duplicate_of = id(2); }
+    if (line === 2) { v.title = "Shared"; v.severity = "minor"; v.confidence = 0.6; }
+    if (line === 3) { v.title = "Shared"; v.line_number = 2; v.severity = "minor"; v.tier = "observation"; }
+  });
+  expect(findings).toEqual([["Claim 1", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+});
+it("hides a counted minor finding that only a major observation sharing its key lifted over the threshold", async () => {
+  const { r, findings, observations } = await foldCase((v, line) => {
+    if (line === 1) { v.title = "Shared"; v.severity = "minor"; }
+    if (line === 3) { v.title = "Shared"; v.line_number = 1; v.severity = "major"; v.tier = "observation"; }
+  }, "major");
+  expect(findings).toEqual([]);
+  expect(observations).toEqual([]);
+  // The hidden minor finding and the nitpick on line 2, as a replay counts them.
+  expect(r.report.below_threshold).toBe(2);
   expect(r.report.verdict).toBe("passed");
 });
 it("lets a stopped session leave the budget queue while another session holds the lock", async () => {

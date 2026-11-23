@@ -494,7 +494,9 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         if (!next) break;
         target = next;
         const targetKey = keyOf(target);
-        const shown = target.v.tier === "finding" ? shownKeys.has(targetKey) : item.v.tier === "observation" && shownObservationKeys.has(targetKey);
+        // A finding-tier link is shown only when its key counts: a below-floor
+        // finding whose key an observation shares is no place to fold into.
+        const shown = target.v.tier === "finding" ? shownFindingTierKeys.has(targetKey) : item.v.tier === "observation" && shownObservationKeys.has(targetKey);
         if (targetKey !== key && shown) { folded = true; break; }
       }
       if (folded) { duplicateKeys.add(key); foldedInto.set(key, target); }
@@ -528,10 +530,14 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       if (best === undefined || severityRank(severity) > severityRank(best)) raised.set(target, severity);
     }
     const observations: ReportFinding[] = [];
+    // A counted finding an observation sharing its key lifted over the
+    // threshold is hidden at its own severity, and counted as hidden.
+    const listed = (severity: ReportFinding["severity"]) => severityRank(severity) >= severityRank(config.severityThreshold) || config.blockOnSeverity !== null && severityRank(severity) >= severityRank(config.blockOnSeverity);
     report.findings = report.findings.flatMap((f) => {
       const key = findingKey(f);
       if (duplicateKeys.has(key)) return [];
       const severity = raised.get(key) ?? countedSeverity.get(key);
+      if (severity && severityRank(severity) < severityRank(f.severity) && !listed(severity)) { report.below_threshold++; return []; }
       const entry = { ...f, ...(severity ? { severity } : {}) };
       if (observationKeys.has(key)) { if (!supersededKeys.has(key)) observations.push(entry); return []; }
       return [entry];
