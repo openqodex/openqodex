@@ -39,7 +39,10 @@
 //     so the defect shows nowhere; or a broad finding absorbs two findings
 //     on lines apart from each other, or a counted finding takes two
 //     possible issues, so a distinct defect is lost; or the merged finding
-//     loses the lines of the one it absorbed.
+//     loses the lines of the one it absorbed; or a possible issue leaves
+//     for the key of a hidden merged finding no finder submitted, or two
+//     possible issues merged into one leave for a counted finding that
+//     overlaps only one of them.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { checkSubmission, finalizeReview, proseErrors, scanReport, sentences, SETTINGS_RULE, SUPPRESSION_RULE } from "./finalize.js";
@@ -613,6 +616,26 @@ describe("one defect under two titles is shown once (16)", () => {
     const report = run2(version, [{ ...broad, confidence: 0.9 }, { ...first, confidence: 0.55 }, { ...third, confidence: 0.55 }]);
     expect(report.findings.map((f) => f.title)).toEqual([broad.title]);
     expect(report.possible.map((f) => f.title)).toEqual([first.title, third.title]);
+  });
+
+  it.each([1, 2])("version %i keeps a possible issue that has only the key of a hidden merged finding", (version) => {
+    const first = { ...thin, line_end: 2, description: "The pool closes before the last put, so put raises ShutDown, and the caller retries.", confidence: 0.9 };
+    const second = { ...thin, title: "Pool shut twice", line_number: 2, line_end: 3, confidence: 0.9 };
+    const report = run2(version, [first, second, { ...rich, title: first.title, line_number: 1, line_end: 3, confidence: 0.55 }], { severityThreshold: "major" });
+    expect(report.findings).toEqual([]);
+    expect(report.below_threshold).toBe(1);
+    expect(report.possible.map((f) => [f.title, f.line_number, f.line_end])).toEqual([[first.title, 1, 3]]);
+  });
+
+  it.each([1, 2])("version %i keeps two possible issues merged into one when the counted finding overlaps only one of them", (version) => {
+    const counted = { ...rich, line_number: 1, line_end: 1, confidence: 0.9 };
+    const near = { ...rich, title: "Pool closed too soon", line_number: 1, line_end: 2, confidence: 0.55 };
+    const far = { ...rich, title: "Last put lost", line_number: 2, line_end: 3, description: "The last put is lost when the pool shuts, so the job never finishes.", confidence: 0.55 };
+    const report = run2(version, [counted, near, far]);
+    expect(report.findings.map((f) => f.title)).toEqual([counted.title]);
+    expect(report.possible.map((f) => [f.title, f.line_number, f.line_end])).toEqual([[far.title, 1, 3]]);
+    const both = run2(version, [{ ...counted, line_end: 2 }, { ...near, line_number: 1 }, { ...far, line_number: 1, line_end: 2 }]);
+    expect(both.possible).toEqual([]);
   });
 
   it.each([1, 2])("version %i keeps findings on lines that do not overlap, and findings from different sources", (version) => {
