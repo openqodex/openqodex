@@ -271,8 +271,8 @@ export class RailsWorld {
 
   // Whether the class chain reaches one of `roots` (qualified names), at most
   // MAX_CHAIN deep. "bound": through repository classes; "named": the class
-  // itself names a framework root.
-  reaches(cls: ClassInfo, roots: ReadonlySet<string>): { via: string[] } | null {
+  // itself names a framework root. "cut" when the chain goes on past MAX_CHAIN.
+  reaches(cls: ClassInfo, roots: ReadonlySet<string>): { via: string[] } | "cut" | null {
     const app = this.appOf(cls.file);
     let cur: ClassInfo | null = cls;
     const via: string[] = [];
@@ -285,12 +285,12 @@ export class RailsWorld {
       if (!next || next.id === cur.id) return null;
       cur = next;
     }
-    return null;
+    return "cut";
   }
 
   // The classes of the repository that inherit from a class, nearest first,
   // at most MAX_CHAIN levels down and `cap` classes in all; `cut` is set when
-  // the cap stopped the walk.
+  // either limit stopped the walk.
   descendants(cls: ClassInfo, cap: number): { list: ClassInfo[]; cut: boolean } {
     if (!this.subclassMap) {
       const m = new Map<string, ClassInfo[]>();
@@ -320,7 +320,8 @@ export class RailsWorld {
       }
       level = next;
     }
-    return { list: out, cut: false };
+    const subs = this.subclassMap;
+    return { list: out, cut: level.some((c) => (subs.get(c.id) ?? []).some((sub) => !seen.has(sub.id))) };
   }
 
   includesAny(cls: ClassInfo, names: ReadonlySet<string>): string | null {
