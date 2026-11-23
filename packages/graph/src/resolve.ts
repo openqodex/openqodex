@@ -3804,8 +3804,33 @@ export function createWorld(input: ResolveInput): World {
       }
       // A region the parser could not read may hide a call of any name
       // written in or around it, or one through a value (scope "project").
+      // A name the file binds to another (`import { target as t }`, a
+      // default import, `import * as ns`) reaches what it is bound to too.
+      // The gap sits inside the innermost definition that holds it, so the
+      // callees of that definition say so.
       for (const r of f.unread ?? []) {
-        unknowns.push(gap({ cause: "file-not-parsed", place: { file: path, line: r.line, column: r.column }, reaches: r.names === null ? "scope" : { names: r.names }, next: NEXT.unread, name: "", scope: "project", note: "the parser could not read the code here, so a call in it may be missing" }));
+        let inner = -1;
+        f.defs.forEach((d, i) => {
+          if (d.line > r.line || d.endLine < r.line) return;
+          const best = f.defs[inner];
+          if (!best || d.endLine - d.line < best.endLine - best.line) inner = i;
+        });
+        const at = { file: path, line: r.line, column: r.column };
+        const base = { cause: "file-not-parsed" as const, place: at, next: NEXT.unread, name: "", scope: "project" as const, caller: callerOf(inner) };
+        unknowns.push(gap({ ...base, reaches: r.names === null ? "scope" : { names: r.names }, note: "the parser could not read the code here, so a call in it may be missing" }));
+        if (r.names === null) continue;
+        const named = new Set(r.names);
+        const ids = new Set<string>();
+        const files = new Set<string>();
+        for (const w of r.names) {
+          const v = resolveLocal(path, w);
+          if (v?.v === "sym") for (const id of v.ids) if (!named.has(defById.get(id)?.name ?? "")) ids.add(id);
+          if (v?.v === "mod" && v.file !== path) files.add(v.file);
+        }
+        const note = "the parser could not read the code here, and a name written there is bound to it (an import under another name, a default import or a module)";
+        // The first gap counts the region as a call through a value; these add only targets.
+        if (ids.size > 0) unknowns.push(gap({ ...base, scope: "file", reaches: { ids: [...ids].sort() }, note }));
+        for (const file of [...files].sort()) unknowns.push(gap({ ...base, scope: "file", reaches: { file }, note }));
       }
       for (const t of f.types) {
         const k = typeKey(path, family, t.ref, 0, true, family === "java" && t.caller >= 0 ? javaNestingOf(defById.get(callerOf(t.caller))) : null);

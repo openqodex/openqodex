@@ -4089,9 +4089,12 @@ function extractPython(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
           i++;
         }
         // getattr(o, name): a call of the method it may take, by that name.
+        // A splat in the first two places may give the name: then it is not known.
         if (fn?.type === "identifier" && fn.text === "getattr") {
-          const all = args?.namedChildren.filter((a) => a.type !== "comment") ?? [];
-          if (all.length >= 2) ctx.addNameBuiltCall(node, all[1]?.type === "keyword_argument" || all[1]?.type === "list_splat" ? undefined : all[1]);
+          const all = args?.namedChildren.filter((a) => a.type !== "comment" && a.type !== "keyword_argument") ?? [];
+          const splat = all.findIndex((a) => a.type === "list_splat" || a.type === "dictionary_splat");
+          if (splat >= 0 && splat <= 1) ctx.addNameBuiltCall(node, undefined);
+          else if (all.length >= 2) ctx.addNameBuiltCall(node, all[1]);
         }
         // isinstance(x, Repo) and issubclass: the classes are type uses.
         if (fn?.type === "identifier" && (fn.text === "isinstance" || fn.text === "issubclass")) {
@@ -4616,12 +4619,23 @@ const JAVA_TYPES = new Set([
   "assignment_expression",
 ]);
 
-// Java reflection that finds a method by a name given at run time, with
-// the argument that names it: `c.getMethod(name, ...)`,
-// `lookup.findVirtual(c, name, type)`. -1: no name, every method
-// (`c.getMethods()`). `getMethod` with no argument is another method
-// (a servlet request's).
-const JAVA_REFLECT = new Map([["getMethod", 0], ["getDeclaredMethod", 0], ["findVirtual", 1], ["findStatic", 1], ["findSpecial", 1], ["getMethods", -1], ["getDeclaredMethods", -1]]);
+// Java reflection that finds a method by a name given at run time: the
+// argument that names it and the type that finds it (`c.getMethod(name,
+// ...)` on a Class, `lookup.findVirtual(c, name, type)` on a Lookup). -1:
+// no name, every method (`c.getMethods()`). `getMethod` with no argument is
+// another method (a servlet request's).
+const JAVA_REFLECT = new Map<string, [number, string]>([["getMethod", [0, "Class"]], ["getDeclaredMethod", [0, "Class"]], ["getMethods", [-1, "Class"]], ["getDeclaredMethods", [-1, "Class"]], ["findVirtual", [1, "Lookup"]], ["findStatic", [1, "Lookup"]], ["findSpecial", [1, "Lookup"]]]);
+
+// Whether a receiver may be of the type `want`: not when it is the class's
+// own method (`getMethods()`, `this.getMethods()`: Class and Lookup are
+// final, so no class of the repository is one), nor a field, a local or a
+// parameter declared of another type. A receiver whose type is not known
+// (a call's result, a class literal) may be.
+function javaMayBe(ctx: Ctx, recv: Receiver, want: string): boolean {
+  if (recv.kind === "self" && recv.path.length === 0) return false;
+  const declared = recv.kind === "type" && recv.path.length === 0 ? recv.type : recv.kind === "self" && recv.path.length === 1 ? (ctx.cls()?.fieldTypes?.[recv.path[0] as string] ?? null) : null;
+  return !declared || declared.result !== undefined || declared.name === want || declared.name.endsWith(`.${want}`);
+}
 
 // The keywords of a declaration's modifiers (`public`, `static`, `abstract`, `default`).
 function javaModifiers(node: Node): Set<string> {
@@ -5441,9 +5455,9 @@ function extractJava(tree: Tree, readers: readonly TreeVisitor[]): FileFacts {
         addCall(name, recv, node.childForFieldName("arguments"), node);
         if (object?.type === "identifier" && javaLocalValue(ctx, object.text) !== undefined) paramCalls.push({ name: object.text, scope: ctx.top });
         // Reflection: a method found by a name given at run time.
-        const at = JAVA_REFLECT.get(name.text);
+        const reflect = JAVA_REFLECT.get(name.text);
         const args = node.childForFieldName("arguments")?.namedChildren.filter((c) => c.type !== "line_comment" && c.type !== "block_comment") ?? [];
-        if (at !== undefined && args.length > at) ctx.addNameBuiltCall(node, args[at]);
+        if (reflect && (reflect[0] < 0 ? args.length === 0 : args.length > reflect[0]) && javaMayBe(ctx, recv, reflect[1])) ctx.addNameBuiltCall(node, args[reflect[0]]);
         return;
       }
       case "object_creation_expression": {
