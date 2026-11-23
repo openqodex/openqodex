@@ -289,7 +289,7 @@ function dedup(findings: ReportFinding[], same = sameDefect, parts?: Map<ReportF
 // a finding the threshold hides. A possible issue merged from two (`parts`)
 // leaves only for a counted finding that overlaps both, so the one the
 // counted finding never touched is not lost with it.
-export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect, parts?: ReadonlyMap<ReportFinding, ReportFinding[]>): ReportFinding[] {
+export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect, parts?: Pick<ReadonlyMap<ReportFinding, ReportFinding[]>, "get">): ReportFinding[] {
   const keys = new Set(counted.map(findingKey));
   return possible.filter((p) => {
     if (keys.has(findingKey(p))) return false;
@@ -297,6 +297,13 @@ export function uncounted(possible: ReportFinding[], counted: ReportFinding[], s
     return near.length !== 1 || possible.filter((q) => same(near[0]!, q)).length !== 1;
   });
 }
+
+// The two possible issues behind each merged one a checked report lists,
+// keyed by the report's own objects, so a later match by one defect (a
+// second reviewer's findings, in possibleAfterSecond) passes them to
+// uncounted too.
+const possibleParts = new WeakMap<ReportFinding, ReportFinding[]>();
+export const mergedParts: Pick<ReadonlyMap<ReportFinding, ReportFinding[]>, "get"> = possibleParts;
 
 // One redaction pass over every string value in a finished report, run after
 // the coverage decisions so they still match on the raw paths.
@@ -796,7 +803,12 @@ export function checkSubmission(args: {
     not_reviewed_paths: change.notReviewed,
     stats: change.stats,
   };
-  return { ok: true, report: redactAll(report, clean), required: live.length, disposed };
+  const out = redactAll(report, clean);
+  keptPossible.forEach((f, i) => {
+    const two = parts.get(f);
+    if (two) possibleParts.set(out.possible[i]!, redactAll(two, clean));
+  });
+  return { ok: true, report: out, required: live.length, disposed };
 }
 
 // What each scanner's findings are about, for a scan-only report.

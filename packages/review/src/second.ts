@@ -20,7 +20,7 @@
 //                  record says so in `missing`, the primary's findings stay);
 //                  any other failure leaves the review as the primary made it
 //                  and is named in the notes and the record
-import { findingKey, sameDefect, severityRank, shortenedMissing, uncounted } from "@openqodex/core";
+import { findingKey, mergedParts, sameDefect, severityRank, shortenedMissing, uncounted } from "@openqodex/core";
 import type { Disagreement, ModelCompletionRecord, Report, ReportFinding } from "@openqodex/core";
 import type { Conversation } from "./conversation.js";
 import { modelSession } from "./model-loop.js";
@@ -90,10 +90,11 @@ export function mergeFindings(primary: { name: string; findings: ReportFinding[]
 // defect with a second finding that joined no primary finding. A second
 // finding that joined a primary finding takes no possible issue: the primary
 // review already ruled on those two, and a staged verifier may have kept
-// them apart.
+// them apart. A possible issue finalize merged from two leaves only for a
+// second finding that overlaps both.
 export function possibleAfterSecond(possible: ReportFinding[], merged: { findings: ReportFinding[]; alone: ReportFinding[] }): ReportFinding[] {
   const keys = new Set(merged.findings.map(findingKey));
-  return uncounted(possible, merged.alone).filter((f) => !keys.has(findingKey(f)));
+  return uncounted(possible, merged.alone, sameDefect, mergedParts).filter((f) => !keys.has(findingKey(f)));
 }
 
 // Each candidate one reviewer raised and the other dropped, in the order
