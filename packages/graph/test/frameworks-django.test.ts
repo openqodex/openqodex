@@ -164,7 +164,8 @@ describe("the Django plugin on hostile input", () => {
   };
   const { urls, tests, files } = hostile(1);
   const quarter = hostile(1 / 4);
-  const build = (root: string) => () => buildGraph({ repoRoot: root, store: null, maxFileBytes: 2 * MiB, budgetMs: 120_000 });
+  // The parse limit is lifted with the budget: a loaded machine must not leave the 1 MiB modules unread.
+  const build = (root: string) => () => buildGraph({ repoRoot: root, store: null, maxFileBytes: 2 * MiB, budgetMs: 120_000, maxParseMs: 120_000 });
   const committed = (of: Record<string, string>) => {
     const root = makeRepo(of);
     commitAll(root);

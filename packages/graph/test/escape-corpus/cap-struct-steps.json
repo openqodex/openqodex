@@ -1,0 +1,44 @@
+{
+  "covers": "a call through a member of an intersection type whose first part extends more interfaces than one structural type lookup may step through; the lookup gives up and the call stays unbound (resolve STRUCT_STEPS)",
+  "caps": [
+    "resolve.ts#STRUCT_STEPS"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/c.ts": "export class C {\n  target(): number {\n    return 1;\n  }\n}\n",
+    "src/b.ts": [
+      "import type { C } from \"./c\";\n",
+      {
+        "repeat": "export interface F{{i}} {\n  f{{i}}: number;\n}\n",
+        "times": 1100
+      },
+      "export interface Wide extends ",
+      {
+        "repeat": "F{{i}}, ",
+        "times": 1099
+      },
+      "F1100 {}\nexport interface Last {\n  a: C;\n}\nexport type I = Wide & Last;\n"
+    ],
+    "src/use.ts": "import type { I } from \"./b\";\nexport function use(x: I): number {\n  return x.a.target();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/c.ts#C.target",
+      "caller": "src/use.ts#use",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/c.ts#C.target",
+      "reason": "could not be bound to one definition",
+      "at": "",
+      "gap": {
+        "cause": "no-receiver-type",
+        "at": "src/use.ts:3"
+      }
+    }
+  ]
+}

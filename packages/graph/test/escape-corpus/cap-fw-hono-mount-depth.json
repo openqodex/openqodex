@@ -1,0 +1,32 @@
+{
+  "covers": "a Hono route on a router mounted deeper than the plugin follows (hono MAX_MOUNT_DEPTH)",
+  "caps": [
+    "frameworks/hono/resolve.ts#MAX_MOUNT_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"hono\": \"^4.0.0\"}}",
+    "src/h.ts": "export function h(c: unknown) {\n  return c;\n}\n",
+    "src/app.ts": "import { Hono } from \"hono\";\nimport { h } from \"./h\";\nexport const app = new Hono();\nconst r1 = new Hono();\nconst r2 = new Hono();\nconst r3 = new Hono();\nconst r4 = new Hono();\nconst r5 = new Hono();\nconst r6 = new Hono();\nconst r7 = new Hono();\nconst r8 = new Hono();\nconst r9 = new Hono();\nconst r10 = new Hono();\nr10.get(\"/x\", h);\nr9.route(\"/a\", r10);\nr8.route(\"/a\", r9);\nr7.route(\"/a\", r8);\nr6.route(\"/a\", r7);\nr5.route(\"/a\", r6);\nr4.route(\"/a\", r5);\nr3.route(\"/a\", r4);\nr2.route(\"/a\", r3);\nr1.route(\"/a\", r2);\napp.route(\"/a\", r1);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 14
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h",
+      "reason": "routers mounted more than 8 levels deep",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/h.ts"
+      }
+    }
+  ]
+}

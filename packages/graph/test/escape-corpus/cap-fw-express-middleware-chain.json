@@ -1,0 +1,39 @@
+{
+  "covers": "Express middleware past the chain the plugin keeps for one route (express MAX_MIDDLEWARE_CHAIN)",
+  "caps": [
+    "frameworks/express/resolve.ts#MAX_MIDDLEWARE_CHAIN"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"express\": \"^4.18.0\"}}",
+    "src/h.ts": "export function h(req: unknown, res: unknown): void {}\nexport function mw(req: unknown, res: unknown, next: () => void): void {\n  next();\n}\n",
+    "src/app.ts": [
+      "import express from \"express\";\nimport { h, mw } from \"./h\";\nexport const app = express();\n",
+      {
+        "repeat": "app.use(mw);\n",
+        "times": 65
+      },
+      "app.get(\"/x\", h);\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#mw",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 68
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#mw",
+      "reason": "middleware entries past 64 in one chain were left out",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/h.ts"
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "covers": "Java reflection that finds a method by a name given at run time: getDeclaredMethod(n).invoke",
+  "files": {
+    "D.java": "class D { static void target4() {} }\n",
+    "E.java": "class E {\n  void run(String n) throws Exception {\n    D.class.getDeclaredMethod(n).invoke(null);\n  }\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "D.java#D.target4",
+      "caller": "E.java#E.run",
+      "file": "E.java",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "D.java#D.target4",
+      "reason": "finds a method by a name given at run time (reflection)",
+      "at": "",
+      "gap": {
+        "cause": "dynamic",
+        "at": "E.java:3"
+      }
+    }
+  ]
+}

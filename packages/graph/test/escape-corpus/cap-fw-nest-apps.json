@@ -1,0 +1,47 @@
+{
+  "covers": "a NestJS route served only by an application past the most applications the plugin keeps in one build; the method is named only by its decorator (nest MAX_APPS, through the plugin's budget table)",
+  "caps": [
+    "frameworks/nest/resolve.ts#MAX_APPS"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"@nestjs/common\": \"^10.0.0\", \"@nestjs/core\": \"^10.0.0\"}}",
+    "src/b.controller.ts": "import { Controller, Get } from \"@nestjs/common\";\n\n@Controller(\"b\")\nexport class B {\n  @Get(\"x\")\n  last() {\n    return 1;\n  }\n}\n",
+    "src/app.module.ts": "import { Module } from \"@nestjs/common\";\nimport { B } from \"./b.controller\";\n\n@Module({})\nexport class AModule {}\n\n@Module({ controllers: [B] })\nexport class BModule {}\n",
+    "src/boot-a.ts": [
+      "import { NestFactory } from \"@nestjs/core\";\nimport { AModule } from \"./app.module\";\n\n",
+      {
+        "repeat": "export async function a{{i}}() {\n  await NestFactory.create(AModule);\n}\n",
+        "times": 1000
+      }
+    ],
+    "src/boot-b.ts": [
+      "import { NestFactory } from \"@nestjs/core\";\nimport { AModule } from \"./app.module\";\n\n",
+      {
+        "repeat": "export async function b{{i}}() {\n  await NestFactory.create(AModule);\n}\n",
+        "times": 1000
+      }
+    ],
+    "src/main.ts": "import { NestFactory } from \"@nestjs/core\";\nimport { BModule } from \"./app.module\";\n\nasync function bootstrap() {\n  await NestFactory.create(BModule);\n}\nbootstrap();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/b.controller.ts#B.last",
+      "caller": null,
+      "file": "src/b.controller.ts",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.controller.ts#B.last",
+      "reason": "the Nest plugin keeps at most 2000 applications in one build",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/b.controller.ts"
+      }
+    }
+  ]
+}

@@ -24,6 +24,7 @@ import type { ProjectModel } from "./discovery/projects.js";
 import { governingTsconfig, isGoStdlib, isNodeBuiltin, isPyStdlib, isRubyStdlib, linkageOf, metadataUnknown, nodeProjectOf, normalisePy, packageName, pathLinkOff } from "./discovery/projects.js";
 import type { Cause, Cut, EvidenceKind, Shape, Tier, Via } from "./model/records.js";
 import { weakest } from "./model/records.js";
+import { NEXT, gap } from "./gap.js";
 import type { Lookup as PluginLookup } from "./frameworks/plugin.js";
 import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, EscapeFact, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, ImportFact, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
 import { CALLER_KINDS, MAX_TYPE_DEPTH, ambientOf, familyOf } from "./types.js";
@@ -94,7 +95,7 @@ export const SHAPE_CAP = 20;
 // `import` or `export` statement is no script; escape analysis walks
 // `export *` on a budget of its own and stops at the build's deadline
 // (Resolved.escapesCut).
-export const RESOLVER_VERSION = 36;
+export const RESOLVER_VERSION = 37;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -178,7 +179,8 @@ const LOOKUP_CUT = {
 
 // A branch of an `export *` set the graph could not follow: what it was
 // and why. It may bring the name too.
-type Unfollowed = { spec: string; cause: Cause; note: string };
+// `file`: the repository module of an `export *` whose lookup gave up.
+type Unfollowed = { spec: string; cause: Cause; note: string; file?: string };
 
 // A step through a module: the outer binding (the import the call read)
 // keeps its kind and line; the tier is the weaker of the two and the notes
@@ -213,8 +215,11 @@ type Mod =
   | null; // a path specifier that names nothing here: a miss
 
 // What a name or an expression stands for.
+// `unfollowed` on a sym: the repository modules of `export *` branches
+// that may also bring the name and whose lookup gave up (too deep), so
+// escape analysis visits them whole (`offers`, issue 448).
 type Value =
-  | { v: "sym"; ids: string[]; ev: Ev }
+  | { v: "sym"; ids: string[]; ev: Ev; unfollowed?: string[] }
   | { v: "mod"; file: string; ev: Ev }
   | { v: "pkg"; dir: string; ev: Ev }
   | { v: "pyns"; dir: string; ev: Ev } // a Python namespace package: a folder without __init__.py
@@ -1102,7 +1107,7 @@ export function createWorld(input: ResolveInput): World {
           else {
             const hit = withEv(index.exports(mod.file, name, depth + 1), mod.ev);
             if (hit === null) unfollowed.push({ spec: imp.spec, cause: "miss", note: `export * from ${imp.spec} could not be read` });
-            else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note });
+            else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note, file: mod.file });
             else if (hit.v !== "miss" || hit.held) starHits.push({ v: hit, spec: imp.spec });
           }
         }
@@ -1146,7 +1151,12 @@ export function createWorld(input: ResolveInput): World {
   function onlyPossible(v: Value, open: Unfollowed[]): Value {
     if (open.length === 0 || v.v !== "sym") return v;
     const why = `${open.map((u) => u.note).join("; ")}, so the name may come from there instead.`;
-    return { ...v, ev: { ...v.ev, tier: weakest(v.ev.tier, "possible"), note: [v.ev.note, why].filter(Boolean).join(" ") } };
+    return withOpen({ ...v, ev: { ...v.ev, tier: weakest(v.ev.tier, "possible"), note: [v.ev.note, why].filter(Boolean).join(" ") } }, open);
+  }
+  // A sym with the repository modules of the branches its lookup left open.
+  function withOpen<V extends Extract<Value, { v: "sym" }>>(v: V, open: Unfollowed[]): V {
+    const files = open.flatMap((u) => (u.file !== undefined ? [u.file] : []));
+    return files.length === 0 ? v : { ...v, unfollowed: [...(v.unfollowed ?? []), ...files] };
   }
 
   // No branch brought the name: the first branch that could not be
@@ -1171,14 +1181,18 @@ export function createWorld(input: ResolveInput): World {
       if (k === null) return (hits[0] as { v: Value }).v; // a gap or a namespace: the first decides, as before
       if (!distinct.has(k)) distinct.set(k, h);
     }
+    // The branches each hit's own lookup left open stay open in the value
+    // made of them, from every hit, not only the first or the distinct ones.
+    const carried = [...new Set(hits.flatMap(({ v }) => (v.v === "sym" ? (v.unfollowed ?? []) : [])))];
+    const kept = carried.length > 0 ? { unfollowed: carried } : {};
     const first = hits[0] as { v: Value };
-    if (distinct.size === 1) return onlyPossible(first.v, open);
+    if (distinct.size === 1) return onlyPossible(first.v.v === "sym" ? { ...first.v, ...kept } : first.v, open);
     const syms = [...distinct.values()].filter((h): h is { v: Extract<Value, { v: "sym" }>; spec: string } => h.v.v === "sym");
     const unopened = open.length > 0 ? ` ${open.map((u) => u.note).join("; ")}.` : "";
     const note = `${file} re-exports ${name} through export * from ${distinct.size} modules (${[...distinct.values()].map((h) => h.spec).join(", ")}); JavaScript exports neither, and a bundler may pick one.${unopened}`;
     if (syms.length < 2) return { v: "gap", cause: "ambiguous", note, candidates: [...distinct.keys()] };
     const base = syms[0]?.v.ev as Ev;
-    return { v: "sym", ids: syms.flatMap((h) => h.v.ids), ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } };
+    return withOpen({ v: "sym", ids: syms.flatMap((h) => h.v.ids), ...kept, ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } }, open);
   }
 
   // A value reached through a module step keeps that step's evidence.
@@ -3621,7 +3635,8 @@ export function createWorld(input: ResolveInput): World {
             const site = siteOf(path, call.line, call.column, ev);
             for (const t of targets.slice(0, DISPATCH_CAP)) addEdge(callerId, t, "may_invoke", site);
             if (targets.length > DISPATCH_CAP) {
-              unknowns.push({ file: path, line: call.line, column: call.column, name: "", cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${by} returns ${targets.length.toLocaleString("en-US")} functions by name; the ${(targets.length - DISPATCH_CAP).toLocaleString("en-US")} past the first ${DISPATCH_CAP} are not listed as possible targets of this call` });
+              // The functions past the cap are known: the gap reaches each of them.
+              unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { ids: targets.slice(DISPATCH_CAP) }, next: NEXT.returnedCap, name: "", shape, caller: callerId, note: `${by} returns ${targets.length.toLocaleString("en-US")} functions by name; the ${(targets.length - DISPATCH_CAP).toLocaleString("en-US")} past the first ${DISPATCH_CAP} are not listed as possible targets of this call` }));
             }
             // A callee that also returns something else (a parameter, a
             // call) may hand back any function: the call keeps its gap.
@@ -3647,8 +3662,13 @@ export function createWorld(input: ResolveInput): World {
         if ("unknown" in out) {
           if (call.implicit) continue;
           unresolvedSites++;
-          const u: UnknownSite = { file: path, line: call.line, column: call.column, name: call.name, cause: out.unknown, shape: out.shape, caller: callerId, scope: out.scope ?? "file" };
+          // A call with no name goes through a value; a named one is found by its name.
+          const u = gap({ cause: out.unknown, place: { file: path, line: call.line, column: call.column }, reaches: call.name === "" ? "values" : { names: [call.name] }, next: call.name === "" ? NEXT.values : NEXT.unbound, name: call.name, shape: out.shape, caller: callerId, scope: out.scope ?? "file" });
           if (out.note) u.note = out.note;
+          if (call.byName) {
+            u.next = NEXT.byName;
+            u.note = call.name === "" ? "a method found by a name given at run time (reflection), which may be any method" : `the method ${call.name} found by its name at run time (reflection)`;
+          }
           if (out.candidates) u.candidates = out.candidates;
           const receiver = receiverHint(call);
           if (receiver) u.receiver = receiver;
@@ -3664,7 +3684,14 @@ export function createWorld(input: ResolveInput): World {
                 : "one of its entries, listed as possible targets";
             if (table.open) u.note = `a computed member of the table ${table.name} (line ${table.line}), which may be changed elsewhere (it is exported, a module's or a package's, written through a member or an index, or passed on): ${which}, or any function put in it`;
             else {
+              // A table nothing else can change: the call runs one of its
+              // entries or none, so the gap reaches the entries past the
+              // listed ones (none when every entry is listed).
               u.scope = "file";
+              if (u.name === "") {
+                u.reaches = { ids: entries.slice(listed.length) };
+                u.next = NEXT.tableCap;
+              }
               u.note = `a computed member of the table ${table.name} (line ${table.line}): ${which}, or a key the table does not hold`;
             }
           }
@@ -3675,21 +3702,21 @@ export function createWorld(input: ResolveInput): World {
           misses.push({ target: out.miss.target, name: out.miss.name, from: callerId, site: siteOf(path, call.line, call.column, out.ev) });
           if (call.implicit) continue;
           unresolvedSites++;
-          unknowns.push({
-            ...(cannotRunPlain(path, family, call, caller, true) ? { notPlain: true } : {}),
-            file: path,
-            line: call.line,
-            column: call.column,
-            name: call.name,
+          const u = gap({
             cause: out.cause,
+            place: { file: path, line: call.line, column: call.column },
+            reaches: { names: [call.name] },
+            next: NEXT.miss,
+            name: call.name,
             shape,
             caller: callerId,
-            scope: "file",
             note:
               out.cause === "miss"
                 ? `no definition of ${call.name} where the evidence points (${out.miss.target.split("\u0000").join(" ")})`
                 : `${out.miss.target.split("::").pop()} is an interface or a type alias without that member, or inherits from a class outside the graph`,
           });
+          if (cannotRunPlain(path, family, call, caller, true)) u.notPlain = true;
+          unknowns.push(u);
           continue;
         }
         // Several ids only when one name has several definitions in one place
@@ -3711,7 +3738,7 @@ export function createWorld(input: ResolveInput): World {
             const site = siteOf(path, call.line, call.column, dispatchEv(declared, contract, targets.length));
             for (const t of kept) addEdge(callerId, t, "dispatches_to", site);
             if (targets.length > DISPATCH_CAP) {
-              unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `the call may run ${targets.length} implementations or overrides of ${declared}; the ${targets.length - DISPATCH_CAP} past the first ${DISPATCH_CAP} in path order are not listed` });
+              unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.dispatchCap, shape, caller: callerId, note: `the call may run ${targets.length} implementations or overrides of ${declared}; the ${targets.length - DISPATCH_CAP} past the first ${DISPATCH_CAP} in path order are not listed` }));
             }
           }
           // A TypeScript interface admits any value of its shape, declared or
@@ -3721,7 +3748,7 @@ export function createWorld(input: ResolveInput): World {
           if (family === "js" && isTsInterface(d.key)) {
             const shaped = shapeTargets(d.key, call.name, new Set([...out.ids, ...targets]));
             if (shaped === null) {
-              unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: openShapeNote(d.key) });
+              unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.openShape, shape, caller: callerId, note: openShapeNote(d.key) }));
             } else {
               const iface = shortKey(d.key);
               if (shaped.classes.length > 0) {
@@ -3734,11 +3761,11 @@ export function createWorld(input: ResolveInput): World {
                 for (const t of keptIds) addEdge(callerId, t, "dispatches_to", site);
                 // Classes past the cap that run only methods already listed hide nothing.
                 if (leftIds.size > 0) {
-                  unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${shaped.classes.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.classes.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` });
+                  unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.dispatchCap, shape, caller: callerId, note: `${shaped.classes.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.classes.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` }));
                 }
               }
               if (shaped.open !== null) {
-                unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: `a value of the interface ${iface} may be any object of that shape; ${shaped.open}` });
+                unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.openShape, shape, caller: callerId, note: `a value of the interface ${iface} may be any object of that shape; ${shaped.open}` }));
               }
             }
           }
@@ -3775,7 +3802,39 @@ export function createWorld(input: ResolveInput): World {
       });
       // Uses as a type: a class, interface or type named in an annotation, a cast or a type test.
       if (f.typeCuts) {
-        unknowns.push({ file: path, line: 0, column: 0, name: "", cause: "unsupported-rule", shape: "other", caller: path, scope: "file", note: `${f.typeCuts} type ${f.typeCuts === 1 ? "annotation is" : "annotations are"} too large to read whole (over 4,096 parts); the types past the cut are not recorded as type uses` });
+        // A type annotation holds no call: the cut hides type uses, which
+        // `references` reads by file, and no caller.
+        unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: 0 }, reaches: { ids: [] }, next: NEXT.typeCut, note: `${f.typeCuts} type ${f.typeCuts === 1 ? "annotation is" : "annotations are"} too large to read whole (over 4,096 parts); the types past the cut are not recorded as type uses` }));
+      }
+      // A region the parser could not read may hide a call of any name
+      // written in or around it, or one through a value (scope "project").
+      // A name the file binds to another (`import { target as t }`, a
+      // default import, `import * as ns`) reaches what it is bound to too.
+      // The gap sits inside the innermost definition that holds it, so the
+      // callees of that definition say so.
+      for (const r of f.unread ?? []) {
+        let inner = -1;
+        f.defs.forEach((d, i) => {
+          if (d.line > r.line || d.endLine < r.line) return;
+          const best = f.defs[inner];
+          if (!best || d.endLine - d.line < best.endLine - best.line) inner = i;
+        });
+        const at = { file: path, line: r.line, column: r.column };
+        const base = { cause: "file-not-parsed" as const, place: at, next: NEXT.unread, name: "", scope: "project" as const, caller: callerOf(inner) };
+        unknowns.push(gap({ ...base, reaches: r.names === null ? "scope" : { names: r.names }, note: "the parser could not read the code here, so a call in it may be missing" }));
+        if (r.names === null) continue;
+        const named = new Set(r.names);
+        const ids = new Set<string>();
+        const files = new Set<string>();
+        for (const w of r.names) {
+          const v = resolveLocal(path, w);
+          if (v?.v === "sym") for (const id of v.ids) if (!named.has(defById.get(id)?.name ?? "")) ids.add(id);
+          if (v?.v === "mod" && v.file !== path) files.add(v.file);
+        }
+        const note = "the parser could not read the code here, and a name written there is bound to it (an import under another name, a default import or a module)";
+        // The first gap counts the region as a call through a value; these add only targets.
+        if (ids.size > 0) unknowns.push(gap({ ...base, scope: "file", reaches: { ids: [...ids].sort() }, note }));
+        for (const file of [...files].sort()) unknowns.push(gap({ ...base, scope: "file", reaches: { file }, note }));
       }
       for (const t of f.types) {
         const k = typeKey(path, family, t.ref, 0, true, family === "java" && t.caller >= 0 ? javaNestingOf(defById.get(callerOf(t.caller))) : null);
@@ -3804,7 +3863,10 @@ export function createWorld(input: ResolveInput): World {
       f.defs.forEach((d, i) => {
         for (const b of d.dynamicBases ?? []) {
           if (b.head && family === "python" && (isTyping(path, b.head, "Generic") || isTyping(path, b.head, "Protocol"))) continue;
-          unknowns.push({ file: path, line: b.line, column: b.column, name: "", cause: "dynamic-base", shape: "other", caller: defIds[i] as string, scope: "file", note: `${d.name} names a base with an expression the graph does not read, so the class it extends is not known` });
+          // A call through the unknown base may run the class or any method it defines.
+          const owner = d.owner ? `${d.owner}.${d.name}` : d.name;
+          const own = [defIds[i] as string, ...f.defs.flatMap((m, j) => (m.owner === owner ? [defIds[j] as string] : []))];
+          unknowns.push(gap({ cause: "dynamic-base", place: { file: path, line: b.line, column: b.column }, reaches: { ids: own }, next: NEXT.dynamicBase, caller: defIds[i] as string, note: `${d.name} names a base with an expression the graph does not read, so the class it extends is not known` }));
         }
       });
       // Overrides: a method to the member of a base it overrides or implements.
@@ -3904,7 +3966,7 @@ export function createWorld(input: ResolveInput): World {
           let byKey = unread.get(path);
           if (!byKey) unread.set(path, (byKey = new Map()));
           if (byKey.has(k.key)) continue;
-          byKey.set(k.key, { file: path, line: imp.line, column: imp.column, name: "", cause: "unsupported-rule", shape: "other", caller: path, scope: "file", candidates: ids, note: `${n.local} is imported here, and no use of it in this file was read; a use in a place the graph does not read may be missing from its references` });
+          byKey.set(k.key, gap({ cause: "unsupported-rule", place: { file: path, line: imp.line, column: imp.column }, reaches: { ids }, next: NEXT.unreadImport, candidates: ids, note: `${n.local} is imported here, and no use of it in this file was read; a use in a place the graph does not read may be missing from its references` }));
         }
       }
     }
@@ -4014,17 +4076,27 @@ export function createWorld(input: ResolveInput): World {
     // stars from when its walk was cut. `skip` leaves out the names a
     // module above already gives itself, and `default`, which no star brings.
     // Escape analysis walks on a step budget of its own (escapeWalk).
-    const offers = (file: string, skip: NameSet | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string> } => {
+    // `open`: the modules of `export *` branches a lookup gave up on (too
+    // deep) though another branch gave the name, and `openNames` those
+    // names: such a branch may bring the name from elsewhere (issue 448).
+    const offers = (file: string, skip: NameSet | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string>; open: string[]; openNames: Set<string> } => {
       const ids: string[] = [];
       const modules: string[] = [];
+      const open: string[] = [];
+      const openNames = new Set<string>();
       let gap = false;
       const names = exportedJsNames(file, escapeWalk);
       for (const [name] of names) {
         checkBudget();
         if (skip && hasName(skip, name)) continue;
         const v = index.exports(file, name, 0);
-        if (v?.v === "sym") ids.push(...v.ids);
-        else if (v?.v === "mod") modules.push(v.file);
+        if (v?.v === "sym") {
+          ids.push(...v.ids);
+          if (v.unfollowed) {
+            open.push(...v.unfollowed);
+            openNames.add(name);
+          }
+        } else if (v?.v === "mod") modules.push(v.file);
         else if (v?.v === "gap") gap = true;
       }
       if (gap) modules.push(...forwards(file));
@@ -4036,7 +4108,7 @@ export function createWorld(input: ResolveInput): World {
           if (mod !== null && "file" in mod) stars.push(mod.file);
         }
       }
-      return { ids, modules, stars, names: names.keys() };
+      return { ids, modules, stars, names: names.keys(), open, openNames };
     };
     // The modules a module forwards names from: `export ... from`, and a
     // local `export { f }` or `export default f` of an imported name.
@@ -4058,6 +4130,7 @@ export function createWorld(input: ResolveInput): World {
     };
     const modules = new Map<string, Place>();
     const offered = new Set<string>();
+    const NO_KEEP: ReadonlySet<string> = new Set();
     const walk = (start: string, place: Place) => {
       // A star's skip is a NameSet: each hop of a long chain of stars adds
       // its own names to the set above it without copying it.
@@ -4141,17 +4214,29 @@ export function createWorld(input: ResolveInput): World {
           const o = offers(file, skip);
           for (const id of o.ids) addReach(id, { why: "module", ...place });
           for (const m of o.modules) queue.push({ file: m, whole: true, skip: null });
-          if (o.stars.length > 0) {
+          const listed = o.stars.length > 0 || o.open.length > 0 ? ["default", ...o.names] : [];
+          // A star visit skips the names given above it and, but for `keep`, the module's own.
+          const skipOwn = (keep: ReadonlySet<string>): NameSet => {
             const from = skip ?? NO_NAMES;
             let given = from;
             const added: string[] = [];
-            for (const n of ["default", ...o.names]) {
+            for (const n of listed) {
+              if (keep.has(n)) continue;
               const next = withName(given, n);
               if (next !== given) added.push(n);
               given = next;
             }
             if (added.length > 0) made.set(given, { from, added, size: sizeOf(from) + added.length });
+            return given;
+          };
+          if (o.stars.length > 0) {
+            const given = skipOwn(NO_KEEP);
             for (const m of o.stars) queue.push({ file: m, whole: true, skip: given });
+          }
+          // A branch a lookup gave up on is visited for the names it may bring instead.
+          if (o.open.length > 0) {
+            const given = skipOwn(o.openNames);
+            for (const m of new Set(o.open)) queue.push({ file: m, whole: true, skip: given });
           }
         }
         for (const m of forwards(file)) queue.push({ file: m, whole: false, skip: null });

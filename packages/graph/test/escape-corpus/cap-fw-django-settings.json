@@ -1,0 +1,41 @@
+{
+  "covers": "a Django settings module with more settings than the fact reader keeps, ROOT_URLCONF past them (django MAX_SETTINGS)",
+  "caps": [
+    "frameworks/django/facts.ts#MAX_SETTINGS"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "django\n",
+    "manage.py": "import django\n",
+    "proj/__init__.py": "",
+    "proj/views.py": "def deep(request):\n    return None\n",
+    "proj/settings.py": [
+      {
+        "repeat": "S{{i}} = 0\n",
+        "times": 400
+      },
+      "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n"
+    ],
+    "proj/urls.py": "from django.urls import path\nfrom proj import views\n\nurlpatterns = [path(\"deep/\", views.deep)]\n"
+  },
+  "mustReach": [
+    {
+      "target": "proj/views.py#deep",
+      "caller": null,
+      "file": "proj/urls.py",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "proj/views.py#deep",
+      "reason": "settings past the first 400 of the module are not read",
+      "at": "proj/settings.py:401",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "proj/settings.py:401"
+      }
+    }
+  ]
+}

@@ -8,14 +8,14 @@
 import type { Cause, Tier } from "../../model/records.js";
 import { weakest } from "../../model/records.js";
 import { entityId } from "../plugin.js";
-import type { Detection, Entity, FrameworkEdgeKind, FrameworkEvidence, FrameworkEvidenceKind, PluginIndex, PluginOutput, Registration, Role, Site, TestCategory } from "../plugin.js";
+import type { Detection, Entity, FrameworkEdgeKind, FrameworkEvidence, FrameworkEvidenceKind, FrameworkUnknown, PluginIndex, PluginOutput, Registration, Role, Site, TestCategory } from "../plugin.js";
 import type { AssocFact, CallbackFact, ConfigDefineFact, ConfigReadFact, DescribeFact, EnqueueFact, MailFact, MigrationOpFact, RenderFact, RequestFact, RouteNameFact, TableNameFact } from "./facts.js";
 import { camelize, classify, demodulize, singularize, tableize, underscore } from "./inflect.js";
 import type { Compiled } from "./match.js";
 import { compilePattern, firstLiterals, matches, requestSegments, stripPrefix } from "./match.js";
 import type { Draft } from "./routes.js";
 import { Budget, expandRoutes } from "./routes.js";
-import type { App, ClassInfo } from "./world.js";
+import type { App, ClassInfo, MethodMiss } from "./world.js";
 import { FRAMEWORK_BASES, MAX_CHAIN, PLUGIN, RailsWorld, appsFrom, relTo, under } from "./world.js";
 import { keptName } from "../shared/kept.js";
 
@@ -75,6 +75,9 @@ export function resolveRails(index: PluginIndex, detections: readonly Detection[
   return out;
 }
 
+// The cause of a method not found: a chain cut past MAX_CHAIN is a cap.
+const missCause = (m: MethodMiss): Cause => (m.status === "external" ? "external" : m.status === "unresolved" ? "fan-out-capped" : "miss");
+
 class Resolver {
   private readonly budget = new Budget(WORK_BUDGET);
   private readonly roleKeys = new Set<string>();
@@ -104,7 +107,8 @@ class Resolver {
     this.jobs();
     this.config();
     this.tests();
-    if (this.budget.spent) this.unknown(null, { project: "" }, "budget", [], null, "the Rails plugin ran out of its work budget; some routes or test links are not listed");
+    // The budget is the whole build's, so what it left out may be in any project.
+    if (this.budget.spent) this.unknown(null, { build: true }, "budget", [], null, "the Rails plugin ran out of its work budget; some routes or test links are not listed");
   }
 
   // ---------- small builders ----------
@@ -136,8 +140,13 @@ class Resolver {
     return e;
   }
 
-  private unknown(site: Site | null, scope: { file: string } | { app: string } | { project: string }, cause: Cause, affects: FrameworkEdgeKind[], name: string | null, note: string): void {
+  private unknown(site: Site | null, scope: FrameworkUnknown["scope"], cause: Cause, affects: FrameworkEdgeKind[], name: string | null, note: string): void {
     this.out.unknowns.push({ plugin: PLUGIN, site, scope, affects, cause, name, note: sentence(note), count: null, exact: false });
+  }
+
+  // A class whose chain of bases goes on past MAX_CHAIN: whether it is `what` is not known.
+  private chainCut(cls: ClassInfo, affects: FrameworkEdgeKind[], what: string): void {
+    this.unknown({ file: cls.file, line: cls.line, column: 0 }, { file: cls.file }, "fan-out-capped", affects, cls.name, `the class chain of ${cls.name} is deeper than ${MAX_CHAIN} classes, so whether it is ${what} is not known`);
   }
 
   private template(app: App, file: string): string {
@@ -262,7 +271,8 @@ class Resolver {
           return;
         }
         reg.handler.status = cls ? "unresolved" : "external";
-        gap(cls ? "miss" : "external", cls ? `${strip(h.target)} has no call method in the repository` : `the Rack application ${strip(h.target)} is outside the repository`);
+        if (call && !("id" in call) && call.status === "unresolved") gap("fan-out-capped", call.note);
+        else gap(cls ? "miss" : "external", cls ? `${strip(h.target)} has no call method in the repository` : `the Rack application ${strip(h.target)} is outside the repository`);
         return;
       }
       case "redirect":
@@ -343,7 +353,7 @@ class Resolver {
     }
     reg.handler.status = hit.status;
     reg.handler.targets = [cls.id];
-    gap(hit.status === "missing" ? "miss" : hit.status === "external" ? "external" : "unsupported-rule", hit.note);
+    gap(missCause(hit), hit.note);
   }
 
   private regsByHandlerAdd(id: string, reg: Registration): void {
@@ -387,8 +397,8 @@ class Resolver {
             found++;
             this.edge(cls.id, own.id, "applies_middleware", app, this.ev("declaration", "possible", site, RULES.callbacks, `${t} is not defined in ${cls.name}; ${sub.name}, which inherits from it, defines it, and Rails calls it on the instance${scope ? `; runs${scope}` : ""}`), { order });
           }
-          if (subs.cut) this.unknown(site, { file: cls.file }, "fan-out-capped", ["applies_middleware"], t, `${cls.name} has more than ${MAX_SUBCLASSES} subclasses; the rest are not searched for ${t}`);
-          if (found === 0) this.unknown(site, { file: cls.file }, hit.status === "external" ? "external" : "miss", ["applies_middleware"], t, `the ${f.call} callback ${t} is not defined: ${hit.note}`);
+          if (subs.cut) this.unknown(site, { file: cls.file }, "fan-out-capped", ["applies_middleware"], t, `${cls.name} has more than ${MAX_SUBCLASSES} subclasses, or subclasses more than ${MAX_CHAIN} levels down; the rest are not searched for ${t}`);
+          if (found === 0) this.unknown(site, { file: cls.file }, missCause(hit), ["applies_middleware"], t, `the ${f.call} callback ${t} is not defined: ${hit.note}`);
           continue;
         }
         const own = hit.via === "own";
@@ -508,7 +518,7 @@ class Resolver {
     // Once per class: past the cap, views in the other subclasses' folders are not searched.
     if (folders.cut && !this.viewCapped.has(cls.id)) {
       this.viewCapped.add(cls.id);
-      this.unknown({ file: cls.file, line: cls.line, column: 0 }, { file: cls.file }, "fan-out-capped", ["renders"], cls.name, `${cls.name} has more than ${MAX_SUBCLASSES} subclasses; the views of the rest are not searched for what its methods render`);
+      this.unknown({ file: cls.file, line: cls.line, column: 0 }, { file: cls.file }, "fan-out-capped", ["renders"], cls.name, `${cls.name} has more than ${MAX_SUBCLASSES} subclasses, or subclasses more than ${MAX_CHAIN} levels down; the views of the rest are not searched for what its methods render`);
     }
     return found;
   }
@@ -532,7 +542,8 @@ class Resolver {
     for (const app of this.w.apps) {
       for (const cls of this.classesUnder(app, "app/mailers/")) {
         const reach = this.w.reaches(cls, MAILER_ROOTS);
-        if (!reach || cls.name === "ApplicationMailer") continue;
+        if (reach === "cut") this.chainCut(cls, ["enqueues"], "a mailer");
+        if (!reach || reach === "cut" || cls.name === "ApplicationMailer") continue;
         this.mailerClasses.set(cls.id, { cls, app });
         const site = { file: cls.file, line: cls.line, column: 0 };
         this.role(cls.id, "mailer", null, app, this.ev("role-base", "likely", site, RULES.mailers, this.baseNote(cls, reach.via)));
@@ -549,7 +560,7 @@ class Resolver {
       for (const cls of this.classesUnder(app, "app/models/")) {
         if (cls.file.includes("/concerns/")) continue;
         const reach = this.w.reaches(cls, MODEL_ROOTS);
-        if (!reach || this.isAbstract(cls)) continue;
+        if (!reach || reach === "cut" || this.isAbstract(cls)) continue;
         this.models.set(cls.id, { cls, app });
         this.role(cls.id, "model", null, app, this.ev("role-base", "likely", { file: cls.file, line: cls.line, column: 0 }, RULES.models, this.baseNote(cls, reach.via)));
       }
@@ -701,8 +712,10 @@ class Resolver {
       const candidates = [...this.classesUnder(app, "app/jobs/"), ...this.classesUnder(app, "app/workers/")];
       const bases = new Set(candidates.map((c) => (c.base ? this.w.resolveConst(c.base, c.def.owner ?? null, app)?.id : undefined)).filter((x): x is string => x !== undefined));
       for (const cls of candidates) {
-        const reach = this.w.reaches(cls, JOB_ROOTS);
+        const found = this.w.reaches(cls, JOB_ROOTS);
+        const reach = found === "cut" ? null : found;
         const sidekiq = this.w.includesAny(cls, SIDEKIQ);
+        if (found === "cut" && !sidekiq) this.chainCut(cls, ["enqueues"], "a job");
         if (!reach && !sidekiq) continue;
         // An abstract base job (ApplicationJob): the base of other jobs with no perform of its own.
         if (bases.has(cls.id) && !this.w.ownMethods(cls).some((m) => m.def.name === "perform")) continue;
@@ -730,7 +743,7 @@ class Resolver {
         if ("id" in perform) this.edge(from, perform.id, "enqueues", app, this.ev("enqueue", "likely", site, RULES.jobs, `${cls.name} is found by the autoload convention; ${f.via} runs its perform method`));
         else {
           this.edge(from, entityId(PLUGIN, job.app.id, "job", cls.name), "enqueues", app, this.ev("enqueue", "likely", site, RULES.jobs, `${cls.name} is found by the autoload convention`));
-          this.unknown(site, { file: cls.file }, "miss", ["enqueues"], `${cls.name}#perform`, `${cls.name} has no perform method`);
+          this.unknown(site, { file: cls.file }, missCause(perform), ["enqueues"], `${cls.name}#perform`, perform.status === "unresolved" ? perform.note : `${cls.name} has no perform method`);
         }
       }
       for (const f of this.factsOfKind(file, "mail") as MailFact[]) {
@@ -742,7 +755,7 @@ class Resolver {
         }
         const hit = this.w.findMethod(cls, f.action);
         if (!("id" in hit)) {
-          this.unknown(site, { file: cls.file }, "miss", ["enqueues"], `${cls.name}#${f.action}`, `${cls.name} has no ${f.action} method`);
+          this.unknown(site, { file: cls.file }, missCause(hit), ["enqueues"], `${cls.name}#${f.action}`, hit.status === "unresolved" ? hit.note : `${cls.name} has no ${f.action} method`);
           continue;
         }
         this.edge(this.w.symbolAt(file, f.line), hit.id, "enqueues", app, this.ev("enqueue", "likely", site, RULES.mailers, `${cls.name} is found by the autoload convention; ${f.via} sends the mail it builds`));

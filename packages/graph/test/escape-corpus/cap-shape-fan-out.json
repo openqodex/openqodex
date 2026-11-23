@@ -1,0 +1,37 @@
+{
+  "covers": "a call through a TypeScript interface that more classes match by shape than the graph lists (resolve SHAPE_CAP)",
+  "caps": [
+    "resolve.ts#SHAPE_CAP"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/i.ts": "export interface Runner {\n  run(): void;\n}\n",
+    "src/shapes.ts": [
+      {
+        "repeat": "export class S{{i}} {\n  run(): void {}\n}\n",
+        "times": 22
+      }
+    ],
+    "src/go.ts": "import type { Runner } from \"./i\";\nexport function go(r: Runner) {\n  r.run();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/shapes.ts#S22.run",
+      "caller": "src/go.ts#go",
+      "file": "src/go.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/shapes.ts#S22.run",
+      "reason": "named `run` in the repository could not be bound",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/go.ts:3"
+      }
+    }
+  ]
+}

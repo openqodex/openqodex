@@ -5,7 +5,7 @@ import { isAbsolute, resolve } from "node:path";
 import { FolderReader, type EntryResult } from "@openqodex/core";
 import { isFrameworkFileFacts } from "./frameworks/facts.js";
 import type { FileFacts } from "./types.js";
-import { MAX_AMBIENT_NAMES, MAX_FACT_STRING, MAX_TYPE_DEPTH } from "./types.js";
+import { MAX_AMBIENT_NAMES, MAX_FACT_STRING, MAX_TYPE_DEPTH, MAX_UNREAD_NAMES } from "./types.js";
 
 // Repo-relative reads, each decided by what the filesystem holds at the
 // moment of that read and by nothing kept from an earlier one. The root is
@@ -175,6 +175,7 @@ export function isFileFacts(v: unknown): v is FileFacts {
     optBool(c.static) &&
     optBool(c.ctor) &&
     optBool(c.dynamic) &&
+    optBool(c.byName) &&
     (c.arity === undefined || (isInt(c.arity) && (c.arity as number) >= 0)) &&
     (c.local === undefined || (isInt(c.local) && (c.local as number) >= 0 && (c.local as number) < defs)) &&
     optBound(c.bound, imports) &&
@@ -218,6 +219,7 @@ export function isFileFacts(v: unknown): v is FileFacts {
     isList(v.values, isValue) &&
     isList(v.types, isTypeUse) &&
     (v.typeCuts === undefined || (isInt(v.typeCuts) && (v.typeCuts as number) > 0)) &&
+    (v.unread === undefined || isList(v.unread, (r) => isObj(r) && isInt(r.line) && isInt(r.column) && (r.names === null || isList(r.names, isStr, MAX_UNREAD_NAMES)))) &&
     isList(v.tables, isTable, 20_000) &&
     isList(v.imports, isImport, 20_000) &&
     isList(v.exportsLocal, (e) => isObj(e) && isStr(e.local) && isStr(e.exported) && (e.line === undefined || isInt(e.line)), 20_000) &&

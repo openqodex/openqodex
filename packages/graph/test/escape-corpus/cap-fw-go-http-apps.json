@@ -1,0 +1,55 @@
+{
+  "covers": "a net/http route on a mux past the muxes the plugin lists in one build (go-http MAX_APPS)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_APPS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport n \"net/http\"\n\n",
+      {
+        "repeat": "var a{{i}} = n.NewServeMux()\n",
+        "times": 1667
+      },
+      ""
+    ],
+    "b.go": [
+      "package main\n\nimport n \"net/http\"\n\n",
+      {
+        "repeat": "var b{{i}} = n.NewServeMux()\n",
+        "times": 1667
+      },
+      ""
+    ],
+    "c.go": [
+      "package main\n\nimport n \"net/http\"\n\n",
+      {
+        "repeat": "var c{{i}} = n.NewServeMux()\n",
+        "times": 1667
+      },
+      ""
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm := n.NewServeMux()\n\tm.HandleFunc(\"/x\", deep)\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped listing applications after 5000",
+      "at": "c.go:1671",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "c.go:1671"
+      }
+    }
+  ]
+}

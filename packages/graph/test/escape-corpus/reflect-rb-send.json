@@ -1,0 +1,41 @@
+{
+  "covers": "Ruby send and public_send with a symbol, and with a name given at run time",
+  "files": {
+    "b.rb": "class W\n  def target2; 1; end\nend\nclass V\n  def lit(w); w.public_send(:target2); end\n  def any(w, n); w.send(n); end\nend\n"
+  },
+  "mustReach": [
+    {
+      "target": "b.rb#W.target2",
+      "caller": null,
+      "file": "b.rb",
+      "line": 5
+    },
+    {
+      "target": "b.rb#W.target2",
+      "caller": null,
+      "file": "b.rb",
+      "line": 6
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "b.rb#W.target2",
+      "reason": "finds `target2` by a name given at run time (reflection)",
+      "at": "b.rb:5",
+      "gap": {
+        "cause": "no-receiver-type",
+        "at": "b.rb:5"
+      }
+    },
+    {
+      "target": "b.rb#W.target2",
+      "reason": "finds a method by a name given at run time (reflection)",
+      "at": "",
+      "gap": {
+        "cause": "dynamic",
+        "at": "b.rb:6"
+      }
+    }
+  ]
+}

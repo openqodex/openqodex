@@ -1,0 +1,42 @@
+{
+  "covers": "Python getattr with a name written as a string, and with a name given at run time",
+  "files": {
+    "a.py": "def target():\n    return 1\n",
+    "b.py": "import a\n\ndef register(f):\n    return f\n\ndef go():\n    register(getattr(a, \"target\"))\n\ndef any(name):\n    register(getattr(a, name))\n"
+  },
+  "mustReach": [
+    {
+      "target": "a.py#target",
+      "caller": null,
+      "file": "b.py",
+      "line": 7
+    },
+    {
+      "target": "a.py#target",
+      "caller": null,
+      "file": "b.py",
+      "line": 10
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "a.py#target",
+      "reason": "finds `target` by a name given at run time (reflection)",
+      "at": "b.py:7",
+      "gap": {
+        "cause": "no-receiver-type",
+        "at": "b.py:7"
+      }
+    },
+    {
+      "target": "a.py#target",
+      "reason": "finds a method by a name given at run time (reflection)",
+      "at": "",
+      "gap": {
+        "cause": "dynamic",
+        "at": "b.py:10"
+      }
+    }
+  ]
+}

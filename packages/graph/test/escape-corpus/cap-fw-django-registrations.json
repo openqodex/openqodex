@@ -1,0 +1,50 @@
+{
+  "covers": "a Django view routed after the application's first 10,000 route registrations (django MAX_REGISTRATIONS_PER_APP)",
+  "caps": [
+    "frameworks/django/resolve.ts#MAX_REGISTRATIONS_PER_APP"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "django\n",
+    "manage.py": "import django\n",
+    "proj/__init__.py": "",
+    "proj/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "proj/views.py": "def page(request):\n    return None\n\n\ndef deep(request):\n    return None\n",
+    "proj/urls.py": [
+      "from django.urls import include, path\nfrom proj import views\n\nurlpatterns = [\n",
+      {
+        "repeat": "    path(\"p{{i}}/\", include(\"proj.table\")),\n",
+        "times": 20
+      },
+      "    path(\"deep/\", views.deep),\n]\n"
+    ],
+    "proj/table.py": [
+      "from django.urls import path\nfrom proj import views\n\nurlpatterns = [\n",
+      {
+        "repeat": "    path(\"r{{i}}/\", views.page),\n",
+        "times": 600
+      },
+      "]\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "proj/views.py#deep",
+      "caller": null,
+      "file": "proj/urls.py",
+      "line": 25
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "proj/views.py#deep",
+      "reason": "the application has more than 10000 route registrations",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "proj/views.py"
+      }
+    }
+  ]
+}

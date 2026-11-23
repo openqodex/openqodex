@@ -1,0 +1,34 @@
+{
+  "covers": "a caller in a file past the build's parse cap (build DEFAULT_MAX_FILES, the default of maxFiles)",
+  "caps": [
+    "build.ts#DEFAULT_MAX_FILES"
+  ],
+  "build": {
+    "maxFiles": 1
+  },
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.ts": "export function target(): void {}\n",
+    "src/b.ts": "import { target } from \"./a\";\ntarget();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#target",
+      "caller": "src/b.ts",
+      "file": "src/b.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#target",
+      "reason": "1 file of its project was not read",
+      "at": "",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "src/b.ts"
+      }
+    }
+  ]
+}

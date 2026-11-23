@@ -1,0 +1,40 @@
+{
+  "covers": "a Rails callback defined only in subclasses, past the subclasses the plugin searches (rails MAX_SUBCLASSES)",
+  "caps": [
+    "frameworks/rails/resolve.ts#MAX_SUBCLASSES"
+  ],
+  "commit": true,
+  "files": {
+    "Gemfile": "source \"https://rubygems.org\"\n\ngem \"rails\"\n",
+    "config/routes.rb": "Rails.application.routes.draw do\nend\n",
+    "app/controllers/application_controller.rb": "class ApplicationController < ActionController::Base\nend\n",
+    "app/controllers/hooked_controller.rb": "class HookedController < ApplicationController\n  before_action :hook\nend\n",
+    "app/controllers/subs.rb": [
+      {
+        "repeat": "class S{{i}} < HookedController\nend\n",
+        "times": 32
+      },
+      "class Last < HookedController\n  def hook\n  end\nend\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "app/controllers/subs.rb#Last.hook",
+      "caller": null,
+      "file": "app/controllers/hooked_controller.rb",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/controllers/subs.rb#Last.hook",
+      "reason": "HookedController has more than 32 subclasses",
+      "at": "app/controllers/hooked_controller.rb:2",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "app/controllers/hooked_controller.rb:2"
+      }
+    }
+  ]
+}

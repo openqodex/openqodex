@@ -17,14 +17,17 @@
 // answer in slices with a turn of the event loop between them, so a
 // cancellation that arrives while the work runs is seen (the MCP server).
 import { langOf, unreadNote } from "../capture/inventory.js";
-import { floorOf, isTestPath, sameNameGaps, toImpactUnknown } from "../impact.js";
+import { floorOf, isTestPath, joinGaps, partialGaps, sameNameGaps, throughFloors, toImpactUnknown } from "../impact.js";
+import type { Through } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
 import { CALLER_KINDS } from "../types.js";
 import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Extra, FloorGroup, Job, Listing, Request, Session } from "./answer.js";
-import { frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
+import { frameworkCallerGaps, frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
+import { gapPlace, namesReached, NEXT } from "../gap.js";
+import type { GapPlace } from "../gap.js";
 import { edgeId, isShortEdgeId, longEdgeId, readEdgeId } from "./ids.js";
 import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, pagingNote, readCursor } from "./page.js";
 import { Overrides, dynamicBases, implementers, importCycles, impact, methodsNamed, outline, packages, path, references, relationsOf } from "./relations.js";
@@ -72,7 +75,7 @@ function unknownsBy(g: Graph): UnknownIndex {
     ix = { byCaller: new Map(), byName: new Map() };
     for (const u of g.unknowns) {
       (ix.byCaller.get(u.caller) ?? ix.byCaller.set(u.caller, []).get(u.caller))?.push(u);
-      (ix.byName.get(u.name) ?? ix.byName.set(u.name, []).get(u.name))?.push(u);
+      for (const name of namesReached(u)) (ix.byName.get(name) ?? ix.byName.set(name, []).get(name))?.push(u);
     }
     unknownIndex.set(g, ix);
   }
@@ -227,6 +230,10 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
   const point = new Point(g, req.target);
   let n: GraphNode | null = null;
   let w: Walk | null = null;
+  // Callers past one hop: the floor of each point the walk expanded past
+  // the target, read one point a time so the budget can stop it.
+  let floorsRead = 0;
+  const floored: Through[] = [];
   return (budget) => {
     const base = empty(s, kind);
     if (!n) {
@@ -239,15 +246,32 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     const walk = w as Walk;
     const target = candidate(g, n, 1);
     if (!walk.run(budget)) return stoppedAt({ ...base, target }, walk.items, walk.pending(), walk.pending().length);
+    // A caller the answer walks through whose own callers may be missing
+    // hides a row of this answer too: each reason names that caller.
+    const through = kind === "callers" ? [...walk.expanded].filter((id) => id !== (n as GraphNode).id) : [];
+    while (floorsRead < through.length) {
+      if (spent(budget)) return stoppedAt({ ...base, target }, walk.items, through.slice(floorsRead), through.length - floorsRead);
+      const m = g.nodes.get(through[floorsRead++] as string);
+      // A file's top level has no callers.
+      if (!m || m.kind === "file") continue;
+      const floor = floorOf(g, { id: m.id, name: m.name, file: m.file, kind: m.kind }, new Set());
+      const fw = frameworkCallerGaps(g, m.file, m.id);
+      const why = [...floor.reasons, ...fw.reasons];
+      if (why.length > 0) floored.push({ name: m.name, file: m.file, line: m.startLine, reasons: why, gaps: joinGaps(floor.gaps, fw.gaps) });
+    }
     let reasons: string[];
     let causes: Record<string, number | null> = {};
     let examples: Answer["unknown"]["examples"];
+    let gaps: GapPlace[] = [];
     // The places that could hide a caller, when each is known and each is a test.
     let inTests: { file: string; line: number | null }[] | null = null;
     if (kind === "callers") {
       const floor = floorOf(g, { id: n.id, name: n.name, file: n.file, kind: n.kind }, new Set());
-      reasons = floor.reasons;
-      if (floor.places && floor.places.length > 0 && floor.places.every((p) => isTestPath(p.file))) inTests = floor.places;
+      // The framework may run it too (a handler, a middleware): a cap of the framework layer may hide that.
+      const fw = frameworkCallerGaps(g, n.file, n.id);
+      reasons = [...floor.reasons, ...fw.reasons];
+      gaps = joinGaps(floor.gaps, fw.gaps);
+      if (fw.reasons.length === 0 && floor.places && floor.places.length > 0 && floor.places.every((p) => isTestPath(p.file))) inTests = floor.places;
       const named = n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n) : unknownsNamed(g, n.name);
       for (const u of named) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = mayBe(named, n).slice(0, 5).map(toImpactUnknown);
@@ -260,9 +284,17 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
       causes = {};
       for (const u of inside) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = inside.slice(0, 5).map(toImpactUnknown);
+      gaps = joinGaps(inside.map(gapPlace));
+    }
+    if (floored.length > 0) {
+      const deep = throughFloors(floored);
+      reasons = [...reasons, ...deep.reasons];
+      gaps = joinGaps(gaps, deep.gaps);
     }
     const partial = g.status.status === "partial";
-    const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples } };
+    // A partial build floors every answer: its files not read are gaps too.
+    gaps = joinGaps(gaps, partialGaps(g));
+    const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples, ...(gaps.length > 0 ? { gaps } : {}) } };
     // Only the target's floor is read: past one hop a caller of a caller may hide anywhere.
     if (inTests && !partial && depth === 1) Object.assign(answer.unknown, { scope: "tests", note: testsNote(inTests) });
     // The same count the floor reason gives, said before the rows.
@@ -277,7 +309,7 @@ const TESTS_SHOWN = 3;
 function testsNote(places: { file: string; line: number | null }[]): string {
   const at = [...new Set(places.map((p) => (p.line === null ? p.file : `${p.file}:${p.line}`)))];
   const more = at.length > TESTS_SHOWN ? ` and ${at.length - TESTS_SHOWN} more` : "";
-  return `Complete in product code. Only test files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
+  return `Only test files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
 }
 
 function changesJob(s: Session, extra: Extra): Job | Answer {
@@ -362,6 +394,19 @@ function jobFor(s: Session, req: Request, extra: Extra, tiers: ReadonlySet<Tier>
   }
 }
 
+// The answers that carry `gaps`, and a floor's gaps at the points it
+// names (node ids), or at the target's definition when none is a node.
+const GAP_KINDS: ReadonlySet<string> = new Set(["callers", "callees", "impact"]);
+function gapsAt(g: Graph, points: readonly string[], target: Answer["target"], cause: string, next: string): GapPlace[] {
+  const at = points.flatMap((id) => {
+    const n = g.nodes.get(id);
+    return n ? [{ cause, file: n.file, line: n.startLine, next }] : [];
+  });
+  if (at.length > 0) return joinGaps(at);
+  const ends = target === null ? [] : Array.isArray(target) ? target : [target];
+  return joinGaps(ends.map((c) => ({ cause, file: c.file, line: c.line, next })));
+}
+
 // What a question's work gave, as its answer. Stopped: its work is kept,
 // the answer is a floor with what it found and where it stopped, and the
 // cursor goes on from there. Whole: the list is kept for the next page.
@@ -371,11 +416,13 @@ function settle(s: Session, req: Request, job: Job, out: Listing | Answer, offse
     const id = keepJob(s.graph, job);
     const a = out.answer;
     const cursor = cursorFor(s.generation, req, offset, id);
+    // Where it stopped is a gap: each point of the frontier, else the target.
+    const stoppedGaps = GAP_KINDS.has(a.kind) ? joinGaps(a.unknown.gaps ?? [], gapsAt(s.graph, out.stopped.frontier, a.target, "budget", NEXT.questionStopped)) : [];
     return {
       ...a,
       [out.into]: out.all.slice(offset, offset + limitOf(req)),
       counts: { certain: null, likely: null, possible: null },
-      unknown: { ...a.unknown, floor: true, reasons: [out.stopped.note, ...a.unknown.reasons] },
+      unknown: { ...a.unknown, floor: true, reasons: [out.stopped.note, ...a.unknown.reasons], ...(stoppedGaps.length > 0 ? { gaps: stoppedGaps } : {}) },
       truncated: {
         by: "budget",
         omitted: null,
@@ -472,7 +519,9 @@ function finish(s: Session, a: Answer): Answer {
   const files = langs.reduce((k, u) => k + u.files, 0);
   if (langs.length > 0) {
     const notes = langs.map(unreadNote).filter((r) => !unknown.reasons.includes(r));
-    unknown = { ...unknown, floor: true, reasons: [...unknown.reasons, ...notes], causes: { ...unknown.causes, "language-not-read": files } };
+    // The build keeps no path of an unread file: the gap is said at the target.
+    const gaps = GAP_KINDS.has(a.kind) && a.error === null ? joinGaps(unknown.gaps ?? [], gapsAt(s.graph, [], a.target, "language-not-read", NEXT.unreadLanguage)) : [];
+    unknown = { ...unknown, floor: true, reasons: [...unknown.reasons, ...notes], causes: { ...unknown.causes, "language-not-read": files }, ...(gaps.length > 0 ? { gaps } : {}) };
   }
   const groups: FloorGroup[] = unknown.groups
     ? [...unknown.groups]

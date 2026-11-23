@@ -29,6 +29,9 @@ export const MAX_AMBIENT_NAMES = 200_000;
 // longer than it is not kept as declared plain data, so the facts that
 // hold it still read back.
 export const MAX_FACT_STRING = 4096;
+// The most words one region the parser could not read keeps
+// (UnreadRegion.names); past it the region may hide a call of anything.
+export const MAX_UNREAD_NAMES = 4096;
 
 // A type named in source: `Repo`, `pkg.Repo` (qualifier "pkg"), Ruby `A::B`
 // (whole path in `name`, the lexical nesting in `qualifier`).
@@ -238,6 +241,10 @@ export type CallFact = {
   arity?: number;
   // A computed callee (`table[key]()`): no name to bind. `name` is empty.
   dynamic?: boolean;
+  // A method found by a name given at run time (Java `getMethod(n)`, Go
+  // `MethodByName(n)`, Python `getattr(o, n)`, Ruby `send(n)`): a call of
+  // the name written, or a computed callee.
+  byName?: boolean;
   // A call of a local or its member uses the local's single callable value.
   // The alias indexes FileFacts.values.
   alias?: number;
@@ -302,6 +309,11 @@ export type EscapeFact =
 // these names.
 export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any"; name?: string; passed?: boolean; plain?: string[] };
 
+// A region of a file the parser could not read (walk.ts, unreadRegions):
+// where it starts, and the words written in and around it, which name
+// what a call hidden there may run; null when there are too many to keep.
+export type UnreadRegion = { line: number; column: number; names: string[] | null };
+
 export type FileFacts = {
   lang: Lang;
   defs: DefFact[];
@@ -309,6 +321,9 @@ export type FileFacts = {
   values: ValueRef[];
   types: TypeUse[];
   typeCuts?: number; // annotations too large to read whole: their types past the cut are not type uses
+  // The regions the parser could not read (a syntax error, or a shape the
+  // grammar does not know): a call there may be missing from `calls`.
+  unread?: UnreadRegion[];
   tables: TableFact[];
   // TypeScript and JavaScript: each object literal that is no definition of
   // the graph (an argument, a returned object, a local) and names a member
@@ -409,10 +424,21 @@ export type InvocationSummary = { params: string[]; invokes: number[]; returns: 
 // callers are found here.
 export type Miss = { target: string; name: string; from: string; site: GraphSite };
 
-// A call site no rule could bind, kept small: the full Unknown record of
+// What a gap may hide a call to: the join key every caller floor reads
+// (impact.ts, floorOf). `names`: a definition of one of these names (a
+// call no rule bound, by its name). `ids`: these definitions. `file`: any
+// definition of the file. "values": what a call through a value may run,
+// which escape analysis narrows (only with scope "project"). "scope": the
+// graph gave up with no narrower target, so every definition of the gap's
+// project. An empty `ids` says the gap can hide no call, and the code that
+// writes it says why. Made only by `gap` (gap.ts).
+export type Reaches = { names: string[] } | { ids: string[] } | { file: string } | "values" | "scope";
+
+// A place the graph gave up, kept small: the full Unknown record of
 // model/records.ts is made from it when an answer shows it. `scope`
 // "project": the call goes through a value (a parameter, a computed
-// member), so it could reach any function of its project.
+// member), so it could reach any function of its project. `reaches`: what
+// a call it hides may run. `next`: what the reader should check there.
 export type UnknownSite = {
   file: string;
   line: number;
@@ -431,6 +457,8 @@ export type UnknownSite = {
   // local or a parameter, `this.x()` where `this` is proved an instance of
   // a class, or a call on a value whose class or interface the graph knows.
   notPlain?: boolean;
+  reaches: Reaches;
+  next: string;
 };
 
 export type Place = { file: string; line: number };

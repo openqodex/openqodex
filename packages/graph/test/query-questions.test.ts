@@ -60,6 +60,11 @@
 // 20. `packages` counts one import site per importing file and module, so a
 //     file that imports a package twice (a type import and a value import,
 //     or an import and a re-export) loses every line after the first.
+// 21. A walk more than one hop deep reads the floor of its target only: a
+//     caller it lists whose own callers may be missing (a use as a value)
+//     leaves the answer silent, though a caller of that caller is part of
+//     the list. Or the answer floors but does not say which listed caller
+//     the gap belongs to, or where.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -760,4 +765,64 @@ describe("packages, one import site per import line (20)", () => {
     expect(a.error).toBeNull();
     expect((a.items as Item[]).map((i) => i.from).sort()).toEqual(["packages/app/src/once.ts", "packages/app/src/twice.ts", "packages/core/src/self.ts"]);
   });
+});
+
+describe("a walk past one hop floors on every point it expanded (21)", () => {
+  let s: Session;
+  const files: Record<string, string> = {
+    "package.json": JSON.stringify({ name: "app", private: true, type: "module" }),
+    "src/t.ts": "export function target(): number {\n  return 1;\n}\n",
+    "src/a.ts": 'import { target } from "./t";\nexport function middle(cb: () => void): number {\n  cb();\n  return target();\n}\n',
+    "src/b.ts": 'import { middle } from "./a";\nexport function top(): number {\n  return middle(() => {});\n}\nexport const handlers = { middle };\n',
+  };
+  beforeAll(async () => {
+    const repo = makeRepo(files);
+    const graph = await buildGraph({ repoRoot: repo, store: null });
+    s = { graph, generation: "deep-floor-build", treeSha: null, builtAt: null, laterEditsKnown: false };
+  });
+  const q = (req: Omit<Request, "apiVersion">) => query(s, { apiVersion: 1, ...req } as Request);
+
+  it("floors callers two hops deep when a caller it lists has a floor, naming that caller and its gap", () => {
+    const one = q({ kind: "callers", target: { name: "target", file: "src/t.ts" } });
+    expect(one.error).toBeNull();
+    expect(one.unknown.floor).toBe(false);
+    const two = q({ kind: "callers", target: { name: "target", file: "src/t.ts" }, depth: 2 });
+    expect(two.error).toBeNull();
+    expect((two.items as Item[]).map((i) => i.fromName).sort()).toEqual(["middle", "top"]);
+    expect(two.unknown.floor).toBe(true);
+    expect(two.unknown.reasons.join(" ")).toMatch(/callers of `middle` at src\/a\.ts:2, which this answer walks through, may be missing: it is used as a value in 1 place, first at src\/b\.ts:5/);
+    expect(two.unknown.gaps).toContainEqual(expect.objectContaining({ file: "src/b.ts", line: 5 }));
+  });
+
+  it("floors callees two hops deep on a call it could not bind in a callee it lists", () => {
+    expect(q({ kind: "callees", target: { name: "top", file: "src/b.ts" } }).unknown.floor).toBe(false);
+    const two = q({ kind: "callees", target: { name: "top", file: "src/b.ts" }, depth: 2 });
+    expect(two.unknown.floor).toBe(true);
+    expect(two.unknown.gaps).toContainEqual(expect.objectContaining({ file: "src/a.ts", line: 3 }));
+  });
+
+  it("floors impact when a caller whose callers it lists has a floor, in the review's summary and the answer", () => {
+    const change = { files: [{ path: "src/t.ts", status: "modified" as const, oldPath: null, binary: false }], coverage: new Map([["src/t.ts", new LineSet().add(2)]]) };
+    const sum = detectImpact(s.graph, change);
+    const seed = sum.unknown.seeds.find((x) => x.seed.includes("#target@"));
+    expect(seed?.floor).toBe(true);
+    expect(seed?.reasons.join(" ")).toMatch(/callers of `middle` at src\/a\.ts:2, which this answer walks through, may be missing: it is used as a value in 1 place, first at src\/b\.ts:5/);
+    const a = query(s, { apiVersion: 1, kind: "impact", limit: 500 } as Request, { change });
+    expect(a.error).toBeNull();
+    expect(a.unknown.floor).toBe(true);
+    expect(a.unknown.gaps).toContainEqual(expect.objectContaining({ file: "src/b.ts", line: 5 }));
+  });
+
+  it("names at most 20 of the floors it walks through and counts the rest", async () => {
+    const n = 25;
+    const many: Record<string, string> = { "package.json": files["package.json"] as string, "src/t.ts": files["src/t.ts"] as string };
+    for (let i = 0; i < n; i++) many[`src/m${i}.ts`] = `import { target } from "./t";\nexport function m${i}(): number {\n  return target();\n}\n`;
+    many["src/h.ts"] = `${Array.from({ length: n }, (_, i) => `import { m${i} } from "./m${i}";\n`).join("")}export const hs = [${Array.from({ length: n }, (_, i) => `m${i}`).join(", ")}];\n`;
+    const graph = await buildGraph({ repoRoot: makeRepo(many), store: null });
+    const a = query({ graph, generation: "deep-floor-many", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "callers", target: { name: "target", file: "src/t.ts" }, depth: 2 } as Request);
+    expect(a.error).toBeNull();
+    expect(a.unknown.reasons.filter((r) => r.startsWith("callers of `m"))).toHaveLength(20);
+    expect(a.unknown.reasons).toContain("5 more callers this answer walks through may have callers missing too; ask `callers` about each");
+    expect((a.unknown.gaps ?? []).length).toBeLessThanOrEqual(20);
+  }, 60_000);
 });

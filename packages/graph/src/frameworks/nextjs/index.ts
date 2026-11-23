@@ -11,7 +11,8 @@ import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 
 // 4: every kept string follows the one rule of shared/kept.ts.
 // 5: a tagged template with type arguments and a cast to an import type with an array suffix are read, not a region the parser could not read.
-export const VERSION = 5;
+// 6: a gap of a middleware's matcher names the middleware, and floors only its callers.
+export const VERSION = 6;
 const SUPPORTED = "Next.js 13.4 to 15";
 
 const app = "nextjs-app";

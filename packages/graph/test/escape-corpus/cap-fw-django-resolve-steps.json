@@ -1,0 +1,80 @@
+{
+  "covers": "a Django view of an application walked after the whole resolve used its work budget on the applications before it (django MAX_RESOLVE_STEPS)",
+  "caps": [
+    "frameworks/django/resolve.ts#MAX_RESOLVE_STEPS"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "django\n",
+    "manage.py": "import django\n",
+    "proj/__init__.py": "",
+    "proj/views.py": "def deep(request):\n    return None\n",
+    "proj/urls.py": [
+      "from django.urls import include, path\n\nurlpatterns = [\n",
+      {
+        "repeat": "    path(\"m{{i}}/\", include(\"proj.mid\")),\n",
+        "times": 430
+      },
+      "]\n"
+    ],
+    "proj/mid.py": [
+      "from django.urls import include, path\n\nurlpatterns = [\n",
+      {
+        "repeat": "    path(\"e{{i}}/\", include(\"proj.empty\")),\n",
+        "times": 430
+      },
+      "]\n"
+    ],
+    "proj/empty.py": "urlpatterns = []\n",
+    "zz/__init__.py": "",
+    "zz/settings.py": "ROOT_URLCONF = \"zz.urls\"\nINSTALLED_APPS = []\n",
+    "zz/urls.py": [
+      "from django.urls import include, path\nfrom proj import views\n\nurlpatterns = [\n",
+      {
+        "repeat": "    path(\"m{{i}}/\", include(\"proj.mid\")),\n",
+        "times": 430
+      },
+      "    path(\"deep/\", views.deep),\n]\n"
+    ],
+    "s1/__init__.py": "",
+    "s1/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s2/__init__.py": "",
+    "s2/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s3/__init__.py": "",
+    "s3/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s4/__init__.py": "",
+    "s4/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s5/__init__.py": "",
+    "s5/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s6/__init__.py": "",
+    "s6/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s7/__init__.py": "",
+    "s7/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s8/__init__.py": "",
+    "s8/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s9/__init__.py": "",
+    "s9/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "s10/__init__.py": "",
+    "s10/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n"
+  },
+  "mustReach": [
+    {
+      "target": "proj/views.py#deep",
+      "caller": null,
+      "file": "zz/urls.py",
+      "line": 435
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "proj/views.py#deep",
+      "reason": "the Django plugin used its work budget of 2000000 steps",
+      "at": "",
+      "gap": {
+        "cause": "budget",
+        "at": "proj/views.py"
+      }
+    }
+  ]
+}

@@ -33,6 +33,9 @@
 // not make (a type the reader did not name in `keep`): it is found from
 // the nearest node made below it, once, and kept on the path.
 import type { Language, Node, Tree } from "web-tree-sitter";
+import { keyShaped } from "./frameworks/shared/kept.js";
+import { MAX_FACT_STRING, MAX_UNREAD_NAMES } from "./types.js";
+import type { UnreadRegion } from "./types.js";
 
 // The node's ancestors: `up(1)` its parent, `up(2)` the one above.
 export type Up = (k: number) => Node | null;
@@ -141,6 +144,113 @@ function regionsOf(tree: Tree): Regions {
   regions = { starts: found.map((r) => r[0]), ends: found.map((r) => r[1]) };
   regionsByTree.set(tree, regions);
   return regions;
+}
+
+// What each region the parser could not read may hide (FileFacts.unread):
+// its line and column, and every word written from its previous named
+// sibling to its next one, but in a comment or the text of a string. A
+// call there may be read as something else or not at all, and the
+// parser's recovery may leave the callee in a neighbour (`F(` in Go leaves
+// `F` a value before the region), so the neighbours' words count too. A
+// call that names no word there goes through a value (a string's text
+// names a function only to code that runs a name built at run time).
+// Regions whose spans overlap are one. `names` is null past
+// MAX_UNREAD_NAMES words: then the region may hide a call of anything.
+//
+// The facts are cached and feed the review packet, so no text that may be
+// a key is kept (frameworks/shared/kept.ts): not a string's text, not a
+// run shaped like a key (`sk_live_...`, `sk-live-...`), and nothing after
+// a quote the parser could not match, since an unterminated string's text
+// is read as code (`"sk_live_...` in Python is a quote, then a name). What
+// is dropped may name a call, so such a region keeps no names (null): it
+// may hide a call of anything.
+const WORD = /[\p{L}_$][\p{L}\p{N}_$]*[?!]?/gu;
+// A run of the characters a key is written with, read whole by keyShaped.
+const RUN = /[\p{L}\p{N}_$?!-]+/gu;
+const isComment = (n: Node) => n.type.includes("comment");
+// A leaf that holds a literal's text, not code: a string's piece, a
+// character, an escape (an interpolation's code is no leaf of this kind).
+const isText = (n: Node) => /string|heredoc|character|rune|escape/.test(n.type);
+// A leaf that opens a string (`"`, `'`, a backtick, `"""`, Python's
+// `f"`), which the parser left unmatched when it stands in an ERROR node.
+const QUOTE = /^[A-Za-z]{0,2}(?:"""|'''|["'`])$/;
+export function unreadRegions(tree: Tree): UnreadRegion[] {
+  if (!tree.rootNode.hasError) return [];
+  const spans: { start: number; end: number; line: number; column: number; nodes: Node[] }[] = [];
+  const stack: Node[] = [tree.rootNode];
+  while (stack.length > 0) {
+    const parent = stack.pop() as Node;
+    const kids = parent.children.filter((c): c is Node => c !== null);
+    kids.forEach((n, i) => {
+      if (n.type === "ERROR" || (n.isMissing && !graceful(n))) {
+        let from = i;
+        for (let k = i - 1; k >= 0 && from === i; k--) if ((kids[k] as Node).isNamed && !isComment(kids[k] as Node)) from = k;
+        let to = i;
+        for (let k = i + 1; k < kids.length && to === i; k++) if ((kids[k] as Node).isNamed && !isComment(kids[k] as Node)) to = k;
+        const nodes = kids.slice(from, to + 1);
+        spans.push({ start: (nodes[0] as Node).startIndex, end: (nodes[nodes.length - 1] as Node).endIndex, line: n.startPosition.row + 1, column: n.startPosition.column, nodes });
+      } else if (n.hasError) stack.push(n);
+    });
+  }
+  // Outer spans first: a span inside one already walked is not walked
+  // again, so nested regions cost one walk of what they cover.
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const out: UnreadRegion[] = [];
+  let open: { end: number; walked: number; region: UnreadRegion; words: Set<string>; blind: boolean } | null = null;
+  const close = () => {
+    if (!open) return;
+    open.region.names = open.blind || open.words.size > MAX_UNREAD_NAMES ? null : [...open.words];
+    out.push(open.region);
+  };
+  for (const s of spans) {
+    if (!open || s.start > open.end) {
+      close();
+      open = { end: s.end, walked: s.start, region: { line: s.line, column: s.column, names: [] }, words: new Set(), blind: false };
+    } else open.end = Math.max(open.end, s.end);
+    const region = open;
+    // Past the cap, or blind, the region keeps no names: nothing more to read.
+    if (region.blind || region.words.size > MAX_UNREAD_NAMES) continue;
+    // The leaves in the order they are written, each with its parent.
+    const below: [Node, Node | null][] = s.nodes.filter((n) => n.endIndex > region.walked).map((n): [Node, Node | null] => [n, null]).reverse();
+    region.walked = Math.max(region.walked, s.end);
+    while (below.length > 0) {
+      const [n, parent] = below.pop() as [Node, Node | null];
+      if (isComment(n)) continue;
+      if (n.childCount > 0) {
+        for (let i = n.childCount - 1; i >= 0; i--) {
+          const c = n.child(i);
+          if (c) below.push([c, n]);
+        }
+        continue;
+      }
+      // An unmatched quote (Python's `string_start` too, before it is read
+      // as a string's piece): what follows it may be a string's text.
+      if ((parent === null ? n.type === "ERROR" : parent.type === "ERROR") && QUOTE.test(n.text)) {
+        region.blind = true;
+        break;
+      }
+      if (isText(n)) continue;
+      for (const run of n.text.match(RUN) ?? []) {
+        if (keyShaped(run)) {
+          region.blind = true;
+          continue;
+        }
+        for (const w of run.match(WORD) ?? []) {
+          if (w.length > MAX_FACT_STRING) continue;
+          if (keyShaped(w)) {
+            region.blind = true;
+            continue;
+          }
+          region.words.add(w);
+          // `save!` and `valid?` are Ruby names; the same word bare may be another.
+          if (w.endsWith("?") || w.endsWith("!")) region.words.add(w.slice(0, -1));
+        }
+      }
+      if (region.blind || region.words.size > MAX_UNREAD_NAMES) break;
+    }
+  }
+  close();
+  return out;
 }
 
 // Whether a node holds a region the parser could not read: `hasError`,

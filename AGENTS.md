@@ -49,6 +49,7 @@ OpenQodex is open source AI code review for Claude Code and Codex. It runs befor
 - A break only the real-programs tier catches shows in the nightly run's issue and is fixed before the version pull request merges.
 - To get the real-programs tier on any pull request, for example a scanner or installer change, a maintainer adds the label `full-ci`.
 - Each push to main also runs the release workflow.
+- After an OpenQodex review, fix only the findings that change a verdict or an answer, put the minor ones in one GitHub issue, and stop after two review rounds per pull request.
 
 ## Exit codes
 
@@ -64,6 +65,7 @@ OpenQodex is open source AI code review for Claude Code and Codex. It runs befor
 - Every test names the failure it guards. It is the one owner of that behaviour, at the strongest boundary that can see it.
 - A new test never asserts how the code is written, and never takes its expected value from the code under test.
 - A bug report becomes a test on the demo repo before it is fixed. The test fails before the fix, and the test and the fix share one pull request.
+- Before coding a rule set with combinations (dedup, folding, severity, floors), write the table of every combination, with one test per row.
 
 ## Traps
 

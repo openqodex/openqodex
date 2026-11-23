@@ -1,0 +1,42 @@
+{
+  "covers": "a namespace used as a value reaches a definition behind an `export *` branch too deep to follow, when the barrel above merges that branch's module with another module that gives the same name (two stars, ambiguous; issue 448, resolve MAX_DEPTH)",
+  "caps": [
+    "resolve.ts#MAX_DEPTH"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/f.ts": "export * from \"./a\";\nexport * from \"./b\";\n",
+    "src/a.ts": "export * from \"./s2\";\nexport * from \"./s1\";\n",
+    "src/s1.ts": "export function x(): void {}\n",
+    "src/b.ts": "export function x(): void {}\n",
+    "src/s2.ts": "export * from \"./c0\";\n",
+    "src/c0.ts": "export * from \"./c1\";\n",
+    "src/c1.ts": "export * from \"./c2\";\n",
+    "src/c2.ts": "export * from \"./c3\";\n",
+    "src/c3.ts": "export * from \"./c4\";\n",
+    "src/c4.ts": "export * from \"./c5\";\n",
+    "src/c5.ts": "export * from \"./c6\";\n",
+    "src/c6.ts": "export * from \"./c7\";\n",
+    "src/c7.ts": "export * from \"./c8\";\n",
+    "src/c8.ts": "export * from \"./c9\";\n",
+    "src/c9.ts": "export * from \"./t\";\n",
+    "src/t.ts": "export function x(): void {}\n",
+    "src/use.ts": "import * as r from \"./f\";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/t.ts#x",
+      "caller": null,
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/t.ts#x",
+      "reason": "its module is used as a value",
+      "at": "src/use.ts:3"
+    }
+  ]
+}

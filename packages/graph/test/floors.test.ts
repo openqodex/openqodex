@@ -43,7 +43,7 @@
 //     through a ternary reads as having no caller) (test 17).
 // 12. A floor whose hidden callers can only be in test files loses its
 //     floor, so a zero reads as "unused"; or one place in product code
-//     beside them still reads as "complete in product code"; or a place in
+//     beside them still reads as "only test files could hide a caller"; or a place in
 //     a folder named like tooling (`scripts/`, `benchmark/`, a package's
 //     `scripts/` or `corpus/`) reads as outside product code, though it can
 //     hold an entry point that ships.
@@ -385,12 +385,12 @@ describe("where a floor's hidden callers can be", () => {
     "test/build.ts": 'import { f } from "../app/a";\nexport const v = X4;\nf();\n',
   };
 
-  it("says complete in product code when every place is a test file, and keeps the floor (12)", async () => {
+  it("says only test files could hide a caller when every place is a test file, and keeps the floor (12)", async () => {
     const a = ask(await sessionOf(BASE), { kind: "callers", target: { name: "f", file: "app/a.ts" } });
     expect(a.unknown.floor).toBe(true);
     expect(a.listIncomplete).toBe(true);
     expect(a.unknown.scope).toBe("tests");
-    expect(a.unknown.note).toBe("Complete in product code. Only test files could hide a caller: app/a.test.ts:2, app/fixtures/run.ts:2, test/build.ts:2.");
+    expect(a.unknown.note).toBe("Only test files could hide a caller: app/a.test.ts:2, app/fixtures/run.ts:2, test/build.ts:2.");
     expect(a.unknown.reasons.join(" ")).toContain("3 files the graph cannot read whole could call it");
   }, 60_000);
 

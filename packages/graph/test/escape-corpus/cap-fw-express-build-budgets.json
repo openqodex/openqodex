@@ -1,0 +1,43 @@
+{
+  "covers": "an Express route on an application past the applications the plugin keeps in one build (express MAX_APPS); every build budget of the plugin is said by one end-of-run table typed over the budgets, so this case backs each of them",
+  "caps": [
+    "frameworks/express/resolve.ts#MAX_APPS",
+    "frameworks/express/resolve.ts#MAX_FACTS_READ",
+    "frameworks/express/resolve.ts#MAX_LOOKUPS",
+    "frameworks/express/resolve.ts#MAX_MIDDLEWARE_EDGES",
+    "frameworks/express/resolve.ts#MAX_MOUNTS",
+    "frameworks/express/resolve.ts#MAX_REGISTRATIONS",
+    "frameworks/express/resolve.ts#MAX_ROLES",
+    "frameworks/express/resolve.ts#MAX_UNKNOWNS"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"express\": \"^4.18.0\"}}",
+    "src/h.ts": "export function h(req: unknown, res: unknown): void {}\n",
+    "src/a.ts": [
+      "import express from \"express\";\n",
+      { "repeat": "export const a{{i}} = express();\n", "times": 2000 }
+    ],
+    "src/z.ts": "import express from \"express\";\nimport { h } from \"./h\";\nexport const z = express();\nz.get(\"/x\", h);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h",
+      "caller": null,
+      "file": "src/z.ts",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h",
+      "reason": "the Express plugin keeps at most 2000 applications in one build",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/h.ts"
+      }
+    }
+  ]
+}

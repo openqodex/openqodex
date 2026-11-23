@@ -509,6 +509,7 @@ export function resolveDjango(index: Index, apps: readonly Detection[]): PluginO
           out.edge({ from: reg.id, to: m.id, kind: "handles", plugin: PLUGIN, app: reg.app, evidence: ev("route-table", "possible", site, rule, "the instance's __call__ method answers requests", lk.via, [reg.id, cls.id]) });
         }
       }
+      if (classes.length > MAX_FAN_OUT) out.gap({ site, scope, affects: ["handles"], cause: "fan-out-capped", name: show(ref), note: `${show(ref)} names ${classes.length} classes; the first ${MAX_FAN_OUT} are kept`, count: classes.length - MAX_FAN_OUT, exact: true });
       return;
     }
     if (lk.kind === "symbol") {
@@ -1182,6 +1183,7 @@ export function resolveDjango(index: Index, apps: readonly Detection[]): PluginO
         out.edge({ from: sig.id, to: fn.id, kind: "schedules", plugin: PLUGIN, app, evidence: e });
         out.role(fn.id, "signal_receiver", r.sender ? `sender ${show(r.sender)}` : null, app, e);
       }
+      if (r.signals.length > MAX_FAN_OUT) out.gap({ site, scope: { file }, affects: ["schedules"], cause: "fan-out-capped", name: fn.name, note: `the receiver ${fn.name} names ${r.signals.length} signals; the first ${MAX_FAN_OUT} are linked`, count: r.signals.length - MAX_FAN_OUT, exact: true });
     }
     for (const c of factsOf(file, "connect")) {
       if (!take(file)) break;

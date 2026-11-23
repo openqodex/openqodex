@@ -315,7 +315,15 @@ function run(index: PluginIndex<GinFact>): Analysis {
   // within one group level, `depth` the groups below the one asked about.
   const receiverOf = (file: string, e: Expr, line: number): Router | "other" | null => routerOf(file, e, line, false, 0, null, 0);
   const routerOf = (file: string, e: Expr, line: number, strict: boolean, steps: number, name: string | null, depth: number): Router | "other" | null => {
-    if (steps > MAX_VALUE_STEPS || !step({ file, line: e.line, column: e.column })) return null;
+    if (steps > MAX_VALUE_STEPS) {
+      gap({ plugin: PLUGIN, site: { file, line: e.line, column: e.column }, scope: { file }, affects: ["handles", "applies_middleware"], cause: "fan-out-capped", name: show(e), note: `${show(e)} is reached through more than ${MAX_VALUE_STEPS} assignments (\`a := b\`), which the plugin does not follow; if it is a gin router, the routes and middleware on it are not listed`, count: null, exact: false });
+      return null;
+    }
+    if (isCut(e)) {
+      gap({ plugin: PLUGIN, site: { file, line: e.line, column: e.column }, scope: { file }, affects: ["handles", "applies_middleware"], cause: "fan-out-capped", name: null, note: "the expression here is longer than the plugin reads; if it is a gin router, the routes and middleware on it are not listed", count: null, exact: false });
+      return null;
+    }
+    if (!step({ file, line: e.line, column: e.column })) return null;
     if (e.t === "call") {
       if (makesEngine(file, e)) {
         const eng = engineAt(file, e, name ?? show(e));
@@ -355,7 +363,7 @@ function run(index: PluginIndex<GinFact>): Analysis {
         return routerType(d.file, d.fact.type) ? { t: "unnamed", key: `parameter:${d.file}:${d.fact.decl}`, what: "parameter", file: d.file, name: d.fact.name, type: `${d.fact.pointer ? "*" : ""}${d.fact.type.join(".")}` } : "other";
       }
       const v = d.fact.value;
-      if (v.t === "ref" || v.t === "call") return routerOf(d.file, v, d.fact.line, true, steps + 1, d.fact.name, depth);
+      if (v.t === "ref" || v.t === "call" || isCut(v)) return routerOf(d.file, v, d.fact.line, true, steps + 1, d.fact.name, depth);
       return v.t === "other" ? null : "other";
     }
     if (found.rest.length !== 1) return null;
@@ -442,7 +450,11 @@ function run(index: PluginIndex<GinFact>): Analysis {
     if (found && found.rest.length === 1) return methodValue(found.decl, found.rest[0] as string, e, what);
     if (found && found.rest.length === 0 && found.decl.kind === "value") {
       const v = found.decl.fact.value;
-      if (v.t === "ref" && steps < MAX_VALUE_STEPS) return bind(found.decl.file, v, found.decl.fact.line, what, steps + 1);
+      if (v.t === "ref") {
+        if (steps < MAX_VALUE_STEPS) return bind(found.decl.file, v, found.decl.fact.line, what, steps + 1);
+        return fail("unresolved", "fan-out-capped", `the ${what} ${show(e)} is reached through more than ${MAX_VALUE_STEPS} assignments (\`a := b\`), which the plugin does not follow, so the ${what} is not bound`, show(e), e);
+      }
+      if (isCut(v)) return fail("unresolved", "fan-out-capped", `the ${what} ${show(e)} holds an expression longer than the plugin reads, so the ${what} is not known`, show(e), e);
       if (v.t === "fn") return fail("unresolved", "unsupported-rule", `the ${what} ${show(e)} is a function held in a value; only a function written in place at the route or a named function is bound`, show(e), e);
     }
     if (found?.decl.kind === "param") return fail("dynamic", "dynamic", `the ${what} ${show(e)} is a parameter, so the caller decides what it is`, show(e), e);
@@ -473,7 +485,7 @@ function run(index: PluginIndex<GinFact>): Analysis {
     if (e.t !== "call") return bind(file, e, line, "middleware", 0);
     const fn = e.fn;
     if (ginPkg(file, fn)) return fail("external", "external", `the middleware is ${show(e)}, which gin builds`, show(e), e);
-    if (fn.t !== "ref") return fail("dynamic", "dynamic", `the middleware is computed (${show(e)})`, null, e);
+    if (fn.t !== "ref") return isCut(fn) ? fail("unresolved", "fan-out-capped", "the function this middleware is made by is longer than the plugin reads, so the middleware is not known", null, e) : fail("dynamic", "dynamic", `the middleware is computed (${show(e)})`, null, e);
     const r = bindRef(file, fn, line, "middleware", 0);
     if (r.status !== "bound") return r.status === "external" ? r : fail(r.status, r.why?.cause ?? "unsupported-rule", `the middleware is the value ${show(e)} returns; ${r.why?.note ?? "its function is not bound"}`, show(fn), e);
     return { ...r, tier: "possible", note: `the middleware is the value ${show(e)} returns` };
@@ -530,6 +542,7 @@ function run(index: PluginIndex<GinFact>): Analysis {
       if (f.prop !== "Use") continue;
       const r = receiverOf(file, f.recv, f.line);
       if (r === null || r === "other") continue;
+      if (f.omitted) gap({ plugin: PLUGIN, site: { file, line: f.line, column: f.column }, scope: { file }, affects: ["applies_middleware"], cause: "fan-out-capped", name: null, note: `the Use call has more than ${MAX_ARGS} arguments; the ${f.omitted} past that were not read, so the middleware they name is not listed`, count: f.omitted, exact: true });
       (uses.get(r.key) ?? uses.set(r.key, []).get(r.key))?.push({ file, call: f });
     }
   }
@@ -579,7 +592,11 @@ function run(index: PluginIndex<GinFact>): Analysis {
       if (f.prop === "Handle") {
         const m = f.args[0] ? methodOf(file, f.args[0]) : null;
         if (m === null) {
-          gap({ plugin: PLUGIN, site, scope: { file }, affects: ["handles"], cause: "dynamic", name: null, note: "the method Handle is given is computed at run time, so this call is not listed as a registration", count: null, exact: false });
+          gap(
+            f.args[0] && isCut(f.args[0])
+              ? { plugin: PLUGIN, site, scope: { file }, affects: ["handles"], cause: "fan-out-capped", name: null, note: "the method Handle is given is longer than the plugin reads, so this call is not listed as a registration", count: null, exact: false }
+              : { plugin: PLUGIN, site, scope: { file }, affects: ["handles"], cause: "dynamic", name: null, note: "the method Handle is given is computed at run time, so this call is not listed as a registration", count: null, exact: false },
+          );
           continue;
         }
         // gin takes a method of upper-case letters only, and panics on any other.
@@ -645,6 +662,7 @@ function run(index: PluginIndex<GinFact>): Analysis {
         const next = chain[i + 1];
         const stepFile = next?.t === "group" ? next.file : file;
         const stepCall = next?.t === "group" ? next.call : f;
+        if (r.t === "group" && r.call.omitted) gap({ plugin: PLUGIN, site: { file: r.file, line: r.call.line, column: r.call.column }, scope: { file: r.file }, affects: ["applies_middleware"], cause: "fan-out-capped", name: null, note: `the Group call has more than ${MAX_ARGS} arguments; the ${r.call.omitted} past that were not read, so the middleware they name is not listed`, count: r.call.omitted, exact: true });
         if (r.t === "group") for (const m of r.call.args.slice(1)) if (!addMw({ file: r.file, e: m, tier: "certain", note: null, site: { file: r.file, line: r.call.line, column: r.call.column } })) break levels;
         for (const u of uses.get(r.key) ?? []) {
           if (!step(site)) {
