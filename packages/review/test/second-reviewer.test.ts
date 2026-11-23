@@ -42,7 +42,9 @@
 //     losing a distinct bug; or a primary possible issue leaves for a second
 //     finding that is the same finding as a primary one, which the primary
 //     review already ruled on; or one broad second finding takes two
-//     possible issues on lines apart from each other.
+//     possible issues on lines apart from each other; or one second
+//     finding takes two primary possible issues finalize merged into one
+//     when it overlaps only one of them.
 import { DEFAULT_CONFIG } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { reviewChange } from "../src/review-change.js";
@@ -277,6 +279,15 @@ it("11. keeps a primary possible issue beside a second finding that is the same 
   expect(possibleAfterSecond([possible], exact).map((f) => f.title)).toEqual(["Overflow on large input"]);
   const alone = mergeFindings({ name: "primary", findings: [] }, { name: "second", findings: [finding] });
   expect(possibleAfterSecond([possible], alone)).toEqual([]);
+});
+
+it("11. keeps two merged primary possible issues when a second finding overlaps only one of them", async () => {
+  const sql = { ...SUBTRACTION, file_path: "db/x.sql", confidence: 0.55, problem: "The function runs as its owner.", consequence: "Any caller gets admin rights.", fix: "Mark it SECURITY INVOKER." };
+  const near = { ...sql, line_number: 1, line_end: 2, title: "Function runs as owner" };
+  const far = { ...sql, line_number: 2, line_end: 2, title: "Body returns a constant", problem: "The body returns 1 whatever the tables hold, so the hygiene check never reports a problem." };
+  const { result } = await run({ findings: [{ ...sql, line_number: 1, confidence: 0.8, title: "No search_path set" }] }, undefined, false, { findings: [SUBTRACTION, near, far] });
+  expect(result.findings.map((f) => f.title).sort()).toEqual(["No search_path set", SUBTRACTION.title]);
+  expect(result.possible.map((f) => [f.title, f.lineStart, f.lineEnd])).toEqual([[far.title, 1, 2]]);
 });
 
 it("11. keeps two primary possible issues that one broad second finding overlaps", () => {
