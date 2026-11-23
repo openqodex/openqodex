@@ -255,7 +255,8 @@ const keptApart = (): boolean => false;
 // higher severity, then the first. Then one defect (sameDefect), only for two
 // findings that are each other's one overlap: a broad finding over two
 // findings on lines apart is three defects, all kept, whatever the order.
-function dedup(findings: ReportFinding[], same = sameDefect): ReportFinding[] {
+// `parts` learns the two findings behind each merged one.
+function dedup(findings: ReportFinding[], same = sameDefect, parts?: Map<ReportFinding, ReportFinding[]>): ReportFinding[] {
   const byKey = new Map<string, ReportFinding>();
   for (const f of findings) {
     const key = findingKey(f);
@@ -272,7 +273,9 @@ function dedup(findings: ReportFinding[], same = sameDefect): ReportFinding[] {
     const twin = overlaps[i]!.length === 1 ? overlaps[i]![0]! : null;
     if (twin && overlaps[kept.indexOf(twin)]!.length === 1) {
       gone.add(twin);
-      out.push(merged(a, twin));
+      const m = merged(a, twin);
+      parts?.set(m, [a, twin]);
+      out.push(m);
     } else out.push(a);
   });
   return out;
@@ -283,12 +286,14 @@ function dedup(findings: ReportFinding[], same = sameDefect): ReportFinding[] {
 // when each is the other's one overlap, so a broad finding never takes two
 // possible issues. A caller passes only the counted findings the report
 // shows when it matches by one defect, so a possible issue never leaves for
-// a finding the threshold hides.
-export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect): ReportFinding[] {
+// a finding the threshold hides. A possible issue merged from two (`parts`)
+// leaves only for a counted finding that overlaps both, so the one the
+// counted finding never touched is not lost with it.
+export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect, parts?: ReadonlyMap<ReportFinding, ReportFinding[]>): ReportFinding[] {
   const keys = new Set(counted.map(findingKey));
   return possible.filter((p) => {
     if (keys.has(findingKey(p))) return false;
-    const near = counted.filter((c) => same(c, p));
+    const near = counted.filter((c) => (parts?.get(p) ?? [p]).every((q) => same(c, q)));
     return near.length !== 1 || possible.filter((q) => same(near[0]!, q)).length !== 1;
   });
 }
@@ -401,7 +406,10 @@ export function finalizeReview(args: {
   const deduped = dedup(findings);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = uncounted(dedup(uncounted(possible, deduped, keptApart)), kept).filter((f) => {
+  // The exact key of a finding as submitted, never of a merged one: a merged
+  // finding's lines are new, so its key is no finder's finding.
+  const parts = new Map<ReportFinding, ReportFinding[]>();
+  const keptPossible = uncounted(dedup(uncounted(possible, findings, keptApart), sameDefect, parts), kept, sameDefect, parts).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
@@ -753,7 +761,9 @@ export function checkSubmission(args: {
   const deduped = dedup(findings, same);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
-  const keptPossible = uncounted(dedup(uncounted(possible, deduped, keptApart), same), kept, same).filter((f) => {
+  // The exact key of a finding as submitted, as in finalizeReview.
+  const parts = new Map<ReportFinding, ReportFinding[]>();
+  const keptPossible = uncounted(dedup(uncounted(possible, findings, keptApart), same, parts), kept, same, parts).filter((f) => {
     if (shown(f, config, own)) return true;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
