@@ -348,7 +348,11 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
     return v.value.t === "ref" ? muxOfRef(d.file, v.value, v.line, true, create, steps + 1) : null;
   };
   const muxOfRef = (file: string, e: Expr, line: number, strict: boolean, create: Site | null, steps: number): Mux | ParamMux | null => {
-    if (e.t !== "ref" || steps > MAX_VALUE_STEPS) return null;
+    if (e.t !== "ref") return null;
+    if (steps > MAX_VALUE_STEPS) {
+      gap({ plugin: PLUGIN, site: { file, line: e.line, column: e.column }, scope: { file }, affects: ["handles", "mounts"], cause: "fan-out-capped", name: show(e), note: `${show(e)} is reached through more than ${MAX_VALUE_STEPS} assignments (\`a := b\`), which the plugin does not follow; if it is a net/http mux, the routes on it are not listed`, count: null, exact: false });
+      return null;
+    }
     if (isPkg(file, e, "http", "DefaultServeMux")) return defaultMux(index.projectOf(file), create);
     const found = declPath(file, e.path, e.decl, line, strict);
     return found && found.rest.length === 0 ? muxOfDecl(found.decl, create, steps) : null;
@@ -477,7 +481,10 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
     const symbol = e.local ? null : lookup(file, e.path);
     if (symbol?.kind === "symbol") return fromLookup(symbol, e, what);
     const found = declPath(file, e.path, e.decl, line, false);
-    if (found && found.rest.length === 0 && found.decl.kind === "value" && steps < MAX_VALUE_STEPS) return { follow: found.decl };
+    if (found && found.rest.length === 0 && found.decl.kind === "value") {
+      if (steps < MAX_VALUE_STEPS) return { follow: found.decl };
+      return fail("unresolved", "fan-out-capped", `the ${what} ${show(e)} is reached through more than ${MAX_VALUE_STEPS} assignments (\`a := b\`), which the plugin does not follow, so the ${what} is not bound`, show(e), e);
+    }
     if (found && found.rest.length === 1) return methodValue(found.decl, found.rest[0] as string, e, what);
     if (found || e.local) return fail("dynamic", "dynamic", `the ${what} ${show(e)} is a value the code computes, not a definition`, show(e), e);
     return fromLookup(symbol ?? { kind: "none" }, e, what);

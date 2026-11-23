@@ -315,7 +315,11 @@ function run(index: PluginIndex<GinFact>): Analysis {
   // within one group level, `depth` the groups below the one asked about.
   const receiverOf = (file: string, e: Expr, line: number): Router | "other" | null => routerOf(file, e, line, false, 0, null, 0);
   const routerOf = (file: string, e: Expr, line: number, strict: boolean, steps: number, name: string | null, depth: number): Router | "other" | null => {
-    if (steps > MAX_VALUE_STEPS || !step({ file, line: e.line, column: e.column })) return null;
+    if (steps > MAX_VALUE_STEPS) {
+      gap({ plugin: PLUGIN, site: { file, line: e.line, column: e.column }, scope: { file }, affects: ["handles", "applies_middleware"], cause: "fan-out-capped", name: show(e), note: `${show(e)} is reached through more than ${MAX_VALUE_STEPS} assignments (\`a := b\`), which the plugin does not follow; if it is a gin router, the routes and middleware on it are not listed`, count: null, exact: false });
+      return null;
+    }
+    if (!step({ file, line: e.line, column: e.column })) return null;
     if (e.t === "call") {
       if (makesEngine(file, e)) {
         const eng = engineAt(file, e, name ?? show(e));
@@ -442,7 +446,10 @@ function run(index: PluginIndex<GinFact>): Analysis {
     if (found && found.rest.length === 1) return methodValue(found.decl, found.rest[0] as string, e, what);
     if (found && found.rest.length === 0 && found.decl.kind === "value") {
       const v = found.decl.fact.value;
-      if (v.t === "ref" && steps < MAX_VALUE_STEPS) return bind(found.decl.file, v, found.decl.fact.line, what, steps + 1);
+      if (v.t === "ref") {
+        if (steps < MAX_VALUE_STEPS) return bind(found.decl.file, v, found.decl.fact.line, what, steps + 1);
+        return fail("unresolved", "fan-out-capped", `the ${what} ${show(e)} is reached through more than ${MAX_VALUE_STEPS} assignments (\`a := b\`), which the plugin does not follow, so the ${what} is not bound`, show(e), e);
+      }
       if (v.t === "fn") return fail("unresolved", "unsupported-rule", `the ${what} ${show(e)} is a function held in a value; only a function written in place at the route or a named function is bound`, show(e), e);
     }
     if (found?.decl.kind === "param") return fail("dynamic", "dynamic", `the ${what} ${show(e)} is a parameter, so the caller decides what it is`, show(e), e);
