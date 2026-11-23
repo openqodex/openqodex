@@ -1,0 +1,87 @@
+{
+  "covers": "a Gin handler met after the plugin's name lookups for one build ran out (gin MAX_LOOKUPS)",
+  "caps": [
+    "frameworks/gin/resolve.ts#MAX_LOOKUPS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nvar r = gin.New()\n\nfunc h(c *gin.Context) {}\n\nfunc rega() {\n",
+      {
+        "repeat": "\tr.GET(\"/x\", n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, h)\n",
+        "times": 650
+      },
+      "}\n"
+    ],
+    "b.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc regb() {\n",
+      {
+        "repeat": "\tr.GET(\"/x\", n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, h)\n",
+        "times": 650
+      },
+      "}\n"
+    ],
+    "c.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc regc() {\n",
+      {
+        "repeat": "\tr.GET(\"/x\", n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, h)\n",
+        "times": 650
+      },
+      "}\n"
+    ],
+    "d.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc regd() {\n",
+      {
+        "repeat": "\tr.GET(\"/x\", n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, h)\n",
+        "times": 650
+      },
+      "}\n"
+    ],
+    "e.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc rege() {\n",
+      {
+        "repeat": "\tr.GET(\"/x\", n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, h)\n",
+        "times": 650
+      },
+      "}\n"
+    ],
+    "f.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc regf() {\n",
+      {
+        "repeat": "\tr.GET(\"/x\", n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, h)\n",
+        "times": 650
+      },
+      "}\n"
+    ],
+    "g.go": [
+      "package main\n\nimport (\n\tn \"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc regg() {\n",
+      {
+        "repeat": "\tr.GET(\"/x\", n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, n.NotFound, h)\n",
+        "times": 650
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc main() {\n\tr.GET(\"/y\", deep)\n\tr.Run()\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 8
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped looking names up after 100000",
+      "at": "d.go:1",
+      "gap": {
+        "cause": "budget",
+        "at": "d.go:1"
+      }
+    }
+  ]
+}
