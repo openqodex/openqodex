@@ -306,6 +306,28 @@ it("folds a duplicate into the first shown link of its chain when the chain's en
   const r = await runStagedReview(f.args);
   expect(r.report.findings.map((finding) => finding.title)).toEqual(["Claim 2"]);
 });
+it("carries a folded major duplicate's severity to its minor survivor, so the review still blocks", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [{ ...candidate("a.txt", "Survivor"), line_number: 1 }]
+      : [{ ...candidate("a.txt", "Major duplicate"), line_number: 2, evidence: [{ file_path: "a.txt", line_number: 2, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const survivor = answer.verdicts.find((v) => v.title === "Survivor")!;
+      survivor.severity = "minor";
+      const duplicate = answer.verdicts.find((v) => v.title === "Major duplicate")!;
+      duplicate.line_number = 2;
+      duplicate.duplicate_of = survivor.id;
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(2));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Survivor", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+});
 it("lets a stopped session leave the budget queue while another session holds the lock", async () => {
   const budgetState = { pending: Promise.resolve(), refused: false };
   const f = fixture(["a.txt"]);
