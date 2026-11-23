@@ -1,0 +1,52 @@
+{
+  "covers": "a FastAPI handler in a build where the plugin left out unknowns past the most it keeps; a gap it did not keep may be the one that hides this handler's route (fastapi MAX_UNKNOWNS)",
+  "caps": [
+    "frameworks/fastapi/resolve.ts#MAX_UNKNOWNS"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "a.py": [
+      "from fastapi import FastAPI\n\na = FastAPI()\n\n",
+      {
+        "repeat": "a.include_router(r{{i}})\n",
+        "times": 1700
+      }
+    ],
+    "b.py": [
+      "from fastapi import FastAPI\n\nb = FastAPI()\n\n",
+      {
+        "repeat": "b.include_router(r{{i}})\n",
+        "times": 1700
+      }
+    ],
+    "c.py": [
+      "from fastapi import FastAPI\n\nc = FastAPI()\n\n",
+      {
+        "repeat": "c.include_router(r{{i}})\n",
+        "times": 1700
+      }
+    ],
+    "main.py": "from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get(\"/x\")\ndef index():\n    return 1\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.py#index",
+      "caller": null,
+      "file": "main.py",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#index",
+      "reason": "the plugin keeps 5000 unknowns in one build",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "c.py:1605"
+      }
+    }
+  ]
+}

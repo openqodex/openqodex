@@ -45,6 +45,27 @@ export const MAX_LOOKUPS = 200_000;
 export const MAX_MIDDLEWARE_EDGES = 30_000;
 export const MAX_UNKNOWNS = 5000;
 
+// What each budget says once it is spent, once for the whole build: one
+// row per budget, so a budget added to `left` without a row does not
+// typecheck and none stops without an unknown the callers floor reads.
+type Budget = "registrations" | "apps" | "middleware" | "modules" | "lookups";
+export const EXITS: Record<Budget, { cause: "fan-out-capped" | "budget"; affects: FrameworkUnknown["affects"]; what: string; past: string }> = {
+  registrations: { cause: "fan-out-capped", affects: ["handles", "mounts"], what: `keeps at most ${MAX_REGISTRATIONS} registrations`, past: "were left out" },
+  apps: { cause: "fan-out-capped", affects: ["handles", "mounts"], what: `keeps at most ${MAX_APPS} applications`, past: "were left out" },
+  middleware: { cause: "fan-out-capped", affects: ["handles", "mounts"], what: `keeps at most ${MAX_MIDDLEWARE_EDGES} guard and interceptor edges`, past: "were left out" },
+  // A module past the budget may be in any project, so its controllers may be too.
+  modules: { cause: "budget", affects: ["handles", "mounts"], what: `visits at most ${MAX_MODULE_VISITS} modules`, past: "visits were refused" },
+  lookups: { cause: "budget", affects: [], what: `makes at most ${MAX_LOOKUPS} lookups`, past: "were refused" },
+};
+export function budgetUnknowns(left: Record<Budget, number>): FrameworkUnknown[] {
+  const out: FrameworkUnknown[] = [];
+  for (const [k, x] of Object.entries(EXITS) as [Budget, (typeof EXITS)[Budget]][]) {
+    const n = left[k];
+    if (n > 0) out.push({ plugin: PLUGIN, site: null, scope: { build: true }, affects: x.affects, cause: x.cause, name: null, note: `the Nest plugin ${x.what} in one build; ${n} ${x.past}`, count: n, exact: true });
+  }
+  return out;
+}
+
 type ClassFact = Extract<NestFact, { kind: "class" }>;
 type FactoryFact = Extract<NestFact, { kind: "factory" }>;
 type CallFact = Extract<NestFact, { kind: "app-call" }>;
@@ -204,7 +225,7 @@ function run(index: PluginIndex<NestFact>): Analysis {
 
   // ---------- budgets and gaps ----------
   const spent = { lookups: 0, modules: 0, registrations: 0, middleware: 0, apps: 0 };
-  const left = { registrations: 0, middleware: 0, apps: 0, modules: 0, lookups: 0 };
+  const left: Record<Budget, number> = { registrations: 0, middleware: 0, apps: 0, modules: 0, lookups: 0 };
   let unknownsLeftOut = 0;
   const seen = new Set<string>();
   const addUnknown = (u: FrameworkUnknown) => {
@@ -1029,13 +1050,7 @@ function run(index: PluginIndex<NestFact>): Analysis {
       }
     }
   }
-  const capped = (n: number, what: string) => {
-    if (n > 0) addUnknown({ plugin: PLUGIN, site: null, scope: { build: true }, affects: ["handles", "mounts"], cause: "fan-out-capped", name: null, note: `the Nest plugin keeps at most ${what} in one build; ${n} were left out`, count: n, exact: true });
-  };
-  capped(left.registrations, `${MAX_REGISTRATIONS} registrations`);
-  capped(left.apps, `${MAX_APPS} applications`);
-  capped(left.middleware, `${MAX_MIDDLEWARE_EDGES} guard and interceptor edges`);
-  if (left.lookups > 0) addUnknown({ plugin: PLUGIN, site: null, scope: { build: true }, affects: [], cause: "budget", name: null, note: `the Nest plugin makes at most ${MAX_LOOKUPS} lookups in one build; ${left.lookups} were refused`, count: left.lookups, exact: true });
+  for (const u of budgetUnknowns(left)) addUnknown(u);
   if (unknownsLeftOut > 0) unknowns.push({ plugin: PLUGIN, site: null, scope: { build: true }, affects: [], cause: "fan-out-capped", name: null, note: `the Nest plugin keeps at most ${MAX_UNKNOWNS} gaps; ${unknownsLeftOut} more were left out`, count: unknownsLeftOut, exact: true });
   return { apps, output: { roles, entities, edges, unknowns } };
 }

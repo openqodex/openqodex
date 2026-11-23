@@ -1,0 +1,45 @@
+{
+  "covers": "a FastAPI route on an application past the most applications the plugin keeps in one build; the handler is named only by its decorator (fastapi MAX_APPS, through the plugin's cap table)",
+  "caps": [
+    "frameworks/fastapi/resolve.ts#MAX_APPS"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "a.py": [
+      "from fastapi import FastAPI\n\n",
+      {
+        "repeat": "a{{i}} = FastAPI()\n",
+        "times": 1000
+      }
+    ],
+    "b.py": [
+      "from fastapi import FastAPI\n\n",
+      {
+        "repeat": "b{{i}} = FastAPI()\n",
+        "times": 1000
+      }
+    ],
+    "main.py": "from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get(\"/x\")\ndef last():\n    return 1\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.py#last",
+      "caller": null,
+      "file": "main.py",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#last",
+      "reason": "the plugin stops at 2000 applications in one build",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.py:3"
+      }
+    }
+  ]
+}

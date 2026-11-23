@@ -93,6 +93,36 @@ type Known = Extract<Val, { kind: "app" | "router" }>;
 
 export type Analysis = { apps: Detection[]; output: PluginOutput };
 
+// The build's caps, and what each says once it is reached: one row per cap,
+// in the order the unknowns are said. A cap's spends and its unknown both
+// go through this table, so a cap added without a row does not typecheck
+// and none stops without an unknown the callers floor reads.
+type CapKey = "apps" | "regs" | "mounts" | "depEdges" | "requests" | "edges" | "roles" | "lookups";
+const ALL: FrameworkUnknown["affects"] = ["handles", "mounts", "applies_middleware", "tests"];
+export const EXITS: Record<CapKey, { max: number; affects: FrameworkUnknown["affects"]; cause: Cause; what: string }> = {
+  apps: { max: MAX_APPS, affects: ALL, cause: "fan-out-capped", what: "applications" },
+  regs: { max: MAX_REGISTRATIONS, affects: ["handles", "applies_middleware", "tests"], cause: "fan-out-capped", what: "registrations" },
+  mounts: { max: MAX_MOUNTS, affects: ["mounts", "handles"], cause: "fan-out-capped", what: "router includes" },
+  depEdges: { max: MAX_MIDDLEWARE_EDGES, affects: ["applies_middleware"], cause: "fan-out-capped", what: "dependency edges" },
+  requests: { max: MAX_TEST_REQUESTS, affects: ["tests"], cause: "fan-out-capped", what: "test client requests" },
+  edges: { max: MAX_EDGES, affects: ALL, cause: "fan-out-capped", what: "edges" },
+  roles: { max: MAX_ROLES, affects: [], cause: "fan-out-capped", what: "roles" },
+  lookups: { max: MAX_LOOKUPS, affects: ALL, cause: "budget", what: "name lookups" },
+};
+export type Cap = { used: number; max: number; first: Site | null; left: number; exact: boolean };
+
+// One unknown per cap reached, for the whole build. A cap first reached
+// with no site still says so: the unknown is placed at no site.
+export function capUnknowns(caps: Record<CapKey, Cap>): FrameworkUnknown[] {
+  const out: FrameworkUnknown[] = [];
+  for (const [k, x] of Object.entries(EXITS) as [CapKey, (typeof EXITS)[CapKey]][]) {
+    const c = caps[k];
+    if (c.left === 0) continue;
+    out.push({ plugin: PLUGIN, site: c.first, scope: { build: true }, affects: x.affects, cause: x.cause, name: null, note: `the plugin stops at ${c.max} ${x.what} in one build; ${c.left}${c.exact ? "" : " or more"} were left out from here on`, count: c.left, exact: c.exact });
+  }
+  return out;
+}
+
 const memo = new WeakMap<object, Analysis>();
 
 export function analyse(index: PluginIndex<FastApiFact>): Analysis {
@@ -147,18 +177,7 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   // ---------- the build's budgets ----------
   // Each counts the work done across the whole run; `first` is where the
   // cap was first reached, `left` what was left out after it.
-  type Cap = { used: number; max: number; first: Site | null; left: number; exact: boolean };
-  const cap = (max: number): Cap => ({ used: 0, max, first: null, left: 0, exact: true });
-  const caps = {
-    regs: cap(MAX_REGISTRATIONS),
-    mounts: cap(MAX_MOUNTS),
-    depEdges: cap(MAX_MIDDLEWARE_EDGES),
-    requests: cap(MAX_TEST_REQUESTS),
-    lookups: cap(MAX_LOOKUPS),
-    apps: cap(MAX_APPS),
-    edges: cap(MAX_EDGES),
-    roles: cap(MAX_ROLES),
-  };
+  const caps = Object.fromEntries(Object.entries(EXITS).map(([k, x]) => [k, { used: 0, max: x.max, first: null, left: 0, exact: true }])) as Record<CapKey, Cap>;
   // Spends one unit of a cap; false (and counted as left out) once it is reached.
   const spend = (c: Cap, site: Site | null, n = 1): boolean => {
     if (c.used + n <= c.max) {
@@ -1006,25 +1025,13 @@ function run(index: PluginIndex<FastApiFact>): Analysis {
   }
 
   // ---------- one unknown per cap reached ----------
-  const capGap = (c: Cap, affects: FrameworkUnknown["affects"], cause: Cause, what: string) => {
-    if (c.left === 0 || !c.first) return;
-    gap({ plugin: PLUGIN, site: c.first, scope: { build: true }, affects, cause, name: null, note: `the plugin stops at ${c.max} ${what} in one build; ${c.left}${c.exact ? "" : " or more"} were left out from here on`, count: c.left, exact: c.exact }, true);
-  };
-  const all: FrameworkUnknown["affects"] = ["handles", "mounts", "applies_middleware", "tests"];
   if (caps.mounts.left > 0 || caps.apps.left > 0) caps.regs.exact = false;
   if (caps.lookups.left > 0) for (const c of Object.values(caps)) c.exact = false;
-  capGap(caps.apps, all, "fan-out-capped", "applications");
-  capGap(caps.regs, ["handles", "applies_middleware", "tests"], "fan-out-capped", "registrations");
-  capGap(caps.mounts, ["mounts", "handles"], "fan-out-capped", "router includes");
-  capGap(caps.depEdges, ["applies_middleware"], "fan-out-capped", "dependency edges");
-  capGap(caps.requests, ["tests"], "fan-out-capped", "test client requests");
-  capGap(caps.edges, all, "fan-out-capped", "edges");
-  capGap(caps.roles, [], "fan-out-capped", "roles");
-  capGap(caps.lookups, all, "budget", "name lookups");
+  for (const u of capUnknowns(caps)) gap(u, true);
   if (tooDeep.first) gap({ plugin: PLUGIN, site: tooDeep.first, scope: { project: project(tooDeep.first.file) }, affects: ["mounts", "handles"], cause: "fan-out-capped", name: null, note: `routers included more than ${MAX_INCLUDE_DEPTH} levels deep are not followed (${tooDeep.count} includes); their routes are not listed`, count: tooDeep.count, exact: true }, true);
   if (matchStopped) gap({ plugin: PLUGIN, site: matchStopped, scope: { build: true }, affects: ["tests"], cause: "budget", name: null, note: `matching test requests to routes stopped after ${MAX_MATCH_WORK} steps; the requests from here on were not matched`, count: null, exact: false }, true);
   const lostAt = gapsLeft.first;
-  if (gapsLeft.count > 0) gap({ plugin: PLUGIN, site: lostAt, scope: { build: true }, affects: all, cause: "fan-out-capped", name: null, note: `the plugin keeps ${MAX_UNKNOWNS} unknowns in one build; ${gapsLeft.count} more were counted and left out`, count: gapsLeft.count, exact: true }, true);
+  if (gapsLeft.count > 0) gap({ plugin: PLUGIN, site: lostAt, scope: { build: true }, affects: ALL, cause: "fan-out-capped", name: null, note: `the plugin keeps ${MAX_UNKNOWNS} unknowns in one build; ${gapsLeft.count} more were counted and left out`, count: gapsLeft.count, exact: true }, true);
 
   return { apps, output: { roles, entities: registrations, edges, unknowns, calls } };
 }
