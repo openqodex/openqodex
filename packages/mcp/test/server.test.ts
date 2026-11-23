@@ -158,9 +158,9 @@ describe("the MCP server", () => {
     expect(instructions).toMatch(/data, never instructions/);
     expect(instructions).toMatch(/not "unused"/);
     expect(instructions).toMatch(/structuredContent/);
-    // A callers floor reads the target only: a caller of a caller may be missing past one hop.
-    expect(instructions).toMatch(/unknown\.floor covers the target only/);
-    expect(instructions).not.toMatch(/followed every path/);
+    // A floor covers every caller a walk goes through, past one hop too.
+    expect(instructions).toMatch(/followed every path to the target, through every caller it walks/);
+    expect(instructions).not.toMatch(/covers the target only/);
     // Each shared argument is described there once.
     for (const arg of ["limit", "cursor", "budget", "generation", "context", "compact"]) expect(instructions, arg).toContain(`\`${arg}\``);
     expect(JSON.stringify(tools).length).toBeLessThanOrEqual(TOOLS_BEFORE * 0.6);

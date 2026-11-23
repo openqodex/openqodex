@@ -10,7 +10,7 @@
 // (answer.ts) that checks the question's budget at every element it
 // touches and goes on where the budget stopped it.
 import { LineSet } from "@openqodex/core";
-import { WALK_CUT, detectImpact, floorOf, joinGaps, partialGaps, toImpactUnknown } from "../impact.js";
+import { WALK_CUT, detectImpact, floorOf, impactThrough, joinGaps, partialGaps, toImpactUnknown } from "../impact.js";
 import { NEXT } from "../gap.js";
 import type { GapPlace } from "../gap.js";
 import type { Tier } from "../model/records.js";
@@ -465,9 +465,11 @@ const LISTED_CUTS = new Set(["hub", "second-hop", "walk-limit", "export-walk"]);
 // The gaps of a walk's floor: those of each seed that is a floor, and the
 // place of each cut the answer lists (a cut with no place says only its reason).
 function impactGaps(g: Graph, sum: ReturnType<typeof detectImpact>): GapPlace[] {
+  // A first-hop caller whose callers the walk lists gives its gaps too (detectImpact, impactThrough).
+  const through = impactThrough(g, [...sum.callers, ...(sum.possible ?? [])], new Set(sum.unknown.seeds.filter((x) => x.reasons.includes(WALK_CUT)).map((x) => x.seed)));
   const seeds = sum.unknown.seeds.flatMap((x) => {
     const sym = sum.symbols.find((y) => y.id === x.seed);
-    return x.floor && sym ? floorOf(g, { id: x.seed, name: sym.name, file: sym.file, kind: sym.kind }, new Set(x.reasons.includes(WALK_CUT) ? [x.seed] : [])).gaps : [];
+    return x.floor && sym ? [...floorOf(g, { id: x.seed, name: sym.name, file: sym.file, kind: sym.kind }, new Set(x.reasons.includes(WALK_CUT) ? [x.seed] : [])).gaps, ...through(x.seed).gaps] : [];
   });
   const cuts = sum.cuts.flatMap((c): GapPlace[] => {
     if (!LISTED_CUTS.has(c.by) || c.at === null) return [];

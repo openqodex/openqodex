@@ -17,7 +17,8 @@
 // answer in slices with a turn of the event loop between them, so a
 // cancellation that arrives while the work runs is seen (the MCP server).
 import { langOf, unreadNote } from "../capture/inventory.js";
-import { floorOf, isTestPath, joinGaps, partialGaps, sameNameGaps, toImpactUnknown } from "../impact.js";
+import { floorOf, isTestPath, joinGaps, partialGaps, sameNameGaps, throughFloors, toImpactUnknown } from "../impact.js";
+import type { Through } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
 import { CALLER_KINDS } from "../types.js";
@@ -229,6 +230,10 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
   const point = new Point(g, req.target);
   let n: GraphNode | null = null;
   let w: Walk | null = null;
+  // Callers past one hop: the floor of each point the walk expanded past
+  // the target, read one point a time so the budget can stop it.
+  let floorsRead = 0;
+  const floored: Through[] = [];
   return (budget) => {
     const base = empty(s, kind);
     if (!n) {
@@ -241,6 +246,19 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     const walk = w as Walk;
     const target = candidate(g, n, 1);
     if (!walk.run(budget)) return stoppedAt({ ...base, target }, walk.items, walk.pending(), walk.pending().length);
+    // A caller the answer walks through whose own callers may be missing
+    // hides a row of this answer too: each reason names that caller.
+    const through = kind === "callers" ? [...walk.expanded].filter((id) => id !== (n as GraphNode).id) : [];
+    while (floorsRead < through.length) {
+      if (spent(budget)) return stoppedAt({ ...base, target }, walk.items, through.slice(floorsRead), through.length - floorsRead);
+      const m = g.nodes.get(through[floorsRead++] as string);
+      // A file's top level has no callers.
+      if (!m || m.kind === "file") continue;
+      const floor = floorOf(g, { id: m.id, name: m.name, file: m.file, kind: m.kind }, new Set());
+      const fw = frameworkCallerGaps(g, m.file, m.id);
+      const why = [...floor.reasons, ...fw.reasons];
+      if (why.length > 0) floored.push({ name: m.name, file: m.file, line: m.startLine, reasons: why, gaps: joinGaps(floor.gaps, fw.gaps) });
+    }
     let reasons: string[];
     let causes: Record<string, number | null> = {};
     let examples: Answer["unknown"]["examples"];
@@ -267,6 +285,11 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
       for (const u of inside) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = inside.slice(0, 5).map(toImpactUnknown);
       gaps = joinGaps(inside.map(gapPlace));
+    }
+    if (floored.length > 0) {
+      const deep = throughFloors(floored);
+      reasons = [...reasons, ...deep.reasons];
+      gaps = joinGaps(gaps, deep.gaps);
     }
     const partial = g.status.status === "partial";
     // A partial build floors every answer: its files not read are gaps too.

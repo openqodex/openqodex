@@ -582,6 +582,48 @@ export function joinGaps(...lists: readonly GapPlace[][]): GapPlace[] {
   return out;
 }
 
+// A caller an answer walks through, its callers listed too, with its own
+// floor: one whose callers may be missing hides a row of the answer.
+export type Through = { name: string; file: string; line: number; reasons: readonly string[]; gaps: readonly GapPlace[] };
+
+// The floors of the callers an answer walks through, each reason naming
+// its caller: at most GAPS_SHOWN reasons, the callers past them counted.
+export function throughFloors(floored: readonly Through[]): { reasons: string[]; gaps: GapPlace[] } {
+  const reasons: string[] = [];
+  let shown = 0;
+  for (const t of floored) {
+    if (reasons.length >= GAPS_SHOWN) break;
+    shown++;
+    for (const r of t.reasons) if (reasons.length < GAPS_SHOWN) reasons.push(`callers of \`${t.name}\` at ${t.file}:${t.line}, which this answer walks through, may be missing: ${r}`);
+  }
+  const more = floored.length - shown;
+  if (more > 0) reasons.push(`${more} more ${more === 1 ? "caller" : "callers"} this answer walks through may have callers missing too; ask \`callers\` about each`);
+  return { reasons, gaps: joinGaps(...floored.map((t) => [...t.gaps])) };
+}
+
+// Per seed of an impact walk, the floors of its first-hop callers, whose
+// callers the walk lists as the second hop. Each caller's floor is read once.
+export function impactThrough(graph: Graph, paths: readonly ImpactPath[], cutAt: ReadonlySet<string>): (seed: string) => { reasons: string[]; gaps: GapPlace[] } {
+  const bySeed = new Map<string, Set<string>>();
+  for (const p of paths) {
+    const from = p.edges.length === 1 ? p.edges[0].from : null;
+    if (from === null || from === p.seed || graph.nodes.get(from)?.kind === "file") continue;
+    const set = bySeed.get(p.seed);
+    if (set) set.add(from);
+    else bySeed.set(p.seed, new Set([from]));
+  }
+  const floors = new Map<string, Through | null>();
+  const floorAt = (id: string): Through | null => {
+    if (floors.has(id)) return floors.get(id) ?? null;
+    const m = graph.nodes.get(id);
+    const f = m ? floorOf(graph, { id, name: m.name, file: m.file, kind: m.kind }, cutAt) : null;
+    const t = m && f && f.reasons.length > 0 ? { name: m.name, file: m.file, line: m.startLine, reasons: f.reasons, gaps: f.gaps } : null;
+    floors.set(id, t);
+    return t;
+  };
+  return (seed) => throughFloors([...(bySeed.get(seed) ?? [])].flatMap((id) => floorAt(id) ?? []));
+}
+
 // The gaps of a partial build, which floors every answer: each file not
 // read and each file whose calls the budget left unresolved.
 export function partialGaps(graph: Graph): GapPlace[] {
@@ -805,9 +847,12 @@ export function detectImpact(graph: Graph, change: Pick<Change, "files" | "cover
   }
 
   // What the graph could not see, per seed and near the change.
+  // A caller the walk lists the callers of may have callers missing too.
+  const through = impactThrough(graph, [...callers, ...possible], cutAt);
   const seeds = [...touched, ...removed].map((id) => {
     const sym = symbols.get(id);
-    const reasons = sym ? floorReasons(graph, { id, name: sym.name, file: sym.file, kind: sym.kind }, cutAt) : ["the symbol is not in the graph"];
+    const own = sym ? floorReasons(graph, { id, name: sym.name, file: sym.file, kind: sym.kind }, cutAt) : ["the symbol is not in the graph"];
+    const reasons = [...own, ...through(id).reasons];
     return { seed: id, floor: reasons.length > 0, reasons };
   });
   const nearFiles = new Set<string>([...change.files.map((f) => f.path), ...[...callers, ...possible].flatMap((p) => p.edges.flatMap((e) => e.sites.map((x) => x.file)))]);
