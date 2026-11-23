@@ -110,7 +110,11 @@ export function frameworkCallerGaps(g: Graph, file: string): { reasons: string[]
     const where = first.site ? ` at ${first.site.file}:${first.site.line}` : "";
     reasons.push(hit.length === 1 ? `the ${first.plugin} plugin gave up${where} (${first.cause}): ${first.note}; the framework may run it there` : `the framework plugins gave up at ${hit.length} places (caps and budgets) where the framework may run it, first the ${first.plugin} plugin${where}: ${first.note}`);
   }
-  const gaps = hit.map((u): GapPlace => ({ cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: NEXT.framework }));
+  // A plugin that failed or stopped names no place: its gap is said at the file asked about.
+  const gaps = [
+    ...runs.map((r): GapPlace => ({ cause: r.status === "failed" ? "unsupported-rule" : "budget", file, line: null, next: NEXT.frameworkRun })),
+    ...hit.map((u): GapPlace => ({ cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: NEXT.framework })),
+  ];
   return { reasons, gaps };
 }
 

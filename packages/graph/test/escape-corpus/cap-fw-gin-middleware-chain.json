@@ -1,0 +1,38 @@
+{
+  "covers": "Gin middleware past the chain the plugin keeps for one route (gin MAX_MIDDLEWARE_CHAIN)",
+  "caps": [
+    "frameworks/gin/resolve.ts#MAX_MIDDLEWARE_CHAIN"
+  ],
+  "commit": true,
+  "files": {
+    "go.mod": "module example.com/app\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "main.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc mw(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n",
+      {
+        "repeat": "\tr.Use(mw)\n",
+        "times": 65
+      },
+      "\tr.GET(\"/x\", deep)\n\tr.Run()\n}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "main.go#mw",
+      "caller": null,
+      "file": "main.go",
+      "line": 76
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#mw",
+      "reason": "the route has more than 64 middleware; those past the first 64 are not listed",
+      "at": "main.go:76",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.go:76"
+      }
+    }
+  ]
+}

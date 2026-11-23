@@ -1,0 +1,48 @@
+{
+  "covers": "a call of what another call returns, when the callee returns more functions than the graph lists (resolve DISPATCH_CAP)",
+  "caps": [
+    "resolve.ts#DISPATCH_CAP"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/h.ts": [
+      {
+        "repeat": "export function h{{i}}() { return {{i}}; }\n",
+        "times": 40
+      }
+    ],
+    "src/m.ts": [
+      "import { ",
+      {
+        "repeat": "h{{i}}, ",
+        "times": 40
+      },
+      "h1 } from \"./h\";\nexport function pick(k: number) {\n",
+      {
+        "repeat": "  if (k === {{i}}) return h{{i}};\n",
+        "times": 39
+      },
+      "  return h40;\n}\nexport function go() {\n  return pick(3)();\n}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h40",
+      "caller": "src/m.ts#go",
+      "file": "src/m.ts",
+      "line": 45
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h40",
+      "reason": "pick returns 40 functions by name; the 8 past the first 32 are not listed",
+      "at": "src/m.ts:45",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/m.ts:45"
+      }
+    }
+  ]
+}

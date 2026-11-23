@@ -1,0 +1,38 @@
+{
+  "covers": "a call through an interface with more implementations than the graph lists as possible targets (resolve DISPATCH_CAP)",
+  "caps": [
+    "resolve.ts#DISPATCH_CAP"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/i.ts": "export interface Runner {\n  run(): void;\n}\n",
+    "src/impls.ts": [
+      "import type { Runner } from \"./i\";\n",
+      {
+        "repeat": "export class C{{i}} implements Runner {\n  run(): void {}\n}\n",
+        "times": 34
+      }
+    ],
+    "src/go.ts": "import type { Runner } from \"./i\";\nexport function go(r: Runner) {\n  r.run();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/impls.ts#C34.run",
+      "caller": "src/go.ts#go",
+      "file": "src/go.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/impls.ts#C34.run",
+      "reason": "named `run` in the repository could not be bound",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/go.ts:3"
+      }
+    }
+  ]
+}

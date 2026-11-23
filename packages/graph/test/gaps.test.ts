@@ -14,6 +14,10 @@
 //     floors nothing, or floors only the answers of its own name.
 //  5. The answer says where each gap is and what to check only in a
 //     sentence, or loses that when the index is written and read back.
+//  6. A floor set by a use as a value, a file not read, a partial build or
+//     an escape search the budget cut names no place in `gaps`, so the
+//     agent learns the list is short and not where to look.
+//  7. An `impact` answer that is a floor carries no `gaps`.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, floorOf } from "../src/index.js";
 import type { Graph } from "../src/index.js";
@@ -111,5 +115,31 @@ describe("a give-up reaches the floors it can hide a caller from", () => {
     const back = readIndexFrom((name) => files[name] ?? null, graph.repoRoot);
     expect(back?.unknowns).toEqual(graph.unknowns);
     expect(graph.unknowns.every((u) => u.next.length > 0 && u.reaches !== undefined)).toBe(true);
+  }, 60_000);
+
+  it("names the place of a use as a value, a file not read and an escape search cut, on callers and impact (6, 7)", async () => {
+    const graph = await buildGraph({
+      repoRoot: makeRepo({
+        "a.ts": "export function f() {\n  return 1;\n}\n",
+        "b.ts": 'import { f } from "./a";\nexport const list = [f];\n',
+        "big.ts": `export const text = "${"x".repeat(400)}";\n`,
+      }),
+      store: null,
+      maxFileBytes: 200,
+    });
+    expect(graph.status.status).toBe("partial");
+    const a = ask(graph, { kind: "callers", target: { name: "f", file: "a.ts" } });
+    expect(a.unknown.floor).toBe(true);
+    expect(a.unknown.gaps).toContainEqual({ cause: "dynamic", file: "b.ts", line: 2, next: NEXT.valueUse });
+    expect(a.unknown.gaps).toContainEqual({ cause: "file-not-parsed", file: "big.ts", line: null, next: NEXT.notRead });
+    const i = ask(graph, { kind: "impact", target: { name: "f", file: "a.ts" } });
+    expect(i.error).toBeNull();
+    expect(i.unknown.floor).toBe(true);
+    expect(i.unknown.gaps).toContainEqual({ cause: "dynamic", file: "b.ts", line: 2, next: NEXT.valueUse });
+    expect(i.unknown.gaps).toContainEqual({ cause: "file-not-parsed", file: "big.ts", line: null, next: NEXT.notRead });
+    // The escape search the budget cut has no place of its own: it is said at the target.
+    graph.escapes.cut = true;
+    const cut = ask(graph, { kind: "callers", target: { name: "f", file: "a.ts" } });
+    expect(cut.unknown.gaps).toContainEqual({ cause: "budget", file: "a.ts", line: 1, next: NEXT.escapesCut });
   }, 60_000);
 });

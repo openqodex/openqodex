@@ -1,0 +1,45 @@
+{
+  "covers": "a Django view in a URLconf included deeper than the plugin follows (django MAX_INCLUDE_DEPTH)",
+  "caps": [
+    "frameworks/django/resolve.ts#MAX_INCLUDE_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "django\n",
+    "manage.py": "import django\n",
+    "proj/__init__.py": "",
+    "proj/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "proj/urls.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u1\"))]\n",
+    "proj/views.py": "def deep(request):\n    return None\n",
+    "proj/u1.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u2\"))]\n",
+    "proj/u2.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u3\"))]\n",
+    "proj/u3.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u4\"))]\n",
+    "proj/u4.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u5\"))]\n",
+    "proj/u5.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u6\"))]\n",
+    "proj/u6.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u7\"))]\n",
+    "proj/u7.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u8\"))]\n",
+    "proj/u8.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u9\"))]\n",
+    "proj/u9.py": "from django.urls import include, path\n\nurlpatterns = [path(\"a/\", include(\"proj.u10\"))]\n",
+    "proj/u10.py": "from django.urls import path\nfrom proj import views\n\nurlpatterns = [path(\"x/\", views.deep)]\n"
+  },
+  "mustReach": [
+    {
+      "target": "proj/views.py#deep",
+      "caller": null,
+      "file": "proj/u10.py",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "proj/views.py#deep",
+      "reason": "includes nested deeper than 8 are not followed",
+      "at": "proj/u8.py:3",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "proj/u8.py:3"
+      }
+    }
+  ]
+}

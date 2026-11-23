@@ -1,0 +1,31 @@
+{
+  "covers": "a net/http handler on a mux mounted deeper than the plugin follows (go-http MAX_MOUNT_DEPTH)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_MOUNT_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport \"net/http\"\n\nfunc deep(w http.ResponseWriter, r *http.Request) {}\n\nfunc main() {\n\tm0 := http.NewServeMux()\n\tm1 := http.NewServeMux()\n\tm2 := http.NewServeMux()\n\tm3 := http.NewServeMux()\n\tm4 := http.NewServeMux()\n\tm5 := http.NewServeMux()\n\tm6 := http.NewServeMux()\n\tm7 := http.NewServeMux()\n\tm8 := http.NewServeMux()\n\tm9 := http.NewServeMux()\n\tm10 := http.NewServeMux()\n\tm10.HandleFunc(\"/x\", deep)\n\tm9.Handle(\"/a/\", http.StripPrefix(\"/a\", m10))\n\tm8.Handle(\"/a/\", http.StripPrefix(\"/a\", m9))\n\tm7.Handle(\"/a/\", http.StripPrefix(\"/a\", m8))\n\tm6.Handle(\"/a/\", http.StripPrefix(\"/a\", m7))\n\tm5.Handle(\"/a/\", http.StripPrefix(\"/a\", m6))\n\tm4.Handle(\"/a/\", http.StripPrefix(\"/a\", m5))\n\tm3.Handle(\"/a/\", http.StripPrefix(\"/a\", m4))\n\tm2.Handle(\"/a/\", http.StripPrefix(\"/a\", m3))\n\tm1.Handle(\"/a/\", http.StripPrefix(\"/a\", m2))\n\tm0.Handle(\"/a/\", http.StripPrefix(\"/a\", m1))\n\thttp.ListenAndServe(\":8080\", m0)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 19
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "muxes mounted more than 8 levels deep are not followed",
+      "at": "main.go:21",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.go:21"
+      }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "covers": "a Gin route on a group nested deeper than the plugin follows (gin MAX_GROUP_DEPTH)",
+  "caps": [
+    "frameworks/gin/resolve.ts#MAX_GROUP_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "go.mod": "module example.com/app\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tg0 := r.Group(\"/a\")\n\tg1 := g0.Group(\"/a\")\n\tg2 := g1.Group(\"/a\")\n\tg3 := g2.Group(\"/a\")\n\tg4 := g3.Group(\"/a\")\n\tg5 := g4.Group(\"/a\")\n\tg6 := g5.Group(\"/a\")\n\tg7 := g6.Group(\"/a\")\n\tg8 := g7.Group(\"/a\")\n\tg9 := g8.Group(\"/a\")\n\tg10 := g9.Group(\"/a\")\n\tg11 := g10.Group(\"/a\")\n\tg12 := g11.Group(\"/a\")\n\tg13 := g12.Group(\"/a\")\n\tg14 := g13.Group(\"/a\")\n\tg15 := g14.Group(\"/a\")\n\tg16 := g15.Group(\"/a\")\n\tg17 := g16.Group(\"/a\")\n\tg18 := g17.Group(\"/a\")\n\tg19 := g18.Group(\"/a\")\n\tg20 := g19.Group(\"/a\")\n\tg21 := g20.Group(\"/a\")\n\tg22 := g21.Group(\"/a\")\n\tg23 := g22.Group(\"/a\")\n\tg24 := g23.Group(\"/a\")\n\tg25 := g24.Group(\"/a\")\n\tg26 := g25.Group(\"/a\")\n\tg27 := g26.Group(\"/a\")\n\tg28 := g27.Group(\"/a\")\n\tg29 := g28.Group(\"/a\")\n\tg30 := g29.Group(\"/a\")\n\tg31 := g30.Group(\"/a\")\n\tg32 := g31.Group(\"/a\")\n\tg33 := g32.Group(\"/a\")\n\tg33.GET(\"/x\", deep)\n\tr.Run()\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 43
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "groups nested more than 32 levels deep are not followed",
+      "at": "main.go:10",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.go:10"
+      }
+    }
+  ]
+}
