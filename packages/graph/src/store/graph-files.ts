@@ -7,7 +7,8 @@ import { FRAMEWORK_DATA_VERSION } from "../frameworks/stage.js";
 import type { FrameworkData } from "../frameworks/stage.js";
 import { projectFolder } from "../resolve.js";
 import { NO_ESCAPES } from "../types.js";
-import type { DispatchSite, Escapes, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, OpaqueFact, Reach, UnknownSite } from "../types.js";
+import type { DispatchSite, Escapes, Graph, GraphEdge, GraphNode, GraphSite, GraphStatus, InvocationSummary, Miss, OpaqueFact, Reach, Reaches, UnknownSite } from "../types.js";
+import { namesReached } from "../gap.js";
 import type { OpenGeneration } from "./types.js";
 
 // How an index is read back: a file of it by its name, or null when the
@@ -81,7 +82,7 @@ const parseLines = <T>(text: string | null): T[] | null => {
 // reaches, and the scripts. 8: a read by a computed key keeps whether it
 // passes its value on and its places; a reach row holds no name. 9: escape
 // facts the budget cut say so (`cut`), so they read back as a floor.
-export const INDEX_FORMAT = 9;
+export const INDEX_FORMAT = 10;
 
 type Row = (number | number[])[];
 
@@ -126,7 +127,9 @@ export function writeIndex(g: Graph): Record<string, string> {
   const edges = g.edges.map(e.edge);
   const importers = [...g.importers.values()].flat().map(e.edge);
   const misses = g.misses.map((m) => [e.s(m.target), e.s(m.name), e.s(m.from), e.site(m.site)]);
-  const unknowns = g.unknowns.map((u) => [e.s(u.file), u.line, u.column, e.s(u.name), e.s(u.cause), e.s(u.shape), e.s(u.caller), u.scope === "project" ? 1 : 0, e.s(u.note), u.candidates ? u.candidates.map(e.s) : -1, ...(u.receiver || u.notPlain ? [e.s(u.receiver)] : []), ...(u.notPlain ? [1] : [])]);
+  // What a gap reaches: 0 values, 1 scope, [2, ...names], [3, ...ids], [4, file].
+  const reaches = (r: Reaches): number | number[] => (r === "values" ? 0 : r === "scope" ? 1 : "names" in r ? [2, ...r.names.map(e.s)] : "ids" in r ? [3, ...r.ids.map(e.s)] : [4, e.s(r.file)]);
+  const unknowns = g.unknowns.map((u) => [e.s(u.file), u.line, u.column, e.s(u.name), e.s(u.cause), e.s(u.shape), e.s(u.caller), u.scope === "project" ? 1 : 0, e.s(u.note), u.candidates ? u.candidates.map(e.s) : -1, e.s(u.receiver), u.notPlain ? 1 : 0, reaches(u.reaches), e.s(u.next)]);
   const place = (p: { file: string; line: number }) => [e.s(p.file), p.line];
   const x = g.escapes;
   const escapes = {
@@ -210,7 +213,9 @@ export function readIndexFrom(read: ReadIndexFile, repoRoot: string): Graph | nu
     });
     const misses = missRows.map((r): Miss => ({ target: d.s(r[0] as number), name: d.s(r[1] as number), from: d.s(r[2] as number), site: d.site(r[3] as number[]) }));
     const unknowns = unknownRows.map((r): UnknownSite => {
-      const u: UnknownSite = { file: d.s(r[0] as number), line: r[1] as number, column: r[2] as number, name: d.s(r[3] as number), cause: d.s(r[4] as number) as UnknownSite["cause"], shape: d.s(r[5] as number) as UnknownSite["shape"], caller: d.s(r[6] as number), scope: r[7] === 1 ? "project" : "file" };
+      const at = r[12] as number | number[];
+      const reaches: Reaches = at === 0 ? "values" : at === 1 ? "scope" : (at as number[])[0] === 2 ? { names: (at as number[]).slice(1).map(d.s) } : (at as number[])[0] === 3 ? { ids: (at as number[]).slice(1).map(d.s) } : { file: d.s((at as number[])[1] as number) };
+      const u: UnknownSite = { file: d.s(r[0] as number), line: r[1] as number, column: r[2] as number, name: d.s(r[3] as number), cause: d.s(r[4] as number) as UnknownSite["cause"], shape: d.s(r[5] as number) as UnknownSite["shape"], caller: d.s(r[6] as number), scope: r[7] === 1 ? "project" : "file", reaches, next: d.s(r[13] as number) };
       const note = d.n(r[8] as number);
       if (note !== null) u.note = note;
       if (Array.isArray(r[9])) u.candidates = (r[9] as number[]).map(d.s);
@@ -306,7 +311,7 @@ export function assemble(
   const unknownNames = new Map<string, number>();
   const valueCalls = new Map<string, number>();
   for (const u of unknowns) {
-    if (u.name !== "") unknownNames.set(u.name, (unknownNames.get(u.name) ?? 0) + 1);
+    for (const name of namesReached(u)) unknownNames.set(name, (unknownNames.get(name) ?? 0) + 1);
     if (u.scope === "project" && u.cause !== "metadata-unreadable") valueCalls.set(projectOf(u.file), (valueCalls.get(projectOf(u.file)) ?? 0) + 1);
   }
   return {

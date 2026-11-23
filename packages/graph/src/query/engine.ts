@@ -17,14 +17,16 @@
 // answer in slices with a turn of the event loop between them, so a
 // cancellation that arrives while the work runs is seen (the MCP server).
 import { langOf, unreadNote } from "../capture/inventory.js";
-import { floorOf, isTestPath, sameNameGaps, toImpactUnknown } from "../impact.js";
+import { GAPS_SHOWN, floorOf, isTestPath, sameNameGaps, toImpactUnknown } from "../impact.js";
 import { API_VERSION, CERTAIN_KINDS, MODEL_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
 import { CALLER_KINDS } from "../types.js";
 import type { Graph, GraphNode, GraphSite, UnknownSite } from "../types.js";
 import { BAD_CURSOR, candidate, counts, empty, fail, graphBlock, isAnswer, listing, OPERATIONS, Point, qualified, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Extra, FloorGroup, Job, Listing, Request, Session } from "./answer.js";
-import { frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
+import { frameworkCallerGaps, frameworkLayer, routes, routesUnsupported, tests, testsUnread } from "./frameworks.js";
+import { gapPlace, namesReached } from "../gap.js";
+import type { GapPlace } from "../gap.js";
 import { edgeId, isShortEdgeId, longEdgeId, readEdgeId } from "./ids.js";
 import { cursorFor, keepJob, keepList, keptJob, keptList, limitOf, pageOf, pagingNote, readCursor } from "./page.js";
 import { Overrides, dynamicBases, implementers, importCycles, impact, methodsNamed, outline, packages, path, references, relationsOf } from "./relations.js";
@@ -72,7 +74,7 @@ function unknownsBy(g: Graph): UnknownIndex {
     ix = { byCaller: new Map(), byName: new Map() };
     for (const u of g.unknowns) {
       (ix.byCaller.get(u.caller) ?? ix.byCaller.set(u.caller, []).get(u.caller))?.push(u);
-      (ix.byName.get(u.name) ?? ix.byName.set(u.name, []).get(u.name))?.push(u);
+      for (const name of namesReached(u)) (ix.byName.get(name) ?? ix.byName.set(name, []).get(name))?.push(u);
     }
     unknownIndex.set(g, ix);
   }
@@ -242,12 +244,16 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
     let reasons: string[];
     let causes: Record<string, number | null> = {};
     let examples: Answer["unknown"]["examples"];
+    let gaps: GapPlace[] = [];
     // The places that could hide a caller, when each is known and each is a test.
     let inTests: { file: string; line: number | null }[] | null = null;
     if (kind === "callers") {
       const floor = floorOf(g, { id: n.id, name: n.name, file: n.file, kind: n.kind }, new Set());
-      reasons = floor.reasons;
-      if (floor.places && floor.places.length > 0 && floor.places.every((p) => isTestPath(p.file))) inTests = floor.places;
+      // The framework may run it too (a handler, a middleware): a cap of the framework layer may hide that.
+      const fw = frameworkCallerGaps(g, n.file);
+      reasons = [...floor.reasons, ...fw.reasons];
+      gaps = [...floor.gaps, ...fw.gaps].slice(0, GAPS_SHOWN);
+      if (fw.reasons.length === 0 && floor.places && floor.places.length > 0 && floor.places.every((p) => isTestPath(p.file))) inTests = floor.places;
       const named = n.kind === "function" || n.kind === "method" ? sameNameGaps(g, n) : unknownsNamed(g, n.name);
       for (const u of named) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = mayBe(named, n).slice(0, 5).map(toImpactUnknown);
@@ -260,9 +266,10 @@ function walkJob(s: Session, req: Request, tiers: ReadonlySet<Tier>): Job | Answ
       causes = {};
       for (const u of inside) causes[u.cause] = (causes[u.cause] ?? 0) + 1;
       examples = inside.slice(0, 5).map(toImpactUnknown);
+      gaps = inside.slice(0, GAPS_SHOWN).map(gapPlace);
     }
     const partial = g.status.status === "partial";
-    const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples } };
+    const answer: Answer = { ...base, target, counts: counts(walk.items), unknown: { floor: reasons.length > 0 || partial, reasons: [...reasons, ...(partial ? g.status.reasons : [])], causes, examples, ...(gaps.length > 0 ? { gaps } : {}) } };
     // Only the target's floor is read: past one hop a caller of a caller may hide anywhere.
     if (inTests && !partial && depth === 1) Object.assign(answer.unknown, { scope: "tests", note: testsNote(inTests) });
     // The same count the floor reason gives, said before the rows.
@@ -277,7 +284,7 @@ const TESTS_SHOWN = 3;
 function testsNote(places: { file: string; line: number | null }[]): string {
   const at = [...new Set(places.map((p) => (p.line === null ? p.file : `${p.file}:${p.line}`)))];
   const more = at.length > TESTS_SHOWN ? ` and ${at.length - TESTS_SHOWN} more` : "";
-  return `Complete in product code. Only test files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
+  return `Only test files could hide a caller: ${at.slice(0, TESTS_SHOWN).join(", ")}${more}.`;
 }
 
 function changesJob(s: Session, extra: Extra): Job | Answer {

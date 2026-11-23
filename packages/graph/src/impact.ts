@@ -22,6 +22,8 @@ import { langOf } from "./capture/inventory.js";
 import { frameworkImpact } from "./frameworks/impact.js";
 import type { DispatchSite, Family, Graph, GraphEdge, GraphNode, HotSymbol, Miss, Place, UnknownSite } from "./types.js";
 import { ESCAPES_CUT, NO_ESCAPES, familyOf } from "./types.js";
+import { NEXT, gapPlace, namesReached } from "./gap.js";
+import type { GapPlace } from "./gap.js";
 
 export const HUB_CALLERS = 40; // a symbol with more direct callers is a hub
 export const HUB_SHOWN = 20; // callers kept for a hub, and per caller on the second hop
@@ -210,14 +212,43 @@ function unknownsNamed(graph: Graph, name: string): UnknownSite[] {
   if (!byName) {
     byName = new Map();
     for (const u of graph.unknowns) {
-      if (u.name === "") continue;
-      const list = byName.get(u.name);
-      if (list) list.push(u);
-      else byName.set(u.name, [u]);
+      for (const name of namesReached(u)) {
+        const list = byName.get(name);
+        if (list) list.push(u);
+        else byName.set(name, [u]);
+      }
     }
     unknownIndex.set(graph, byName);
   }
   return byName.get(name) ?? [];
+}
+
+// The gaps that reach definitions by id, by file or by the whole project
+// (`reaches`), and the calls through a value by project. A metadata gap
+// is left out of both: floorOf reads it from the model, with its folder.
+type ReachIndex = { ids: Map<string, UnknownSite[]>; files: Map<string, UnknownSite[]>; scope: Map<string, UnknownSite[]>; values: Map<string, UnknownSite[]> };
+const reachIndex = new WeakMap<Graph, ReachIndex>();
+function reachOf(graph: Graph): ReachIndex {
+  let ix = reachIndex.get(graph);
+  if (!ix) {
+    ix = { ids: new Map(), files: new Map(), scope: new Map(), values: new Map() };
+    for (const u of graph.unknowns) {
+      if (u.cause === "metadata-unreadable") continue;
+      const r = u.reaches;
+      if (u.scope === "project") push(ix.values, graph.projectOf(u.file), u);
+      if (r === "scope") push(ix.scope, graph.projectOf(u.file), u);
+      else if (typeof r === "object" && "ids" in r) for (const id of r.ids) push(ix.ids, id, u);
+      else if (typeof r === "object" && "file" in r) push(ix.files, r.file, u);
+    }
+    reachIndex.set(graph, ix);
+  }
+  return ix;
+}
+
+// The gaps that reach a seed by its id, its file or its project, each once.
+function gapsReaching(graph: Graph, seed: { id: string; file: string }, project: string): UnknownSite[] {
+  const ix = reachOf(graph);
+  return [...new Set([...(ix.ids.get(seed.id) ?? []), ...(ix.files.get(seed.file) ?? []), ...(ix.scope.get(project) ?? [])])];
 }
 
 // The calls of a seed's name no rule could bind that may be its callers
@@ -285,8 +316,8 @@ function opaqueFor(graph: Graph, file: string, project: string): { file: string;
 }
 
 // Calls through a value (a callback, a computed member), per family, with the first place.
-const familyValueCalls = new WeakMap<Graph, Map<Family, Place & { count: number }>>();
-function valueCallsOf(graph: Graph, family: Family): (Place & { count: number }) | undefined {
+const familyValueCalls = new WeakMap<Graph, Map<Family, Place & { count: number; first: UnknownSite }>>();
+function valueCallsOf(graph: Graph, family: Family): (Place & { count: number; first: UnknownSite }) | undefined {
   let byFamily = familyValueCalls.get(graph);
   if (!byFamily) {
     byFamily = new Map();
@@ -296,7 +327,7 @@ function valueCallsOf(graph: Graph, family: Family): (Place & { count: number })
       if (!f) continue;
       const kept = byFamily.get(f);
       if (kept) kept.count++;
-      else byFamily.set(f, { file: u.file, line: u.line, count: 1 });
+      else byFamily.set(f, { file: u.file, line: u.line, count: 1, first: u });
     }
     familyValueCalls.set(graph, byFamily);
   }
@@ -324,10 +355,22 @@ export function floorReasons(graph: Graph, seed: { id: string; name: string; fil
 // the first of many, a cut) or when the call runs where a value goes, not
 // where it was taken (a use as a value, a getter read, a function passed
 // to a callee that calls it): such a floor may hide a caller anywhere.
-export type Floor = { reasons: string[]; places: { file: string; line: number | null }[] | null };
+// `gaps`: each place the graph gave up that reaches the seed, with what
+// to check there, at most GAPS_SHOWN; the reasons hold the counts.
+export type Floor = { reasons: string[]; places: { file: string; line: number | null }[] | null; gaps: GapPlace[] };
+export const GAPS_SHOWN = 20;
 export function floorOf(graph: Graph, seed: { id: string; name: string; file: string; kind?: ImpactKind | undefined }, cutAt: ReadonlySet<string>): Floor {
   const reasons: string[] = [];
   let places: Floor["places"] = [];
+  const gaps: GapPlace[] = [];
+  const seen = new Set<Pick<UnknownSite, "cause" | "file" | "line" | "next">>();
+  const said = (list: readonly Pick<UnknownSite, "cause" | "file" | "line" | "next">[]) => {
+    for (const u of list) {
+      if (gaps.length >= GAPS_SHOWN || seen.has(u)) continue;
+      seen.add(u);
+      gaps.push(gapPlace(u));
+    }
+  };
   const why = (reason: string, at: readonly { file: string; line: number | null }[] | null) => {
     reasons.push(reason);
     places = places && at ? [...places, ...at.map((p) => ({ file: p.file, line: p.line }))] : null;
@@ -344,16 +387,19 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
   const project = graph.projectOf(seed.file);
   const projectValues = (): boolean => {
     const values = graph.valueCalls.get(project) ?? 0;
+    if (values > 0) said(reachOf(graph).values.get(project) ?? []);
     if (values > 0) why(`${values} ${values === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in ${project === "" ? "the repository root project" : project}, and could reach it`, null);
     return values > 0;
   };
   if (kind !== "function" && kind !== "method") {
     const named = graph.unknownNames.get(seed.name) ?? 0;
+    if (named > 0) said(unknownsNamed(graph, seed.name));
     if (named > 0) why(`${calls(named)} named \`${seed.name}\` in the repository could not be bound to one definition`, null);
     projectValues();
   } else {
-    const gaps = sameNameGaps(graph, { ...seed, kind });
-    if (gaps.length > 0) why(`${calls(gaps.length)} named \`${seed.name}\` in the repository could not be bound to one definition`, gaps);
+    const unbound = sameNameGaps(graph, { ...seed, kind });
+    said(unbound);
+    if (unbound.length > 0) why(`${calls(unbound.length)} named \`${seed.name}\` in the repository could not be bound to one definition`, unbound);
     const x = graph.escapes;
     const used = x.uses.get(seed.id);
     if (used) why(`it is used as a value in ${used.count} ${used.count === 1 ? "place" : "places"}, first at ${at(used)}; a call through that value is not listed`, null);
@@ -400,6 +446,7 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
     if (anyRead) why(`${anyRead.count} ${anyRead.count === 1 ? "read" : "reads"} by a computed key on a value that is no string, number or other primitive, first at ${at(anyRead)}, may run it (a getter) or take it as a value`, anyRead.passed ? null : (anyRead.places ?? null));
     if (kind === "method" && family && !kept) {
       const values = valueCallsOf(graph, family);
+      if (values) said([values.first]);
       if (values) why(`${values.count} ${values.count === 1 ? "call goes" : "calls go"} through a value (a callback or a computed member) in projects that can hold its objects, first at ${at(values)}`, only(values));
     }
   }
@@ -412,11 +459,26 @@ export function floorOf(graph: Graph, seed: { id: string; name: string; file: st
   const importersUnresolved = unresolved.length;
   if (importersUnresolved > 0) why(`the calls of ${importersUnresolved} ${importersUnresolved === 1 ? "file" : "files"} that import it were not resolved: the budget ran out`, null);
   // A manifest or tsconfig governing its folder that could not be read, when its loss can hide a call.
-  for (const g of graph.model.unreadable) if (g.affects.length > 0 && (g.dir === "" || seed.file.startsWith(`${g.dir}/`))) why(g.note, null);
+  for (const g of graph.model.unreadable) {
+    if (g.affects.length === 0 || (g.dir !== "" && !seed.file.startsWith(`${g.dir}/`))) continue;
+    said([{ cause: "metadata-unreadable", file: g.file, line: 0, next: NEXT.metadata }]);
+    why(g.note, null);
+  }
+  // Every other place the graph gave up that reaches the seed by its id,
+  // its file or its project, one reason per cause.
+  const reached = gapsReaching(graph, seed, project);
+  said(reached);
+  const byCause = new Map<string, UnknownSite[]>();
+  for (const u of reached) push(byCause, u.cause, u);
+  for (const [cause, list] of byCause) {
+    const first = list[0] as UnknownSite;
+    const where = first.line > 0 ? `${first.file}:${first.line}` : first.file;
+    why(list.length === 1 ? `the graph gave up at ${where} (${cause}): ${first.note ?? "a call there may reach it"}` : `the graph gave up at ${list.length} places (${cause}) where a call may reach it, first at ${where}: ${first.note ?? "a call there may reach it"}`, null);
+  }
   if (cutAt.has(seed.id)) why("the walk was cut at it", null);
   if (graph.escapes.missing) why(NO_ESCAPES, null);
   if (graph.escapes.cut) why(ESCAPES_CUT, null);
-  return { reasons, places };
+  return { reasons, places, gaps };
 }
 
 export function detectImpact(graph: Graph, change: Pick<Change, "files" | "coverage">): ImpactSummary {

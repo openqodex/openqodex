@@ -25,6 +25,8 @@
 import { normalisePy } from "../discovery/manifests.js";
 import { PLUGINS } from "../frameworks/registry.js";
 import { isTestPath } from "../impact.js";
+import { NEXT } from "../gap.js";
+import type { GapPlace } from "../gap.js";
 import type { Tier } from "../model/records.js";
 import type { Graph, GraphNode, GraphSite } from "../types.js";
 import { candidate, counts, empty, fail, isAnswer, listing, Point, stoppedAt } from "./answer.js";
@@ -74,6 +76,42 @@ export function frameworkLayer(g: Graph): FwLayer | null {
   const edges = f.edges.filter((e): e is FwEdge => isObj(e) && typeof e.from === "string" && typeof e.to === "string" && typeof e.kind === "string" && isObj(e.evidence) && isObj(e.evidence.site));
   const unknowns = f.unknowns.filter((u): u is FwUnknown => isObj(u) && Array.isArray(u.affects) && typeof u.cause === "string");
   return { registrations, edges, unknowns, runs, apps };
+}
+
+// The framework relations that describe data and never run code.
+const DATA_KINDS = new Set(["renders", "declares_field", "changes_schema", "maps_to", "uses_type", "reads_config", "defines_config"]);
+
+// Where the framework layer gave up in a way that may hide it running a
+// function of `file` (as a handler, a middleware, a job): each cap or
+// step budget (cause fan-out-capped or budget) that names a relation that
+// runs code, or none, in the function's project or the whole build, and
+// each plugin that failed or stopped. Its reasons and its gaps, for a
+// caller floor.
+export function frameworkCallerGaps(g: Graph, file: string): { reasons: string[]; gaps: GapPlace[] } {
+  const layer = frameworkLayer(g);
+  if (!layer) return { reasons: [], gaps: [] };
+  const project = g.projectOf(file);
+  const appProject = new Map(layer.apps.map((a) => [a.id, g.projectOf(a.site.file)]));
+  const reaches = (u: FwUnknown): boolean => {
+    const scope = (u as { scope?: unknown }).scope;
+    if (isObj(scope)) {
+      if (scope.build === true) return true;
+      if (typeof scope.project === "string") return scope.project === project;
+      if (typeof scope.app === "string") return appProject.get(scope.app) === undefined || appProject.get(scope.app) === project;
+      if (typeof scope.file === "string") return g.projectOf(scope.file) === project;
+    }
+    return u.site === null || g.projectOf(u.site.file) === project;
+  };
+  const hit = layer.unknowns.filter((u) => (u.cause === "fan-out-capped" || u.cause === "budget") && (u.affects.length === 0 || u.affects.some((k) => !DATA_KINDS.has(k))) && reaches(u));
+  const runs = layer.runs.filter((r) => r.status === "failed" || r.status === "stopped");
+  const reasons = runs.map((r) => `the ${r.id} plugin ${r.status === "failed" ? "failed" : "stopped"} (${r.reason ?? r.status}), so what it runs is not listed and may call it`);
+  const first = hit[0];
+  if (first) {
+    const where = first.site ? ` at ${first.site.file}:${first.site.line}` : "";
+    reasons.push(hit.length === 1 ? `the ${first.plugin} plugin gave up${where} (${first.cause}): ${first.note}; the framework may run it there` : `the framework plugins gave up at ${hit.length} places (caps and budgets) where the framework may run it, first the ${first.plugin} plugin${where}: ${first.note}`);
+  }
+  const gaps = hit.map((u): GapPlace => ({ cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: NEXT.framework }));
+  return { reasons, gaps };
 }
 
 // The plugins of this build whose rules emit `kind` (a route

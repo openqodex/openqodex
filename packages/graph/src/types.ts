@@ -409,10 +409,21 @@ export type InvocationSummary = { params: string[]; invokes: number[]; returns: 
 // callers are found here.
 export type Miss = { target: string; name: string; from: string; site: GraphSite };
 
-// A call site no rule could bind, kept small: the full Unknown record of
+// What a gap may hide a call to: the join key every caller floor reads
+// (impact.ts, floorOf). `names`: a definition of one of these names (a
+// call no rule bound, by its name). `ids`: these definitions. `file`: any
+// definition of the file. "values": what a call through a value may run,
+// which escape analysis narrows (only with scope "project"). "scope": the
+// graph gave up with no narrower target, so every definition of the gap's
+// project. An empty `ids` says the gap can hide no call, and the code that
+// writes it says why. Made only by `gap` (gap.ts).
+export type Reaches = { names: string[] } | { ids: string[] } | { file: string } | "values" | "scope";
+
+// A place the graph gave up, kept small: the full Unknown record of
 // model/records.ts is made from it when an answer shows it. `scope`
 // "project": the call goes through a value (a parameter, a computed
-// member), so it could reach any function of its project.
+// member), so it could reach any function of its project. `reaches`: what
+// a call it hides may run. `next`: what the reader should check there.
 export type UnknownSite = {
   file: string;
   line: number;
@@ -431,6 +442,8 @@ export type UnknownSite = {
   // local or a parameter, `this.x()` where `this` is proved an instance of
   // a class, or a call on a value whose class or interface the graph knows.
   notPlain?: boolean;
+  reaches: Reaches;
+  next: string;
 };
 
 export type Place = { file: string; line: number };

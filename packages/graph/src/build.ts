@@ -45,6 +45,7 @@ import type { FileInput, Resolved, World } from "./resolve.js";
 import { asPredictMeta, decideMode, predictMs, recordBuild } from "./runtime/predict.js";
 import type { Mode } from "./runtime/predict.js";
 import { RepoReader } from "./safe-fs.js";
+import { NEXT, gap, namesReached } from "./gap.js";
 import { INDEX_FORMAT, readIndex, serializeModel, writeIndex } from "./store/graph-files.js";
 import type { GraphStore } from "./store/types.js";
 import type { DefFact, FileFacts, Graph, GraphEdge, GraphNode, Lang, NotRead, UnknownSite } from "./types.js";
@@ -562,12 +563,13 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     }
     const unknowns: UnknownSite[] = [...resolved.unknowns];
     for (const file of resolved.budgetFiles) {
-      unknowns.push({ file, line: 0, column: 0, name: "", cause: "budget", shape: "other", caller: file, scope: "file", note: "the budget ran out before every call of this file was resolved" });
+      // What the file's unresolved calls run is not known: no narrower target.
+      unknowns.push(gap({ cause: "budget", place: { file, line: 0 }, reaches: "scope", next: NEXT.budget, note: "the budget ran out before every call of this file was resolved" }));
     }
     const unknownNames = new Map<string, number>();
     const valueCalls = new Map<string, number>();
     for (const u of unknowns) {
-      if (u.name !== "") unknownNames.set(u.name, (unknownNames.get(u.name) ?? 0) + 1);
+      for (const name of namesReached(u)) unknownNames.set(name, (unknownNames.get(name) ?? 0) + 1);
       if (u.scope === "project" && u.cause !== "metadata-unreadable") {
         const p = projectOf(u.file);
         valueCalls.set(p, (valueCalls.get(p) ?? 0) + 1);
