@@ -68,6 +68,7 @@ export const NEXT = {
   budget: "Build again with a larger budget (`openqodex graph build`) so the calls of this file are resolved.",
   metadata: "Fix or restore this manifest so the graph can read it, then build again.",
   framework: "Read the framework registrations near this place: a handler, middleware or job past the plugin's limit may be the target.",
+  frameworkFile: "Read the framework registrations in this file yourself: the plugin did not read it, so a handler it registers may be the target.",
   frameworkRun: "Read the framework registrations of this project yourself: the plugin failed or stopped, so what the framework runs is not listed.",
   noCall: "Nothing to check for callers: this gap cannot hide a call.",
   valueUse: "Open this use of the target as a value and follow where the value goes; a call through it is not listed.",
@@ -82,4 +83,6 @@ export const NEXT = {
   walkCut: "Ask `openqodex graph callers` about this symbol: the review's walk stopped here, so its callers past the cut are not listed.",
   escapesCut: "Build again with a larger budget (`openqodex graph build`): the search for the ways a function escapes stopped before it finished.",
   noEscapes: "Build the graph with `buildGraph` or `openqodex graph build`: it was put together without its escape facts.",
+  unreadLanguage: "Search the files in the languages the graph does not read for uses of the target: a call there is not listed.",
+  questionStopped: "Ask again with this answer's cursor, or with a larger time budget: the question stopped here, and what lies past this point is not counted.",
 } as const;

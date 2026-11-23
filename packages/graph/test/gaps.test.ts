@@ -18,11 +18,15 @@
 //     an escape search the budget cut names no place in `gaps`, so the
 //     agent learns the list is short and not where to look.
 //  7. An `impact` answer that is a floor carries no `gaps`.
+//  8. A question stopped by its time budget, a language the build does not
+//     read, or the review walk cut at its limit floors the answer with no
+//     place in `gaps`.
 import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, floorOf } from "../src/index.js";
 import type { Graph } from "../src/index.js";
 import { NEXT, gap } from "../src/gap.js";
 import { query } from "../src/query/engine.js";
+import { checksBudget } from "../src/query/traverse.js";
 import type { Answer, Request, Session } from "../src/query/answer.js";
 import { readIndexFrom, writeIndex } from "../src/store/graph-files.js";
 import { commitAll, makeRepo, symbol } from "./helpers.js";
@@ -31,7 +35,7 @@ import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 afterAll(removeTempDirs);
 
 const session = (graph: Graph): Session => ({ graph, generation: "g", treeSha: null, builtAt: null, laterEditsKnown: false });
-const ask = (graph: Graph, req: Omit<Request, "apiVersion">): Answer => query(session(graph), { apiVersion: 1, ...req } as Request);
+const ask = (graph: Graph, req: Omit<Request, "apiVersion">, checks?: number): Answer => query(session(graph), { apiVersion: 1, ...req } as Request, checks === undefined ? {} : { budget: checksBudget(checks) });
 const build = (files: Record<string, string>) => buildGraph({ repoRoot: makeRepo(files), store: null });
 
 describe("a give-up reaches the floors it can hide a caller from", () => {
@@ -141,5 +145,38 @@ describe("a give-up reaches the floors it can hide a caller from", () => {
     graph.escapes.cut = true;
     const cut = ask(graph, { kind: "callers", target: { name: "f", file: "a.ts" } });
     expect(cut.unknown.gaps).toContainEqual({ cause: "budget", file: "a.ts", line: 1, next: NEXT.escapesCut });
+  }, 60_000);
+
+  it("names where a question stopped at its time budget (8)", async () => {
+    const callers = Array.from({ length: 30 }, (_, i) => `export function c${i}() {\n  return hub();\n}\n`).join("");
+    const graph = await build({ "h.ts": `export function hub() {\n  return 1;\n}\n${callers}` });
+    const req = { kind: "callers" as const, target: { name: "hub", file: "h.ts" }, depth: 2 };
+    const whole = checksBudget(Number.MAX_SAFE_INTEGER);
+    query(session(graph), { apiVersion: 1, ...req }, { budget: whole });
+    // Stopped in the walk, past finding the target.
+    const a = ask(graph, req, Math.floor(whole.checks * 0.8));
+    expect(a.truncated.by).toBe("budget");
+    expect(a.unknown.floor).toBe(true);
+    expect(a.unknown.gaps?.length ?? 0).toBeGreaterThan(0);
+    expect(a.unknown.gaps?.every((x) => x.cause === "budget" && x.file === "h.ts" && x.line !== null && x.next === NEXT.questionStopped)).toBe(true);
+  }, 60_000);
+
+  it("names the target when a language the build does not read can call it (8)", async () => {
+    const graph = await build({ "src/A.java": "class A {\n  void f() {}\n}\n", "src/B.kt": "class B { fun g() { A().f() } }\n" });
+    expect(graph.status.unreadLanguages).toEqual([{ language: "kotlin", files: 1 }]);
+    const a = ask(graph, { kind: "callers", target: { name: "f", file: "src/A.java" } });
+    expect(a.unknown.floor).toBe(true);
+    expect(a.unknown.gaps).toContainEqual({ cause: "language-not-read", file: "src/A.java", line: 2, next: NEXT.unreadLanguage });
+  }, 60_000);
+
+  it("names the seed the review walk cut at its limit (8)", async () => {
+    // 20 callers of the seed, each with 20 callers: past the walk's 200 symbols.
+    const mids = Array.from({ length: 20 }, (_, i) => `export function m${i}() {\n  return seed();\n}\n`).join("");
+    const tops = Array.from({ length: 20 }, (_, i) => Array.from({ length: 20 }, (_, j) => `export function t${i}_${j}() {\n  return m${i}();\n}\n`).join("")).join("");
+    const graph = await build({ "s.ts": `export function seed() {\n  return 1;\n}\n${mids}`, "t.ts": `import { ${Array.from({ length: 20 }, (_, i) => `m${i}`).join(", ")} } from "./s";\n${tops}` });
+    const i = ask(graph, { kind: "impact", target: { name: "seed", file: "s.ts" } });
+    expect(i.error).toBeNull();
+    expect(i.unknown.reasons.join(" ")).toMatch(/the walk stopped at 200 symbols/);
+    expect(i.unknown.gaps).toContainEqual({ cause: "fan-out-capped", file: "s.ts", line: 1, next: NEXT.walkCut });
   }, 60_000);
 });

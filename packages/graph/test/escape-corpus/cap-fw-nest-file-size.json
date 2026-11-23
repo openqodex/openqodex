@@ -1,0 +1,38 @@
+{
+  "covers": "a Nest controller action in a file over the size the plugin reads, which the graph itself reads (nest MAX_SOURCE_BYTES)",
+  "caps": [
+    "frameworks/nest/facts.ts#MAX_SOURCE_BYTES"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"@nestjs/common\": \"^10.0.0\", \"@nestjs/core\": \"^10.0.0\"}}",
+    "src/c.controller.ts": [
+      "import { Controller, Get } from \"@nestjs/common\";\n\n@Controller(\"c\")\nexport class C {\n  @Get(\"x\")\n  list() {\n    return 1;\n  }\n}\n",
+      {
+        "repeat": "// padding past the size bound the framework plugin reads\n",
+        "times": 5000
+      }
+    ],
+    "src/app.module.ts": "import { Module } from \"@nestjs/common\";\nimport { C } from \"./c.controller\";\n\n@Module({ controllers: [C] })\nexport class AppModule {}\n",
+    "src/main.ts": "import { NestFactory } from \"@nestjs/core\";\nimport { AppModule } from \"./app.module\";\n\nasync function bootstrap() {\n  const app = await NestFactory.create(AppModule);\n  await app.listen(3000);\n}\nbootstrap();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/c.controller.ts#C.list",
+      "caller": null,
+      "file": "src/c.controller.ts",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/c.controller.ts#C.list",
+      "reason": "the file is larger than the plugin reads",
+      "at": "",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "src/c.controller.ts:1"
+      }
+    }
+  ]
+}
