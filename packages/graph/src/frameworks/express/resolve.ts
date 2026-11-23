@@ -604,8 +604,15 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     const target = importTarget(file, name);
     const lf = target ? index.languageFacts(target.file) : null;
     if (!target || !lf) return NOT;
-    // `export default Y`, `export const X = ...`, or `const Y = ...; export { Y as X }`.
-    const local = (target.name === "default" ? lf.defaultExport : null) ?? (writesOf(target.file, target.name, 0).some((v) => v.exported) ? target.name : (lf.exportsLocal.find((x) => x.exported === target.name)?.local ?? null));
+    // `export default Y` and `module.exports = Y` export Y's value when they
+    // run: Y must be a const, and no other `module.exports` may replace it.
+    if (target.name === "default" && lf.defaultExport !== null) {
+      const cjs = cjsEntry(target.file, "default");
+      const writes = writesOf(target.file, lf.defaultExport, 0);
+      return cjs !== "competing" && cjs !== "replaced" && writes.length > 0 && writes.every((w) => w.decl === "const") ? { file: target.file, at: 0, name: lf.defaultExport } : NOT;
+    }
+    // `export const X = ...`, or `const Y = ...; export { Y as X }`.
+    const local = writesOf(target.file, target.name, 0).some((v) => v.exported) ? target.name : (lf.exportsLocal.find((x) => x.exported === target.name)?.local ?? null);
     return local !== null && writesOf(target.file, local, 0).length > 0 ? { file: target.file, at: 0, name: local } : NOT;
   };
   // How many names a binding is from a string (1 when every write is

@@ -37,6 +37,8 @@ const KEPT = [
   ["app.use(h, guarded);", "/by-guard"],
   ["app.use(auth, byCall);", "/by-call"],
   ["app.use(guard.required, byRequired);", "/by-required"],
+  ["app.use(REPLACED, byReplaced);", "/by-replaced"],
+  ["app.use(LATER, byLater);", "/by-later"],
   ["  app.use(requireAuth, byParam);", "/by-param"],
 ] as const;
 const routerOf = (mount: string) => /, (\w+)\);$/.exec(mount)?.[1] as string;
@@ -46,6 +48,8 @@ const COMPUTED = [
   'import { PREFIX as IMPORTED } from "./config.js";',
   'import { CLAUSE } from "./clause.js";',
   'import DEFAULTED from "./default-prefix.js";',
+  'import REPLACED from "./replaced.js";',
+  'import LATER from "./later.js";',
   'const WRAPPED = (process.env["API_PREFIX"] as string)!;',
   'const guard = require("./guard.js");',
   'const PREFIX = "/" + process.env.API_PREFIX;',
@@ -74,6 +78,10 @@ const files: Record<string, string> = {
   "src/config.ts": "export const PREFIX = process.env.API_PREFIX;\n",
   "src/clause.ts": "const BASE = process.env.API_BASE;\nexport { BASE as CLAUSE };\n",
   "src/default-prefix.ts": "const prefix = process.env.API_PREFIX;\nexport default prefix;\n",
+  // A string exported as the default, then replaced by middleware.
+  "src/replaced.js": "const prefix = process.env.API_PREFIX;\nmodule.exports = prefix;\nmodule.exports = function guard(_req, _res, next) {\n  next();\n};\n",
+  // A default export of a binding before its string is written: it exports undefined.
+  "src/later.ts": "let prefix: string | undefined;\nexport default prefix;\nprefix = process.env.API_PREFIX;\n",
   // Module-level names String and process that a destructuring declares:
   // the module's own, so String() is a call of middleware and
   // process.env is no environment.
