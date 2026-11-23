@@ -315,6 +315,13 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
     // the process is gone; its exit reports why
   });
 
+  // The agent may leave children of its own, also after it exited itself:
+  // the whole group goes, then the output it saved for the session.
+  const stop = (): void => {
+    killGroup(child);
+    if (sessionId !== null) removeSavedOutput(configDir, opts.snapshotDir, sessionId);
+  };
+
   return {
     pid: child.pid ?? null,
     send(text: string): Promise<Turn> {
@@ -324,9 +331,11 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
         child.stdin?.write(`${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`);
       });
     },
+    // The stop handler calls this and exits right after, so the saved
+    // output goes here too, synchronously.
     kill(): void {
       clearTimeout(timer);
-      killGroup(child);
+      stop();
     },
     async close(): Promise<void> {
       clearTimeout(timer);
@@ -336,10 +345,7 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
         const grace = new Promise<void>((done) => setTimeout(done, 3_000).unref());
         await Promise.race([gone, grace]);
       }
-      // The agent may leave children of its own, also after it exited
-      // itself: the whole group goes.
-      killGroup(child);
-      if (sessionId !== null) removeSavedOutput(configDir, opts.snapshotDir, sessionId);
+      stop();
     },
   };
 }

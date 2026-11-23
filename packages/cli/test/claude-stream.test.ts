@@ -205,6 +205,19 @@ describe("the output Claude Code saved for the session", () => {
     expect(existsSync(join(cfg, "projects", claudeProjectName(snapshotDir), SESSION))).toBe(false);
   });
 
+  it("8. is removed also when the review is interrupted: kill alone, before the host exits", async () => {
+    const cfg = config();
+    const bin = standIn(`(${SAVE}, ${JSON.stringify(RECORDED)}.split('__SNAPSHOT__').join(snapshot))`);
+    const snapshotDir = realpathSync(tempDir("oq-stream-snap-"));
+    const session = claudeDriver.start({ snapshotDir, deadline: Date.now() + 30_000, bin, web: false });
+    const turn = await session.send("Review this.");
+    expect(existsSync(join(cfg, "projects", claudeProjectName(snapshotDir), SESSION)), "the stand-in saved").toBe(true);
+    // The stop handler calls kill and exits the process right after: no close runs.
+    session.kill!();
+    expect(turn.sessionId).toBe(SESSION);
+    expect(existsSync(join(cfg, "projects", claudeProjectName(snapshotDir)))).toBe(false);
+  });
+
   it("9. leaves another session's folder, another working folder's and a look-alike name", async () => {
     const cfg = config();
     const projects = join(cfg, "projects");
