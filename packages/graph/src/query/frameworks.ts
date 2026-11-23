@@ -102,18 +102,20 @@ export function frameworkCallerGaps(g: Graph, file: string): { reasons: string[]
     }
     return u.site === null || g.projectOf(u.site.file) === project;
   };
-  const hit = layer.unknowns.filter((u) => (u.cause === "fan-out-capped" || u.cause === "budget") && (u.affects.length === 0 || u.affects.some((k) => !DATA_KINDS.has(k))) && reaches(u));
+  // A cap, a budget, or a file the plugin did not read (too large, broken):
+  // each may hide a registration, so the framework may run it there.
+  const hit = layer.unknowns.filter((u) => (u.cause === "fan-out-capped" || u.cause === "budget" || u.cause === "file-not-parsed") && (u.affects.length === 0 || u.affects.some((k) => !DATA_KINDS.has(k))) && reaches(u));
   const runs = layer.runs.filter((r) => r.status === "failed" || r.status === "stopped");
   const reasons = runs.map((r) => `the ${r.id} plugin ${r.status === "failed" ? "failed" : "stopped"} (${r.reason ?? r.status}), so what it runs is not listed and may call it`);
   const first = hit[0];
   if (first) {
     const where = first.site ? ` at ${first.site.file}:${first.site.line}` : "";
-    reasons.push(hit.length === 1 ? `the ${first.plugin} plugin gave up${where} (${first.cause}): ${first.note}; the framework may run it there` : `the framework plugins gave up at ${hit.length} places (caps and budgets) where the framework may run it, first the ${first.plugin} plugin${where}: ${first.note}`);
+    reasons.push(hit.length === 1 ? `the ${first.plugin} plugin gave up${where} (${first.cause}): ${first.note}; the framework may run it there` : `the framework plugins gave up at ${hit.length} places (caps, budgets and files not read) where the framework may run it, first the ${first.plugin} plugin${where}: ${first.note}`);
   }
   // A plugin that failed or stopped names no place: its gap is said at the file asked about.
   const gaps = [
     ...runs.map((r): GapPlace => ({ cause: r.status === "failed" ? "unsupported-rule" : "budget", file, line: null, next: NEXT.frameworkRun })),
-    ...hit.map((u): GapPlace => ({ cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: NEXT.framework })),
+    ...hit.map((u): GapPlace => ({ cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: u.cause === "file-not-parsed" ? NEXT.frameworkFile : NEXT.framework })),
   ];
   return { reasons, gaps };
 }

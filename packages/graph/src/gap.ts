@@ -67,6 +67,7 @@ export const NEXT = {
   budget: "Build again with a larger budget (`openqodex graph build`) so the calls of this file are resolved.",
   metadata: "Fix or restore this manifest so the graph can read it, then build again.",
   framework: "Read the framework registrations near this place: a handler, middleware or job past the plugin's limit may be the target.",
+  frameworkFile: "Read the framework registrations in this file yourself: the plugin did not read it, so a handler it registers may be the target.",
   frameworkRun: "Read the framework registrations of this project yourself: the plugin failed or stopped, so what the framework runs is not listed.",
   noCall: "Nothing to check for callers: this gap cannot hide a call.",
   valueUse: "Open this use of the target as a value and follow where the value goes; a call through it is not listed.",

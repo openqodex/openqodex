@@ -1,0 +1,36 @@
+{
+  "covers": "a net/http handler in a file over the size the Go plugins read, which the graph itself reads (go-http MAX_SOURCE_BYTES, shared by gin)",
+  "caps": [
+    "frameworks/go-http/facts.ts#MAX_SOURCE_BYTES"
+  ],
+  "files": {
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": [
+      "package main\n\nimport \"net/http\"\n\nfunc index(w http.ResponseWriter, r *http.Request) {}\n\nfunc main() {\n\tm := http.NewServeMux()\n\tm.HandleFunc(\"/x\", index)\n\thttp.ListenAndServe(\":8080\", m)\n}\n",
+      {
+        "repeat": "// padding past the size bound the framework plugin reads\n",
+        "times": 5000
+      }
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "main.go#index",
+      "caller": null,
+      "file": "main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#index",
+      "reason": "over the 262144 byte cap of the net/http plugin",
+      "at": "",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "main.go:1"
+      }
+    }
+  ]
+}
