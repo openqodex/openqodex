@@ -183,13 +183,20 @@ describe("6. a taskkill that fails", () => {
   it("stops the reviewer itself and says so on stderr when taskkill cannot run", async () => {
     let err = "";
     const write = vi.spyOn(process.stderr, "write").mockImplementation((s) => ((err += String(s)), true));
-    // No C:\\Windows\\System32\\taskkill.exe here, so taskkill cannot start.
     const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-    await new Promise((done) => child.once("spawn", done));
-    const gone = new Promise((done) => child.once("exit", done));
-    killGroup(child, "win32");
-    const stopped = await Promise.race([gone.then(() => true), new Promise((done) => setTimeout(() => done(false), 5_000))]);
-    write.mockRestore();
+    let stopped = false;
+    try {
+      await new Promise((done) => child.once("spawn", done));
+      const gone = new Promise((done) => child.once("exit", done));
+      // A system folder with no taskkill in it, so taskkill cannot start, on
+      // native Windows too.
+      vi.stubEnv("SystemRoot", tempDir("oq-win-no-taskkill-"));
+      killGroup(child, "win32");
+      stopped = await Promise.race([gone.then(() => true), new Promise<boolean>((done) => setTimeout(() => done(false), 5_000))]);
+    } finally {
+      vi.unstubAllEnvs();
+      write.mockRestore();
+    }
     if (!stopped) child.kill("SIGKILL");
     expect(stopped).toBe(true);
     expect(err).toMatch(new RegExp(`^openqodex: taskkill could not stop the reviewer \\(process ${child.pid}\\): .+; the reviewer alone was stopped, and programs it started may still run\n$`));
