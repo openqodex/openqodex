@@ -38,7 +38,7 @@
   "floored": [
     {
       "target": "svc/app/controllers/users_controller.rb#UsersController.deep",
-      "reason": "the framework plugins gave up at",
+      "reason": "the Rails plugin ran out of its work budget",
       "at": "",
       "gap": {
         "cause": "budget",

@@ -27,7 +27,7 @@ import { PLUGINS } from "../frameworks/registry.js";
 import { isTestPath } from "../impact.js";
 import { NEXT } from "../gap.js";
 import type { GapPlace } from "../gap.js";
-import type { Tier } from "../model/records.js";
+import type { Cause, Tier } from "../model/records.js";
 import type { Graph, GraphNode, GraphSite } from "../types.js";
 import { candidate, counts, empty, fail, isAnswer, listing, Point, stoppedAt } from "./answer.js";
 import type { Answer, Candidate, Job, Request, Session } from "./answer.js";
@@ -81,41 +81,115 @@ export function frameworkLayer(g: Graph): FwLayer | null {
 // The framework relations that describe data and never run code.
 const DATA_KINDS = new Set(["renders", "declares_field", "changes_schema", "maps_to", "uses_type", "reads_config", "defines_config"]);
 
+// Whether a framework gap of each cause can drop a registration, a
+// middleware or a job of a function of the graph, so that function reads
+// as having no caller. One row per cause: a cause added to Cause does not
+// typecheck until it is classified here.
+const DROPS: Record<Cause, boolean> = {
+  external: false, // what it names is outside the repository: no function of the graph is dropped
+  "no-receiver-type": true, // a registration on a receiver no rule types is not read
+  "untyped-receiver": true,
+  "not-exported": true, // the handler's name was not followed to its definition
+  "metadata-unreadable": true, // the manifest that enables the plugin's rules was not read
+  ambiguous: true, // the handler may be another of the definitions it could mean
+  miss: true, // the handler named is not where the evidence points; the real one is not listed
+  dynamic: true, // a computed path, handler, prefix or list: the route may not be listed
+  "dynamic-base": true, // routes inherited from a computed base are not listed
+  "fan-out-capped": true,
+  "file-not-parsed": true,
+  "unsupported-language": true,
+  "unsupported-rule": true, // a form the plugin does not read: what it registers is not listed
+  budget: true,
+  "export-chain-too-deep": true,
+  memory: true,
+  "variant-excluded": true, // a file of another build variant may register it there
+  redacted: true, // a value kept out of the facts: what it named is not known
+};
+// The plugins whose registrations name what they run only through the
+// file's imports (a name bound by an import, a value an imported function
+// returns, a file the router's own file is). A gap of one reaches a
+// function in another project only when the gap's file reaches the
+// function's file through imports. Any other plugin names code by a
+// module path in a string (Django's include), by a constant Ruby loads on
+// its own (Rails), or by a naming rule (JUnit), so its gap reaches the
+// whole build; so does a plugin not listed here.
+const BOUND_BY_IMPORTS: ReadonlySet<string> = new Set(["express", "fastapi", "gin", "go-http", "hono", "nest", "nextjs", "react"]);
+
+// The files that import `file`, directly or through other imports; a Go
+// file is imported through its package folder.
+function importedBy(g: Graph, file: string): Set<string> {
+  const keysOf = (f: string) => (f.endsWith(".go") ? [f, `go:${f.slice(0, Math.max(0, f.lastIndexOf("/")))}`] : [f]);
+  const out = new Set<string>();
+  const queue = keysOf(file);
+  for (let i = 0; i < queue.length; i++) {
+    for (const e of g.importers.get(queue[i] as string) ?? []) {
+      if (out.has(e.from)) continue;
+      out.add(e.from);
+      queue.push(...keysOf(e.from));
+    }
+  }
+  return out;
+}
+
+const drops = (cause: string): boolean => (DROPS as Record<string, boolean | undefined>)[cause] ?? true;
+
 // Where the framework layer gave up in a way that may hide it running a
-// function of `file` (as a handler, a middleware, a job): each cap or
-// step budget (cause fan-out-capped or budget) that names a relation that
-// runs code, or none, in the function's project or the whole build, and
-// each plugin that failed or stopped. Its reasons and its gaps, for a
-// caller floor.
+// function of `file` (as a handler, a middleware, a job): each gap whose
+// cause can drop a registration (DROPS) and that names a relation that
+// runs code, or none, and reaches the function's project, and each plugin
+// that failed or stopped. Its reasons and its gaps, for a caller floor.
 export function frameworkCallerGaps(g: Graph, file: string): { reasons: string[]; gaps: GapPlace[] } {
   const layer = frameworkLayer(g);
   if (!layer) return { reasons: [], gaps: [] };
   const project = g.projectOf(file);
-  const appProject = new Map(layer.apps.map((a) => [a.id, g.projectOf(a.site.file)]));
+  const appFile = new Map(layer.apps.map((a) => [a.id, a.site.file]));
+  // A gap reaches the function when its place is in the function's
+  // project, or imports the function's file (a handler imported from
+  // another project), or when its plugin names code by other means.
+  let importers: Set<string> | null = null;
+  const imports = (f: string): boolean => (importers ??= importedBy(g, file)).has(f);
+  const near = (f: string): boolean => g.projectOf(f) === project || imports(f);
   const reaches = (u: FwUnknown): boolean => {
+    if (!BOUND_BY_IMPORTS.has(u.plugin)) return true;
     const scope = (u as { scope?: unknown }).scope;
     if (isObj(scope)) {
       if (scope.build === true) return true;
-      if (typeof scope.project === "string") return scope.project === project;
-      if (typeof scope.app === "string") return appProject.get(scope.app) === undefined || appProject.get(scope.app) === project;
-      if (typeof scope.file === "string") return g.projectOf(scope.file) === project;
+      if (typeof scope.project === "string") return scope.project === project || [...(importers ??= importedBy(g, file))].some((f) => g.projectOf(f) === scope.project);
+      if (typeof scope.app === "string") {
+        const at = appFile.get(scope.app);
+        return at === undefined || near(at);
+      }
+      if (typeof scope.file === "string") return near(scope.file);
     }
-    return u.site === null || g.projectOf(u.site.file) === project;
+    return u.site === null || near(u.site.file);
   };
-  // A cap, a budget, or a file the plugin did not read (too large, broken):
-  // each may hide a registration, so the framework may run it there.
-  const hit = layer.unknowns.filter((u) => (u.cause === "fan-out-capped" || u.cause === "budget" || u.cause === "file-not-parsed") && (u.affects.length === 0 || u.affects.some((k) => !DATA_KINDS.has(k))) && reaches(u));
+  // A cap, a budget, a computed value, a file the plugin did not read: each
+  // may hide a registration, so the framework may run it there.
+  const hit = layer.unknowns.filter((u) => drops(u.cause) && (u.affects.length === 0 || u.affects.some((k) => !DATA_KINDS.has(k))) && reaches(u));
   const runs = layer.runs.filter((r) => r.status === "failed" || r.status === "stopped");
   const reasons = runs.map((r) => `the ${r.id} plugin ${r.status === "failed" ? "failed" : "stopped"} (${r.reason ?? r.status}), so what it runs is not listed and may call it`);
-  const first = hit[0];
-  if (first) {
-    const where = first.site ? ` at ${first.site.file}:${first.site.line}` : "";
-    reasons.push(hit.length === 1 ? `the ${first.plugin} plugin gave up${where} (${first.cause}): ${first.note}; the framework may run it there` : `the framework plugins gave up at ${hit.length} places (caps, budgets and files not read) where the framework may run it, first the ${first.plugin} plugin${where}: ${first.note}`);
+  // One reason per plugin and cause, at the first place of each; a gap
+  // with no place (a stop for the whole build) is said before the others,
+  // and the first gap of each group leads the list, which is cut at a few.
+  const ordered = [...hit].sort((a, b) => (a.site === null ? 0 : 1) - (b.site === null ? 0 : 1));
+  const groups = new Map<string, FwUnknown[]>();
+  for (const u of ordered) {
+    const k = `${u.plugin}\u0000${u.cause}`;
+    const list = groups.get(k);
+    if (list) list.push(u);
+    else groups.set(k, [u]);
   }
+  for (const [first, ...rest] of groups.values()) {
+    const u = first as FwUnknown;
+    const where = u.site ? ` at ${u.site.file}:${u.site.line}` : "";
+    reasons.push(rest.length === 0 ? `the ${u.plugin} plugin gave up${where} (${u.cause}): ${u.note}; the framework may run it there` : `the ${u.plugin} plugin gave up at ${rest.length + 1} places (${u.cause}) where the framework may run it, first${where}: ${u.note}`);
+  }
+  const leading = [...groups.values()].map((list) => list[0] as FwUnknown);
+  const lead = new Set(leading);
   // A plugin that failed or stopped names no place: its gap is said at the file asked about.
   const gaps = [
     ...runs.map((r): GapPlace => ({ cause: r.status === "failed" ? "unsupported-rule" : "budget", file, line: null, next: NEXT.frameworkRun })),
-    ...hit.map((u): GapPlace => ({ cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: u.cause === "file-not-parsed" ? NEXT.frameworkFile : NEXT.framework })),
+    ...[...leading, ...ordered.filter((u) => !lead.has(u))].map((u): GapPlace => ({ cause: u.cause, file: u.site?.file ?? file, line: u.site && u.site.line > 0 ? u.site.line : null, next: u.cause === "file-not-parsed" ? NEXT.frameworkFile : NEXT.framework })),
   ];
   return { reasons, gaps };
 }

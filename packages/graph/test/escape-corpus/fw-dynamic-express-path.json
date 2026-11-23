@@ -1,0 +1,29 @@
+{
+  "covers": "an Express route whose path a function computes: the plugin lists no route for the handler, so its dynamic gap must floor the handler's callers",
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"express\": \"^4.18.0\"}}",
+    "src/h.ts": "export function h(req: unknown, res: unknown): void {}\n",
+    "src/app.ts": "import express from \"express\";\nimport { h } from \"./h\";\n\nfunction pathFor(): string {\n  return \"/x\";\n}\nexport const app = express();\napp.get(pathFor(), h);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 8
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h",
+      "reason": "the express plugin gave up at src/app.ts:8 (dynamic)",
+      "at": "",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:8"
+      }
+    }
+  ]
+}

@@ -15,9 +15,8 @@
 // The list below is every cap that no corpus case trips, one line each:
 // "no-caller", it cannot hide a caller of a `callers` answer; "elsewhere",
 // another test trips it and proves the floor (the input is a clock, the
-// heap, or too large for a case); "no-row", it may hide a caller and no
-// test here proves the floor yet. A "no-row" entry is debt: it is listed so
-// the debt is seen, and the next case that trips it moves it to `caps`.
+// heap, or too large for a case). There is no third kind: a cap that may
+// hide a caller with no test proving the floor does not pass this file.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,7 +26,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const src = join(here, "..", "src");
 const corpus = join(here, "escape-corpus");
 
-type Excuse = { kind: "no-caller" | "elsewhere" | "no-row"; why: string };
+type Excuse = { kind: "no-caller" | "elsewhere"; why: string };
 const EXCUSED: Record<string, Excuse> = {
   "build.ts#DEFAULT_BUDGET_MS": { kind: "elsewhere", why: "caps.test.ts (2): a build out of time reads no more files and is partial, which floors every answer; how far it gets is time, not input" },
   "build.ts#DEFAULT_MAX_HEAP_MB": { kind: "elsewhere", why: "caps.test.ts (3): a build past the memory bound reads no more files and is partial; the bound is the heap, not input" },
@@ -59,7 +58,6 @@ const EXCUSED: Record<string, Excuse> = {
   "frameworks/fastapi/resolve.ts#MAX_TEST_REQUESTS": { kind: "no-caller", why: "matches a test's request to a route; its gaps reach `tests` only" },
   "frameworks/gin/resolve.ts#MAX_ROLES": { kind: "no-caller", why: "each role is added beside an edge to the same target, and a callers answer reads edges, never roles; an edge left out is MAX_EDGES's floor" },
   "frameworks/go-http/facts.ts#MAX_SCOPES": { kind: "no-caller", why: "it drops the outermost enclosing functions of a fact; the plugins read only the innermost (`scopes[0]`, gin's Use order), which is always kept" },
-  "frameworks/go-http/facts.ts#MAX_STRING": { kind: "no-row", why: "a route literal past it floors (escape-corpus/cap-fw-go-string.json), but a package constant past it records no constant, so its route reads as computed (cause dynamic) and is dropped with no floor the plugin records" },
   "frameworks/go-http/resolve.ts#MAX_MATCH_WORK": { kind: "no-caller", why: "matches a test's request to a route; its gaps reach `tests` only" },
   "frameworks/go-http/resolve.ts#MAX_PATTERN_SEGMENTS": { kind: "no-caller", why: "matches a test's request to a route; its gaps reach `tests` only" },
   "frameworks/go-http/resolve.ts#MAX_ROLES": { kind: "no-caller", why: "a callers answer reads edges, never roles: a route or middleware role is added beside its edge (an edge left out is MAX_EDGES's floor), and a test role only marks a named test function" },

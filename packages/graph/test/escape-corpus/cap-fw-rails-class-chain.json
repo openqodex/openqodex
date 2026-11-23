@@ -50,7 +50,7 @@
     },
     {
       "target": "app/controllers/down.rb#D9.hook",
-      "reason": "the framework plugins gave up at 3 places",
+      "reason": "the rails plugin gave up at 3 places (fan-out-capped)",
       "at": "",
       "gap": {
         "cause": "fan-out-capped",
@@ -59,7 +59,7 @@
     },
     {
       "target": "app/jobs/deep_job.rb#DeepJob.perform",
-      "reason": "the framework plugins gave up at 3 places",
+      "reason": "the rails plugin gave up at 3 places (fan-out-capped)",
       "at": "",
       "gap": {
         "cause": "fan-out-capped",

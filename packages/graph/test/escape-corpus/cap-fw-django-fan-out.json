@@ -59,7 +59,7 @@
     },
     {
       "target": "proj/signals.py#handler",
-      "reason": "the framework plugins gave up at 2 places",
+      "reason": "the django plugin gave up at 2 places (fan-out-capped)",
       "at": "",
       "gap": {
         "cause": "fan-out-capped",

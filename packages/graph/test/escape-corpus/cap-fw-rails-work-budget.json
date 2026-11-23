@@ -36,7 +36,7 @@
   "floored": [
     {
       "target": "app/controllers/users_controller.rb#UsersController.deep",
-      "reason": "the framework plugins gave up at 3 places",
+      "reason": "the Rails plugin ran out of its work budget",
       "at": "",
       "gap": {
         "cause": "budget",
@@ -45,7 +45,7 @@
     },
     {
       "target": "app/controllers/users_controller.rb#UsersController.deep",
-      "reason": "the framework plugins gave up at 3 places",
+      "reason": "the Rails plugin ran out of its work budget",
       "at": "",
       "gap": {
         "cause": "budget",
