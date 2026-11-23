@@ -335,14 +335,14 @@ function run(index: PluginIndex<NextFact>): Analysis {
     addRole(fn.id, "middleware", "nextjs", null, { kind: "role-path", tier: "certain", site, via: null, premises: [], rule: rule("nextjs-middleware"), note: null });
     const parsed = matcher?.values?.map((m) => readMatcher(m)) ?? null;
     if (matcher && matcher.values === null) {
-      addUnknown({ plugin: PLUGIN, site: { file, line: matcher.line, column: matcher.column }, scope: { project }, affects: ["applies_middleware"], cause: "dynamic", name: "matcher", note: "the middleware's matcher is computed, so the routes it runs for are not known", count: null, exact: false });
+      addUnknown({ plugin: PLUGIN, site: { file, line: matcher.line, column: matcher.column }, scope: { project }, affects: ["applies_middleware"], cause: "dynamic", name: "matcher", note: "the middleware's matcher is computed, so the routes it runs for are not known", count: null, exact: false, symbol: fn.id });
       continue;
     }
     // A cut list: a route no entry read selects may be selected by one past the cut.
     const cutList = matcher?.more ?? 0;
-    if (cutList > 0) addUnknown({ plugin: PLUGIN, site: { file, line: matcher?.line ?? 1, column: matcher?.column ?? 1 }, scope: { project }, affects: ["applies_middleware"], cause: "fan-out-capped", name: "matcher", note: `the matcher list has ${cutList} entries past the ${matcher?.values?.length ?? 0} the plugin reads, so a route only those entries select is linked as possible`, count: cutList, exact: true });
+    if (cutList > 0) addUnknown({ plugin: PLUGIN, site: { file, line: matcher?.line ?? 1, column: matcher?.column ?? 1 }, scope: { project }, affects: ["applies_middleware"], cause: "fan-out-capped", name: "matcher", note: `the matcher list has ${cutList} entries past the ${matcher?.values?.length ?? 0} the plugin reads, so a route only those entries select is linked as possible`, count: cutList, exact: true, symbol: fn.id });
     const tooLong = parsed?.filter((m) => m === "cap").length ?? 0;
-    if (tooLong > 0) addUnknown({ plugin: PLUGIN, site: { file, line: matcher?.line ?? 1, column: matcher?.column ?? 1 }, scope: { project }, affects: ["applies_middleware"], cause: "fan-out-capped", name: "matcher", note: `${tooLong} matcher entries have more than ${MAX_PATTERN_SEGMENTS} segments, which the plugin does not compare, so a route they may select is linked as possible`, count: tooLong, exact: true });
+    if (tooLong > 0) addUnknown({ plugin: PLUGIN, site: { file, line: matcher?.line ?? 1, column: matcher?.column ?? 1 }, scope: { project }, affects: ["applies_middleware"], cause: "fan-out-capped", name: "matcher", note: `${tooLong} matcher entries have more than ${MAX_PATTERN_SEGMENTS} segments, which the plugin does not compare, so a route they may select is linked as possible`, count: tooLong, exact: true, symbol: fn.id });
     for (const reg of registrations) {
       if (reg.app === null || !own.has(reg.app) || reg.pattern === null) continue;
       let tier: "certain" | "possible" | null = null;
