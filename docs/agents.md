@@ -22,17 +22,19 @@ Without a terminal to ask in, `init` writes the plan when it runs inside Claude 
 
 ## The instruction section
 
+OpenQodex is opt-in per repository. A repository opts in by having an OpenQodex settings file: `.openqodex/config.yaml`, or the older `.openqodex.yaml` at its root. `init` creates `.openqodex/config.yaml` in the repository it runs in, and so does the first `review` or `scan` you run by hand, which says so in one line.
+
 In user scope, `init` adds one marked line to each agent's global instruction file, which the agent reads in every repository. It prints the line before writing it:
 
 ```
 <!-- openqodex:start -->
-Before any push, review the change with the openqodex skill.
+Before any push in a repository that has an OpenQodex settings file (`.openqodex/config.yaml`, or `.openqodex.yaml` at its root), review the change with the openqodex skill.
 <!-- openqodex:end -->
 ```
 
-The skill holds the procedure, and a repository's own team section (below) says how that repository reviews. An install made by an earlier version, with the longer section, gets this line in its place on the next `init`, while that section is still exactly as `init` wrote it.
+The line says when to review, and nothing else. The skill holds the procedure, and the repository's settings file holds its rules. An install made by an earlier version, with a longer section or the line that asked for a review in every repository, gets this line in its place on the next `init`, while the old one is still exactly as `init` wrote it.
 
-In project scope the repository's `CLAUDE.md` and `AGENTS.md` get a longer section: review with the openqodex skill when a feature or fix is done, and do not push on a blocked verdict unless the developer says so after seeing the findings. The Cursor and Cline rules carry that longer section too: Cursor has no instruction file in the home folder, so its rule in the repository holds it. So does Goose's `.goosehints` in the repository.
+In project scope the repository's `CLAUDE.md` and `AGENTS.md` get the same one line. The Cursor and Cline rules carry it too, followed by the line that runs the skill: Cursor has no instruction file in the home folder, so its rule in the repository holds it. So does Goose's `.goosehints` in the repository.
 
 The tables below name the file for each agent. In an existing file, the section is appended and your own text stays as it is. `--uninstall` removes exactly that section, and nothing around it.
 
@@ -40,20 +42,15 @@ The tables below name the file for each agent. In an existing file, the section 
 
 Inside a repository, the plan of `init` in user scope also holds a review section for this repo's `CLAUDE.md` and `AGENTS.md`, so teammates' agents review before they push too. `--no-repo` leaves it out, and the choice is recorded for that repository: a later `init`, with `--yes` or without, keeps it out. `init --uninstall` in that repository forgets the choice.
 
-The section goes into `CLAUDE.md` and `AGENTS.md` at the root of the repository, and `init` creates a file that is not there. It is meant for a teammate who has installed nothing, so it names only the pinned `npx` command:
+The section goes into `CLAUDE.md` and `AGENTS.md` at the root of the repository, and `init` creates a file that is not there. It is meant for a teammate who has installed nothing, so it names only the `npx` command, with no version, so it never goes out of date:
 
 ```
 <!-- openqodex:start -->
-## Review with OpenQodex before you push
-- Before any `git push`, run `npx -y openqodex@<version> review` from the repository root. It can take minutes, and OpenQodex stops the reviewer after 30 minutes. Run it in the background and wait for it to exit.
-- Show the developer the receipt it prints: the verdict, one line per finding and the absolute path of `report.html`. Ask: "Fix all, or tell me which?" Fix only the findings they name (`npx -y openqodex@<version> findings 1,3` prints them in full), then review again and show the new receipt. OpenQodex starts its own reviewer process, so by default the agent that wrote the code does not judge its own work.
-- Do not push on a blocked verdict unless the developer says so after seeing the findings.
-- Never add a file to `review.instructions_files` on your own. Ask the developer which files the reviewer may use, then set only what they name.
-- The report is in `.openqodex/reviews/`.
+Before any push, review the change with OpenQodex: run `npx -y openqodex review` from the repository root and show the developer what it prints. Its settings are in `.openqodex/config.yaml`.
 <!-- openqodex:end -->
 ```
 
-The two files show in `git status`, and `init` says to commit them. When git ignores one of them in this repository, `init` says so instead, since your team does not get it. `init` writes neither file through a symbolic link. A section you edited is yours: a later `init` and `--uninstall` leave it as it is. `--uninstall` removes our untouched section, and deletes a file only when `init` created it and nothing else is in it. In project scope the same two files carry the instruction section instead, never both.
+A longer section an earlier version wrote, which named a pinned version such as `npx -y openqodex@0.24.0 review`, gets this line in its place on the next `init`, on your machine or a teammate's, while it is still exactly as that version wrote it. The two files show in `git status`, and `init` says to commit them. When git ignores one of them in this repository, `init` says so instead, since your team does not get it. `init` writes neither file through a symbolic link. A section you edited is yours: a later `init` and `--uninstall` leave it as it is. `--uninstall` removes our untouched section, and deletes a file only when `init` created it and nothing else is in it. In project scope the same two files carry the instruction section instead, never both.
 
 ## The review runs in its own reviewer process
 
@@ -136,7 +133,7 @@ In project scope, the hooks, the skill and the rules call `npx -y openqodex@<ver
 
 When `CLAUDE_CONFIG_DIR` is set, Claude Code reads its settings from that folder instead of `~/.claude`, and so do these user-scope paths. `init` also finds Claude Code by that folder.
 
-The hook is one `PreToolUse` entry. It matches the `Bash` tool and runs only for `git push` commands. It calls `openqodex hook check`.
+The hook is one `PreToolUse` entry. It matches the `Bash` tool and runs only for `git push` commands. It calls `openqodex hook check`. In a repository with no OpenQodex settings file, `hook check` prints nothing and lets the push go on.
 
 In user scope, `init` adds rules so Claude Code runs these review commands without asking, and the agent can review unattended: `<launcher> review` and `review --all`, each also with ` --offline` at the end, plus `guide`, `guide skill` and `guide <topic>`, `findings` with any numbers (it only reads the last review's report and prints it), and `graph` with any arguments (it reads the repository and writes only that repository's `.openqodex/graph/` folder and its local refs `refs/openqodex/graph/<tree>`). No rule covers the tools of the code graph's MCP server. A Claude Code rule such as `mcp__openqodex` names a server only by its name, and a repository's `.mcp.json` or a local-scope entry, which Claude Code prefers to the user-scope server `init` registers, can give that name to another server; the rule would let that server's tools run without asking. So Claude Code asks before the server's tools run. A `mcp__openqodex` rule an earlier build added is removed by the next `init`. Each review rule matches one exact line, so the same command with any other flag, such as `--output` or `--config`, a branch or a pull request, or chained with `&&`, still asks you. `scan`, `doctor`, `trust`, `update`, `init` and `report` still ask you. The rules of earlier versions for `review --agent` and `review --finalize` are removed by the next `init`. Project scope writes no permission rule: a committed settings file would decide for every teammate. A rule you already had is left alone, and `init --uninstall` removes only the rules `init` added. When a later version grants a different set, the next `init` removes the rules an earlier version added and adds the new ones. When your home path holds a space or another character the shell would read, the launcher is written in single quotes in the skill and in the rules alike. When the launcher's path holds `*`, which Claude Code reads as a wildcard, `init` writes no rule and says so in one line; Claude Code then asks before each review command.
 
@@ -157,7 +154,7 @@ Neither the skill `init` writes nor `guide skill` carries the sentence that tell
 
 `init` also finds Codex by `$CODEX_HOME`. The skill stays in `~/.agents/skills`, the folder the Codex docs name for skills, whatever `CODEX_HOME` says.
 
-Codex runs the hook before every shell command. `hook check` returns at once and prints nothing when the command is not a `git push`.
+Codex runs the hook before every shell command. `hook check` returns at once and prints nothing when the command is not a `git push`, or when the repository has no OpenQodex settings file.
 
 Codex runs a new hook only after you trust it. Open Codex, run `/hooks`, and trust the OpenQodex hook. Until then, Codex skips the push gate. A project hook also needs the project itself to be trusted in Codex.
 
@@ -203,6 +200,7 @@ OpenQodex writes no Goose hook. The hints ask Goose to review before any `git pu
 
 The gate runs in Claude Code and Codex, through the hooks above, and in the git pre-push hook below. It looks for the record `review` wrote, in your own `~/.openqodex/receipts/`. The check inside your agent looks for the record of your current work and does not know what a push sends: for a plain `git push` (also after one leading `cd <folder> &&`, with the folder as a full path or one starting with `./` or `../`, judged in that folder, and with its output trimmed, as in `2>&1 | tail -5`) it asks whether your current work has a passing review, and for any other push command it says it cannot tell. The git pre-push hook looks for the record of exactly the change being pushed. Report files a branch carries under `.openqodex/` never count. It never scans, never starts a review, and never approves a push for you: your agent's own permission prompt for `git push` still applies.
 
+- A repository with no OpenQodex settings file has not opted in: the check inside your agent says nothing and lets the push go on. The git pre-push hook exists only in a repository where `init` added it.
 - A complete review of this change that passed: the gate says nothing.
 - A push whose commits change nothing but files under `.openqodex/`, counted from a commit the remote already has, with no other change in your work tree for the check inside your agent: `review` leaves `.openqodex/` out of every change, so there is nothing to review and the gate says nothing. A base that only a local branch holds, or a replace ref, never counts. The skip trusts this repository's own record of what the remote holds (its remote-tracking refs), as the receipt lookup does. The check inside your agent never skips a force push, or a push that sends more than the current branch.
 - A complete review of this change that is blocked: the gate denies the push when `review.block_on_severity` is set, with the counts and the absolute path of `report.html`, and tells the agent to ask you "fix all, or tell me which?" and to fix only the findings you name.

@@ -49,6 +49,7 @@ Looking for hosted pull request review? [Sign up for Qodex](https://agents.qodex
 - At the end, it prints a receipt: the verdict, one line per finding and the path of `report.html`. It also writes `report.md`, `report.json` and `report.sarif`. Here is an [example report](https://github.com/openqodex/openqodex/blob/main/tests/golden/expected/claude/run/report.md).
 - You choose what gets fixed. Your agent asks "Fix all, or tell me which?" and fixes only the findings you name.
 - The push gate warns by default. It blocks only when `.openqodex/config.yaml` sets `review.block_on_severity`.
+- It runs only in repositories you opt in. A repository opts in with `.openqodex/config.yaml`, which `openqodex init` writes there. Elsewhere your agents do not review before a push, and the push gate says nothing.
 
 ## What you get: a code graph
 

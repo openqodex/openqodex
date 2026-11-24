@@ -7,7 +7,9 @@
 // the Claude Code permission rules depend on changes (the commands an agent
 // runs, what the files must say). test/agent-contract.test.ts holds every
 // user-scope file to the copy checked in for this number, so changing one
-// without a bump fails.
+// without a bump fails. A change that a file an older init wrote still works
+// with beside the new binary is checked in there as a revision of the same
+// number instead, with no bump.
 // configFormat: bumped when a key of the repo or user config changes
 // meaning in a way an existing file cannot keep (CONFIG_CHANGES in the core
 // package handles renames and removals without a bump).

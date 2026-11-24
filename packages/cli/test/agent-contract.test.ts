@@ -12,7 +12,14 @@
 //     so the background update crosses a change only `init` brings to the
 //     files already written.
 //  3. The copy checked in for a contract is rewritten in place instead of a
-//     new contract being added with its own copy.
+//     new contract, or a new revision of it, being added with its own copy.
+//
+// A revision (folder `<n>.<k>`) is a change under the same contract that a
+// file an older init wrote still works with beside the new binary: the
+// background update may cross it, and the line after the update counts the
+// files `init` refreshes (agents/stale.ts). 3.1 made every trigger ask for a
+// review only in a repository with an OpenQodex settings file: an older
+// file asks in more repositories, and the review still runs there.
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -27,14 +34,25 @@ const LAUNCHER = "/home/dev/.openqodex/bin/openqodex";
 const VERSION = "9.9.9";
 
 // The sha256 of each checked-in copy (copyHash). A copy's files are never
-// changed: a new contract adds a folder and a line here. The one exception
+// changed: a new contract, or a revision of one (above), adds a folder and
+// a line here. The one exception
 // is an agent new in the running contract, whose files are added to its
 // copy, since no machine holds them yet (Goose, added under contract 3).
-const COPIES: Record<number, string> = {
-  1: "6baaa371d9d814b0ca225ff82705403d607f4d0f02c137834050b8d7c2566ecc",
-  2: "f34091e753bd8c0a0dce42cd5f7312d7e5609497e9dc941aff72048f4fce87a3",
-  3: "ed9e38f9c3f0be5bdfc1d5f3b049776a8eaf5820899e737238911889644dcb45",
+const COPIES: Record<string, string> = {
+  "1": "6baaa371d9d814b0ca225ff82705403d607f4d0f02c137834050b8d7c2566ecc",
+  "2": "f34091e753bd8c0a0dce42cd5f7312d7e5609497e9dc941aff72048f4fce87a3",
+  "3": "ed9e38f9c3f0be5bdfc1d5f3b049776a8eaf5820899e737238911889644dcb45",
+  "3.1": "a5f5ad7bda82693b228e9c7de64a334c781992b550383f18896ad53c3f2f2060",
 };
+
+// The newest revision of contract `n`: its folder name.
+function newest(n: number): string | undefined {
+  const revision = (k: string): number => Number(k.split(".")[1] ?? 0);
+  return Object.keys(COPIES)
+    .filter((k) => k.split(".")[0] === String(n))
+    .sort((a, b) => revision(a) - revision(b))
+    .pop();
+}
 
 // Every file, hook and rule a user-scope init writes for every agent, for a
 // fixed launcher, by a name that says which.
@@ -53,8 +71,8 @@ function rendered(): Record<string, string> {
   return out;
 }
 
-function copy(n: number): Record<string, string> {
-  const dir = join(COPIES_DIR, String(n));
+function copy(name: string): Record<string, string> {
+  const dir = join(COPIES_DIR, name);
   return Object.fromEntries(readdirSync(dir).map((f) => [f, readFileSync(join(dir, f), "utf8")]));
 }
 
@@ -78,13 +96,14 @@ describe("the user-scope agent files", () => {
 
   it("are the copy checked in for the running agentContract: changing one needs a new contract and a new copy (failure 2)", () => {
     const n = runningContract().agent;
-    expect(Object.keys(COPIES).map(Number), `add test/fixtures/agent-contract/${n}/ and its hash for agentContract ${n}`).toContain(n);
-    expect(rendered()).toEqual(copy(n));
+    const name = newest(n);
+    expect(name, `add test/fixtures/agent-contract/${n}/ and its hash for agentContract ${n}`).toBeDefined();
+    expect(rendered()).toEqual(copy(name!));
   });
 
   it("each checked-in copy is pinned by its hash, so none is rewritten under its number (failure 3)", () => {
-    const dirs = readdirSync(COPIES_DIR).map(Number).sort((a, b) => a - b);
-    expect(dirs).toEqual(Object.keys(COPIES).map(Number).sort((a, b) => a - b));
-    for (const n of dirs) expect(copyHash(copy(n)), `copy ${n}`).toBe(COPIES[n]);
+    const dirs = readdirSync(COPIES_DIR).sort();
+    expect(dirs).toEqual(Object.keys(COPIES).sort());
+    for (const name of dirs) expect(copyHash(copy(name)), `copy ${name}`).toBe(COPIES[name]);
   });
 });

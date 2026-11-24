@@ -1,0 +1,10 @@
+[
+  "Bash(/home/dev/.openqodex/bin/openqodex review)",
+  "Bash(/home/dev/.openqodex/bin/openqodex review --all)",
+  "Bash(/home/dev/.openqodex/bin/openqodex review --offline)",
+  "Bash(/home/dev/.openqodex/bin/openqodex review --all --offline)",
+  "Bash(/home/dev/.openqodex/bin/openqodex guide)",
+  "Bash(/home/dev/.openqodex/bin/openqodex guide *)",
+  "Bash(/home/dev/.openqodex/bin/openqodex findings *)",
+  "Bash(/home/dev/.openqodex/bin/openqodex graph *)"
+]

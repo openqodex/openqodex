@@ -19,7 +19,7 @@ export type Target =
   | { kind: "hook-json"; agent: AgentId; label: string; path: string; group: HookGroup; inRepo: boolean; usesLauncher: boolean }
   // A section between the openqodex markers in a markdown file.
   // `replaces`: other sections we write that this one may replace when one
-  // is found exactly as written, recorded or not.
+  // is found exactly as written, recorded or not (sameSection).
   | { kind: "md-section"; agent: AgentId; label: string; path: string; section: string; inRepo: boolean; replaces?: string[] }
   // Rules merged into permissions.allow of a Claude Code settings file.
   | { kind: "allow-rules"; agent: AgentId; label: string; path: string; rules: string[]; inRepo: boolean }
@@ -61,19 +61,41 @@ export function previousInstructionSections(): string[] {
   return [
     template("previous", "instructions-0.5.0.md").trimEnd(),
     template("previous", "instructions-0.8.2.md").trimEnd(),
+    template("previous", "instructions-0.13.0.md").trimEnd(),
   ];
 }
 
+// The global sections earlier versions wrote, replaced in place where no
+// record names them.
+function previousGlobalSections(): string[] {
+  return [template("previous", "global-0.9.0.md").trimEnd()];
+}
+
+// Earlier team sections, each with `{{VERSION}}` for the version its pin
+// named: found as some version wrote it, init puts the current one in its
+// place, recorded or not (a teammate's checkout).
+function previousTeamSections(): string[] {
+  return ["db539cd9", "a3eb5158", "a33125e3", "c3152258", "49601e43"].map((id) => template("previous", `team-${id}.md`).trimEnd());
+}
+
+// Whether `existing` is the section `written`, where a `{{VERSION}}` in
+// `written` stands for the version the pin in `existing` names.
+export function sameSection(existing: string, written: string): boolean {
+  if (!written.includes("{{VERSION}}")) return existing === written;
+  const version = /openqodex@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(existing)?.[1];
+  return version !== undefined && written.replaceAll("{{VERSION}}", () => version) === existing;
+}
+
 // The marked section for each agent's global instruction file: one line
-// that names the skill. The global file is read in every repository, so it
-// carries only the trigger; the skill holds the procedure, and a repo's own
-// team section says how that repo reviews.
+// that names the skill, for a repository with an OpenQodex settings file
+// only. The global file is read in every repository, so it carries only the
+// trigger; the skill holds the procedure, and the repo's settings file its rules.
 export function globalSection(): string {
   return template("global-section.md").trimEnd();
 }
 
 function sectionTarget(agent: AgentId, label: string, path: string, inRepo: boolean): Target {
-  if (!inRepo) return { kind: "md-section", agent, label, path, section: globalSection(), inRepo };
+  if (!inRepo) return { kind: "md-section", agent, label, path, section: globalSection(), inRepo, replaces: previousGlobalSections() };
   return { kind: "md-section", agent, label, path, section: instructionSection(), inRepo, replaces: previousInstructionSections() };
 }
 
@@ -204,10 +226,12 @@ function fileTarget(agent: AgentId, label: string, path: string, content: string
 
 // The section for the repo's own CLAUDE.md and AGENTS.md, written by a
 // user-scope init so a teammate with nothing installed reviews too. It names
-// only the pinned npx command, never the skill or the launcher.
-// The heading every version of the team section opens with, after the start
-// marker: setUpAt tells it from an agent's own section by it (plan.ts).
-export const TEAM_HEADING = "## Review with OpenQodex before you push";
+// only the npx command, never the skill or the launcher, and no version, so
+// it never goes stale.
+// What every version of the team section opens with, after the start marker:
+// the heading of the earlier sections, then the current line. setUpAt
+// tells it from an agent's own section by them (plan.ts).
+export const TEAM_OPENINGS = ["## Review with OpenQodex before you push", "Before any push, review the change with OpenQodex:"];
 
 export function teamSection(version: string): string {
   return fill(template("repo", "team-section.md"), version).trimEnd();
@@ -215,9 +239,10 @@ export function teamSection(version: string): string {
 
 export function teamTargets(repoRoot: string, version: string): Target[] {
   const section = teamSection(version);
+  const replaces = [...previousTeamSections(), instructionSection(), ...previousInstructionSections()];
   return [
-    { kind: "md-section", agent: "claude-code", label: "team review section", path: join(repoRoot, "CLAUDE.md"), section, inRepo: true, replaces: [instructionSection(), ...previousInstructionSections()] },
-    { kind: "md-section", agent: "codex", label: "team review section", path: join(repoRoot, "AGENTS.md"), section, inRepo: true, replaces: [instructionSection(), ...previousInstructionSections()] },
+    { kind: "md-section", agent: "claude-code", label: "team review section", path: join(repoRoot, "CLAUDE.md"), section, inRepo: true, replaces },
+    { kind: "md-section", agent: "codex", label: "team review section", path: join(repoRoot, "AGENTS.md"), section, inRepo: true, replaces },
   ];
 }
 
