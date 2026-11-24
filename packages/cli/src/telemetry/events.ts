@@ -315,15 +315,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-// A version from text that states one: the first word shaped like 1.2 or
-// 1.2.3, with a v before it or a suffix such as -beta after it allowed,
-// rebuilt from its three numbers. "2.1.289 (Claude Code)" is 2.1.289. Text
-// with no such word, such as a path, is unknown: digits elsewhere in it,
-// such as a user id in a folder name, never leave.
+// A version from text that states one: the first word, split on spaces
+// only, that is a version on its own: 1.2 or 1.2.3, a v before it and a
+// -suffix of letters and digits after it allowed, rebuilt from its three
+// numbers. "2.1.289 (Claude Code)" is 2.1.289. Anything else is unknown, so
+// digits inside a path or in brackets, such as a user id, never leave.
 export function versionOf(raw: unknown): string {
   if (typeof raw !== "string") return "unknown";
-  for (const word of raw.slice(0, 200).split(/[\s(),;]+/)) {
-    const m = /^v?(\d{1,9})\.(\d{1,9})(?:\.(\d{1,9}))?(?:[-+][0-9A-Za-z.-]*)?$/.exec(word);
+  for (const word of raw.slice(0, 200).split(/\s+/)) {
+    const m = /^v?(\d{1,9})\.(\d{1,9})(?:\.(\d{1,9}))?(?:-[0-9A-Za-z]+)?$/.exec(word);
     if (m) return [m[1]!, m[2]!, m[3] ?? "0"].map((r) => String(Number(r))).join(".");
   }
   return "unknown";

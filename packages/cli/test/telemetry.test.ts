@@ -1359,7 +1359,8 @@ describe("values built from text (failure 4)", () => {
     expect(versionOf("codex-cli 0.46.0")).toBe("0.46.0");
     expect(versionOf("v1.2")).toBe("1.2.0");
     expect(versionOf("cursor-agent 2025.09.18-7ae6800")).toBe("2025.9.18");
-    for (const text of ["/Users/12345/.local/bin/claude", "/opt/claude-2.1.0/bin/claude", "build 42", "acmebuild (Claude Code)", "", 7]) expect(versionOf(text), String(text)).toBe("unknown");
+    expect(versionOf("claude 2.1.289 (Claude Code)")).toBe("2.1.289");
+    for (const text of ["/opt/(10.23)/claude", "/home/u12345/claude", "/Users/12345/.local/bin/claude", "/opt/claude-2.1.0/bin/claude", "build 42", "acmebuild (Claude Code)", "", 7]) expect(versionOf(text), String(text)).toBe("unknown");
   });
 
   it("the format is the one the command used, and the flags include every flag of the CLI", () => {
