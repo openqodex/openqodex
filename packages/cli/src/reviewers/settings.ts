@@ -14,7 +14,8 @@
 // ANTHROPIC_MODEL, which its reviewer already gets.
 // A file that cannot be used, or a value openqodex does not know, stops the
 // review with the file named, rather than reviewing with a setting the
-// developer did not choose. A key it does not know is named, with the known
+// developer did not choose. A bad reviewer_model or reviewer_effort stops
+// only a review Codex runs, and only when no flag replaces it. A key it does not know is named, with the known
 // key nearest to it, in a warning.
 import { OpenQodexError } from "@openqodex/core";
 import { openqodexHomeDir } from "../launcher.js";
@@ -37,19 +38,32 @@ export const REVIEWER_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 // `.`, `-`, `_`, `:`, `/`, never starting with `-`, so it cannot read as a flag.
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 
+// A value from the file or the command line, safe to print on one line: a
+// line break or other control character is escaped, and a value that is
+// not a string, number or boolean is named by its kind, never converted
+// (a mapping's own `toString` key would make String() throw).
+export function shownValue(value: unknown): string {
+  // oxlint-disable-next-line no-control-regex
+  if (typeof value === "string") return value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value);
+  return Array.isArray(value) ? "a list" : typeof value === "object" ? "a mapping" : typeof value;
+}
+
 // Null when `value` is a model id the reviewer can be given, else why not.
 export function modelProblem(value: unknown): string | null {
-  return typeof value === "string" && MODEL_ID.test(value) ? null : `must be a model id such as gpt-5.5, not ${String(value)}`;
+  return typeof value === "string" && MODEL_ID.test(value) ? null : `must be a model id such as gpt-5.5, not ${shownValue(value)}`;
 }
 
 // Null when `value` is a reasoning effort the reviewer can be given, else why not.
 export function effortProblem(value: unknown): string | null {
-  return typeof value === "string" && (REVIEWER_EFFORTS as readonly string[]).includes(value) ? null : `must be one of ${REVIEWER_EFFORTS.join(", ")}, not ${String(value)}`;
+  return typeof value === "string" && (REVIEWER_EFFORTS as readonly string[]).includes(value) ? null : `must be one of ${REVIEWER_EFFORTS.join(", ")}, not ${shownValue(value)}`;
 }
 
 // `warnings`: lines for the command to print, one per problem it can go on with.
-// `model` and `effort`: null leaves Codex's own default.
-export type ReviewerSettings = { reviewer: string; web: boolean; model: string | null; effort: string | null; warnings: string[] };
+// `model` and `effort`: null leaves Codex's own default, and is what a bad
+// value reads as. `modelProblem` and `effortProblem`: the line, naming the
+// file, that stops a Codex review when no flag replaces the bad value.
+export type ReviewerSettings = { reviewer: string; web: boolean; model: string | null; effort: string | null; modelProblem: string | null; effortProblem: string | null; warnings: string[] };
 
 export function readReviewerSettings(home: string = openqodexHomeDir()): ReviewerSettings {
   const config = readUserConfig(home);
@@ -64,10 +78,16 @@ export function readReviewerSettings(home: string = openqodexHomeDir()): Reviewe
   }
   const model = config.values.reviewer_model ?? null;
   const modelBad = model === null ? null : modelProblem(model);
-  if (modelBad !== null) throw new OpenQodexError(`${config.path}: reviewer_model ${modelBad}`);
   const effort = config.values.reviewer_effort ?? null;
   const effortBad = effort === null ? null : effortProblem(effort);
-  if (effortBad !== null) throw new OpenQodexError(`${config.path}: reviewer_effort ${effortBad}`);
   const unknown = unknownKeysWarning(config);
-  return { reviewer, web: web === "on" || web === true, model: model as string | null, effort: effort as string | null, warnings: unknown === null ? [] : [unknown] };
+  return {
+    reviewer,
+    web: web === "on" || web === true,
+    model: modelBad === null ? (model as string | null) : null,
+    effort: effortBad === null ? (effort as string | null) : null,
+    modelProblem: modelBad === null ? null : `${config.path}: reviewer_model ${modelBad}`,
+    effortProblem: effortBad === null ? null : `${config.path}: reviewer_effort ${effortBad}`,
+    warnings: unknown === null ? [] : [unknown],
+  };
 }

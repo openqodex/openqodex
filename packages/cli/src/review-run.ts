@@ -218,6 +218,10 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   const web = o.web ?? settings.web;
   const reviewerModel = o.reviewerModel ?? settings.model;
   const reviewerEffort = o.reviewerEffort ?? settings.effort;
+  // A bad file value a flag replaces is never used; one it does not stops
+  // the review once Codex is chosen to run it.
+  const tuningProblems = [o.reviewerModel === undefined ? settings.modelProblem : null, o.reviewerEffort === undefined ? settings.effortProblem : null].filter((p) => p !== null);
+  const reviewerTuningError = tuningProblems.length > 0 ? tuningProblems.join("; ") : null;
   const parts = laptopParts({ ...o, instructionsRef }, repoRoot, config);
   const choice = o.reviewer ?? settings.reviewer;
   // An unknown reviewer name stops the run before the scanner lists are read.
@@ -376,7 +380,7 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   let code: number = EXIT_OK;
   try {
     await runReviewCore(
-      { repoRoot, config, scope: o.scope, all: o.all, target: o.target, overlay: o.overlay, only, skip, noGraph: o.noGraph, reviewer: choice, web, reviewerModel, reviewerEffort, timeoutMs: o.timeoutMs, timedOut: timedOutLine(o.timeoutMs), runtimeVersion: __OPENQODEX_VERSION__ },
+      { repoRoot, config, scope: o.scope, all: o.all, target: o.target, overlay: o.overlay, only, skip, noGraph: o.noGraph, reviewer: choice, web, reviewerModel, reviewerEffort, reviewerTuningError, timeoutMs: o.timeoutMs, timedOut: timedOutLine(o.timeoutMs), runtimeVersion: __OPENQODEX_VERSION__ },
       {
         ...parts,
         clock,

@@ -175,6 +175,10 @@ export type ReviewInputs = {
   // Codex's own default. Another agent's reviewer is not given them.
   reviewerModel?: string | null;
   reviewerEffort?: string | null;
+  // Why the Codex model or effort the developer set cannot be used, in one
+  // line naming where it was set: the review stops when Codex is chosen,
+  // and goes on with another reviewer, which never takes them.
+  reviewerTuningError?: string | null;
   // The deadline for the scan, the graph and every reviewer turn, fixed
   // this long after the reviewer is chosen and before anything is scanned.
   timeoutMs: number;
@@ -486,6 +490,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
   const clock = deps.clock ?? phaseClock(deps.now);
   clock.enter("reviewer");
   const chosen: Chosen = deps.model ? { model: deps.model } : await chooseReviewer(inputs.reviewer, deps.drivers, repoRoot);
+  if ("driver" in chosen && chosen.driver.name === "codex" && inputs.reviewerTuningError) throw new OpenQodexError(inputs.reviewerTuningError);
   const deadline = inputs.deadlineAt ?? deps.now() + inputs.timeoutMs;
 
   const changes = new Set<Change>();
@@ -632,8 +637,8 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     const traced = agent ? agent.driver.traced : true;
     // The model and the effort go to Codex only: one value cannot name a
     // model of both agents, and `auto` picks either.
-    const tuning = agent?.driver.name === "codex" ? { model: inputs.reviewerModel ?? null, effort: inputs.reviewerEffort ?? null } : { model: null, effort: null };
-    const tuned = { ...(tuning.model !== null ? { model: tuning.model } : {}), ...(tuning.effort !== null ? { effort: tuning.effort } : {}) };
+    const codex = agent?.driver.name === "codex";
+    const tuned = { ...(codex && inputs.reviewerModel ? { model: inputs.reviewerModel } : {}), ...(codex && inputs.reviewerEffort ? { effort: inputs.reviewerEffort } : {}) };
     // The driver's per-run proof of its boundary (Codex's sandbox probe),
     // on the redacted snapshot, before its hash is taken.
     clock.enter("reviewer");
@@ -683,7 +688,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
           if (stopped) throw new Error("the review stopped");
           const modelSessionForRole = model ? modelSession({ reviewer: model.reviewer, role, budget: model.budget, box, now: deps.now, deadline, shared, budgetState }) : null;
           if (modelSessionForRole) modelSessions.push(modelSessionForRole);
-          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, ...tuning, secrets: p.secrets }), { driver: agent.driver.name, role, now: deps.now }) : null;
+          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, ...tuned, secrets: p.secrets }), { driver: agent.driver.name, role, now: deps.now }) : null;
           const opened = register(modelSessionForRole ?? metered!.session);
           return {
             send: (text) => opened.send(text),
@@ -763,7 +768,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       deps.onEvent({ type: "started", driver: "model", version: model.reviewer.model, pid: null });
       say(`Reviewer: model ${model.reviewer.model} started; this takes several minutes`);
     } else if (notStarted === null && agent) {
-      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, ...tuning, secrets: p.secrets }), { driver: agent.driver.name, now: deps.now });
+      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, ...tuned, secrets: p.secrets }), { driver: agent.driver.name, now: deps.now });
       session = register(metered.session);
       pid = metered.session.pid;
       deps.onEvent({ type: "started", driver: agent.driver.name, version: agent.version, pid });

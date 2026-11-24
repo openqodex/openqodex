@@ -76,8 +76,15 @@ describe("one reader for the user config", () => {
     writeFileSync(config(s), "reviewer_effort: extreme\n");
     const bad = launch(s, ["doctor"]);
     expect(bad.stdout).toMatch(/^ {2}reviewer_model +Codex's own \(default\)$/m);
-    expect(bad.stdout).toMatch(/^ {2}reviewer_effort +extreme \(config\.yaml: not low, medium, high, xhigh, a review stops\)$/m);
+    expect(bad.stdout).toMatch(/^ {2}reviewer_effort +extreme \(config\.yaml: not low, medium, high, xhigh, a Codex review stops\)$/m);
     expect(bad.stdout).not.toMatch(/unknown key reviewer_/);
+    // A mapping whose own toString key breaks String(), and a value with a
+    // line break, each print on their own one row.
+    writeFileSync(config(s), "reviewer_model: {toString: x}\nreviewer_effort: \"high\\nlow\"\n");
+    const odd = launch(s, ["doctor"]);
+    expect(odd.status, odd.stderr).not.toBe(2);
+    expect(odd.stdout).toMatch(/^ {2}reviewer_model +a mapping \(config\.yaml: not a model id, a Codex review stops\)$/m);
+    expect(odd.stdout).toMatch(/^ {2}reviewer_effort +high\\u000alow \(config\.yaml: not low, medium, high, xhigh, a Codex review stops\)$/m);
   });
 
   it("an environment switch is named as the source of update off (failure 4)", () => {
