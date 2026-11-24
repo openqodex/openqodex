@@ -7,7 +7,8 @@
 //    refuse each before the held-out access log gains a line.
 // 4. An npm release run reads golden comments before its access is logged: selection logs the release, the
 //    package and its integrity first, and the truth is read only after.
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
@@ -19,15 +20,35 @@ afterEach(() => vi.unstubAllEnvs());
 afterAll(removeTempDirs);
 
 const AT_ARGS = "--release requires a comparison's local build";
-const run = (...extra) => {
-  const r = spawnSync(process.execPath, [join(benchRoot, "run.mjs"), "--release", "compare-2026-10", "--suite", "martian", "--split", "test", "--purpose", "diagnostic", "--reviewers", "claude", "--graph", "on", "--web", "off", "--repeat", "3", "--max-usd", "1", "--max-minutes", "60", "--dry-run", ...extra], { encoding: "utf8" });
+// A cache that already holds a small openqodex 9.9.9 tarball and the registry's answer for it, so the run never
+// touches the real bench cache or the network to fetch it.
+const cacheWithPackage = () => {
+  const cache = tempDir("oq-release-package-run-cache-");
+  const src = tempDir("oq-release-package-src-");
+  mkdirSync(join(src, "package", "dist"), { recursive: true });
+  writeFileSync(join(src, "package", "package.json"), JSON.stringify({ name: "openqodex", version: "9.9.9" }));
+  writeFileSync(join(src, "package", "dist", "bin.js"), "console.log('bin');\n");
+  writeFileSync(join(src, "package", "dist", "lib.js"), "export const x = 1;\n");
+  const dir = join(cache, "packages", "npm");
+  mkdirSync(dir, { recursive: true });
+  execFileSync("tar", ["-czf", join(dir, "openqodex-9.9.9.tgz"), "-C", src, "package"], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
+  const integrity = `sha512-${createHash("sha512").update(readFileSync(join(dir, "openqodex-9.9.9.tgz"))).digest("base64")}`;
+  writeFileSync(join(dir, "openqodex-9.9.9.json"), JSON.stringify({ name: "openqodex", version: "9.9.9", tarball: "https://registry.npmjs.org/openqodex/-/openqodex-9.9.9.tgz", integrity, fetchedAt: "2026-11-01T00:00:00.000Z" }));
+  return cache;
+};
+const run = (cache, release, ...extra) => {
+  const r = spawnSync(process.execPath, [join(benchRoot, "run.mjs"), "--release", release, "--suite", "martian", "--split", "test", "--purpose", "diagnostic", "--reviewers", "claude", "--graph", "on", "--web", "off", "--repeat", "3", "--max-usd", "1", "--max-minutes", "60", "--dry-run", ...extra], { encoding: "utf8", env: { ...process.env, OPENQODEX_BENCH_CACHE: cache } });
   return `${r.stdout}${r.stderr}`;
 };
 
 it("a release run with --package npm:<version> passes the argument check, and a file or smoke package does not", () => {
-  expect(run("--package", "npm:0.23.0"), "npm:<version> was refused at the argument check").not.toContain(AT_ARGS);
-  expect(run("--package", "file:/nowhere/openqodex-0.23.0.tgz"), "a packed file was admitted under --release").toContain(AT_ARGS);
-  expect(run("--package", "npm:0.23.0", "--smoke"), "a smoke run was admitted under --release").toContain("--smoke runs development cases only");
+  const cache = cacheWithPackage();
+  // The package is unpacked from the temp cache, then the registry is asked for it: that is the next refusal,
+  // whether the registry answers 404 or cannot be reached.
+  expect(run(cache, "9.9.9", "--package", "npm:9.9.9"), "npm:<version> did not reach the registry check").toContain("refused: the npm registry (https://registry.npmjs.org) could not confirm openqodex@9.9.9");
+  expect(existsSync(join(cache, "packages", "openqodex-" + createHash("sha256").update(readFileSync(join(cache, "packages", "npm", "openqodex-9.9.9.tgz"))).digest("hex").slice(0, 16), "record.json")), "the run did not use the temp cache").toBe(true);
+  expect(run(cache, "9.9.9", "--package", "file:/nowhere/openqodex-9.9.9.tgz"), "a packed file was admitted under --release").toContain(AT_ARGS);
+  expect(run(cache, "9.9.9", "--package", "npm:9.9.9", "--smoke"), "a smoke run was admitted under --release").toContain("--smoke runs development cases only");
 });
 
 // The package record run.mjs makes of npm:0.23.0 (lib/package.mjs preparePackage), and the registry's answer for it.
