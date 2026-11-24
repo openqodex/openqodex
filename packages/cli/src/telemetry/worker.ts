@@ -22,13 +22,15 @@ const GIT_MS = 1500;
 // The top of the work tree git resolves for the folder, with the command's
 // own environment: GIT_DIR, GIT_WORK_TREE or core.worktree can put it
 // outside the folder's parents, and the command then works on it. Null
-// outside a repository; "unknown" when git did not answer in time.
+// only when git says the folder is in no repository; "unknown" for any
+// other failure (git missing, killed, refused, slow), and then nothing is
+// sent. Only git's closing newline comes off: a path may end in spaces.
 function workTree(cwd: string, env: NodeJS.ProcessEnv): Promise<string | null | "unknown"> {
   return new Promise((done) => {
-    execFile("git", ["rev-parse", "--show-toplevel"], { cwd, env: { ...env, GIT_OPTIONAL_LOCKS: "0" }, timeout: GIT_MS, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
-      if (error !== null) return done(error.killed === true ? "unknown" : null);
-      const line = stdout.trim();
-      done(line === "" ? null : line);
+    execFile("git", ["rev-parse", "--show-toplevel"], { cwd, env: { ...env, GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C", LANGUAGE: "C" }, timeout: GIT_MS, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+      if (error !== null) return done(error.killed !== true && error.code === 128 && /not a git repository/i.test(stderr) ? null : "unknown");
+      const line = stdout.replace(/\r?\n$/, "");
+      done(line === "" ? "unknown" : line);
     });
   });
 }
@@ -38,7 +40,8 @@ function workerContext(raw: string | undefined): WorkerContext | null {
   try {
     const c = JSON.parse(raw) as Partial<WorkerContext>;
     if (typeof c.cwd !== "string" || typeof c.offline !== "boolean" || (c.config !== undefined && typeof c.config !== "string")) return null;
-    return { cwd: c.cwd, offline: c.offline, mayCreate: c.mayCreate === true, ...(c.config !== undefined ? { config: c.config } : {}) };
+    if (c.also !== undefined && !(Array.isArray(c.also) && c.also.every((d) => typeof d === "string"))) return null;
+    return { cwd: c.cwd, offline: c.offline, mayCreate: c.mayCreate === true, ...(c.config !== undefined ? { config: c.config } : {}), ...(c.also !== undefined ? { also: c.also } : {}) };
   } catch {
     return null;
   }
@@ -62,6 +65,7 @@ export async function runTelemetryWorker(env: NodeJS.ProcessEnv = process.env): 
   // parents; its own switch counts too.
   const tree = await workTree(ctx.cwd, env);
   if (tree === "unknown" || (tree !== null && !telemetrySwitch(tree, ctx.config).on)) return;
+  for (const dir of ctx.also ?? []) if (!telemetrySwitch(dir).on) return;
   const target = telemetryTarget(env);
   if (target === null) return;
   // install.first_use is made here only, by the worker that made the id.

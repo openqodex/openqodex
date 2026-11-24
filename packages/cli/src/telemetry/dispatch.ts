@@ -19,9 +19,10 @@ import { commandProps, commonProps, validate, type EventName } from "./events.js
 export const MAX_EVENTS = 8;
 export const MAX_BYTES = 16_000;
 
-// What the worker is handed besides the events: the policy context, and
+// What the worker is handed besides the events: the policy context, the
+// other folders the command worked in (the demo's new repository), and
 // whether this command may make the install id.
-export type WorkerContext = PolicyContext & { mayCreate: boolean };
+export type WorkerContext = PolicyContext & { mayCreate: boolean; also?: string[] };
 
 // The distinct id the command validates with; the worker puts the hash of
 // the install id in its place. It has the same length, so the size check
@@ -41,6 +42,8 @@ type Run = {
   // A finalize another openqodex started: it sends its review event only.
   handedOff: boolean;
   sub?: string;
+  // Folders the command worked in besides its own: each one's switch counts.
+  also: string[];
   commandSent: boolean;
 };
 
@@ -61,13 +64,19 @@ export function begin(command: string, args: string[], started = Date.now()): vo
   // Only a review's own flag: words after `--` are a path or report text.
   const flags = args.includes("--") ? args.slice(0, args.indexOf("--")) : args;
   const handedOff = command === "review" && flags.includes(HANDED_OFF);
-  run = { command, args, started, silent: silentCommand(command, args), mayCreate: command !== "init" && command !== "hook" && !handedOff, handedOff, commandSent: false };
+  run = { command, args, started, silent: silentCommand(command, args), mayCreate: command !== "init" && command !== "hook" && !handedOff, handedOff, also: [], commandSent: false };
   pending = [];
 }
 
 // init may create the id once the developer agreed to the install.
 export function permitId(): void {
   if (run !== null) run.mayCreate = true;
+}
+
+// A folder the command works in that its arguments do not name, such as
+// the repository demo makes: the worker checks its switch too.
+export function noteFolder(dir: string): void {
+  if (run !== null) run.also.push(resolve(dir));
 }
 
 // The sub-command word, for a command whose arguments alone do not say it.
@@ -144,7 +153,7 @@ export function dispatch(): void {
     const entry = process.argv[1];
     if (entry === undefined) return;
     const home = openqodexHome();
-    const worker: WorkerContext = { ...ctx, mayCreate: r.mayCreate };
+    const worker: WorkerContext = { ...ctx, mayCreate: r.mayCreate, ...(r.also.length > 0 ? { also: r.also } : {}) };
     const child = spawn(process.execPath, [resolve(entry), "__telemetry"], {
       cwd: parse(home).root || "/",
       detached: true,

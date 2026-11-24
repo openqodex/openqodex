@@ -527,18 +527,27 @@ function planUpdateFilesRemoval(home: string, guard: Guard): Action[] {
   const path = statePath(home);
   if (existsSync(path)) actions.push({ verb: "remove", path, note: "the update check's state", apply: () => guard.remove(path) });
   // The usage data's install id: a new install is a new id. Only the id
-  // file goes, and its folder only when nothing else is left in it.
+  // file goes, and its folder only when nothing else is left in it. A
+  // link at either, or a file where the folder should be, is not ours:
+  // it is left alone, and the strict home guard refuses any link on the way.
   const telemetry = telemetryDir(home);
   const id = idPath(home);
-  const idStat = lstatSync(id, { throwIfNoEntry: false });
-  if (idStat !== undefined && !idStat.isDirectory()) {
+  const lstatOf = (path: string) => {
+    try {
+      return lstatSync(path, { throwIfNoEntry: false });
+    } catch {
+      return undefined;
+    }
+  };
+  if (lstatOf(telemetry)?.isDirectory() === true && lstatOf(id)?.isFile() === true) {
+    const strict = homeGuard(home, true);
     actions.push({
       verb: "remove",
       path: id,
       note: "the usage data's install id",
       apply: () => {
-        guard.remove(id);
-        guard.removeEmptyFolder(telemetry);
+        strict.remove(id);
+        strict.removeEmptyFolder(telemetry);
       },
     });
   }

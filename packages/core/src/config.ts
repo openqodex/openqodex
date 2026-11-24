@@ -705,7 +705,11 @@ export function telemetrySwitch(dir: string, configFlag?: string): { on: boolean
     } catch {
       return `${label} does not parse`;
     }
-    if (!isRecord(data) || !("openqodex_telemetry" in data)) return null;
+    // An empty file says nothing; anything else that is not a mapping is
+    // a file the command refuses, and its switch cannot be read: off.
+    if (data === null || data === undefined) return null;
+    if (!isRecord(data)) return `${label} is not a mapping`;
+    if (!("openqodex_telemetry" in data)) return null;
     return telemetryValue(data.openqodex_telemetry) === "on" ? null : `openqodex_telemetry in ${label}`;
   };
   const readAt = (folder: string, name: string): string | null => {
@@ -715,19 +719,23 @@ export function telemetrySwitch(dir: string, configFlag?: string): { on: boolean
       return `${name} cannot be read`;
     }
   };
-  // The real folder, so a link into an opted-out repository finds its config.
-  let start = resolve(dir);
+  // Both the folder as given and its real place, so a link into an
+  // opted-out repository, and a link that sits inside one, both count.
+  const given = resolve(dir);
+  let real = given;
   try {
-    start = realpathSync(start);
+    real = realpathSync(given);
   } catch {
     // A folder that cannot be resolved is walked as given.
   }
   const folders: string[] = [];
-  for (let at = start; ; ) {
-    folders.push(at);
-    const up = dirname(at);
-    if (up === at) break;
-    at = up;
+  for (const start of [real, given]) {
+    for (let at = start; ; ) {
+      if (!folders.includes(at)) folders.push(at);
+      const up = dirname(at);
+      if (up === at) break;
+      at = up;
+    }
   }
   for (const folder of folders) {
     const why = readAt(folder, CONFIG_FILE) ?? readAt(folder, LEGACY_CONFIG_FILE);

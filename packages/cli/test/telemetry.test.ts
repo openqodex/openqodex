@@ -59,9 +59,12 @@ const VERSION = (JSON.parse(readFileSync(join(cliRoot, "package.json"), "utf8"))
 // The variables that point git at another repository: a test run from a git
 // hook inherits them, and git would then work on the caller's repository.
 const GIT_OVERRIDES = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"];
+// Config a caller's git passes down (git -c, GIT_CONFIG_COUNT): a hooks path
+// there would run the caller's hooks in a fixture.
+const INHERITED_GIT_CONFIG = /^GIT_CONFIG_(PARAMETERS|COUNT|KEY_\d+|VALUE_\d+)$/;
 const gitEnv = (): NodeJS.ProcessEnv => {
   const e: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
-  for (const key of GIT_OVERRIDES) delete e[key];
+  for (const key of Object.keys(e)) if (GIT_OVERRIDES.includes(key) || INHERITED_GIT_CONFIG.test(key)) delete e[key];
   return e;
 };
 
@@ -76,8 +79,9 @@ const ANNOUNCED = /anonymous|sends usage data/i;
 const SETTLE_MS = 4500;
 
 const SQL = "CREATE FUNCTION public.do_thing() RETURNS void\nLANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN END $$;\n";
-// No download from a test: the two scanners a text file calls for are off.
-const BASE = "scanners:\n  disable: [semgrep, gitleaks]\n";
+// No download from a test: the two scanners a text file calls for, and the
+// two downloaded SQL scanners init would fetch for the SQL file, are off.
+const BASE = "scanners:\n  disable: [semgrep, gitleaks, squawk, sqlfluff]\n";
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
@@ -189,7 +193,7 @@ function seedId(b: Box): void {
 // left out, so no run can reach the real one.
 function onEnv(b: Box, host: string, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of STRIP) delete e[key];
+  for (const key of Object.keys(e)) if (STRIP.includes(key) || INHERITED_GIT_CONFIG.test(key)) delete e[key];
   Object.assign(e, { HOME: b.home, OPENQODEX_HOME: b.oqHome, OPENQODEX_AUTO_UPDATE: "0", OPENQODEX_TELEMETRY: "1", OPENQODEX_TELEMETRY_HOST: host, PATH: agentFreePath(), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" });
   for (const [key, value] of Object.entries(extra)) {
     if (value === undefined) delete e[key];
@@ -343,6 +347,7 @@ describe("a switch that is off (failure 1)", () => {
     },
     { name: "the value maybe", prepare: project("openqodex_telemetry: maybe\n") },
     { name: "a list as the value", prepare: project("openqodex_telemetry: [1]\n") },
+    { name: "a project config that is a list holding the key", prepare: (b) => writeFileSync(join(b.repo, ".openqodex/config.yaml"), "- openqodex_telemetry: 0\n") },
     { name: "a project config that is not YAML", prepare: (b) => writeFileSync(join(b.repo, ".openqodex/config.yaml"), "scanners: [\n") },
     {
       name: "the user config key",
@@ -441,6 +446,57 @@ describe("a switch that is off (failure 1)", () => {
     await sleep(SETTLE_MS);
     expect(off.hits).toEqual([]);
   }, 60_000);
+
+  it("demo into a folder inside a project that is off sends nothing; into one that is on, it sends", async () => {
+    const run = async (value: string): Promise<Server> => {
+      const server = await capture();
+      const b = box();
+      seedId(b);
+      const project = join(b.root, "project");
+      mkdirSync(project);
+      writeFileSync(join(project, ".openqodex.yaml"), `openqodex_telemetry: ${value}\n`);
+      // Started in a repository that is on, so only the demo folder's switch can stop it.
+      const r = await runCli(["demo", join(project, "demo"), "--no-install"], { cwd: b.repo, env: onEnv(b, server.url) });
+      expect(r.status, r.stderr).toBe(0);
+      return server;
+    };
+    const off = await run("0");
+    const on = await run("1");
+    await waitFor(() => on.hits.length === 1, 10_000, "the control's request");
+    await sleep(SETTLE_MS);
+    expect(off.hits).toEqual([]);
+  }, 120_000);
+
+  it.skipIf(process.platform === "win32")("a git that fails for any reason but no repository means nothing is sent", async () => {
+    const server = await capture();
+    const b = box();
+    seedId(b);
+    const bin = tempDir("oq-tel-git-");
+    writeFileSync(join(bin, "git"), "#!/bin/sh\necho 'fatal: something went wrong' >&2\nexit 1\n");
+    chmodSync(join(bin, "git"), 0o755);
+    const r = await runCli(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { PATH: `${bin}${delimiter}${agentFreePath()}`, OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
+    expect(r.status).toBe(0);
+    expect(server.hits).toEqual([]);
+    // The control: outside any repository, git says so, and the worker sends.
+    const outside = realpathSync(tempDir("oq-tel-norepo-"));
+    const c = await runCli(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: outside, offline: false }) }) });
+    expect(c.status).toBe(0);
+    expect(server.hits).toHaveLength(1);
+  }, 30_000);
+
+  it("--cwd as a link that sits inside a folder that is off sends nothing", async () => {
+    const server = await capture();
+    const b = box();
+    seedId(b);
+    const off = join(b.root, "off");
+    mkdirSync(off);
+    writeFileSync(join(off, ".openqodex.yaml"), "openqodex_telemetry: 0\n");
+    symlinkSync(b.repo, join(off, "link"));
+    const r = await runCli([...SCAN, "--cwd", join(off, "link")], { cwd: b.root, env: onEnv(b, server.url) });
+    expect(r.status, r.stderr).toBe(0);
+    await sleep(SETTLE_MS);
+    expect(server.hits).toEqual([]);
+  }, 30_000);
 
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("a --config the command cannot reach turns it off", async () => {
     const server = await capture();
@@ -908,6 +964,32 @@ describe("dry runs, uninstall and a declined init (failure 8)", () => {
     expect(uk.status, uk.stderr).toBe(0);
     expect(existsSync(join(keep.oqHome, "telemetry", "id"))).toBe(false);
     expect(readFileSync(join(keep.oqHome, "telemetry", "notes.txt"), "utf8")).toBe("mine\n");
+
+    // A telemetry folder that is a link is not the uninstall's: what it points at stays.
+    const linked = box();
+    const linkedServer = await capture();
+    quiet.push(["init --uninstall with the telemetry folder a link", linkedServer]);
+    const linkedInstalled = await runCli([...INSTALL, "--agent", "claude-code"], { cwd: linked.repo, env: onEnv(linked, linkedServer.url, { OPENQODEX_TELEMETRY: "0" }) });
+    expect(linkedInstalled.status, linkedInstalled.stderr).toBe(0);
+    const target = join(linked.home, "elsewhere");
+    mkdirSync(target);
+    writeFileSync(join(target, "id"), "not openqodex's\n");
+    symlinkSync(target, join(linked.oqHome, "telemetry"));
+    const ul = await runCli(["init", "--uninstall", "--yes"], { cwd: linked.repo, env: onEnv(linked, linkedServer.url) });
+    expect(ul.status, ul.stderr).toBe(0);
+    expect(readFileSync(join(target, "id"), "utf8")).toBe("not openqodex's\n");
+
+    // A file where the telemetry folder should be: the uninstall still runs.
+    const flat = box();
+    const flatServer = await capture();
+    quiet.push(["init --uninstall with a file in place of the telemetry folder", flatServer]);
+    const flatInstalled = await runCli([...INSTALL, "--agent", "claude-code"], { cwd: flat.repo, env: onEnv(flat, flatServer.url, { OPENQODEX_TELEMETRY: "0" }) });
+    expect(flatInstalled.status, flatInstalled.stderr).toBe(0);
+    writeFileSync(join(flat.oqHome, "telemetry"), "a file\n");
+    const uf = await runCli(["init", "--uninstall", "--yes"], { cwd: flat.repo, env: onEnv(flat, flatServer.url) });
+    expect(uf.status, uf.stderr).toBe(0);
+    expect(existsSync(join(flat.oqHome, "bin", "openqodex"))).toBe(false);
+    expect(readFileSync(join(flat.oqHome, "telemetry"), "utf8")).toBe("a file\n");
 
     const one = box();
     const oneServer = await capture();

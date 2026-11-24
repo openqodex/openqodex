@@ -126,11 +126,11 @@ When a command ends, it starts a separate background process and gives it the ev
 
 ## Turn it off
 
-- For a repository: add `openqodex_telemetry: 0` to `.openqodex/config.yaml`. Commit it, and it is off for everyone who works there. It counts in the folder the command runs in, in every parent folder, and in the repository git works on. That repository can be elsewhere when `GIT_DIR` or `GIT_WORK_TREE` is set.
+- For a repository: add `openqodex_telemetry: 0` to `.openqodex/config.yaml`. Commit it, and it is off for everyone who works there. It counts in the folder the command runs in, in every parent folder, and in the repository git works on. That repository can be elsewhere when `GIT_DIR` or `GIT_WORK_TREE` is set. If git cannot say which repository that is, nothing is sent. A folder reached through a link counts with the parent folders of both the link and its target. For `openqodex demo`, the folder it creates counts too.
 - For your machine: set `OPENQODEX_TELEMETRY=0` or `DO_NOT_TRACK=1` in your shell profile. This works with every version of OpenQodex.
 - For your machine, in a file: add `openqodex_telemetry: 0` to `~/.openqodex/config.yaml`. An OpenQodex older than 0.25.0 that reads the same file does not know the key. It prints a warning and pauses its own automatic updates.
 
-The key takes these values. `0`, `false` and `off` turn usage data off. `1`, `true` and `on` leave it on. Any other value turns it off. In a project's config file, OpenQodex also prints a warning. The variable `OPENQODEX_TELEMETRY` works the same way: any value other than `1`, `true` or `on` turns usage data off.
+The key takes these values. `0`, `false` and `off` turn usage data off. `1`, `true` and `on` leave it on. Any other value turns it off. A config file that is not a list of keys and values turns it off too. In a project's config file, OpenQodex also prints a warning. The variable `OPENQODEX_TELEMETRY` works the same way: any value other than `1`, `true` or `on` turns usage data off.
 
 When it is off, nothing is sent and no id is created. `openqodex doctor` shows whether it is on.
 
