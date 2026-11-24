@@ -22,10 +22,11 @@
 // osv-scanner reach theirs when ReviewBench allows them, else they fail alone.
 //
 // Exit 0 with a findings file, or non-zero with none, which ReviewBench
-// retries. A review the reviewer never answered always fails. One it
-// answered that ended incomplete (a report then holds no finding) fails the
-// first attempt and is written empty from the second, so one pull request
-// the review cannot finish costs that pull request, not the whole run.
+// retries. Every review that does not finish (the deadline stopped it with
+// no report, openqodex exited outside 0, 1 and 2, the reviewer never
+// answered, or it answered and ended incomplete) fails the first attempt
+// and is written empty from the second, so one pull request the review
+// cannot finish costs that pull request, not the whole run.
 // The failure list is in benchmark/test/reviewbench-entry.test.mjs.
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { chownSync, closeSync, constants, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -136,8 +137,12 @@ export function outputOf(contract, pr, findings) {
  */
 export function decide({ code, report, usage, attempt, agent }) {
   if (code === 0 && report === null) return { write: [], note: "nothing to review: the change has no file the review reads" };
-  if (report === null) return { fail: code === null ? "the review was stopped at its deadline and wrote no report" : `openqodex exited ${code} and wrote no report` };
-  if (code !== 0 && code !== 1 && code !== 2) return { fail: `openqodex exited ${code}` };
+  // A failure ReviewBench retries: the first attempt fails so a retry happens;
+  // from the second the pull request is written with no finding, because one
+  // pull request that never succeeds fails the whole run.
+  const failing = (reason) => (attempt < 2 ? { fail: reason } : { write: [], note: `${reason}; written with no finding on attempt ${attempt}` });
+  if (report === null) return failing(code === null ? "the review was stopped at its deadline and wrote no report" : `openqodex exited ${code} and wrote no report`);
+  if (code !== 0 && code !== 1 && code !== 2) return failing(`openqodex exited ${code}`);
   const status = report.completion?.status ?? null;
   if (status === "complete") {
     const { findings, dropped } = findingsOf(report, agent);
@@ -145,7 +150,7 @@ export function decide({ code, report, usage, attempt, agent }) {
   }
   const missing = (report.completion?.missing ?? []).slice(0, 3).join("; ") || "no completion record";
   const answered = (usage?.calls ?? []).some((c) => c.outcome === "ok");
-  if (!answered) return { fail: `the reviewer never answered: ${missing}` };
+  if (!answered) return failing(`the reviewer never answered: ${missing}`);
   if (attempt < 2) return { fail: `the review ended incomplete, so it holds no finding: ${missing}` };
   return { write: [], note: `the review ended incomplete again on attempt ${attempt}; written with no finding: ${missing}` };
 }
