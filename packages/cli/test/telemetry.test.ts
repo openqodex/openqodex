@@ -598,7 +598,7 @@ describe("the first run (failure 3)", () => {
 
 // Every property name, written here; it must equal the docs table and the code.
 const PROPS = [
-  "installId", "installAgeDays", "$process_person_profile", "$geoip_disable", "$lib", "openqodexVersion", "platform", "arch", "os", "osMajor", "nodeMajor", "wsl", "hostAgent", "runner", "tty",
+  "installId", "installAgeDays", "$process_person_profile", "$lib", "openqodexVersion", "platform", "arch", "os", "osMajor", "nodeMajor", "wsl", "hostAgent", "runner", "tty",
   "command", "sub", "exitCode", "durationMs", "threw", "interrupted", "errorKind", "errorClass", "errorCode", "errorLine", "errorColumn", "flags", "format",
   "ended", "agents", "scope", "hook", "mcp", "inRepo", "interactive", "result", "reviewerReady", "skipReason",
   "mode", "fromInit", "cleanupFailed", "verdict", "nothing", "demo", "reviewer", "reviewerVersion", "modelRequested", "modelReported", "effortRequested", "reviewersPassed", "staged", "web",
@@ -657,7 +657,6 @@ const MODEL_VALUES = new Set([...PUBLIC_MODELS, "other", "default", "unknown", "
 function badValue(name: string, v: unknown): string | null {
   const count = (x: unknown) => typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= 2_147_483_647;
   if (name === "$process_person_profile") return v === false ? null : "must be false";
-  if (name === "$geoip_disable") return v === true ? null : "must be true";
   if (name === "installId") return typeof v === "string" && /^[0-9a-f]{64}$/.test(v) ? null : "not a hash";
   if (name === "exitCode") return [0, 1, 2, 130, 143].includes(v as number) ? null : "not an exit code";
   if (name === "openqodexVersion" || name === "reviewerVersion") return typeof v === "string" && (v === "unknown" || /^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(v)) ? null : "not a version";
@@ -699,7 +698,8 @@ function checkPayloads(server: Server, canaries: string[]): void {
       expect(e.distinct_id).toBe(e.properties.installId);
       expect(e.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
       expect(e.properties.$process_person_profile).toBe(false);
-      expect(e.properties.$geoip_disable).toBe(true);
+      // PostHog works out the location from the request; the client never sends an address or a location.
+      expect(Object.keys(e.properties).filter((k) => k === "$ip" || k.startsWith("$geoip"))).toEqual([]);
       for (const [name, value] of Object.entries(e.properties)) {
         expect(PROPS, `${e.event} property ${name}`).toContain(name);
         expect(badValue(name, value), `${e.event} ${name} = ${JSON.stringify(value)}`).toBeNull();

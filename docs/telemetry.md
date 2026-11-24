@@ -25,7 +25,6 @@ Each event also carries a random event id and the time it happened, to the milli
 | `installId` | A hash of the random install id. |
 | `installAgeDays` | Whole days since the install id was made. |
 | `$process_person_profile` | Always `false`: PostHog makes no person profile. |
-| `$geoip_disable` | Always `true`: PostHog works out no location. |
 | `$lib` | Always `openqodex`. |
 | `openqodexVersion` | The OpenQodex version. |
 | `platform`, `arch` | Node's name for the operating system and the processor type. |
@@ -118,7 +117,7 @@ The background process creates a random id in `~/.openqodex/telemetry/id` the fi
 
 ## Where it goes
 
-By default, events go to PostHog, an analytics service, at `eu.i.posthog.com` in the EU. The variable `OPENQODEX_TELEMETRY_HOST` sends them to another address instead. That address must use `https`, or `http` on `localhost` or `127.0.0.1`. PostHog receives each request from your IP address, as every server does. Each event tells PostHog not to work out a location from it.
+By default, events go to PostHog, an analytics service, at `eu.i.posthog.com` in the EU. PostHog receives each request from your IP address, as every server does. PostHog works out an approximate location from it: country, city and time zone. The OpenQodex project in PostHog discards the IP address itself, so it is not stored. The variable `OPENQODEX_TELEMETRY_HOST` sends the events to another address instead. That address must use `https`, or `http` on `localhost` or `127.0.0.1`.
 
 ## How it is sent
 

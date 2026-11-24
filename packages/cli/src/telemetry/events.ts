@@ -185,7 +185,6 @@ const COMMON: Record<string, Kind> = {
   installId: { kind: "hash" },
   installAgeDays: N,
   $process_person_profile: { kind: "const", value: false },
-  $geoip_disable: { kind: "const", value: true },
   $lib: { kind: "const", value: "openqodex" },
   openqodexVersion: { kind: "version" },
   platform: word(PLATFORMS, true),
@@ -401,7 +400,6 @@ export function commonProps(o: { hostAgent: string | null; launcher: boolean; en
   const p = osPlatform();
   return {
     $process_person_profile: false,
-    $geoip_disable: true,
     $lib: "openqodex",
     openqodexVersion: __OPENQODEX_VERSION__,
     platform: p,
