@@ -311,3 +311,31 @@ export async function preparePackage(spec, { cache = cacheRoot() } = {}) {
     rmSync(temp, { recursive: true, force: true });
   }
 }
+
+// ---------- a release run on the published package ----------
+
+/**
+ * Refuses a release run's package record that is not the published package
+ * of its release (run.mjs --package npm:<release>): openqodex at that
+ * version, with its tarball's sha256 and a sha512 integrity equal to the
+ * one the registry gave when it was fetched. Throws "refused: ...".
+ */
+export function npmReleaseRecord(release, p) {
+  const named = p === null || p === undefined ? "no package record" : p.spec === "local" ? `the local build${p.commit ? ` at ${String(p.commit).slice(0, 12)}` : ""}` : `${p.spec ?? "an unnamed package"} (${p.name ?? "no name"}@${p.version ?? "no version"})`;
+  if (p === null || p === undefined || p.spec !== `npm:${release}` || p.name !== PACKAGE_NAME || p.version !== release) throw new Error(`refused: the run names the release ${release}, but it reviewed ${named}, not ${PACKAGE_NAME}@${release} from npm (run.mjs --package npm:${release}); a release run reviews the published package of its release, and a local build is never one`);
+  if (!/^[0-9a-f]{64}$/.test(String(p.sha256)) || !String(p.integrity).startsWith("sha512-") || p.registryIntegrity !== p.integrity) throw new Error(`refused: the run's package record of ${PACKAGE_NAME}@${release} does not hold a tarball sha256 and a sha512 integrity that equals the one the registry gave when it was fetched`);
+}
+
+/**
+ * The release a run's package record makes it once the npm registry, asked
+ * again, gives that version the record's integrity: { release, package },
+ * or a thrown refusal. `answer` is the registry's record of openqodex at
+ * `release` (lib/martian-board.mjs npmRegistryAnswer). lib/suites.mjs
+ * selectCases and lib/martian-board.mjs releaseGate both decide an npm
+ * release here.
+ */
+export function npmRelease(release, p, answer) {
+  npmReleaseRecord(release, p);
+  if (answer?.name !== PACKAGE_NAME || answer?.version !== release || answer?.dist?.integrity !== p.integrity) throw new Error(`refused: the npm registry (https://${REGISTRY_HOST}) gives ${answer?.name}@${answer?.version} the integrity ${answer?.dist?.integrity}, and the run's package record of ${PACKAGE_NAME}@${release} holds ${p.integrity}; the run did not review the published build of its release`);
+  return { release, package: p };
+}

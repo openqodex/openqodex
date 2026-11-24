@@ -2,10 +2,21 @@
 // 1. A release run is refused at its argument check because it names the published npm package, although the docs
 //    and the converter's release gate say a release run reviews that package. It must reach the later gates.
 // 2. The argument check is loosened too far: a packed file or a smoke run is admitted under --release.
+// 3. An npm release run reads held-out cases on a package record the registry does not confirm: a record whose
+//    integrity was changed, an answer from the registry that differs, or no answer at all. Case selection must
+//    refuse each before the held-out access log gains a line.
+// 4. An npm release run reads golden comments before its access is logged: selection logs the release, the
+//    package and its integrity first, and the truth is read only after.
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { benchRoot } from "../lib/cases.mjs";
+import { selectCases, truthOf } from "../lib/suites.mjs";
+import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
+
+afterEach(() => vi.unstubAllEnvs());
+afterAll(removeTempDirs);
 
 const AT_ARGS = "--release requires a comparison's local build";
 const run = (...extra) => {
@@ -17,4 +28,42 @@ it("a release run with --package npm:<version> passes the argument check, and a 
   expect(run("--package", "npm:0.23.0"), "npm:<version> was refused at the argument check").not.toContain(AT_ARGS);
   expect(run("--package", "file:/nowhere/openqodex-0.23.0.tgz"), "a packed file was admitted under --release").toContain(AT_ARGS);
   expect(run("--package", "npm:0.23.0", "--smoke"), "a smoke run was admitted under --release").toContain("--smoke runs development cases only");
+});
+
+// The package record run.mjs makes of npm:0.23.0 (lib/package.mjs preparePackage), and the registry's answer for it.
+const INTEGRITY = `sha512-${"A".repeat(86)}==`;
+const record = (patch = {}) => ({ spec: "npm:0.23.0", name: "openqodex", version: "0.23.0", sha256: "a".repeat(64), integrity: INTEGRITY, bytes: 1, registryIntegrity: INTEGRITY, fileCount: 1, ...patch });
+const answer = (integrity = INTEGRITY) => ({ name: "openqodex", version: "0.23.0", dist: { integrity } });
+const selection = (packageRecord, registryAnswer) => {
+  vi.stubEnv("OPENQODEX_BENCH_CACHE", tempDir("oq-release-package-cache-"));
+  const accessLog = join(tempDir("oq-release-package-index-"), "heldout-access.jsonl");
+  const options = { suite: "martian", split: "test", release: "0.23.0", packageRecord, registryAnswer, runId: "test-run", by: "tester", purpose: "score", accessLog };
+  return { accessLog, select: () => selectCases(options) };
+};
+
+it("an npm release run whose registry integrity differs is refused before any case is read", () => {
+  const other = `sha512-${"B".repeat(86)}==`;
+  const tries = [
+    ["the registry gives another integrity", record(), answer(other), /did not review the published build/],
+    ["the record's integrity was changed after the registry gave its own", record({ integrity: other }), answer(), /integrity that equals the one the registry gave/],
+    ["the record was changed to match a tampered answer", record({ integrity: other, registryIntegrity: other }), answer(), /did not review the published build/],
+    ["the registry was never asked", record(), null, /did not review the published build/],
+    ["the record names another version", record({ spec: "npm:0.22.0", version: "0.22.0" }), answer(), /not openqodex@0\.23\.0 from npm/],
+  ];
+  for (const [why, packageRecord, registryAnswer, refusal] of tries) {
+    const s = selection(packageRecord, registryAnswer);
+    expect(s.select, `${why}: the selection was admitted`).toThrow(refusal);
+    expect(existsSync(s.accessLog), `${why}: the access log gained a line`).toBe(false);
+  }
+});
+
+it("an npm release run logs held-out access before reading golden comments", () => {
+  const s = selection(record(), answer());
+  const cases = s.select();
+  expect(cases.length).toBeGreaterThan(0);
+  const lines = readFileSync(s.accessLog, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  expect(lines, "the access line does not name the release, the package and its integrity").toEqual([expect.objectContaining({ suite: "martian", purpose: "release-run", runPurpose: "score", release: "0.23.0", runId: "test-run", caseCount: cases.length, caseIds: cases.map((c) => c.id), build: "npm openqodex@0.23.0", integrity: INTEGRITY })]);
+  expect(lines[0], "an npm release run claims a comparison record").not.toHaveProperty("comparisonHash");
+  // The cache holds no golden file: selection read none, and a read after it fails.
+  expect(() => truthOf(cases[0], { cache: tempDir("oq-release-package-empty-") })).toThrow(/not in the cache/);
 });

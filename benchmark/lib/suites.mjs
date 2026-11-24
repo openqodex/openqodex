@@ -64,6 +64,7 @@ import { dirname, join } from "node:path";
 import { benchRoot, buildCase, caseIdFromHash, casesRoot, git, parseCaseId, readCase as readPlantedSpec, readLock } from "./cases.mjs";
 import { cacheRoot } from "./licence.mjs";
 import { comparisonRelease } from "./comparison.mjs";
+import { npmRelease } from "./package.mjs";
 import { greptileEntryProblems, greptileRows } from "./greptile.mjs";
 import { MERGE_BASE_RULE, materialisePr, mergeBasesOf } from "./materialise.mjs";
 import { readDecisions, resolveRulings } from "./rulings.mjs";
@@ -588,13 +589,16 @@ const FULL_ID = /^[a-z][a-z0-9-]*\/[^@\s]+@[0-9a-f]{8}$/;
 // The cases of a real suite one run uses (failures 7 and 8): every usable
 // case on the split's development side, or the subset the split file names,
 // or the cases `refs` names (<suite>/<name> or a full case id), each of
-// which must be on that side and in that subset. An accepted comparison
-// release admits the test split on its pinned clean build and logs access.
+// which must be on that side and in that subset. A release admits the test
+// split on its accepted comparison's pinned clean local build, or on the
+// published npm package of that release whose record `registryAnswer` (the
+// registry asked again) confirms (lib/package.mjs npmRelease), the same two
+// branches lib/martian-board.mjs releaseGate takes; then it logs access.
 // `heldOut` true
 // (run.mjs --materialise-only, which builds and proves cases and reviews
 // none, and logs the access) may select the test split. Throws one error
 // whose lines name every refusal; nothing is fetched or built here.
-export function selectCases({ suite, split = "dev", subset = null, refs = null, root = benchRoot, heldOut = false, release = null, build = null, packageRecord = null, runId = null, by = null, accessLog = join(cacheRoot(), "heldout-access.jsonl"), purpose = null, change = null }) {
+export function selectCases({ suite, split = "dev", subset = null, refs = null, root = benchRoot, heldOut = false, release = null, build = null, packageRecord = null, runId = null, by = null, accessLog = join(cacheRoot(), "heldout-access.jsonl"), purpose = null, change = null, registryAnswer = null }) {
   if (!SUITES[suite]) throw new Error(`no real suite named ${suite}; the real suites are ${Object.keys(SUITES).join(", ")}`);
   if (split !== "dev" && split !== "test") throw new Error(`--split takes dev or test, not ${JSON.stringify(split)}`);
   const s = readSuite(suite, { root });
@@ -605,10 +609,11 @@ export function selectCases({ suite, split = "dev", subset = null, refs = null, 
   const refused = purposeProblems({ suite, splitFile: s.split, purpose, split, subset, names: named, change });
   if (refused.length > 0) throw new Error(refused.join("\n"));
   if (split === "test" && !heldOut && release === null) throw new Error(`the ${suite} test split is held out: no held-out case runs before a release; use --release with an accepted comparison, or --materialise-only to prove cases without a review`);
-  const gate = split === "test" && !heldOut ? comparisonRelease({ release, suite, split, splitHash: s.splitHash, build, package: packageRecord }, { root, admit: true }) : null;
+  const gate = split === "test" && !heldOut ? (packageRecord?.spec === "local" ? comparisonRelease({ release, suite, split, splitHash: s.splitHash, build, package: packageRecord }, { root, admit: true }) : npmRelease(release, packageRecord, registryAnswer)) : null;
   const admitted = (cases) => {
     if (gate) {
-      const access = { at: new Date().toISOString(), suite, caseCount: cases.length, caseIds: cases.map((c) => c.id), purpose: "release-run", ...(purpose !== null ? { runPurpose: purpose } : {}), runId, release, by, comparisonHash: gate.comparison.hash, build: gate.buildLabel };
+      const pinned = gate.comparison ? { comparisonHash: gate.comparison.hash, build: gate.buildLabel } : { build: `npm ${gate.package.name}@${gate.package.version}`, integrity: gate.package.integrity };
+      const access = { at: new Date().toISOString(), suite, caseCount: cases.length, caseIds: cases.map((c) => c.id), purpose: "release-run", ...(purpose !== null ? { runPurpose: purpose } : {}), runId, release, by, ...pinned };
       try {
         mkdirSync(dirname(accessLog), { recursive: true });
         appendFileSync(accessLog, `${JSON.stringify(access)}\n`);

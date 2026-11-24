@@ -59,8 +59,10 @@
 // request cases); for a real suite (aacr, clean), without --cases, every usable
 // case on the development side of its split file runs, or the subset that
 // --subset names there (dev-smoke, dev-laptop). The test split is held out
-// and refused outside an accepted comparison release (lib/suites.mjs
-// selectCases). The manifest records suite, split, splitHash and subset.
+// and refused outside a release: an accepted comparison's local build, or
+// the published package of the release, --package npm:<release>, which the
+// registry confirms again (lib/suites.mjs selectCases). The manifest
+// records suite, split, splitHash and subset.
 // A real suite's development cases run in scan mode and with laptop or
 // model reviewers, scored against the same saved truth.
 //
@@ -316,7 +318,8 @@ import { comparePasses } from "./lib/identical.mjs";
 import { heldOutAccessPath } from "./lib/index.mjs";
 import { controlCaseData, controlEnv, controlSample, probeControl } from "./lib/claude-control.mjs";
 import { materialiseOnly } from "./lib/materialise-only.mjs";
-import { parsePackageSpec, preparePackage } from "./lib/package.mjs";
+import { PACKAGE_NAME, parsePackageSpec, preparePackage } from "./lib/package.mjs";
+import { npmRegistryAnswer, REGISTRY } from "./lib/martian-board.mjs";
 import { laptopMetered, probeReviewer, BLOCKED } from "./lib/reviewers.mjs";
 import { attemptDir, bundleHash, CLAUDE_MODEL_FROM, claudeRunModels, executeRun, failureOf, jobState, laptopInvocation, planJobs, preflightRefusals, provenanceProblems, resumeProblems, runManifest, saveSampleRow, sampleRecord, savedSampleRows, scannerPreflight, scanSampleRecord } from "./lib/runner.mjs";
 import { SCAN_CONFIG, SCAN_RULES_VERSION } from "./lib/scan-score.mjs";
@@ -535,7 +538,7 @@ function modelChecks(o, given, models) {
 // now from the pinned files, saved as the run's spec copy with the accepted
 // comments only (failure 30, lib/suites.mjs specCopy). Exits 2 on a
 // refusal, leaving no temp folder.
-function realCases(o, { build, packageRecord, out } = {}) {
+function realCases(o, { build, packageRecord, out, registryAnswer } = {}) {
   const tempRoot = makeTempRoot();
   const refuse = (lines) => {
     rmSync(tempRoot, { recursive: true, force: true });
@@ -545,7 +548,7 @@ function realCases(o, { build, packageRecord, out } = {}) {
   };
   let picked = [];
   try {
-    picked = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, release: o.release ?? null, build, packageRecord, runId: out ? basename(out) : null, by: gitUserName(), purpose: o.purpose, change: o.change, ...(o.purpose !== null ? { accessLog: heldOutAccessPath() } : {}) });
+    picked = selectCases({ suite: o.suite, split: o.split, subset: o.subset, refs: o.realRefs, release: o.release ?? null, build, packageRecord, runId: out ? basename(out) : null, by: gitUserName(), purpose: o.purpose, change: o.change, registryAnswer, ...(o.purpose !== null ? { accessLog: heldOutAccessPath() } : {}) });
   } catch (error) {
     refuse(error.message.split("\n"));
   }
@@ -652,7 +655,15 @@ async function prepareRunBuild(o, date) {
   if (problems.length > 0) throw new Error(problems.join("\n"));
   const packageRecord = pkg ? (({ files, ...rest }) => ({ ...rest, fileCount: Object.keys(files).length }))(pkg.record) : { spec: "local", commit: build.commit, dirty: build.dirty };
   const out = o.out ?? join(benchRoot, "results", o.mode === "scan" ? `${date}-${build.short}-${o.suite}-scan-laptop` : o.control ? `${date}-${build.short}-control` : o.path === "server" ? `${date}-${build.short}-${o.suite}-review-server` : `${date}-${build.short}`);
-  return { pkg, build, packageRecord, out };
+  // A release run on the published package asks the npm registry for its
+  // release again; lib/suites.mjs selectCases checks the answer against the
+  // package record before any held-out case is read (lib/package.mjs npmRelease).
+  let registryAnswer = null;
+  if (o.release && packageRecord.spec.startsWith("npm:")) {
+    try { registryAnswer = await npmRegistryAnswer(o.release); }
+    catch (error) { throw new Error(`refused: the npm registry (${REGISTRY}) could not confirm ${PACKAGE_NAME}@${o.release}: ${error.message.split("\n")[0]}`); }
+  }
+  return { pkg, build, packageRecord, out, registryAnswer };
 }
 
 // The board a real suite's cases come from, at the commit boards.json pins (failure 35).
@@ -922,7 +933,7 @@ async function scanMain(o, { cases, snap, hashes, tempRoot, build, leave, real, 
   const settings = {
     runId,
     mode: "scan",
-    ...(o.release ? { release: o.release, buildLabel: `local build ${build.commit}` } : {}),
+    ...(o.release ? { release: o.release, buildLabel: packageRecord.spec === "local" ? `local build ${build.commit}` : `npm ${packageRecord.name}@${packageRecord.version}` } : {}),
     path: "laptop",
     suite: o.suite,
     split: o.split,
@@ -1356,7 +1367,7 @@ async function main() {
   const settings = {
     runId: basename(out),
     mode: "review",
-    ...(o.release ? { release: o.release, buildLabel: `local build ${build.commit}` } : {}),
+    ...(o.release ? { release: o.release, buildLabel: packageRecord.spec === "local" ? `local build ${build.commit}` : `npm ${packageRecord.name}@${packageRecord.version}` } : {}),
     suite,
     split: o.split,
     splitHash: real?.splitHash ?? null,
