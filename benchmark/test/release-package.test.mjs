@@ -8,10 +8,10 @@
 // 4. An npm release run reads golden comments before its access is logged: selection logs the release, the
 //    package and its integrity first, and the truth is read only after.
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
-import { benchRoot } from "../lib/cases.mjs";
+import { benchRoot, git } from "../lib/cases.mjs";
 import { selectCases, truthOf } from "../lib/suites.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
@@ -34,11 +34,24 @@ it("a release run with --package npm:<version> passes the argument check, and a 
 const INTEGRITY = `sha512-${"A".repeat(86)}==`;
 const record = (patch = {}) => ({ spec: "npm:0.23.0", name: "openqodex", version: "0.23.0", sha256: "a".repeat(64), integrity: INTEGRITY, bytes: 1, registryIntegrity: INTEGRITY, fileCount: 1, ...patch });
 const answer = (integrity = INTEGRITY) => ({ name: "openqodex", version: "0.23.0", dist: { integrity } });
+// A clean git checkout holding the martian suite files, so the selection tests do not depend on the state of this working tree.
+const cleanBenchmark = () => {
+  const repo = tempDir("oq-release-package-repo-");
+  for (const file of ["suites/martian", "splits/martian-v1.json"]) {
+    mkdirSync(join(repo, "benchmark", file, ".."), { recursive: true });
+    cpSync(join(benchRoot, file), join(repo, "benchmark", file), { recursive: true });
+  }
+  git(repo, "init", "-q");
+  git(repo, "add", "-A");
+  git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "Fixture");
+  return { repo, root: join(repo, "benchmark") };
+};
 const selection = (packageRecord, registryAnswer) => {
   vi.stubEnv("OPENQODEX_BENCH_CACHE", tempDir("oq-release-package-cache-"));
   const accessLog = join(tempDir("oq-release-package-index-"), "heldout-access.jsonl");
-  const options = { suite: "martian", split: "test", release: "0.23.0", packageRecord, registryAnswer, runId: "test-run", by: "tester", purpose: "score", accessLog };
-  return { accessLog, select: () => selectCases(options) };
+  const checkout = cleanBenchmark();
+  const options = { suite: "martian", split: "test", release: "0.23.0", packageRecord, registryAnswer, runId: "test-run", by: "tester", purpose: "score", accessLog, root: checkout.root };
+  return { accessLog, checkout, select: () => selectCases(options) };
 };
 
 it("an npm release run whose registry integrity differs is refused before any case is read", () => {
@@ -62,8 +75,15 @@ it("an npm release run logs held-out access before reading golden comments", () 
   const cases = s.select();
   expect(cases.length).toBeGreaterThan(0);
   const lines = readFileSync(s.accessLog, "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  expect(lines, "the access line does not name the release, the package and its integrity").toEqual([expect.objectContaining({ suite: "martian", purpose: "release-run", runPurpose: "score", release: "0.23.0", runId: "test-run", caseCount: cases.length, caseIds: cases.map((c) => c.id), build: "npm openqodex@0.23.0", integrity: INTEGRITY })]);
+  expect(lines, "the access line does not name the release, the package and its integrity").toEqual([expect.objectContaining({ suite: "martian", purpose: "release-run", runPurpose: "score", release: "0.23.0", runId: "test-run", caseCount: cases.length, caseIds: cases.map((c) => c.id), build: "npm openqodex@0.23.0", integrity: INTEGRITY, harness: git(s.checkout.repo, "rev-parse", "HEAD").trim() })]);
   expect(lines[0], "an npm release run claims a comparison record").not.toHaveProperty("comparisonHash");
   // The cache holds no golden file: selection read none, and a read after it fails.
   expect(() => truthOf(cases[0], { cache: tempDir("oq-release-package-empty-") })).toThrow(/not in the cache/);
+});
+
+it("an npm release run on a dirty checkout is refused before any held-out case is selected", () => {
+  const s = selection(record(), answer());
+  writeFileSync(join(s.checkout.repo, "scratch.txt"), "dirty\n");
+  expect(s.select, "an npm release run was admitted on a dirty checkout").toThrow(/npm release requires a clean checkout; the tree is dirty/);
+  expect(existsSync(s.accessLog), "the access log gained a line").toBe(false);
 });

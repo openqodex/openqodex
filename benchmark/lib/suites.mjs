@@ -609,10 +609,20 @@ export function selectCases({ suite, split = "dev", subset = null, refs = null, 
   const refused = purposeProblems({ suite, splitFile: s.split, purpose, split, subset, names: named, change });
   if (refused.length > 0) throw new Error(refused.join("\n"));
   if (split === "test" && !heldOut && release === null) throw new Error(`the ${suite} test split is held out: no held-out case runs before a release; use --release with an accepted comparison, or --materialise-only to prove cases without a review`);
+  const npm = split === "test" && !heldOut && packageRecord?.spec !== "local";
+  // The harness that scores an npm release run is this checkout; it must be
+  // clean, as the local release path requires (lib/comparison.mjs), and its
+  // commit goes in the access line.
+  let harness = null;
+  if (npm) {
+    const repo = git(root, "rev-parse", "--show-toplevel").trim();
+    if (git(repo, "status", "--porcelain").trim() !== "") throw new Error("npm release requires a clean checkout; the tree is dirty");
+    harness = git(repo, "rev-parse", "HEAD").trim();
+  }
   const gate = split === "test" && !heldOut ? (packageRecord?.spec === "local" ? comparisonRelease({ release, suite, split, splitHash: s.splitHash, build, package: packageRecord }, { root, admit: true }) : npmRelease(release, packageRecord, registryAnswer)) : null;
   const admitted = (cases) => {
     if (gate) {
-      const pinned = gate.comparison ? { comparisonHash: gate.comparison.hash, build: gate.buildLabel } : { build: `npm ${gate.package.name}@${gate.package.version}`, integrity: gate.package.integrity };
+      const pinned = gate.comparison ? { comparisonHash: gate.comparison.hash, build: gate.buildLabel } : { build: `npm ${gate.package.name}@${gate.package.version}`, integrity: gate.package.integrity, harness };
       const access = { at: new Date().toISOString(), suite, caseCount: cases.length, caseIds: cases.map((c) => c.id), purpose: "release-run", ...(purpose !== null ? { runPurpose: purpose } : {}), runId, release, by, ...pinned };
       try {
         mkdirSync(dirname(accessLog), { recursive: true });
