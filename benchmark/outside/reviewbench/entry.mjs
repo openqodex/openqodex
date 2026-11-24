@@ -24,7 +24,8 @@
 // Exit 0 with a findings file, or non-zero with none, which ReviewBench
 // retries. Every review that does not finish (the deadline stopped it with
 // no report, openqodex exited outside 0, 1 and 2, the reviewer never
-// answered, or it answered and ended incomplete) fails the first attempt
+// answered, it answered and ended incomplete, or a file it wrote was
+// refused) fails the first attempt
 // and is written empty from the second, so one pull request the review
 // cannot finish costs that pull request, not the whole run.
 // The failure list is in benchmark/test/reviewbench-entry.test.mjs.
@@ -37,9 +38,11 @@ import { fileURLToPath } from "node:url";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 // The manifest asks for 3600 s per pull request. The reviewer gets 2700 s;
-// the whole review is stopped at 3300 s, so this process always ends first.
+// the whole review is asked to stop at 3300 s and killed 30 s later, so this
+// process always ends first.
 const REVIEW_TIMEOUT_SECONDS = 2700;
 const REVIEW_DEADLINE_MS = 3300_000;
+const STOP_GRACE_MS = 30_000;
 const SHA = /^[0-9a-f]{40}$/;
 
 /** The contract's inputs from the environment; throws naming the first that is wrong. */
@@ -133,14 +136,16 @@ export function outputOf(contract, pr, findings) {
 /**
  * What to do with a finished review: { write: findings[] } or { fail: reason }.
  * `code` is the CLI's exit code (null when it was stopped), `report` its
- * report.json or null, `usage` its usage.json or null.
+ * report.json or null, `usage` its usage.json or null, and `refused` why one
+ * of those files was not read (readReviewFile), or null.
  */
-export function decide({ code, report, usage, attempt, agent }) {
-  if (code === 0 && report === null) return { write: [], note: "nothing to review: the change has no file the review reads" };
+export function decide({ code, report, usage, attempt, agent, refused = null }) {
   // A failure ReviewBench retries: the first attempt fails so a retry happens;
   // from the second the pull request is written with no finding, because one
   // pull request that never succeeds fails the whole run.
   const failing = (reason) => (attempt < 2 ? { fail: reason } : { write: [], note: `${reason}; written with no finding on attempt ${attempt}` });
+  if (refused) return failing(`the review's files were refused: ${refused}`);
+  if (code === 0 && report === null) return { write: [], note: "nothing to review: the change has no file the review reads" };
   if (report === null) return failing(code === null ? "the review was stopped at its deadline and wrote no report" : `openqodex exited ${code} and wrote no report`);
   if (code !== 0 && code !== 1 && code !== 2) return failing(`openqodex exited ${code}`);
   const status = report.completion?.status ?? null;
@@ -200,37 +205,56 @@ function cliPath(env) {
   return join(dirname(pkg), typeof bin === "string" ? bin : bin.openqodex);
 }
 
-// Runs the review and resolves with its exit code, or null when the
-// deadline stopped it. The child leads a process group of its own, so the
-// stop reaches the reviewer and the scanners too. The group is also killed
-// when the review ends, so no process of it is left to change the files
-// root reads next.
-function runReview(command, args, options) {
+/**
+ * Runs the review and resolves with its exit code, or null when the
+ * deadline stopped it. The child leads a process group of its own. The
+ * reviewer leads another group, which only openqodex stops: at the
+ * deadline the group gets SIGTERM, on which openqodex stops its reviewer
+ * and exits, and SIGKILL `graceMs` later. The group is also killed when
+ * the review ends, so no process of it is left to change the files root
+ * reads next.
+ */
+export function runReview(command, args, options, { deadlineMs = REVIEW_DEADLINE_MS, graceMs = STOP_GRACE_MS } = {}) {
   return new Promise((done) => {
     const child = spawn(command, args, { ...options, detached: true, stdio: ["ignore", "inherit", "inherit"] });
     let stopped = false;
-    const stopGroup = () => {
+    let kill = null;
+    const signalGroup = (signal) => {
       try {
-        process.kill(-child.pid, "SIGKILL");
+        process.kill(-child.pid, signal);
       } catch {
         // already gone
       }
     };
     const timer = setTimeout(() => {
       stopped = true;
-      stopGroup();
-    }, REVIEW_DEADLINE_MS);
+      signalGroup("SIGTERM");
+      kill = setTimeout(() => signalGroup("SIGKILL"), graceMs);
+    }, deadlineMs);
     child.on("error", (error) => {
       clearTimeout(timer);
+      clearTimeout(kill);
       console.error(`openqodex-reviewbench: could not start openqodex: ${error.message}`);
       done(127);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      stopGroup();
+      clearTimeout(kill);
+      signalGroup("SIGKILL");
       done(stopped ? null : code);
     });
   });
+}
+
+/**
+ * Writes the findings file as root through a temporary file beside it,
+ * created new (wx): a link or file planted at that name is refused, never
+ * followed or overwritten.
+ */
+export function writeFindingsFile(out, doc, pid = process.pid) {
+  const tmp = `${out}.tmp-${pid}`;
+  writeFileSync(tmp, `${JSON.stringify(doc, null, 2)}\n`, { flag: "wx" });
+  renameSync(tmp, out);
 }
 
 async function main(env = process.env) {
@@ -268,16 +292,15 @@ async function main(env = process.env) {
   // Removed as the review's user, so a link planted in it never leads root
   // to delete anything else.
   spawnSync("rm", ["-rf", work], { stdio: "ignore", ...(user ? { uid: user.uid, gid: user.gid } : {}) });
-  const refused = reportRead?.refused ?? usageRead?.refused;
-  if (refused) throw new Error(`the review's files were refused: ${refused}`);
+  const refused = reportRead?.refused ?? usageRead?.refused ?? null;
 
-  const decision = decide({ code, report, usage, attempt: contract.attempt, agent: contract.agent });
+  // A refused file is never read: its pull request fails as any review
+  // that did not finish, and from the second attempt is written empty.
+  const decision = decide({ code, report: refused ? null : report, usage: refused ? null : usage, attempt: contract.attempt, agent: contract.agent, refused });
   if (decision.fail) throw new Error(decision.fail);
   if (decision.note) console.error(`openqodex-reviewbench: ${decision.note}`);
   const doc = outputOf(contract, pr, decision.write);
-  const tmp = `${contract.out}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(doc, null, 2)}\n`);
-  renameSync(tmp, contract.out);
+  writeFindingsFile(contract.out, doc);
   console.error(`openqodex-reviewbench: wrote ${doc.findings.length} finding(s) to ${contract.out}`);
 }
 

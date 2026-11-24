@@ -33,13 +33,19 @@
 //    ReviewBench, where the review runs as the node user.
 // 9. A report.json symlink planted by the reviewer is refused, not read as
 //    root: the reviewer reads an untrusted pull request and owns the folder
-//    root reads the report from.
+//    root reads the report from. A refused file then fails every attempt,
+//    so one pull request fails the whole run.
+// 10. The findings file is written as root through a temporary name where a
+//    link was planted, so root overwrites the file the link names.
+// 11. At the deadline the review is killed at once, so openqodex never stops
+//    its reviewer, which leads a process group of its own and keeps running.
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { decide, findingsOf, readReviewFile } from "../outside/reviewbench/entry.mjs";
+import { decide, findingsOf, readReviewFile, runReview, writeFindingsFile } from "../outside/reviewbench/entry.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -80,6 +86,8 @@ function run({ repo, base, head }, { mode = "", env = {} } = {}) {
     env: {
       PATH: `${bin}:${process.env.PATH}`,
       HOME: home,
+      // So the test folders' cleanup finds a review a timeout left behind.
+      OPENQODEX_TEST_OWNER: process.env.OPENQODEX_TEST_OWNER,
       OPENQODEX_HOME: join(home, ".openqodex"),
       OPENQODEX_AUTO_UPDATE: "0",
       OPENQODEX_CLI: CLI,
@@ -220,5 +228,53 @@ describe("ReviewBench entrypoint", () => {
     expect(readReviewFile(join(dir, "usage.json"), uid)).toEqual({ json: { calls: [] } });
     expect(readReviewFile(join(dir, "usage.json"), uid + 1)).toEqual({ refused: `usage.json is owned by uid ${uid}, not the review's user ${uid + 1}` });
     expect(readReviewFile(join(dir, "absent.json"), uid)).toBeNull();
+    // A refused file fails the first attempt and is written empty from the second, even with a report beside it.
+    const report = { completion: { status: "complete" }, findings: [] };
+    expect(decide({ code: 0, report, usage: null, attempt: 1, agent: "openqodex", refused: "report.json is a symbolic link" })).toEqual({ fail: expect.stringMatching(/refused: report\.json is a symbolic link/) });
+    expect(decide({ code: 0, report, usage: null, attempt: 2, agent: "openqodex", refused: "report.json is a symbolic link" })).toEqual({ write: [], note: expect.stringMatching(/refused: report\.json is a symbolic link; written with no finding on attempt 2/) });
+  });
+
+  it("10. a link planted at the findings file's temporary name is refused, and the file it names is unchanged", () => {
+    const dir = tempDir("oq-rb-out-");
+    const target = join(tempDir("oq-rb-target-"), "target.txt");
+    writeFileSync(target, "untouched");
+    symlinkSync(target, join(dir, "findings.json.tmp-4242"));
+    expect(() => writeFindingsFile(join(dir, "findings.json"), { findings: [] }, 4242)).toThrow(/EEXIST/);
+    expect(readFileSync(target, "utf8")).toBe("untouched");
+    expect(existsSync(join(dir, "findings.json"))).toBe(false);
+    writeFindingsFile(join(dir, "findings.json"), { findings: [] }, 4243);
+    expect(JSON.parse(readFileSync(join(dir, "findings.json"), "utf8"))).toEqual({ findings: [] });
+  });
+
+  it("11. at the deadline openqodex is asked to stop first, so it stops a reviewer in a process group of its own", async () => {
+    const dir = tempDir("oq-rb-stop-");
+    const pidFile = join(dir, "reviewer.pid");
+    // A stand-in openqodex: it starts a detached reviewer, and on SIGTERM stops that reviewer's group and exits.
+    const script = join(dir, "cli.cjs");
+    writeFileSync(script, `const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const r = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+fs.writeFileSync(${JSON.stringify(pidFile)}, String(r.pid));
+process.on("SIGTERM", () => { try { process.kill(-r.pid, "SIGKILL"); } catch {} process.exit(143); });
+setInterval(() => {}, 1000);
+`);
+    const alive = (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let reviewer = null;
+    try {
+      const code = await runReview(process.execPath, [script], { env: process.env }, { deadlineMs: 1500, graceMs: 5000 });
+      expect(code, "the deadline stop did not resolve null").toBeNull();
+      reviewer = Number(readFileSync(pidFile, "utf8"));
+      for (let i = 0; i < 40 && alive(reviewer); i++) await sleep(50);
+      expect(alive(reviewer), "the reviewer kept running after the deadline").toBe(false);
+    } finally {
+      if (reviewer !== null && alive(reviewer)) process.kill(-reviewer, "SIGKILL");
+    }
   });
 });
