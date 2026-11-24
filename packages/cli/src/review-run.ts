@@ -398,13 +398,13 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   const noteReview = (result: ReviewCoreResult | null, exitCode: number, cleanupFailed: boolean): void => {
     try {
       if (result === null) {
-        record("review.completed", reviewProps({ ...usage, ended: "error", cleanupFailed: false, exitCode, reviewer: reviewer?.driver ?? null }));
+        record("review.completed", () => reviewProps({ ...usage, ended: "error", cleanupFailed: false, exitCode, reviewer: reviewer?.driver ?? null }));
         return;
       }
       const ended = result.ended === "nothing" ? "nothing" : result.ended === "unavailable" ? "unavailable" : o.end?.ended === "incomplete" || (result.ended === "reviewed" && result.completion.status !== "complete") ? "incomplete" : "finished";
       const calls = result.ended === "nothing" ? undefined : result.usage?.calls;
       const totals = result.ended === "nothing" ? undefined : result.usage?.totals;
-      record("review.completed", reviewProps({
+      record("review.completed", () => reviewProps({
         ...usage,
         ended,
         cleanupFailed,
@@ -489,7 +489,7 @@ export async function runReview(o: ReviewOptions): Promise<number> {
             // spawn has started the worker by the time it returns, so the
             // events of a stopped review still leave.
             try {
-              record("review.completed", reviewProps({ ...usage, ended: "interrupted", cleanupFailed: false, exitCode: exit, reviewer: reviewer?.driver ?? null, ...(reviewer ? { reviewerVersion: reviewer.version } : {}) }));
+              record("review.completed", () => reviewProps({ ...usage, ended: "interrupted", cleanupFailed: false, exitCode: exit, reviewer: reviewer?.driver ?? null, ...(reviewer ? { reviewerVersion: reviewer.version } : {}) }));
               recordCommand({ exitCode: exit, threw: false, interrupted: true });
               dispatch();
             } catch {
@@ -501,9 +501,11 @@ export async function runReview(o: ReviewOptions): Promise<number> {
           process.once("SIGTERM", onSignal);
         },
         onResult: (result) => {
-          kept = result;
           try {
             code = finish(result);
+            // Kept only once its report is written: a failure in finish is
+            // an error, not a finished review whose cleanup failed.
+            kept = result;
           } finally {
             offSignals();
           }

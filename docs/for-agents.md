@@ -167,7 +167,7 @@ Write what a reviewer of this repository must know in `.openqodex/custom-instruc
 | a scanner `untrusted` | A custom scanner is not approved. The developer decides. |
 | a scanner `disabled` | The config or `--offline` switched it off. |
 | files from an older version, and an `init` command | Tell the developer in one line. Give them the command. Run it only if they ask. |
-| `OpenQodex had a problem. Nothing has been sent.` | Follow the skill's rule for this message. Never choose to send the report yourself. |
+| `OpenQodex had a problem. This issue report has not been sent.` | Follow the skill's rule for this message. Never choose to send the report yourself. |
 
 In a sandbox that cannot download, a scanner that is not installed yet cannot install. Ask the developer to run `npx -y openqodex@0.24.0 doctor --install` in their own terminal, inside the repository.
 

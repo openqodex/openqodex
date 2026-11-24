@@ -14,7 +14,7 @@ One event after a review and after a scan: the verdict, the time of each step, w
 
 Every event also has: the OpenQodex version, your operating system and its major version, the processor type, the Node major version, the agent you ran the command from, whether the command ran in a terminal, how OpenQodex was started, a random id for this install, and the age of that id in days.
 
-Every value is a yes or no, a whole number, or a word from a fixed list in the OpenQodex program. A model name that is not on the list of public models is sent as `other`.
+Every value is a yes or no, a whole number, a word from a fixed list in the OpenQodex program, a version number rebuilt from its digits, or the hash of the install id. A model name that is not on the list of public models is sent as `other`.
 
 ### Every event
 
@@ -112,7 +112,7 @@ Code. Diffs. File names and paths. Repository, branch and remote names. Finding 
 
 ## The id
 
-The first command creates a random id in `~/.openqodex/telemetry/id`. Events carry a hash of it. It is not linked to you, your account or your repository. Delete the file to get a new id. `init --uninstall` removes it.
+The first command creates a random id in `~/.openqodex/telemetry/id`. Events carry a hash of it. It is not linked to you, your account or your repository. Delete the file to get a new id. An `init --uninstall` that removes the `openqodex` launcher from `~/.openqodex/bin` removes the id too.
 
 ## Where it goes
 
@@ -128,7 +128,7 @@ When a command ends, it starts a separate background process and gives it the ev
 - For your machine: set `OPENQODEX_TELEMETRY=0` or `DO_NOT_TRACK=1` in your shell profile. This works with every version of OpenQodex.
 - For your machine, in a file: add `openqodex_telemetry: 0` to `~/.openqodex/config.yaml`. An OpenQodex older than 0.25.0 that reads the same file does not know the key. It prints a warning and pauses its own automatic updates.
 
-The key takes these values. `0`, `false` and `off` turn usage data off. `1`, `true` and `on` leave it on. Any other value turns it off, and OpenQodex prints a warning. The variable `OPENQODEX_TELEMETRY` works the same way: any value other than `1`, `true` or `on` turns usage data off.
+The key takes these values. `0`, `false` and `off` turn usage data off. `1`, `true` and `on` leave it on. Any other value turns it off. In a project's config file, OpenQodex also prints a warning. The variable `OPENQODEX_TELEMETRY` works the same way: any value other than `1`, `true` or `on` turns usage data off.
 
 When it is off, nothing is sent and no id is created. `openqodex doctor` shows whether it is on.
 

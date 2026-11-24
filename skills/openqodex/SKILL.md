@@ -75,7 +75,7 @@ Quote `#42`: in a shell `#` starts a comment. A pull request link works too. Ope
 - Never set `OPENQODEX_SKIP`. It is the developer's switch, not yours.
 - When OpenQodex prints that files it wrote for your agent are from an older version and that `init` refreshes them, tell the developer in one line and give them that `init` command. Run it only if they ask you to: it rewrites their agent files.
 - When the verdict is `blocked`, do not push unless the developer says so after seeing the findings.
-- When OpenQodex prints "OpenQodex had a problem. Nothing has been sent." with `1 create a GitHub issue` and `2 ignore`, tell the developer in one line what went wrong and give them the two choices. Never choose 1 yourself. If they say 1, run `npx -y openqodex@0.24.0 report --send-last` from the same folder. Anything else means 2: do nothing.
+- When OpenQodex prints "OpenQodex had a problem. This issue report has not been sent." with `1 create a GitHub issue` and `2 ignore`, tell the developer in one line what went wrong and give them the two choices. Never choose 1 yourself. If they say 1, run `npx -y openqodex@0.24.0 report --send-last` from the same folder. Anything else means 2: do nothing.
 
 ## Reading the report
 

@@ -724,7 +724,7 @@ async function runFinalize(flags: GlobalFlags, path: string | undefined, all: bo
     const exitCode = exitFor(report);
     // The process that writes the report owns the review's usage data: a
     // finalize handed here by another version records it, its parent does not.
-    recordEvent("review.completed", reviewProps({ mode: "agent", scope: whole ? "all" : target ? "target" : "change", fromInit: false, ended: "finished", cleanupFailed: false, exitCode, reviewer: hostAgent(), report: { ...report, timings: undefined } }));
+    recordEvent("review.completed", () => reviewProps({ mode: "agent", scope: whole ? "all" : target ? "target" : "change", fromInit: false, ended: "finished", cleanupFailed: false, exitCode, reviewer: hostAgent(), report: { ...report, timings: undefined } }));
     return exitCode;
   } finally { removeDiffs(change); }
 }

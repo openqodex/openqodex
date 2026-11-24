@@ -273,7 +273,7 @@ export function composeIssue(problem: Problem, command: string, args: string[]):
 
 export function issueText(issue: Issue): string {
   return [
-    "OpenQodex had a problem. Nothing has been sent.",
+    "OpenQodex had a problem. This issue report has not been sent.",
     `Issue title: ${issue.title}`,
     "Issue body:",
     issue.body,

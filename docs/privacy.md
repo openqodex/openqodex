@@ -4,7 +4,7 @@ This page is the privacy policy for OpenQodex: the `openqodex` package on npm, i
 
 ## What OpenQodex collects
 
-Anonymous usage data. Each event holds the OpenQodex version, your operating system, the agent and model that reviewed, timings, scanner names, counts and token counts, with a random id for the install. `telemetry` lists every field and every way to turn it off. No event holds code, a path, a repository name or finding text. OpenQodex has no account and no server of its own; the events go to PostHog in the EU. This covers OpenQodex and its built-in scanners. Claude Code, Codex and any custom scanner you approve follow their own policies. semgrep runs with its own metrics switched off.
+Anonymous usage data. The events hold the OpenQodex version, your operating system, the agent and model that reviewed, timings, scanner names, counts and token counts, with a random id for the install. `telemetry` lists every field and every way to turn it off. No event holds code, a path, a repository name or finding text. OpenQodex has no account and no server of its own; the events go to PostHog in the EU. This covers OpenQodex and its built-in scanners. Claude Code, Codex and any custom scanner you approve follow their own policies. semgrep runs with its own metrics switched off.
 
 ## Who reviews your code
 

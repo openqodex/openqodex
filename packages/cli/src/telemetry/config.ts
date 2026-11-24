@@ -15,6 +15,7 @@
 //   8  <home>/config.yaml cannot be read, or its key is not on          off
 //   9  a project config near the folder says anything but on            off
 // OPENQODEX_TELEMETRY=1 lifts rule 7 and nothing else.
+import { realpathSync } from "node:fs";
 import { sep } from "node:path";
 import { telemetrySwitch, telemetryValue } from "@openqodex/core";
 import { launcherStarted } from "../launcher.js";
@@ -55,6 +56,16 @@ export type Switch = { on: boolean; why: string };
 
 const set = (v: string | undefined): boolean => v !== undefined && v !== "";
 
+// The entry with its links resolved: a global npm install runs through a
+// link in <prefix>/bin that points into node_modules.
+function realEntry(entry: string): string {
+  try {
+    return realpathSync(entry);
+  } catch {
+    return entry;
+  }
+}
+
 export function enabled(o: { env: NodeJS.ProcessEnv; home: string; context: PolicyContext; entry?: string }): Switch {
   const { env, context } = o;
   const target = telemetryTarget(env);
@@ -69,7 +80,7 @@ export function enabled(o: { env: NodeJS.ProcessEnv; home: string; context: Poli
   const dnt = env.DO_NOT_TRACK;
   if (set(dnt) && !["0", "false"].includes(dnt!.trim().toLowerCase())) return { on: false, why: "DO_NOT_TRACK" };
   const entry = o.entry ?? process.argv[1];
-  const published = launcherStarted(env, entry) || (entry !== undefined && entry.split(sep).includes("node_modules"));
+  const published = launcherStarted(env, entry) || (entry !== undefined && realEntry(entry).split(sep).includes("node_modules"));
   if (!published && !(forced !== undefined && target.loopback)) return { on: false, why: "a local build" };
   const user = readUserConfig(o.home);
   if (user.error !== null) return { on: false, why: "the user config cannot be read" };

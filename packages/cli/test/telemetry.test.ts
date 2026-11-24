@@ -13,8 +13,8 @@
 //     data (usage data is never announced on the terminal).
 //  4. A path, a name or a private word is in a payload; or a property or a
 //     value is not in the closed lists, or the docs table drifts from them.
-//  5. A command waits for the network or hangs; or the worker outlives its
-//     hard stop.
+//  5. A command waits for the network or hangs; or a worker stuck before
+//     its request outlives its 4 second hard stop.
 //  6. A delivery or identity failure changes a command's exit code, stdout
 //     or stderr.
 //  7. An abandoned first review loses the install.
@@ -27,6 +27,8 @@
 // 16. A review is counted as finished before its cleanup, counted twice, or
 //     not counted; a handed-off finalize is counted by the wrong process.
 // 17. The feedback question is inside the duration, or holds the event back.
+// 18. A relative OPENQODEX_HOME sends the worker to another home's config.
+// 19. A custom scanner's name reaches the scanner fields of an event.
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders } from "node:http";
@@ -39,7 +41,8 @@ import { stagedAnswer } from "../../review/test/staged-fake.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 import { run as e2eRun } from "../../../tests/e2e/support.js";
 import { AGENT_ENV, agentFreePath, BIN } from "./init-helpers.js";
-import { canonicalModel, propertyNames, PUBLIC_MODELS } from "../src/telemetry/events.js";
+import type { Report } from "@openqodex/core";
+import { canonicalModel, propertyNames, PUBLIC_MODELS, scanProps, validate } from "../src/telemetry/events.js";
 import { begin, dispatch, recordCommand } from "../src/telemetry/dispatch.js";
 
 afterAll(removeTempDirs);
@@ -124,6 +127,9 @@ async function capture(mode: Mode = "ok", marker?: string): Promise<Server> {
   servers.push(s);
   return s;
 }
+
+// A valid event, for a worker started by hand.
+const ENVELOPE: Envelope = { uuid: "1b4e28ba-2fa1-4d2e-883f-0016d3cca427", event: "command.completed", distinct_id: "a".repeat(64), timestamp: "2026-11-24T00:00:00.000Z", properties: { command: "scan", exitCode: 0 } };
 
 const events = (s: Server): Envelope[] => s.hits.flatMap((h) => (JSON.parse(h.body) as { batch: Envelope[] }).batch);
 const named = (s: Server, event: string): Envelope[] => events(s).filter((e) => e.event === event);
@@ -258,6 +264,13 @@ function standIn(o: { version?: string; models?: string[]; first?: string; hang?
   return dir;
 }
 
+// This package's files, as npm installs them, copied into `dest`.
+function copyPackage(dest: string): void {
+  for (const entry of ["dist", "lenses", "docs", "skills", "templates", "demo", "toolchain.json", "locks", "wasm", "package.json"]) {
+    if (existsSync(join(cliRoot, entry))) cpSync(join(cliRoot, entry), join(dest, entry), { recursive: true });
+  }
+}
+
 const withClaude = (bin: string): string => `${bin}${delimiter}${agentFreePath()}`;
 const REVIEW = ["review", "--only", "sqllint", "--no-install", "--no-graph"];
 // A change with no scanner candidate, so the stand-in's empty answer completes the review.
@@ -365,9 +378,8 @@ describe("a switch that is off (failure 1)", () => {
 
   it("a worker started by hand gets past no switch, and reads the project config when it sends", async () => {
     const server = await capture();
-    const envelope: Envelope = { uuid: "1b4e28ba-2fa1-4d2e-883f-0016d3cca427", event: "command.completed", distinct_id: "a".repeat(64), timestamp: "2026-11-24T00:00:00.000Z", properties: { command: "scan", exitCode: 0 } };
     const worker = async (b: Box, extra: Record<string, string | undefined>): Promise<void> => {
-      const r = await runCli(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { ...extra, OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([envelope]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
+      const r = await runCli(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { ...extra, OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
       expect(r.status).toBe(0);
     };
     for (const extra of [{ CI: "1" }, { OPENQODEX_OFFLINE: "1" }, { OPENQODEX_TELEMETRY: "0" }, { DO_NOT_TRACK: "1" }]) await worker(box(), extra);
@@ -607,7 +619,7 @@ describe("what a payload holds (failures 4 and 13)", () => {
 // ---------- 5. the command never waits ----------
 
 describe("a server that holds its answer (failure 5)", () => {
-  it("the command exits while the request is open, and the worker's hard stop closes it within 5 seconds", async () => {
+  it("the command exits while the request is open, and the worker's request cap closes it within 5 seconds", async () => {
     const server = await capture("hold");
     const b = box();
     seedId(b);
@@ -619,6 +631,45 @@ describe("a server that holds its answer (failure 5)", () => {
     expect(r.exitAt).toBeLessThan(hit.closedAt ?? Number.POSITIVE_INFINITY);
     await waitFor(() => hit.closedAt !== undefined, 6000, "the worker to close the held request");
     expect(hit.closedAt! - hit.at).toBeLessThanOrEqual(5000);
+  }, 30_000);
+
+  it("a worker stuck before its request is stopped by its 4 second hard stop", async () => {
+    const server = await capture();
+    const b = box();
+    seedId(b);
+    // A network stack that never answers and holds the process open, as a
+    // hung socket does: fetch is replaced in the worker by a call that keeps
+    // a timer alive and never settles, so only the hard stop ends it.
+    const stuck = join(b.root, "stuck.cjs");
+    writeFileSync(stuck, "globalThis.fetch = () => { setInterval(() => {}, 1000); return new Promise(() => {}); };\n");
+    const started = Date.now();
+    const worker = start(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { NODE_OPTIONS: `--require ${stuck}`, OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
+    // Without the hard stop it would run forever: this test ends it.
+    const backstop = setTimeout(() => worker.kill("SIGKILL"), 8000);
+    const r = await worker.done;
+    clearTimeout(backstop);
+    const took = Date.now() - started;
+    expect(r.signal).toBeNull();
+    expect(r.status).toBe(0);
+    expect(took).toBeGreaterThanOrEqual(4000);
+    expect(took).toBeLessThan(6000);
+    expect(server.hits).toEqual([]);
+  }, 30_000);
+});
+
+// ---------- 18. the worker's home ----------
+
+describe("a relative OPENQODEX_HOME (failure 18)", () => {
+  it("reaches the worker resolved, so its switch check reads the same user config", async () => {
+    const server = await capture();
+    const b = box();
+    const seen = join(b.root, "worker-home.txt");
+    const recorder = join(b.root, "recorder.cjs");
+    writeFileSync(recorder, `if (process.argv.includes("__telemetry")) require("node:fs").writeFileSync(${JSON.stringify(seen)}, process.env.OPENQODEX_HOME ?? "");\n`);
+    const r = await runCli(SCAN, { cwd: b.repo, env: onEnv(b, server.url, { OPENQODEX_HOME: ".oq", NODE_OPTIONS: `--require ${recorder}` }) });
+    expect(r.status, r.stderr).toBe(0);
+    await waitFor(() => server.hits.length === 1, 10_000, "the request");
+    expect(readFileSync(seen, "utf8")).toBe(join(b.repo, ".oq"));
   }, 30_000);
 });
 
@@ -727,47 +778,82 @@ function pty(cwd: string, env: NodeJS.ProcessEnv, args: string[], steps: [string
 }
 
 describe("dry runs, uninstall and a declined init (failure 8)", () => {
-  it("send nothing and leave no id", async () => {
-    const server = await capture();
-    const dry = box();
-    const d = await runCli(["init", "--dry-run", "--yes", "--agent", "claude-code", "--hook", "none", "--no-repo", "--no-review"], { cwd: dry.repo, env: onEnv(dry, server.url) });
+  // Each case runs on a home that already has an id where the command could
+  // otherwise send, so only the silence rule keeps it from sending.
+  it("send nothing, and leave no id where none was", async () => {
+    const quiet: [string, Server][] = [];
+    const INSTALL = ["init", "--yes", "--hook", "none", "--no-repo", "--no-review"];
+
+    const fresh = box();
+    const freshServer = await capture();
+    quiet.push(["init --dry-run on a fresh home", freshServer]);
+    const d = await runCli(["init", "--dry-run", "--yes", "--agent", "claude-code", "--hook", "none", "--no-repo", "--no-review"], { cwd: fresh.repo, env: onEnv(fresh, freshServer.url) });
     expect(d.status, d.stderr).toBe(0);
     expect(d.stderr).not.toMatch(ANNOUNCED);
-    expect(existsSync(join(dry.oqHome, "telemetry"))).toBe(false);
+    expect(existsSync(join(fresh.oqHome, "telemetry"))).toBe(false);
+
+    const dry = box();
+    seedId(dry);
+    const dryServer = await capture();
+    quiet.push(["init --dry-run on a home with an id", dryServer]);
+    const d2 = await runCli(["init", "--dry-run", "--yes", "--agent", "claude-code", "--hook", "none", "--no-repo", "--no-review"], { cwd: dry.repo, env: onEnv(dry, dryServer.url) });
+    expect(d2.status, d2.stderr).toBe(0);
 
     const un = box();
-    const installed = await runCli(["init", "--yes", "--agent", "claude-code", "--hook", "none", "--no-repo", "--no-review"], { cwd: un.repo, env: onEnv(un, server.url, { OPENQODEX_TELEMETRY: "0" }) });
+    const unServer = await capture();
+    quiet.push(["init --uninstall that removes the launcher", unServer]);
+    const installed = await runCli([...INSTALL, "--agent", "claude-code"], { cwd: un.repo, env: onEnv(un, unServer.url, { OPENQODEX_TELEMETRY: "0" }) });
     expect(installed.status, installed.stderr).toBe(0);
     seedId(un);
-    const u = await runCli(["init", "--uninstall", "--yes"], { cwd: un.repo, env: onEnv(un, server.url) });
+    const u = await runCli(["init", "--uninstall", "--yes"], { cwd: un.repo, env: onEnv(un, unServer.url) });
     expect(u.status, u.stderr).toBe(0);
     expect(existsSync(join(un.oqHome, "telemetry"))).toBe(false);
 
+    const one = box();
+    const oneServer = await capture();
+    quiet.push(["init --uninstall of one agent of two, which keeps the id", oneServer]);
+    const two = await runCli([...INSTALL, "--agent", "claude-code", "--agent", "cursor"], { cwd: one.repo, env: onEnv(one, oneServer.url, { OPENQODEX_TELEMETRY: "0" }) });
+    expect(two.status, two.stderr).toBe(0);
+    seedId(one);
+    const u1 = await runCli(["init", "--uninstall", "--yes", "--agent", "cursor"], { cwd: one.repo, env: onEnv(one, oneServer.url) });
+    expect(u1.status, u1.stderr).toBe(0);
+    expect(existsSync(join(one.oqHome, "telemetry", "id"))).toBe(true);
+
     const declined = box();
-    const n = await pty(declined.repo, onEnv(declined, server.url), ["init", "--agent", "claude-code", "--no-review"], [["Write these files?", "n"]]);
+    const declinedServer = await capture();
+    quiet.push(["an init the developer declines", declinedServer]);
+    const n = await pty(declined.repo, onEnv(declined, declinedServer.url), ["init", "--agent", "claude-code", "--no-review"], [["Write these files?", "n"]]);
     expect(n.stdout).toContain("Write these files?");
     expect(existsSync(join(declined.oqHome, "telemetry"))).toBe(false);
     expect(n.stdout).not.toMatch(ANNOUNCED);
 
     await sleep(SETTLE_MS);
-    expect(server.hits).toEqual([]);
-  }, 120_000);
+    for (const [what, server] of quiet) expect(server.hits, what).toEqual([]);
+  }, 150_000);
 });
 
 describe("the hot paths (failure 9)", () => {
-  it("hook check, mcp and the pre-push hook send nothing and make no id", async () => {
-    const server = await capture();
+  it("hook check and mcp send nothing on a home with an id; the pre-push hook makes no id on a fresh one", async () => {
+    const quiet: [string, Server][] = [];
     const b = box();
-    const env = onEnv(b, server.url);
-    const check = await runCli(["hook", "check"], { cwd: b.repo, env, input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "git push" }, cwd: b.repo }) });
+    seedId(b);
+    const checkServer = await capture();
+    quiet.push(["hook check", checkServer]);
+    const check = await runCli(["hook", "check"], { cwd: b.repo, env: onEnv(b, checkServer.url), input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "git push" }, cwd: b.repo }) });
     expect(check.status, check.stderr).toBe(0);
-    const mcp = await runCli(["mcp"], { cwd: b.repo, env });
+    const mcpServer = await capture();
+    quiet.push(["mcp", mcpServer]);
+    const mcp = await runCli(["mcp"], { cwd: b.repo, env: onEnv(b, mcpServer.url) });
     expect(mcp.signal).toBeNull();
-    const prePush = await runCli(["hook", "pre-push"], { cwd: b.repo, env });
+
+    const fresh = box();
+    const pushServer = await capture();
+    quiet.push(["hook pre-push on a fresh home", pushServer]);
+    const prePush = await runCli(["hook", "pre-push"], { cwd: fresh.repo, env: onEnv(fresh, pushServer.url) });
     expect(prePush.stderr).not.toMatch(ANNOUNCED);
-    expect(existsSync(join(b.oqHome, "telemetry"))).toBe(false);
+    expect(existsSync(join(fresh.oqHome, "telemetry"))).toBe(false);
     await sleep(SETTLE_MS);
-    expect(server.hits).toEqual([]);
+    for (const [what, server] of quiet) expect(server.hits, what).toEqual([]);
   }, 60_000);
 });
 
@@ -824,13 +910,55 @@ describe("the cost of dispatch (failure 14)", () => {
     const usage = join(b.root, "cpu.json");
     const hook = join(b.root, "cpu.cjs");
     writeFileSync(hook, `process.on("exit", () => require("node:fs").writeFileSync(${JSON.stringify(usage)}, JSON.stringify(process.cpuUsage())));\n`);
-    const envelope: Envelope = { uuid: "1b4e28ba-2fa1-4d2e-883f-0016d3cca427", event: "command.completed", distinct_id: "a".repeat(64), timestamp: "2026-11-24T00:00:00.000Z", properties: { command: "scan", exitCode: 0 } };
-    const w = await spawnAsync(process.execPath, ["--require", hook, BIN, "__telemetry"], { cwd: b.root, env: onEnv(b, ok.url, { OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([envelope]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
+    const w = await spawnAsync(process.execPath, ["--require", hook, BIN, "__telemetry"], { cwd: b.root, env: onEnv(b, ok.url, { OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
     expect(w.status).toBe(0);
     expect(ok.hits).toHaveLength(1);
     const cpu = JSON.parse(readFileSync(usage, "utf8")) as { user: number; system: number };
     console.log(`telemetry worker: ${((cpu.user + cpu.system) / 1000).toFixed(1)} ms of CPU (user ${(cpu.user / 1000).toFixed(1)}, system ${(cpu.system / 1000).toFixed(1)})`);
   }, 60_000);
+});
+
+// ---------- 1. a global install counts as published ----------
+
+describe("a global npm install, run through its link (failure 1)", () => {
+  it("is on by default, while a link to a local build stays off", async () => {
+    const server = await capture();
+    const b = box();
+    const prefix = join(b.root, "prefix");
+    copyPackage(join(prefix, "lib", "node_modules", "openqodex"));
+    mkdirSync(join(prefix, "bin"), { recursive: true });
+    // What npm install -g leaves on macOS and Linux: <prefix>/bin/openqodex links into node_modules.
+    symlinkSync(join("..", "lib", "node_modules", "openqodex", "dist", "bin.js"), join(prefix, "bin", "openqodex"));
+    symlinkSync(BIN, join(prefix, "bin", "local-build"));
+    const env = onEnv(b, server.url, { OPENQODEX_TELEMETRY: undefined });
+    const telemetry = async (entry: string) => (JSON.parse((await runCli(["doctor", "--json"], { cwd: b.repo, env, bin: entry })).stdout) as { telemetry: unknown }).telemetry;
+    expect(await telemetry(join(prefix, "bin", "openqodex"))).toEqual({ on: true, why: "default" });
+    expect(await telemetry(join(prefix, "bin", "local-build"))).toEqual({ on: false, why: "a local build" });
+  }, 60_000);
+});
+
+// ---------- 19. custom scanner names ----------
+
+describe("a custom scanner's name (failure 19)", () => {
+  it("is counted in the scanner fields and never named, nor its failure reason", () => {
+    const report = {
+      verdict: "passed",
+      stats: { files: 1, additions: 1, deletions: 0 },
+      findings: [],
+      scanners: [
+        { scanner: "custom:customerproject", status: "ran", durationMs: 5, reason: null },
+        { scanner: "custom:acme-internal", status: "failed", durationMs: 5, reason: "customerproject exited 3 in /home/jdoe/acme" },
+        { scanner: "sqllint", status: "failed", durationMs: 3, reason: "customerproject crashed at /home/jdoe/acme" },
+      ],
+    } as unknown as Report;
+    const props = scanProps({ report, exitCode: 0, candidates: 0, demo: false, reportDir: false, blockOnFlag: false });
+    const event = validate({ ...ENVELOPE, event: "scan.completed", properties: props });
+    expect(event).not.toBeNull();
+    const wire = JSON.stringify(event);
+    for (const canary of ["customerproject", "acme", "jdoe", "custom:"]) expect(wire).not.toContain(canary);
+    expect(event!.properties).toMatchObject({ customScanners: 2, customScannersFailed: 1, scannersFailed: ["sqllint"] });
+    expect(Object.keys(event!.properties.scannerFailures as object)).toEqual(["sqllint"]);
+  });
 });
 
 // ---------- 15. model names ----------
@@ -924,9 +1052,7 @@ describe("counting reviews (failure 16)", () => {
     // A second runtime, as the updater leaves one: this package with its version string changed.
     const other = `${VERSION.split(".").slice(0, 2).join(".")}.99`;
     const runtime = join(b.oqHome, "runtime", other);
-    for (const entry of ["dist", "lenses", "docs", "skills", "templates", "demo", "toolchain.json", "locks", "wasm", "package.json"]) {
-      if (existsSync(join(cliRoot, entry))) cpSync(join(cliRoot, entry), join(runtime, entry), { recursive: true });
-    }
+    copyPackage(runtime);
     const copy = join(runtime, "dist", "bin.js");
     writeFileSync(copy, readFileSync(copy, "utf8").replaceAll(`"${VERSION}"`, `"${other}"`));
     // The brief, written by the other version, with usage data off.

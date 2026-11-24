@@ -862,7 +862,7 @@ export async function run(args: string[]): Promise<number> {
     // the developer agreed to may create the install id.
     if (installed) permitId();
     if (outcome.ended !== "dry-run" && outcome.ended !== "removed") {
-      recordEvent("init.completed", { ended: outcome.ended, agents, scope: setup.scope, hook: setup.chosen?.hook ?? "none", mcp: setup.chosen?.mcp ?? false, inRepo: repoRoot !== null, interactive: interactive(), exitCode: outcome.code });
+      recordEvent("init.completed", () => ({ ended: outcome.ended, agents, scope: setup.scope, hook: setup.chosen?.hook ?? "none", mcp: setup.chosen?.mcp ?? false, inRepo: repoRoot !== null, interactive: interactive(), exitCode: outcome.code }));
       dispatch();
     }
     if (outcome.code === EXIT_OK && installed) {
@@ -887,7 +887,7 @@ export async function run(args: string[]): Promise<number> {
         result = await reviewAfterInit({ repoRoot, runner: setup.runner, interactive: interactive() && !flags.yes, initFiles: setup.before, end });
         if (result === "skipped") skipReason = end.why === "not now" ? "declined" : "no_change";
       }
-      recordEvent("init.first_review", { result, reviewerReady: ready, ...(skipReason !== undefined ? { skipReason } : {}) });
+      recordEvent("init.first_review", () => ({ result, reviewerReady: ready, ...(skipReason !== undefined ? { skipReason } : {}) }));
       // The command to run next, by the launcher's full path: an npx install
       // puts no `openqodex` on PATH, and init never edits a shell profile.
       out();

@@ -63,7 +63,7 @@ export async function runScan(args: {
   if (args.blockOn !== undefined) p.config = { ...p.config, blockOnSeverity: args.blockOn as Severity };
   if (args.reportDir === undefined) announceRepoFiles(p.repoRoot);
   const outcome = reportScan(p, flags, clock, args.reportDir);
-  record("scan.completed", scanProps({ report: outcome.report, exitCode: outcome.exitCode, candidates: p.scan?.candidates.length ?? 0, demo: args.demo === true, reportDir: args.reportDir !== undefined, blockOnFlag: args.blockOn !== undefined }));
+  record("scan.completed", () => scanProps({ report: outcome.report, exitCode: outcome.exitCode, candidates: p.scan?.candidates.length ?? 0, demo: args.demo === true, reportDir: args.reportDir !== undefined, blockOnFlag: args.blockOn !== undefined }));
   return outcome;
 }
 

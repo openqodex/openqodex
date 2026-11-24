@@ -47,7 +47,7 @@ const BIN = join(cliRoot, "dist", "bin.js");
 const VERSION = (JSON.parse(readFileSync(join(cliRoot, "package.json"), "utf8")) as { version: string }).version;
 const OS = ({ darwin: "macOS", linux: "Linux", win32: "Windows" } as Record<string, string>)[process.platform] ?? process.platform;
 const ENVIRONMENT = `Environment: ${OS}, ${process.arch}, Node ${process.versions.node.split(".")[0]}`;
-const HEADLINE = "OpenQodex had a problem. Nothing has been sent.";
+const HEADLINE = "OpenQodex had a problem. This issue report has not been sent.";
 const LATER = "To create the issue, run: openqodex report --send-last\nTo ignore it, do nothing\n";
 
 function temp(prefix: string): string {

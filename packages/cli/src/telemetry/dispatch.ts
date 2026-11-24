@@ -63,9 +63,15 @@ export function noteSub(sub: string): void {
   if (run !== null) run.sub = sub;
 }
 
-export function record(event: EventName, props: Record<string, unknown>): void {
+// `props` is a function, called here inside a try, so building an event
+// never throws into the command and never runs for a silent command.
+export function record(event: EventName, props: () => Record<string, unknown>): void {
   if (run === null || run.silent) return;
-  pending.push({ event, props, timestamp: new Date().toISOString() });
+  try {
+    pending.push({ event, props: props(), timestamp: new Date().toISOString() });
+  } catch {
+    // An event that cannot be built is dropped.
+  }
 }
 
 function context(args: string[]): PolicyContext {
@@ -84,7 +90,8 @@ function context(args: string[]): PolicyContext {
 export function recordCommand(o: { exitCode: number; error?: unknown; threw: boolean; interrupted: boolean }): void {
   if (run === null || run.silent || run.commandSent || run.handedOff) return;
   run.commandSent = true;
-  record("command.completed", commandProps({ command: run.command, args: run.args, sub: run.sub, exitCode: o.exitCode, durationMs: Date.now() - run.started, error: o.error, threw: o.threw, interrupted: o.interrupted }));
+  const r = run;
+  record("command.completed", () => commandProps({ command: r.command, args: r.args, sub: r.sub, exitCode: o.exitCode, durationMs: Date.now() - r.started, error: o.error, threw: o.threw, interrupted: o.interrupted }));
 }
 
 export function dispatch(): void {
@@ -128,7 +135,7 @@ export function dispatch(): void {
       detached: true,
       stdio: "ignore",
       windowsHide: true,
-      env: { ...process.env, OPENQODEX_TELEMETRY_EVENTS: json, OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify(ctx) },
+      env: { ...process.env, OPENQODEX_HOME: home, OPENQODEX_TELEMETRY_EVENTS: json, OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify(ctx) },
     });
     child.once("error", () => undefined);
     child.unref();
