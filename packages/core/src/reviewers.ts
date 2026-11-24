@@ -30,7 +30,7 @@ export const REVIEWER_EFFORTS: Record<ListedReviewer, readonly string[]> = {
 // ignoring the list. Until that release is cut it holds the next minor
 // version; scripts/sync-version.mjs writes the version changesets chose in
 // place of a value marked `release: next`.
-export const REVIEWERS_SINCE = "0.24.0"; // release: next
+export const REVIEWERS_SINCE = "0.24.0";
 
 // A Codex model id: letters, digits and `.`, `-`, `_`, `:`, `/`, never
 // starting with `-`.
