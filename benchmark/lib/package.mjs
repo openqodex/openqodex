@@ -224,11 +224,16 @@ function treeOf(dir) {
 }
 
 // Why the unpacked folder may not be used as it is (failure 6), or null.
-// `expected` comes from the tarball's own bytes ({ sha256, integrity, bytes,
-// files }), never from record.json alone: record.json is a file in the same
-// folder and can be edited together with the code it vouches for.
+// `expected` is the record the tarball's own bytes make ({ name, version,
+// sha256, integrity, bytes, files }), never record.json alone: record.json
+// is a file in the same folder and can be edited together with the code it
+// vouches for. Every field of record.json must equal it, since the run
+// reports the record it returns.
 function folderProblem(dir, record, expected) {
   if (record.sha256 !== expected.sha256 || record.integrity !== expected.integrity || record.bytes !== expected.bytes) return "its record names another tarball";
+  if (record.name !== expected.name || record.version !== expected.version) return "its record names another package";
+  const named = Object.keys(record.files ?? {});
+  if (named.length !== Object.keys(expected.files).length || named.some((path) => record.files[path] !== expected.files[path])) return "its record lists other files";
   const { files, odd } = treeOf(dir);
   if (odd.length > 0) return `${odd[0]} is neither a file nor a folder`;
   for (const [path, hash] of Object.entries(expected.files)) if (files[path] !== hash) return `${path} is ${files[path] ? "changed" : "missing"}`;
@@ -281,12 +286,18 @@ export async function preparePackage(spec, { cache = cacheRoot() } = {}) {
   };
   let extracted = "now";
   if (existsSync(join(dir, "record.json"))) {
-    // The expected hashes come from the tarball bytes, not from record.json.
+    // The expected record comes from the tarball bytes, not from record.json.
     const expectedFiles = {};
-    for (const m of tarMembers(bytes)) if (m.type === "file") expectedFiles[m.path] = sha256Of(m.body);
+    let manifest = null;
+    for (const m of tarMembers(bytes)) {
+      if (m.type !== "file") continue;
+      expectedFiles[m.path] = sha256Of(m.body);
+      if (m.path === "package/package.json") manifest = m.body;
+    }
     let problem;
     try {
-      problem = folderProblem(dir, JSON.parse(readFileSync(join(dir, "record.json"), "utf8")), { sha256, integrity: integrityOf(bytes), bytes: bytes.length, files: expectedFiles });
+      const { name, version } = JSON.parse(manifest.toString("utf8"));
+      problem = folderProblem(dir, JSON.parse(readFileSync(join(dir, "record.json"), "utf8")), { name, version, sha256, integrity: integrityOf(bytes), bytes: bytes.length, files: expectedFiles });
     } catch {
       problem = "its record cannot be read";
     }

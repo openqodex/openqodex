@@ -451,6 +451,25 @@ describe("an unpacked package edited after it was unpacked runs under the tarbal
     expect(again.extracted, "an edited file vouched for by an edited record was reused").toBe("again");
     expect(readFileSync(again.lib).equals(original)).toBe(true);
   });
+
+  it("a record.json edited alone (its file list or its version) is unpacked again, so the run never reports it", async () => {
+    const cache = tempDir("oq-outside-cache-");
+    const first = await preparePackage(`file:${tarball}`, { cache });
+    const recordPath = join(first.dir, "..", "record.json");
+    const edits = [
+      ["a file dropped from its list", (r) => delete r.files["package/dist/lib.js"]],
+      ["no file list", (r) => delete r.files],
+      ["another version", (r) => (r.version = "9.9.9")],
+    ];
+    for (const [why, edit] of edits) {
+      const edited = readJson(recordPath);
+      edit(edited);
+      writeFileSync(recordPath, JSON.stringify(edited, null, 2));
+      const again = await preparePackage(`file:${tarball}`, { cache });
+      expect(again.extracted, `a record with ${why} was reused`).toBe("again");
+      expect(again.record, `a record with ${why} was reported`).toMatchObject({ version: first.record.version, files: first.record.files });
+    }
+  });
 });
 
 describe("a tarball member is written outside the package's folder, or as a link", () => {
