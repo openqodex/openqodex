@@ -67,7 +67,7 @@
 //    also admits its pinned clean local build, explicitly labelled local.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PACKAGE_NAME } from "./package.mjs";
+import { PACKAGE_NAME, npmRelease, npmReleaseRecord } from "./package.mjs";
 import { benchRoot } from "./cases.mjs";
 import { comparisonRelease } from "./comparison.mjs";
 import { boardReview, martianReviewConversion, readAttempts, readBoardReviews } from "./board-reviews.mjs";
@@ -111,17 +111,15 @@ export async function releaseGate(manifest, { registry = npmRegistryAnswer, root
   if (typeof release !== "string" || release.trim() === "") throw new Error("refused: the run is not a release run (its manifest names no release). Every Martian case is held out, and only a release run's samples are converted, the one way their golden comments are read");
   const p = manifest.package ?? null;
   if (p?.spec === "local") return comparisonRelease(manifest, { root });
-  const named = p === null ? "no package record" : p.spec === "local" ? `the local build${p.commit ? ` at ${String(p.commit).slice(0, 12)}` : ""}` : `${p.spec ?? "an unnamed package"} (${p.name ?? "no name"}@${p.version ?? "no version"})`;
-  if (p === null || p.spec !== `npm:${release}` || p.name !== PACKAGE_NAME || p.version !== release) throw new Error(`refused: the run names the release ${release}, but it reviewed ${named}, not ${PACKAGE_NAME}@${release} from npm (run.mjs --package npm:${release}); a release run reviews the published package of its release, and a local build is never one`);
-  if (!/^[0-9a-f]{64}$/.test(String(p.sha256)) || !String(p.integrity).startsWith("sha512-") || p.registryIntegrity !== p.integrity) throw new Error(`refused: the run's package record of ${PACKAGE_NAME}@${release} does not hold a tarball sha256 and a sha512 integrity that equals the one the registry gave when it was fetched`);
+  // The record is checked before the registry is asked (lib/package.mjs).
+  npmReleaseRecord(release, p);
   let answer;
   try {
     answer = await registry(release);
   } catch (error) {
     throw new Error(`refused: the npm registry (${REGISTRY}) could not confirm ${PACKAGE_NAME}@${release}: ${firstLine(error)}`);
   }
-  if (answer?.name !== PACKAGE_NAME || answer?.version !== release || answer?.dist?.integrity !== p.integrity) throw new Error(`refused: the npm registry (${REGISTRY}) gives ${answer?.name}@${answer?.version} the integrity ${answer?.dist?.integrity}, and the run's package record of ${PACKAGE_NAME}@${release} holds ${p.integrity}; the run did not review the published build of its release`);
-  return { release, package: p };
+  return npmRelease(release, p, answer);
 }
 
 /**

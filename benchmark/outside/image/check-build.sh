@@ -2,8 +2,9 @@
 # Guards "a run silently lacks a scanner". The outside benchmark's image must
 # not build unless every built-in scanner is installed at its pinned version
 # and reports its check case. Three linux/amd64 builds of image/Dockerfile:
-#   full      must build, run as a user other than root, and report every
-#             built-in ready when checked again in the finished image;
+#   full      must build, have a node user other than root (the user the
+#             entrypoint reviews as), and report every built-in ready when
+#             checked again in the finished image, as that user;
 #   no-ruby   (WITH_RUBY=0) must fail, naming brakeman and rubocop, no other;
 #   no-rust   (WITH_RUST=0) must fail, naming cargo-deny, no other.
 # The full image is kept as $IMAGE_TAG for local runs.
@@ -18,7 +19,7 @@ context=$(dirname "$here")
 dockerfile="$here/Dockerfile"
 tag=${IMAGE_TAG:-openqodex-outside:local}
 # The built-in scanners of the openqodex version image/package.json pins
-# (0.12.0): 21 in toolchain.json beside uv, and sqllint, which runs inside it.
+# (0.23.0): 21 in toolchain.json beside uv, and sqllint, which runs inside it.
 expected=${EXPECTED_SCANNERS:-22}
 
 skip() {
@@ -57,24 +58,24 @@ not_ready() {
   { grep -oE 'not ready: [a-z0-9-]+:' "$1" || true; } | sed -E 's/^not ready: //; s/:$//' | sort -u
 }
 
-# The full image checked again at run time, as the user it runs as: after
-# the build's last step, and without the build log, which a repeat build
-# takes from the cache and leaves empty. Nothing may need installing.
+# The full image checked again at run time, as the user reviews run as:
+# after the build's last step, and without the build log, which a repeat
+# build takes from the cache and leaves empty. Nothing may need installing.
 recheck() {
-  docker run --rm --platform linux/amd64 --entrypoint node "$tag" /srv/preinstall.mjs >"$out/recheck.log" 2>&1 || true
+  docker run --rm --platform linux/amd64 --user node --entrypoint node "$tag" /srv/preinstall.mjs >"$out/recheck.log" 2>&1 || true
 }
 
-# 1. The full image builds, runs as a user other than root, and has every
-# built-in scanner ready.
+# 1. The full image builds, has a node user other than root to review as,
+# and has every built-in scanner ready.
 if ! build full --load -t "$tag"; then
   tail -n 40 "$out/full.log" >&2
   missing=$(not_ready "$out/full.log" | tr '\n' ' ' | sed 's/ $//')
   fail "the full image did not build${missing:+; not ready: $missing} (log: $out/full.log)"
 fi
-uid=$(docker run --rm --platform linux/amd64 --entrypoint id "$tag" -u 2>&1 || true)
+uid=$(docker run --rm --platform linux/amd64 --user node --entrypoint id "$tag" -u 2>&1 || true)
 case "$uid" in
-  "" | 0 | *[!0-9]*) fail "the full image runs as user ${uid:-unknown}, not as a user other than root" ;;
-  *) echo "check-build: full: runs as user $uid" ;;
+  "" | 0 | *[!0-9]*) fail "the full image's node user is ${uid:-unknown}, not a user other than root" ;;
+  *) echo "check-build: full: reviews run as node, user $uid" ;;
 esac
 recheck
 if grep -q '^installing ' "$out/recheck.log"; then
@@ -108,4 +109,4 @@ refused() {
 refused no-ruby "brakeman rubocop" --build-arg WITH_RUBY=0
 refused no-rust "cargo-deny" --build-arg WITH_RUST=0
 
-echo "check-build: passed: $tag runs as user $uid with every built-in scanner ready; a build without Ruby or Rust is refused"
+echo "check-build: passed: $tag reviews as user $uid with every built-in scanner ready; a build without Ruby or Rust is refused"

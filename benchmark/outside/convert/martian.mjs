@@ -27,7 +27,8 @@
 // PLAN-benchmark 4.3, a version, which lib/index.mjs already requires of a
 // held-out entry), that reviewed the published package of that release, as
 // the npm registry confirms (lib/martian-board.mjs releaseGate). run.mjs
-// writes no release run yet; the field and the package record are the gate.
+// writes one with --release <version> --package npm:<version>; the field and
+// the package record are the gate.
 //
 // Failure list, written before the code:
 // 1. A run that is not a release run reads Martian's cases: a manifest with

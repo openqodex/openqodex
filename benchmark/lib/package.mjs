@@ -224,12 +224,20 @@ function treeOf(dir) {
 }
 
 // Why the unpacked folder may not be used as it is (failure 6), or null.
-function folderProblem(dir, record, sha256) {
-  if (record.sha256 !== sha256 || !record.files) return "its record names another tarball, or no files";
+// `expected` is the record the tarball's own bytes make ({ name, version,
+// sha256, integrity, bytes, files }), never record.json alone: record.json
+// is a file in the same folder and can be edited together with the code it
+// vouches for. Every field of record.json must equal it, since the run
+// reports the record it returns.
+function folderProblem(dir, record, expected) {
+  if (record.sha256 !== expected.sha256 || record.integrity !== expected.integrity || record.bytes !== expected.bytes) return "its record names another tarball";
+  if (record.name !== expected.name || record.version !== expected.version) return "its record names another package";
+  const named = Object.keys(record.files ?? {});
+  if (named.length !== Object.keys(expected.files).length || named.some((path) => record.files[path] !== expected.files[path])) return "its record lists other files";
   const { files, odd } = treeOf(dir);
   if (odd.length > 0) return `${odd[0]} is neither a file nor a folder`;
-  for (const [path, hash] of Object.entries(record.files)) if (files[path] !== hash) return `${path} is ${files[path] ? "changed" : "missing"}`;
-  const added = Object.keys(files).find((path) => !(path in record.files));
+  for (const [path, hash] of Object.entries(expected.files)) if (files[path] !== hash) return `${path} is ${files[path] ? "changed" : "missing"}`;
+  const added = Object.keys(files).find((path) => !(path in expected.files));
   return added ? `${added} was added` : null;
 }
 
@@ -278,9 +286,23 @@ export async function preparePackage(spec, { cache = cacheRoot() } = {}) {
   };
   let extracted = "now";
   if (existsSync(join(dir, "record.json"))) {
-    const problem = folderProblem(dir, JSON.parse(readFileSync(join(dir, "record.json"), "utf8")), sha256);
+    // The expected record comes from the tarball bytes, not from record.json.
+    const expectedFiles = {};
+    let manifest = null;
+    for (const m of tarMembers(bytes)) {
+      if (m.type !== "file") continue;
+      expectedFiles[m.path] = sha256Of(m.body);
+      if (m.path === "package/package.json") manifest = m.body;
+    }
+    let problem;
+    try {
+      const { name, version } = JSON.parse(manifest.toString("utf8"));
+      problem = folderProblem(dir, JSON.parse(readFileSync(join(dir, "record.json"), "utf8")), { name, version, sha256, integrity: integrityOf(bytes), bytes: bytes.length, files: expectedFiles });
+    } catch {
+      problem = "its record cannot be read";
+    }
     if (problem === null) return result("reused");
-    // Never run what differs from its record: unpack it again from the bytes.
+    // Never run what differs from the tarball: unpack it again from the bytes.
     rmSync(dir, { recursive: true, force: true });
     extracted = "again";
   }
@@ -310,4 +332,32 @@ export async function preparePackage(spec, { cache = cacheRoot() } = {}) {
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
+}
+
+// ---------- a release run on the published package ----------
+
+/**
+ * Refuses a release run's package record that is not the published package
+ * of its release (run.mjs --package npm:<release>): openqodex at that
+ * version, with its tarball's sha256 and a sha512 integrity equal to the
+ * one the registry gave when it was fetched. Throws "refused: ...".
+ */
+export function npmReleaseRecord(release, p) {
+  const named = p === null || p === undefined ? "no package record" : p.spec === "local" ? `the local build${p.commit ? ` at ${String(p.commit).slice(0, 12)}` : ""}` : `${p.spec ?? "an unnamed package"} (${p.name ?? "no name"}@${p.version ?? "no version"})`;
+  if (p === null || p === undefined || p.spec !== `npm:${release}` || p.name !== PACKAGE_NAME || p.version !== release) throw new Error(`refused: the run names the release ${release}, but it reviewed ${named}, not ${PACKAGE_NAME}@${release} from npm (run.mjs --package npm:${release}); a release run reviews the published package of its release, and a local build is never one`);
+  if (!/^[0-9a-f]{64}$/.test(String(p.sha256)) || !String(p.integrity).startsWith("sha512-") || p.registryIntegrity !== p.integrity) throw new Error(`refused: the run's package record of ${PACKAGE_NAME}@${release} does not hold a tarball sha256 and a sha512 integrity that equals the one the registry gave when it was fetched`);
+}
+
+/**
+ * The release a run's package record makes it once the npm registry, asked
+ * again, gives that version the record's integrity: { release, package },
+ * or a thrown refusal. `answer` is the registry's record of openqodex at
+ * `release` (lib/martian-board.mjs npmRegistryAnswer). lib/suites.mjs
+ * selectCases and lib/martian-board.mjs releaseGate both decide an npm
+ * release here.
+ */
+export function npmRelease(release, p, answer) {
+  npmReleaseRecord(release, p);
+  if (answer?.name !== PACKAGE_NAME || answer?.version !== release || answer?.dist?.integrity !== p.integrity) throw new Error(`refused: the npm registry (https://${REGISTRY_HOST}) gives ${answer?.name}@${answer?.version} the integrity ${answer?.dist?.integrity}, and the run's package record of ${PACKAGE_NAME}@${release} holds ${p.integrity}; the run did not review the published build of its release`);
+  return { release, package: p };
 }
