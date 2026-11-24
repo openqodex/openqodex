@@ -21,8 +21,10 @@
 //     reviewer_model, reviewer_effort) pause updates as unknown keys, or
 //     doctor shows them as if they were in force instead of naming the
 //     project lines that replace them.
+//  9. openqodex_telemetry: 0, the usage data switch, is taken for an unknown
+//     key and pauses updates, or doctor does not say usage data is off and why.
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { BIN, cli, env, sandbox, type Sandbox } from "./init-helpers.js";
@@ -125,5 +127,19 @@ describe("one reader for the user config", () => {
     const s = installed();
     writeFileSync(config(s), "skip_version: 99999999999999999999.0.0\n");
     expect(launch(s, ["update", "--status"]).stdout).toMatch(/^updates +paused: unknown value 99999999999999999999\.0\.0 for skip_version in .*config\.yaml/m);
+  });
+
+  it("openqodex_telemetry: 0 is a key OpenQodex knows: updates stay on, doctor says usage data is off and why, and no id is made (failure 9)", () => {
+    const s = installed();
+    writeFileSync(config(s), "openqodex_telemetry: 0\n");
+    // Every other switch out of the way; a dead loopback port, so nothing could reach any host.
+    const e = { ...laptop(s), OPENQODEX_TELEMETRY_HOST: "http://127.0.0.1:9" };
+    for (const key of ["OPENQODEX_TELEMETRY", "DO_NOT_TRACK", "OPENQODEX_REVIEW_DEPTH", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL", "TF_BUILD", "TEAMCITY_VERSION", "BUILDKITE", "CODEBUILD_BUILD_ID", "BUILDER_OUTPUT"]) delete e[key];
+    const status = spawnSync("sh", [join(s.oqHome, "bin/openqodex"), "update", "--status"], { encoding: "utf8", env: e, cwd: s.repo, timeout: 120_000 });
+    expect(status.stdout).toMatch(/^updates +on$/m);
+    expect(`${status.stdout}${status.stderr}`).not.toMatch(/unknown key/);
+    const doctor = spawnSync("sh", [join(s.oqHome, "bin/openqodex"), "doctor", "--json"], { encoding: "utf8", env: e, cwd: s.repo, timeout: 120_000 });
+    expect(JSON.parse(doctor.stdout).telemetry).toEqual({ on: false, why: "openqodex_telemetry in the user config" });
+    expect(existsSync(join(s.oqHome, "telemetry"))).toBe(false);
   });
 });

@@ -20,6 +20,8 @@
 // 25. A file an earlier init wrote with every default as a live value keeps
 //     an old default after the default changed, without a word; or a file
 //     the team wrote by hand is warned about its own choice.
+// 26. The usage data key lands in the file init writes, even as a comment,
+//     or config migrate drops a line that switches usage data off.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -54,6 +56,7 @@ const SHIPPED_KEYS = [
   "graph.max_file_bytes",
   "graph.max_cache_mb",
   "graph.max_heap_mb",
+  "openqodex_telemetry",
 ];
 
 function repo(): string {
@@ -74,10 +77,14 @@ describe("the file init writes", () => {
   it("sets version only; every other key is a comment with its default (failure 19)", () => {
     expect(parseYaml(DEFAULT_CONFIG_YAML)).toEqual({ version: 1 });
     expect(parseConfig(DEFAULT_CONFIG_YAML)).toEqual({ config: DEFAULT_CONFIG, warnings: [] });
-    for (const { key, default: value } of CONFIG_KEYS.filter((k) => k.key !== "version")) {
+    for (const { key, default: value } of CONFIG_KEYS.filter((k) => k.key !== "version" && !k.unlisted)) {
       const leaf = key.split(".").pop()!;
       expect(DEFAULT_CONFIG_YAML, key).toMatch(new RegExp(`^# *${leaf}: ${value.replace(/[[\]]/g, "\\$&")}$`, "m"));
     }
+  });
+
+  it("never holds the usage data key, not even as a comment (failure 26)", () => {
+    expect(DEFAULT_CONFIG_YAML).not.toContain("openqodex_telemetry");
   });
 
   it("reads back to the defaults, with no warning, once the `# ` starting each line below version is removed (failure 19)", () => {
@@ -153,6 +160,16 @@ describe("config migrate", () => {
     applyMigration(root, m);
     expect(readFileSync(join(root, ".openqodex/config.yaml"), "utf8")).toBe(m.text);
     expect(planMigration(root).changes).toEqual([]);
+  });
+
+  it("keeps openqodex_telemetry: 0 beside a key it renames (failure 26)", () => {
+    const root = repo();
+    mkdirSync(join(root, ".openqodex"));
+    writeFileSync(join(root, ".openqodex/config.yaml"), "openqodex_telemetry: 0\npr_review:\n  block_on_severity: major\n");
+    const m = planMigration(root);
+    expect(m.changes).toEqual(["pr_review renamed to review"]);
+    applyMigration(root, m);
+    expect(readFileSync(join(root, ".openqodex/config.yaml"), "utf8")).toBe("openqodex_telemetry: 0\nreview:\n  block_on_severity: major\n");
   });
 
   it("moves the 0.1.0 root file into .openqodex/config.yaml when it is the only one (failure 24)", () => {
