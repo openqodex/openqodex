@@ -7,6 +7,8 @@
 //    refuse each before the held-out access log gains a line.
 // 4. An npm release run reads golden comments before its access is logged: selection logs the release, the
 //    package and its integrity first, and the truth is read only after.
+// 5. An npm release run runs the cached package's code (its CLI's --version) before its record is checked
+//    against the release and the registry, so a tampered cache runs before it is refused.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -21,13 +23,13 @@ afterAll(removeTempDirs);
 
 const AT_ARGS = "--release requires a comparison's local build";
 // A cache that already holds a small openqodex 9.9.9 tarball and the registry's answer for it, so the run never
-// touches the real bench cache or the network to fetch it.
-const cacheWithPackage = () => {
+// touches the real bench cache or the network to fetch it. Its CLI writes `ran` into `marker` when it runs.
+const cacheWithPackage = (marker = join(tempDir("oq-release-package-marker-"), "ran")) => {
   const cache = tempDir("oq-release-package-run-cache-");
   const src = tempDir("oq-release-package-src-");
   mkdirSync(join(src, "package", "dist"), { recursive: true });
   writeFileSync(join(src, "package", "package.json"), JSON.stringify({ name: "openqodex", version: "9.9.9" }));
-  writeFileSync(join(src, "package", "dist", "bin.js"), "console.log('bin');\n");
+  writeFileSync(join(src, "package", "dist", "bin.js"), `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
   writeFileSync(join(src, "package", "dist", "lib.js"), "export const x = 1;\n");
   const dir = join(cache, "packages", "npm");
   mkdirSync(dir, { recursive: true });
@@ -42,11 +44,13 @@ const run = (cache, release, ...extra) => {
 };
 
 it("a release run with --package npm:<version> passes the argument check, and a file or smoke package does not", () => {
-  const cache = cacheWithPackage();
-  // The package is unpacked from the temp cache, then the registry is asked for it: that is the next refusal,
-  // whether the registry answers 404 or cannot be reached.
-  expect(run(cache, "9.9.9", "--package", "npm:9.9.9"), "npm:<version> did not reach the registry check").toContain("refused: the npm registry (https://registry.npmjs.org) could not confirm openqodex@9.9.9");
+  const marker = join(tempDir("oq-release-package-marker-"), "ran");
+  const cache = cacheWithPackage(marker);
+  // The package is unpacked from the temp cache, then its record is checked against the release: a record of
+  // another version is the next refusal, before the registry is asked, so the test needs no network.
+  expect(run(cache, "9.9.8", "--package", "npm:9.9.9"), "npm:<version> did not reach the package record check").toContain("refused: the run names the release 9.9.8, but it reviewed npm:9.9.9 (openqodex@9.9.9)");
   expect(existsSync(join(cache, "packages", "openqodex-" + createHash("sha256").update(readFileSync(join(cache, "packages", "npm", "openqodex-9.9.9.tgz"))).digest("hex").slice(0, 16), "record.json")), "the run did not use the temp cache").toBe(true);
+  expect(existsSync(marker), "the package's CLI ran before its record was checked").toBe(false);
   expect(run(cache, "9.9.9", "--package", "file:/nowhere/openqodex-9.9.9.tgz"), "a packed file was admitted under --release").toContain(AT_ARGS);
   expect(run(cache, "9.9.9", "--package", "npm:9.9.9", "--smoke"), "a smoke run was admitted under --release").toContain("--smoke runs development cases only");
 });

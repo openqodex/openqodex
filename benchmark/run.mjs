@@ -318,7 +318,7 @@ import { comparePasses } from "./lib/identical.mjs";
 import { heldOutAccessPath } from "./lib/index.mjs";
 import { controlCaseData, controlEnv, controlSample, probeControl } from "./lib/claude-control.mjs";
 import { materialiseOnly } from "./lib/materialise-only.mjs";
-import { PACKAGE_NAME, parsePackageSpec, preparePackage } from "./lib/package.mjs";
+import { npmRelease, npmReleaseRecord, PACKAGE_NAME, parsePackageSpec, preparePackage } from "./lib/package.mjs";
 import { npmRegistryAnswer, REGISTRY } from "./lib/martian-board.mjs";
 import { laptopMetered, probeReviewer, BLOCKED } from "./lib/reviewers.mjs";
 import { attemptDir, bundleHash, CLAUDE_MODEL_FROM, claudeRunModels, executeRun, failureOf, jobState, laptopInvocation, planJobs, preflightRefusals, provenanceProblems, resumeProblems, runManifest, saveSampleRow, sampleRecord, savedSampleRows, scannerPreflight, scanSampleRecord } from "./lib/runner.mjs";
@@ -650,19 +650,24 @@ async function prepareRunBuild(o, date) {
   try { pkg = await preparePackage(o.package); }
   catch (error) { throw new Error(`--package ${o.package}: ${error.message}`); }
   if (pkg) o.cli = pkg.cli;
+  const pkgRecord = pkg ? (({ files, ...rest }) => ({ ...rest, fileCount: Object.keys(files).length }))(pkg.record) : null;
+  // A release run on the published package checks its record, then asks the
+  // npm registry for its release again, before any code of the package runs
+  // (packageBuild asks its CLI for --version). lib/suites.mjs selectCases
+  // checks the answer again before any held-out case is read
+  // (lib/package.mjs npmRelease).
+  let registryAnswer = null;
+  if (o.release && pkgRecord?.spec.startsWith("npm:")) {
+    npmReleaseRecord(o.release, pkgRecord);
+    try { registryAnswer = await npmRegistryAnswer(o.release); }
+    catch (error) { throw new Error(`refused: the npm registry (${REGISTRY}) could not confirm ${PACKAGE_NAME}@${o.release}: ${error.message.split("\n")[0]}`); }
+    npmRelease(o.release, pkgRecord, registryAnswer);
+  }
   const controlBuild = o.control && !o.release ? { problems: [], build: { commit: git(repoRoot, "rev-parse", "HEAD").trim(), short: git(repoRoot, "rev-parse", "--short=7", "HEAD").trim(), bundleHash: null, cliVersion: null, dirty: git(repoRoot, "status", "--porcelain").trim() !== "" } } : null;
   const { problems, build } = controlBuild ?? (pkg ? packageBuild(pkg) : buildInfo(o.cli));
   if (problems.length > 0) throw new Error(problems.join("\n"));
-  const packageRecord = pkg ? (({ files, ...rest }) => ({ ...rest, fileCount: Object.keys(files).length }))(pkg.record) : { spec: "local", commit: build.commit, dirty: build.dirty };
+  const packageRecord = pkgRecord ?? { spec: "local", commit: build.commit, dirty: build.dirty };
   const out = o.out ?? join(benchRoot, "results", o.mode === "scan" ? `${date}-${build.short}-${o.suite}-scan-laptop` : o.control ? `${date}-${build.short}-control` : o.path === "server" ? `${date}-${build.short}-${o.suite}-review-server` : `${date}-${build.short}`);
-  // A release run on the published package asks the npm registry for its
-  // release again; lib/suites.mjs selectCases checks the answer against the
-  // package record before any held-out case is read (lib/package.mjs npmRelease).
-  let registryAnswer = null;
-  if (o.release && packageRecord.spec.startsWith("npm:")) {
-    try { registryAnswer = await npmRegistryAnswer(o.release); }
-    catch (error) { throw new Error(`refused: the npm registry (${REGISTRY}) could not confirm ${PACKAGE_NAME}@${o.release}: ${error.message.split("\n")[0]}`); }
-  }
   return { pkg, build, packageRecord, out, registryAnswer };
 }
 
