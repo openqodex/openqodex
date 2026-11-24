@@ -186,7 +186,8 @@ export function codexCatalog(stdout: string): { models: string[]; top: string | 
   const list = (data as { models?: unknown } | null)?.models;
   if (!Array.isArray(list)) return null;
   const rows = list.filter((m): m is { slug: string; visibility?: unknown; priority?: unknown } => typeof (m as { slug?: unknown } | null)?.slug === "string");
-  if (rows.length === 0) return null;
+  // A row without a slug may hide a model: the list is not whole, so it says nothing.
+  if (rows.length === 0 || rows.length !== list.length) return null;
   const shown = rows.filter((m) => m.visibility === "list").sort((a, b) => (typeof a.priority === "number" ? a.priority : Infinity) - (typeof b.priority === "number" ? b.priority : Infinity));
   return { models: rows.map((m) => m.slug), top: shown[0]?.slug ?? null };
 }
@@ -321,6 +322,9 @@ export type CodexRun = { finalText: string; calls: ToolCall[]; input: number | n
 export function codexStream(secrets: string[] = []): { line(text: string): string | null; end(code: number | null, signal: string | null): CodexRun } {
   let answer: string | null = null;
   let completed = false;
+  // A `turn.failed` ends the turn; an `error` event alone may be a retry
+  // that recovered (a reconnect, an overload) before the turn completed.
+  let turnFailed = false;
   let failed: string | null = null;
   let input: number | null = null;
   let output: number | null = null;
@@ -335,6 +339,7 @@ export function codexStream(secrets: string[] = []): { line(text: string): strin
       return null;
     }
     if (e.type === "turn.failed" || e.type === "error") {
+      if (e.type === "turn.failed") turnFailed = true;
       const said = reviewerError(str((e.error as Record<string, unknown> | undefined)?.message) ?? str(e.message), undefined, secrets);
       // The first error, unless a later one says the model cannot serve and
       // it does not: a reconnect notice can come before the usage limit or
@@ -375,6 +380,9 @@ export function codexStream(secrets: string[] = []): { line(text: string): strin
     },
     end(code: number | null, signal: string | null): CodexRun {
       const base = { calls, input, output };
+      // A turn that completed with an answer and exit 0 is answered, though
+      // an error event came before it: Codex retried and recovered.
+      if (!turnFailed && completed && code === 0 && answer !== null) return { ...base, finalText: answer, failure: null };
       if (failed !== null) return { ...base, finalText: "", failure: failed };
       if (code !== 0) return { ...base, finalText: "", failure: `the reviewer exited (${signal ?? `exit ${code}`}) before it answered` };
       if (!completed) return { ...base, finalText: "", failure: "the reviewer ended without finishing its turn" };
@@ -447,7 +455,11 @@ function start(opts: StartOptions): ReviewerSession {
         }
         const r = stream.end(code, signal);
         if (stopped !== null) return done({ ...r, finalText: "", failure: stopped });
-        if (r.failure !== null && errLine !== null && r.failure.includes("exited")) return done({ ...r, failure: `${r.failure}: ${errLine}` });
+        if (r.failure !== null && errLine !== null && r.failure.includes("exited")) {
+          // A model that cannot serve, said on stderr only, still lets a list move on.
+          const said = reviewerError(errLine, undefined, opts.secrets);
+          return done({ ...r, failure: cannotServe(said) ? said : `${r.failure}: ${errLine}` });
+        }
         done(r);
       });
       proc.stdin?.on("error", () => {

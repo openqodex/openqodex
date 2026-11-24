@@ -4,7 +4,7 @@
 // start on this machine (doctor, init).
 import { OpenQodexError, REVIEWERS_SINCE, entryLabel, reviewerEffortProblem, reviewerModelProblem } from "@openqodex/core";
 import type { ReviewerEntry } from "@openqodex/core";
-import { REVIEWER_NAMES, entryCanStart, hostAgent } from "@openqodex/review";
+import { REVIEWER_NAMES, entryCanStart, hostAgent, readinessCache } from "@openqodex/review";
 import type { ReviewerDriver } from "@openqodex/review";
 import { isMap, parseDocument } from "yaml";
 import type { Document, Pair } from "yaml";
@@ -52,7 +52,8 @@ export async function defaultReviewerList(drivers: readonly ReviewerDriver[], re
     if (tool === "claude") entries.push({ tool, model: "opus", effort: "high" });
     else {
       const top = d.ok && driver.models ? ((await driver.models(d.bin))?.top ?? null) : null;
-      entries.push({ tool, ...(top !== null ? { model: top } : {}), effort: "high" });
+      // A slug the config would refuse is left out: Codex's own default then.
+      entries.push({ tool, ...(top !== null && reviewerModelProblem("codex", top) === null ? { model: top } : {}), effort: "high" });
     }
     ready.push(d.ok);
   }
@@ -98,18 +99,24 @@ export function insertReviewerList(before: string, entries: readonly ReviewerEnt
   if (newer(REVIEWERS_SINCE, running)) {
     // Not released yet: see above.
   } else if (min === undefined || min === null) {
-    const items = doc.contents.items as Pair[];
-    const at = items.findIndex((p) => (p.key as { value?: unknown } | null)?.value === "version");
-    items.splice(at < 0 ? 0 : at + 1, 0, doc.createPair("min_version", REVIEWERS_SINCE));
+    // `min_version:` with no value is set in place, never written twice.
+    if (doc.has("min_version")) doc.set("min_version", REVIEWERS_SINCE);
+    else {
+      const items = doc.contents.items as Pair[];
+      const at = items.findIndex((p) => (p.key as { value?: unknown } | null)?.value === "version");
+      items.splice(at < 0 ? 0 : at + 1, 0, doc.createPair("min_version", REVIEWERS_SINCE));
+    }
   } else if (newer(REVIEWERS_SINCE, String(min))) oldMin = String(min);
   return { text: doc.toString(), oldMin };
 }
 
 // Each entry of a project's list, and whether it can start on this
 // machine, with the reason when it cannot, and whether its model was
-// confirmed. Nothing is started.
+// confirmed. Nothing is started. Every entry shares one readiness cache, so
+// each tool is checked once, however long the list.
 export async function listReadiness(entries: readonly ReviewerEntry[], drivers: readonly ReviewerDriver[], repoRoot: string): Promise<{ entry: ReviewerEntry; label: string; version: string | null; line: string }[]> {
-  const found = await Promise.all(entries.map((e) => entryCanStart(e, drivers, repoRoot)));
+  const cache = readinessCache();
+  const found = await Promise.all(entries.map((e) => entryCanStart(e, drivers, repoRoot, cache)));
   return entries.map((entry, i) => {
     const f = found[i]!;
     return { entry, label: entryLabel(entry), version: f.ok ? f.version : null, line: f.ok ? `can start here (${f.driver.name} ${f.version})${f.modelChecked ? "" : `; whether model ${entry.model} serves this login shows only when a review starts`}` : `cannot start here: ${f.reason}` };

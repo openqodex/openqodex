@@ -74,11 +74,11 @@ describe("one reader for the user config", () => {
     const r = launch(s, ["doctor"]);
     expect(r.stdout).toMatch(/config\.yaml sets reviewer: codex, reviewer_web: off, reviewer_model: gpt-test-model, reviewer_effort: high\. openqodex no longer reads them there/);
     expect(r.stdout).toContain("    - tool: codex");
-    expect(r.stdout).toContain("      model: gpt-test-model");
-    expect(r.stdout).toContain("your reviewer_web: off is not honoured any more");
+    expect(r.stdout).toContain('      model: "gpt-test-model"');
+    expect(r.stdout).toContain("Your reviewer_web: off still keeps the reviewer's web tools off for now");
     expect(r.stdout).not.toMatch(/^ {2}reviewer(_model|_effort|_web)? +/m);
     expect(r.stdout).not.toMatch(/unknown key reviewer/);
-    expect(r.stdout).not.toMatch(/^ {2}updates +paused/m);
+    expect(r.stdout).toMatch(/^ {2}updates +on$/m);
     // A value no tool takes is named as written, on one line, and carried nowhere.
     writeFileSync(config(s), "reviewer_model: {toString: x}\nreviewer_effort: \"high\\nlow\"\n");
     const odd = launch(s, ["doctor"]);

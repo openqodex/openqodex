@@ -698,9 +698,10 @@ async function planReviewerList(s: Setup, actions: Action[], record: InstallReco
   const repoRoot = s.repoRoot;
   let loadedPath: string | null;
   try {
-    loadedPath = loadConfig(repoRoot).path;
+    loadedPath = loadConfig(repoRoot, undefined, { runtimeVersion: s.version }).path;
   } catch {
-    // A config that does not load is left as it is; review names the problem.
+    // A config that does not load, or needs a newer openqodex, is left as it
+    // is; review names the problem.
     return;
   }
   const path = loadedPath ?? join(repoRoot, STATE_DIR, FOLDER_CONFIG);
@@ -718,7 +719,8 @@ async function planReviewerList(s: Setup, actions: Action[], record: InstallReco
     const now = readRepoFile(repoRoot, path, CONFIG_MAX_BYTES);
     if (now === null) return;
     const next = insertReviewerList(now, entries);
-    if (next === null) return;
+    // A file the list would push past the size a review reads is left as it is.
+    if (next === null || Buffer.byteLength(next.text, "utf8") > CONFIG_MAX_BYTES) return;
     s.guard.write(path, next.text, { keepMode: true });
     const owned = record.files.find((f) => f.path === path);
     if (owned !== undefined && owned.sha256 === sha256(now)) owned.sha256 = sha256(next.text);

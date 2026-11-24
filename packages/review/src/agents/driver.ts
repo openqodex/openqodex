@@ -49,10 +49,11 @@ const PLAN_LIMIT = /usage limit|plan limit|limit reached|hit your (\S+ )?limit|b
 // The words of a reviewer whose model cannot be used by this login, as the
 // real agents print them: Claude Code's "There's an issue with the selected
 // model (x). It may not exist or you may not have access to it." with the
-// API error model_not_found or not_found_error (Claude Code 2.1.331), and
-// Codex's "The 'x' model is not supported when using Codex with a ChatGPT
-// account." (codex-cli 0.171.0). Not authorized for a model is the same.
-const MODEL_UNAVAILABLE = /model_not_found|issue with the selected model|model is not supported|not supported when using codex|unrecognized_model|not_found_error|(do not|don't|does not) have access to (the |this )?model|not (authorized|allowed) to use (the |this )?model/i;
+// API error model_not_found (Claude Code 2.1.331), and Codex's "The 'x'
+// model is not supported when using Codex with a ChatGPT account."
+// (codex-cli 0.171.0). Not authorized for a model is the same. A bare
+// not_found_error is not enough: it can name another missing resource.
+const MODEL_UNAVAILABLE = /model_not_found|issue with the selected model|model is not supported|not supported when using codex|unrecognized_model|(do not|don't|does not) have access to (the |this )?model|not (authorized|allowed) to use (the |this )?model/i;
 // The API is overloaded (Claude's 529 overloaded_error): this model cannot
 // serve now, another may.
 const OVERLOADED = /overloaded/i;

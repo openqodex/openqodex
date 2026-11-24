@@ -34,6 +34,13 @@ export function leftSnapshot(t: TraceEntry): boolean {
   return outsideSnapshot(t) && t.ok;
 }
 
+// Whether a traced reviewer crossed its boundary, as completionRecord counts
+// it: a served call outside the snapshot, or a served tool it was not
+// given. A list's fallback never drops an attempt that did.
+export function crossedBoundary(trace: readonly TraceEntry[], tools: readonly string[]): boolean {
+  return trace.some((t) => leftSnapshot(t) || (t.ok && !tools.includes(t.tool)));
+}
+
 export function refusedOutside(t: TraceEntry): boolean {
   return outsideSnapshot(t) && !t.ok;
 }

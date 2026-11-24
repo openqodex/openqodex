@@ -209,7 +209,7 @@ Claude Code sends the brief and files it reads to the model your Claude Code log
 OpenQodex and the built-in scanners send no code anywhere.
 `security` lists every network call.
 
-When Codex is installed and logged in too, a review you run from Claude Code still uses Claude Code. The project's `review.reviewers` in `.openqodex/config.yaml` sets which agent and model review, in order, with a fallback when one hits a limit (`config`). `--reviewer codex` picks Codex for one run.
+With no `review.reviewers` in the project's config file, a review you run from Claude Code uses Claude Code, even when Codex is installed and logged in too. A list there wins over that: its first entry that can start reviews, whichever agent you run it from, with a fallback when one hits a limit (`config`). `--reviewer codex` picks Codex for one run.
 
 ## The push gate
 

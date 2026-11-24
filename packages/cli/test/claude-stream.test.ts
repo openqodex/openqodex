@@ -138,8 +138,9 @@ describe("the Claude Code stream reader, on a recorded run", () => {
 
   it("10. a rejected rate limit and an overload are failures the next entry may take over; a plain error is not", async () => {
     const result = (text: string, type: string | null) => JSON.stringify({ type: "result", subtype: "success", is_error: true, num_turns: 1, result: text, ...(type ? { api_error_type: type } : {}) });
-    const limited = [JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour" } }), result("Claude AI usage limit reached|1764000000", null), ""].join("\n");
-    expect((await runOnce(standIn(JSON.stringify(limited)))).turn.failure).toMatch(/^the reviewer hit /);
+    // The result's own text names no limit: the rejected event alone must.
+    const limited = [JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour" } }), result("Request failed", null), ""].join("\n");
+    expect((await runOnce(standIn(JSON.stringify(limited)))).turn.failure).toMatch(/^the reviewer hit a rate limit \(/);
     const overloaded = [result("API Error: 529 Overloaded", "overloaded_error"), ""].join("\n");
     const turn = (await runOnce(standIn(JSON.stringify(overloaded)))).turn;
     expect(turn.failure).toMatch(/^the reviewer's model cannot serve this review: it is overloaded/);

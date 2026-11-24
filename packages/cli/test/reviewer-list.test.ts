@@ -29,8 +29,10 @@
 //     over or failed before it, with why.
 // 10. The retired reviewer keys of the user config are still read, give no
 //     warning naming the lines to move, or pause automatic updates as
-//     unknown keys; a personal reviewer_web: off is honoured silently, or
-//     dropped without saying so.
+//     unknown keys; a personal reviewer_web: off is dropped on upgrade, or
+//     honoured without saying so. The lines name a file the project does
+//     not read, add a second review block, repeat a key the file has, turn
+//     `reviewer: auto` into a Codex-only list, or leave a model unquoted.
 // 11. init writes a reviewer the developer cannot start (the other agent,
 //     not installed), puts the running agent second, or fails when Codex's
 //     model list cannot be read.
@@ -41,16 +43,17 @@
 //     writes a second review block beside a hosted pr_review one, or writes
 //     a min_version the running build itself refuses.
 import { stagedFake } from "../../review/test/staged-fake.js";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { parse as parseYaml } from "yaml";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Report } from "@openqodex/core";
-import { parseConfig, reviewerLine } from "@openqodex/core";
+import { REVIEWERS_SINCE, parseConfig, reviewerLine } from "@openqodex/core";
 import { parseFlags } from "../src/flags.js";
 import { runReview } from "../src/review-run.js";
 import { defaultReviewerList, insertReviewerList, listReadiness } from "../src/reviewers/list.js";
-import { userConfigNotes } from "../src/reviewers/settings.js";
+import { projectFile, retiredReviewerWarning, userConfigNotes } from "../src/reviewers/settings.js";
 import { readUserConfig, unknownKeys } from "../src/user-config.js";
 import { updatesAllowed } from "../src/update/state.js";
 import { DEPTH_ENV, reviewerError } from "@openqodex/review";
@@ -67,16 +70,18 @@ function git(cwd: string, ...args: string[]): void {
 }
 
 // A repo whose base commit holds `config` as .openqodex/config.yaml, with an
-// uncommitted text file: no scanner candidate.
+// uncommitted edit to a tracked text file (so no global ignore can hide it):
+// no scanner candidate.
 function repo(config: string): string {
   const dir = tempDir("oq-list-");
   git(dir, "init", "-q", "-b", "main");
   writeFileSync(join(dir, "README.md"), "hello\n");
+  writeFileSync(join(dir, "notes.txt"), "first line\n");
   mkdirSync(join(dir, ".openqodex"));
   writeFileSync(join(dir, ".openqodex", "config.yaml"), config);
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", "Base");
-  writeFileSync(join(dir, "notes.txt"), "one line\n");
+  writeFileSync(join(dir, "notes.txt"), "first line\none line\n");
   return dir;
 }
 
@@ -84,7 +89,7 @@ function repo(config: string): string {
 const LIMIT = reviewerError("You've hit your usage limit. Upgrade to Pro or try again later.");
 const NO_MODEL = reviewerError("There's an issue with the selected model (bogus-model-xyz). It may not exist or you may not have access to it. model_not_found not_found_error");
 
-type Start = { model?: string | null; effort?: string | null; sent: number; closed: boolean };
+type Start = { model?: string | null; effort?: string | null; web: boolean; sent: number; closed: boolean };
 type Fake = ReviewerDriver & { starts: Start[] };
 // `fail` answers a start's failure from its model and its order among this
 // driver's starts, or null for the recorded answer. `wait` holds a start's
@@ -95,6 +100,8 @@ type Behaviour = {
   wait?: (index: number) => Promise<void> | null;
   catalog?: { models: string[]; top: string | null } | null;
   answered?: () => void;
+  // Calls a start's first turn adds; it may also change the snapshot.
+  extra?: (index: number, snapshotDir: string) => Turn["calls"];
 };
 
 function fake(name: string, b: Behaviour = {}): Fake {
@@ -108,7 +115,7 @@ function fake(name: string, b: Behaviour = {}): Fake {
     ...("catalog" in b ? { async models() { return b.catalog ?? null; } } : {}),
     start(opts): ReviewerSession {
       const index = driver.starts.length;
-      const start: Start = { ...("model" in opts ? { model: opts.model } : {}), ...("effort" in opts ? { effort: opts.effort } : {}), sent: 0, closed: false };
+      const start: Start = { ...("model" in opts ? { model: opts.model } : {}), ...("effort" in opts ? { effort: opts.effort } : {}), web: opts.web, sent: 0, closed: false };
       driver.starts.push(start);
       return stagedFake({
         pid: 4242 + index,
@@ -116,8 +123,9 @@ function fake(name: string, b: Behaviour = {}): Fake {
           start.sent++;
           await b.wait?.(index);
           const usage = { turns: 1, input_tokens: 1, output_tokens: 1, cost_usd: null };
+          const extra = start.sent === 1 ? (b.extra?.(index, opts.snapshotDir) ?? []) : [];
           const failure = b.fail?.(opts.model, index) ?? null;
-          if (failure !== null) return { finalText: "", calls: [], usage, sessionId: "fake", failure };
+          if (failure !== null) return { finalText: "", calls: extra, usage, sessionId: "fake", failure };
           const id = /`change_id`: `([0-9a-f]{12})`/.exec(text)?.[1] ?? "missing";
           const finalText = JSON.stringify({ version: 2, change_id: id, summary: `Reviewed by ${opts.model ?? name}.`, findings: [], dropped: [] });
           const read = { tool: "Read", input: { file_path: "notes.txt" }, ok: true, read: { path: "notes.txt", start: 1, lines: 1 } };
@@ -158,8 +166,17 @@ afterEach(() => {
 const listing = (entries: string[], extra = "") => `version: 1\nreview:\n${extra}  reviewers:\n${entries.map((e) => `    - ${e}\n`).join("")}`;
 const SINGLE = "  stages: false\n";
 
-function review(drivers: ReviewerDriver[], config: string, more: { reviewer?: string; reviewerEffort?: string } = {}): Promise<number> {
-  const { global } = parseFlags(["--cwd", repo(config), "--no-color", "--format", "json"], {});
+// The repository of the last review(), for its run folder.
+let lastRepo = "";
+const runFile = (name: string): string | null => {
+  const reviews = join(lastRepo, ".openqodex", "reviews");
+  for (const d of readdirSync(reviews)) if (existsSync(join(reviews, d, name))) return readFileSync(join(reviews, d, name), "utf8");
+  return null;
+};
+
+function review(drivers: ReviewerDriver[], config: string, more: { reviewer?: string; reviewerEffort?: string; web?: boolean } = {}): Promise<number> {
+  lastRepo = repo(config);
+  const { global } = parseFlags(["--cwd", lastRepo, "--no-color", "--format", "json"], {});
   return runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", timeoutMs: 60_000, drivers, ...more });
 }
 
@@ -266,6 +283,28 @@ describe("an entry that cannot serve partway", () => {
     expect(err).toMatch(/codex, model gpt-a failed: the reviewer hit its usage or plan limit/);
     expect(err).toMatch(/codex, model gpt-b failed: the reviewer hit its usage or plan limit/);
     expect(err).toMatch(/- claude skipped: claude is not logged in; run claude login/);
+    // Reviewers did start: the record says so, and the calls they made are kept.
+    expect(err).toContain("every reviewer of the project's list failed or was passed over");
+    expect(JSON.parse(runFile("reviewer.json")!)).toMatchObject({ started: true });
+    expect((JSON.parse(runFile("usage.json")!) as { calls: unknown[] }).calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("6. a boundary crossed by an entry that then hit its limit ends the review; no later entry starts", async () => {
+    const outside = { tool: "Read", input: { file_path: "/etc/hosts" }, ok: true, read: { path: "/etc/hosts", start: 1, lines: 1 } };
+    const claude = fake("claude", { fail: (_m, index) => (index === 0 ? LIMIT : null), extra: (index) => (index === 0 ? [outside] : []) });
+    const codex = fake("codex");
+    expect(await review([claude, codex], listing(["tool: claude\n      model: opus", "tool: codex"], SINGLE))).toBe(2);
+    expect(codex.starts).toHaveLength(0);
+    expect(err).not.toContain("the review starts again");
+    expect((JSON.parse(out) as Report).completion?.missing.join("\n")).toMatch(/the reviewer read outside the snapshot: \/etc\/hosts/);
+  });
+
+  it("6. a snapshot an entry changed before it hit its limit ends the review, checked against the first baseline", async () => {
+    const claude = fake("claude", { fail: (_m, index) => (index === 0 ? LIMIT : null), extra: (index, snapshotDir) => (index === 0 && writeFileSync(join(snapshotDir, "notes.txt"), "changed\n"), []) });
+    const codex = fake("codex");
+    expect(await review([claude, codex], listing(["tool: claude\n      model: opus", "tool: codex"], SINGLE))).toBe(2);
+    expect(codex.starts).toHaveLength(0);
+    expect((JSON.parse(out) as Report).completion?.missing).toContain("the snapshot changed while the reviewer read it");
   });
 
   it("8. --reviewer <tool>:<model> replaces the list and has no fallback", async () => {
@@ -279,16 +318,19 @@ describe("an entry that cannot serve partway", () => {
 });
 
 describe("the retired reviewer keys of the user config", () => {
-  it("10. are not read, warn once with the project lines, say web stays on, and do not pause automatic updates", async () => {
+  it("10. are not read, warn once with the project lines, keep a personal web opt-out, and do not pause automatic updates", async () => {
     writeFileSync(join(home, "config.yaml"), "update: on\nreviewer: codex\nreviewer_web: off\nreviewer_model: gpt-old\nreviewer_effort: high\n");
     const claude = fake("claude");
     const codex = fake("codex");
     expect(await review([claude, codex], "version: 1\n", { reviewer: "claude" })).toBe(0);
     for (const s of claude.starts) expect(s).not.toHaveProperty("model");
     expect(codex.starts).toHaveLength(0);
-    expect(err).toContain(`${readUserConfig(home).path} sets reviewer: codex, reviewer_web: off, reviewer_model: gpt-old, reviewer_effort: high. openqodex no longer reads them there: each project chooses its reviewer in .openqodex/config.yaml, which the whole team shares.`);
-    expect(err).toContain("  review:\n    reviewers:\n      - tool: codex\n        model: gpt-old\n        effort: high\n    reviewer_web: off\n");
-    expect(err).toContain("your reviewer_web: off is not honoured any more");
+    expect(err).toContain(`${readUserConfig(home).path} sets reviewer: codex, reviewer_web: off, reviewer_model: gpt-old, reviewer_effort: high. openqodex no longer reads them there: each project chooses its reviewer in its own config file, which the whole team shares.`);
+    expect(err).toContain("add these lines to the project's .openqodex/config.yaml:\n  review:\n    reviewers:\n      - tool: codex\n        model: \"gpt-old\"\n        effort: high\n    reviewer_web: off\n");
+    // The opt-out made before the move holds until the project's file says so.
+    expect(claude.starts.length).toBeGreaterThan(0);
+    for (const s of claude.starts) expect(s.web).toBe(false);
+    expect(err).toContain("Your reviewer_web: off still keeps the reviewer's web tools off for now");
     expect(err.match(/no longer reads them there/g)).toHaveLength(1);
     const config = readUserConfig(home);
     expect(unknownKeys(config)).toBeNull();
@@ -299,6 +341,39 @@ describe("the retired reviewer keys of the user config", () => {
     writeFileSync(join(home, "config.yaml"), "reviewer: [unclosed\n");
     expect(userConfigNotes(home)[0]).toMatch(/automatic updates are off until it is fixed$/);
     expect(await review([fake("claude")], "version: 1\n", { reviewer: "claude" })).toBe(0);
+  });
+
+  it("10. the lines go into the file the project reads and its existing block, never repeat a key, and keep auto as auto", async () => {
+    const user = (text: string): ReturnType<typeof readUserConfig> => ({ path: "/home/config.yaml", raw: text, error: null, values: parseYaml(text) as Record<string, unknown>, unknown: [] });
+    // The root file of before 0.2.0, with a hosted pr_review block.
+    const legacy = tempDir("oq-list-legacy-");
+    git(legacy, "init", "-q");
+    writeFileSync(join(legacy, ".openqodex.yaml"), "pr_review:\n  severity_threshold: major\n");
+    const w = retiredReviewerWarning(user("reviewer: claude\nreviewer_web: off\n"), projectFile(legacy))!;
+    expect(w).toContain("add these lines inside the pr_review: block of the project's .openqodex.yaml:\n    reviewers:\n      - tool: claude\n    reviewer_web: off\n");
+    expect(w).not.toMatch(/^ *review:$/m);
+    expect(w).toContain("move it into the project's .openqodex.yaml");
+    // A key the file already has is not repeated.
+    const listed = repo("review:\n  reviewers:\n    - tool: codex\n");
+    const w2 = retiredReviewerWarning(user("reviewer: claude\nreviewer_web: off\n"), projectFile(listed))!;
+    expect(w2).toContain("inside the review: block of the project's .openqodex/config.yaml:\n    reviewer_web: off");
+    expect(w2).not.toContain("- tool: claude");
+    expect(retiredReviewerWarning(user("reviewer: claude\n"), projectFile(listed))).toContain("The project's .openqodex/config.yaml already sets its own, and a review uses that.");
+    // auto with Codex tuning: no list, auto order kept.
+    const w3 = retiredReviewerWarning(user("reviewer: auto\nreviewer_model: \"123\"\nreviewer_effort: high\n"), projectFile(null))!;
+    expect(w3).not.toContain("tool: codex");
+    expect(w3).not.toContain("add these lines");
+    expect(w3).toContain("reviewer: auto needs no line: a project with no review.reviewers keeps the auto order");
+    // A model a YAML reader would take for a number stays a string.
+    const w4 = retiredReviewerWarning(user("reviewer: codex\nreviewer_model: \"123\"\n"), projectFile(null))!;
+    expect(w4).toContain('model: "123"');
+    const pasted = w4.split("\n").filter((l) => l.startsWith("  ")).map((l) => l.slice(2)).join("\n");
+    expect(parseConfig(`${pasted}\n`).config.reviewers).toEqual([{ tool: "codex", model: "123" }]);
+    // --reviewer-web on still wins over the personal opt-out.
+    writeFileSync(join(home, "config.yaml"), "reviewer_web: off\n");
+    const claude = fake("claude");
+    expect(await review([claude], "version: 1\n", { reviewer: "claude", web: true })).toBe(0);
+    for (const s of claude.starts) expect(s.web).toBe(true);
   });
 });
 
@@ -316,6 +391,15 @@ describe("what doctor says of each entry", () => {
       "can start here (codex 9.9.9)",
       "cannot start here: this codex login has no model gpt-b (its models: gpt-a)",
     ]);
+  });
+
+  it("13. a long list checks each tool once and reads its list of models once", async () => {
+    const counts = { detect: 0, models: 0 };
+    const codex = fake("codex", { catalog: { models: ["gpt-a"], top: "gpt-a" } });
+    const counted: ReviewerDriver = { ...codex, detect: (root) => (counts.detect++, codex.detect(root)), models: (bin) => (counts.models++, codex.models!(bin)) };
+    const rows = await listReadiness(Array.from({ length: 40 }, (_, i) => ({ tool: "codex", model: i % 2 === 0 ? "gpt-a" : "gpt-b" })), [counted], tempDir("oq-list-ready-"));
+    expect(rows).toHaveLength(40);
+    expect(counts).toEqual({ detect: 1, models: 1 });
   });
 });
 
@@ -357,6 +441,11 @@ describe("the list init writes", () => {
     const old = insertReviewerList("version: 1\nmin_version: 0.20.0\n", [{ tool: "claude" }], "99.0.0");
     expect(old?.oldMin).toBe("0.20.0");
     expect(old?.text).toMatch(/min_version: 0\.20\.0\n/);
+    // A higher min_version is never lowered; an empty one is set in place, once.
+    expect(insertReviewerList("version: 1\nmin_version: 98.0.0\n", [{ tool: "claude" }], "99.0.0")?.text).toMatch(/min_version: 98\.0\.0\n/);
+    const blank = insertReviewerList("version: 1\nmin_version:\n", [{ tool: "claude" }], "99.0.0")!.text;
+    expect(blank.match(/min_version/g)).toHaveLength(1);
+    expect(blank).toContain(`min_version: ${REVIEWERS_SINCE}\n`);
     const hosted = insertReviewerList("pr_review:\n  severity_threshold: major\n", [{ tool: "claude" }])!.text;
     expect(hosted).not.toMatch(/^review:/m);
     expect(parseConfig(hosted).config.reviewers).toEqual([{ tool: "claude" }]);

@@ -167,13 +167,23 @@ describe("the Codex stream reader, on a recorded run", () => {
 
   it("22. a model this login cannot use is a failure the next list entry may take over, with Codex's own words", async () => {
     const said = "The 'gpt-gone' model is not supported when using Codex with a ChatGPT account.";
-    const error = JSON.stringify({ type: "error", message: said });
+    // A reconnect notice first: the later model error wins over it.
+    const error = JSON.stringify({ type: "error", message: "Reconnecting... 1/5 (stream disconnected before completion)" });
     const failed = JSON.stringify({ type: "turn.failed", error: { message: said } });
     const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"') && !l.includes('"agent_message"')), error, failed, ""].join("\n")));
     const { turn } = await runOnce(bin);
     expect(turn.finalText).toBe("");
     expect(turn.failure).toBe(`the reviewer's model cannot serve this review: it does not exist or this login has no access to it (${said})`);
     expect(cannotServe(turn.failure)).toBe(true);
+  });
+
+  it("23. an overload Codex retried and recovered from is no failure: the completed turn's answer stands, so no list entry takes over", async () => {
+    const overloaded = JSON.stringify({ type: "error", message: "We're currently experiencing high demand, which may cause temporary errors. Reconnecting... 1/5" });
+    const at = lines.findIndex((l) => l.includes('"turn.completed"'));
+    const bin = standIn(text([...lines.slice(0, at), overloaded, ...lines.slice(at)].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.failure).toBeNull();
+    expect(JSON.parse(turn.finalText)).toMatchObject({ searched: true });
   });
 
   it("3. a stream that ends with no terminal event is no answer", async () => {

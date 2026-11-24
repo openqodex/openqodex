@@ -22,7 +22,7 @@ import { progress } from "../pipeline.js";
 import { claudeDriver, codexDriver, cursorDriver } from "@openqodex/review";
 import type { ReviewerEntry } from "@openqodex/core";
 import { listReadiness } from "../reviewers/list.js";
-import { retiredReviewerWarning } from "../reviewers/settings.js";
+import { personalWebOff, projectFile, retiredReviewerWarning } from "../reviewers/settings.js";
 import { readUserConfig, unknownKeysWarning } from "../user-config.js";
 import { statusLines } from "./update.js";
 
@@ -69,14 +69,14 @@ type Setting = { key: string; value: string; source: string };
 // Each key of the user config with the value in force and where it comes
 // from: the environment, the file, or the default. The reviewer keys it held
 // up to 0.23.0 are named in a warning: the project's file holds them now.
-function userSettings(home: string, env: NodeJS.ProcessEnv): Report["settings"] {
+function userSettings(home: string, env: NodeJS.ProcessEnv, repo: string | null): Report["settings"] {
   const config = readUserConfig(home);
   const file = "config.yaml";
   const warnings: string[] = [];
   if (config.error !== null) warnings.push(`${config.error}: updates are off until it is fixed`);
   const unknown = unknownKeysWarning(config);
   if (unknown !== null) warnings.push(unknown);
-  const retired = config.error === null ? retiredReviewerWarning(config) : null;
+  const retired = config.error === null ? retiredReviewerWarning(config, projectFile(repo)) : null;
   if (retired !== null) warnings.push(...retired.split("\n"));
   const v = config.values;
   const set = (value: unknown): boolean => value !== undefined && value !== null;
@@ -196,7 +196,7 @@ export async function run(args: string[]): Promise<number> {
       configLine = loaded.path === null ? "no config, defaults in use" : `ok, ${n} custom scanner${n === 1 ? "" : "s"}`;
       const listed = loaded.config.reviewers;
       const rows = listed === undefined ? null : await listReadiness(listed, [claudeDriver, codexDriver, cursorDriver], repo);
-      reviewers = { web: loaded.config.reviewerWeb === false ? "off" : "on", entries: rows === null ? null : rows.map((row) => ({ ...row.entry, ready: row.version !== null, line: row.line })) };
+      reviewers = { web: loaded.config.reviewerWeb === false || personalWebOff(openqodexHome()) ? "off" : "on", entries: rows === null ? null : rows.map((row) => ({ ...row.entry, ready: row.version !== null, line: row.line })) };
       if (loaded.warnings.length > 0) configLine += ` (${loaded.warnings.join("; ")})`;
       for (const row of n > 0 ? trustState(repo, loaded.config) : []) {
         const trust =
@@ -237,7 +237,7 @@ export async function run(args: string[]): Promise<number> {
     custom,
     reviewers,
     home: openqodexHome(),
-    settings: userSettings(openqodexHome(), process.env),
+    settings: userSettings(openqodexHome(), process.env, repo),
     update: statusLines(openqodexHome()),
     ...(required ? { required } : {}),
   };

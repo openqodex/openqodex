@@ -34,7 +34,7 @@ import { keepRunStateOutOfRepo, noteScan } from "./feedback.js";
 import { directRunner, launcherPath, launcherRunner, launcherStarted, openqodexHomeDir, shQuote } from "./launcher.js";
 import { writeHomeLastReview, writeHomeReceipt } from "./receipts.js";
 import { listReadiness, reviewerChoice } from "./reviewers/list.js";
-import { userConfigNotes } from "./reviewers/settings.js";
+import { personalWebOff, userConfigNotes } from "./reviewers/settings.js";
 import { conventionHint } from "./instructions.js";
 import { dropTempRef, resolveTarget } from "./target.js";
 
@@ -115,7 +115,7 @@ export type Readiness = { ready: { name: string; version: string } | null; reaso
 // review checks it, else `auto` with every driver's detect() run at once;
 // or, when none can start, each one's reason and fix. Nothing is started.
 export async function reviewerReadiness(repoRoot: string, drivers: ReviewerDriver[] = DRIVERS): Promise<Readiness> {
-  const listed = loadConfig(repoRoot).config.reviewers;
+  const listed = loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ }).config.reviewers;
   if (listed !== undefined) {
     const rows = await listReadiness(listed, drivers, repoRoot);
     const first = rows.find((r) => r.version !== null);
@@ -221,14 +221,15 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   // A --report-dir reached through a link stops the run here, before
   // anything is made, scanned or written.
   const reportWriter = o.reportDir === undefined ? null : reportFolderWriter(o.reportDir, repoRoot);
+  // A flag that does not name a reviewer stops the run before any file is
+  // made, and before the scanner lists are read.
+  const choice = reviewerChoice(o.reviewer, o.reviewerEffort, config.reviewers);
   if (o.reportDir === undefined) announceRepoFiles(repoRoot);
   else keepRunStateOutOfRepo();
-  for (const w of userConfigNotes()) warn(`openqodex: ${w}`);
-  const web = o.web ?? config.reviewerWeb ?? true;
+  for (const w of userConfigNotes(undefined, repoRoot)) warn(`openqodex: ${w}`);
+  // A retired personal reviewer_web: off still holds (settings.ts).
+  const web = o.web ?? (config.reviewerWeb === false || personalWebOff() ? false : true);
   const parts = laptopParts({ ...o, instructionsRef }, repoRoot, config);
-  // A flag that does not name a reviewer stops the run before the scanner
-  // lists are read.
-  const choice = reviewerChoice(o.reviewer, o.reviewerEffort, config.reviewers);
   if (typeof choice === "string") reviewerOrder(choice, parts.drivers);
   const only = scannerList("--only", o.only);
   const skip = scannerList("--skip", o.skip);
@@ -304,8 +305,11 @@ export async function runReview(o: ReviewOptions): Promise<number> {
         "unchecked-candidates.json": `${JSON.stringify({ label: "unchecked scanner candidates, not a review: no reviewer checked them", change_id: result.change.id, candidates: result.scan.candidates }, null, 2)}\n`,
         "report.html": renderUnavailableHtml({ changeId: result.change.id, reasons, candidatesPath: path, fallback, version: __OPENQODEX_VERSION__ }),
       });
-      noteReviewer({ started: false, reasons });
-      warn("Full review unavailable: openqodex could not start a reviewer.");
+      // A list whose entries all failed after one started: the record says
+      // a reviewer started, and the calls those runs made are kept.
+      noteReviewer({ started: result.started === true, reasons });
+      if (result.usage) write({ "usage.json": `${JSON.stringify(redactStored(result.usage, secrets), null, 2)}\n` });
+      warn(result.started ? "Full review unavailable: every reviewer of the project's list failed or was passed over." : "Full review unavailable: openqodex could not start a reviewer.");
       for (const line of reasons) warn(`- ${line}`);
       warn(`Unchecked scanner candidates, not a review: ${path}`);
       warn(`To review with the agent you are in instead, run \`${fallback}\` and follow the brief it prints.`);
@@ -366,7 +370,7 @@ export async function runReview(o: ReviewOptions): Promise<number> {
       // The record the push hooks trust, in the developer's home: a branch
       // cannot plant it the way it can carry files under .openqodex/.
       try {
-        writeHomeReceipt(openqodexHomeDir(), repoRoot, gateReceipt(out.report, completion.status, shown, out.paths.html));
+        writeHomeReceipt(openqodexHomeDir(), repoRoot, gateReceipt(out.report, completion.status, shown, out.paths.html, config));
       } catch (error) {
         warn(`openqodex: could not record this review for the push hooks: ${(error as Error).message.split("\n")[0]}`);
       }

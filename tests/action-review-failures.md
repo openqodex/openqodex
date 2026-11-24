@@ -50,6 +50,6 @@ Added after the third code review:
 
 Added with the project's reviewer list (`review.reviewers`):
 
-36. The Action ignores the config's reviewer list: it forces Claude Code when the list names Codex first, or reads the list from the pull request's head when `config-from` is base.
-37. A list that names only Codex, on a runner with no codex, installs Claude Code or reviews with it, instead of running the scanners only and saying why.
+36. The Action ignores the config's reviewer list: it forces Claude Code when the list names Codex first, or when it could not read the list; reads the list from the pull request's head when `config-from` is base; or reads the config from the base branch's tip, which can move between the Action's steps, instead of the pull request's base commit.
+37. A list that names only Codex, on a runner with no codex or a logged-out one, installs Claude Code or reviews with it, instead of running the scanners only and saying why in the log and the job summary.
 38. With no list, the review no longer runs with Claude Code alone, as it did before lists existed.

@@ -39,6 +39,7 @@ import {
   REVIEWER_WEB_TOOLS,
   cleanupDiffs,
   completionRecord,
+  crossedBoundary,
   configHash,
   getChange,
   getTreeChange,
@@ -93,7 +94,7 @@ import type { Graph, GraphStore, Lease } from "@openqodex/graph";
 import { createToolResolver } from "@openqodex/scanners";
 import { meterSession } from "./agent-usage.js";
 import { REVIEWER_NAMES, cannotServe, hostAgent } from "./agents/driver.js";
-import type { ReviewerDriver, ReviewerSession, Turn } from "./agents/driver.js";
+import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./agents/driver.js";
 import { checkContext, useContext } from "./context.js";
 import type { ContextItem } from "./context.js";
 import { converse, deliverRanges, redactSnapshot } from "./conversation.js";
@@ -289,7 +290,9 @@ export type ReviewCoreResult =
   | { ended: "nothing" }
   // No reviewer could start, or its boundary could not be shown for this
   // run: the scan's candidates stay unchecked.
-  | { ended: "unavailable"; reasons: string[]; change: Change; scan: ScanResult; secrets: string[] }
+  // `started` and `usage`: a list whose every entry failed or was passed
+  // over after one had started; the calls those runs made.
+  | { ended: "unavailable"; reasons: string[]; change: Change; scan: ScanResult; secrets: string[]; started?: true; usage?: { calls: CallRecord[]; totals: UsageTotals } }
   // The reviewer ran. `report` carries the completion record and says
   // incomplete when the record does; `display` is the code report.html shows.
   // `usage`: one record per round, from the driver's running totals.
@@ -348,14 +351,24 @@ const entryOf = (entry: ReviewerEntry): Omit<PassedReviewer, "outcome" | "reason
 // tried. Nothing is started. `modelChecked`: the entry names no model, or
 // the login's list holds it; false when no list could say (Claude Code has
 // none), so only a review shows whether the model serves.
-export async function entryCanStart(entry: ReviewerEntry, drivers: readonly ReviewerDriver[], repoRoot: string): Promise<{ ok: true; driver: ReviewerDriver; version: string; bin: string; modelChecked: boolean } | { ok: false; reason: string }> {
+//
+// `cache`: one run's answers, shared by every entry it checks: each tool's
+// detect() runs once and each program's list of models is read once, so a
+// long list starts at most one check per tool at a time.
+export type ReadinessCache = { detect: Map<string, Promise<Detected>>; models: Map<string, Promise<{ models: string[]; top: string | null } | null>> };
+export const readinessCache = (): ReadinessCache => ({ detect: new Map(), models: new Map() });
+
+export async function entryCanStart(entry: ReviewerEntry, drivers: readonly ReviewerDriver[], repoRoot: string, cache: ReadinessCache = readinessCache()): Promise<{ ok: true; driver: ReviewerDriver; version: string; bin: string; modelChecked: boolean } | { ok: false; reason: string }> {
   const driver = drivers.find((d) => d.name === entry.tool);
   if (driver === undefined) return { ok: false, reason: "no reviewer of that name" };
-  const d = await driver.detect(repoRoot);
+  if (!cache.detect.has(driver.name)) cache.detect.set(driver.name, driver.detect(repoRoot));
+  const d = await cache.detect.get(driver.name)!;
   if (!d.ok) return { ok: false, reason: `${d.missing}; ${d.fix}` };
   let modelChecked = entry.model === undefined;
   if (entry.model !== undefined && driver.models) {
-    const catalog = await driver.models(d.bin);
+    const key = `${driver.name}\0${d.bin}`;
+    if (!cache.models.has(key)) cache.models.set(key, driver.models(d.bin));
+    const catalog = await cache.models.get(key)!;
     if (catalog !== null && !catalog.models.includes(entry.model)) return { ok: false, reason: `this ${driver.name} login has no model ${entry.model} (its models: ${catalog.models.join(", ")})` };
     modelChecked = catalog !== null;
   }
@@ -364,11 +377,11 @@ export async function entryCanStart(entry: ReviewerEntry, drivers: readonly Revi
 
 // The first entry of `list` from `from` on that can start here, and every
 // entry before it that cannot, each with why.
-async function pickFrom(list: readonly ReviewerEntry[], from: number, drivers: readonly ReviewerDriver[], repoRoot: string): Promise<{ picked: Picked | null; passed: PassedReviewer[] }> {
+async function pickFrom(list: readonly ReviewerEntry[], from: number, drivers: readonly ReviewerDriver[], repoRoot: string, cache: ReadinessCache): Promise<{ picked: Picked | null; passed: PassedReviewer[] }> {
   const passed: PassedReviewer[] = [];
   for (let i = from; i < list.length; i++) {
     const entry = list[i]!;
-    const can = await entryCanStart(entry, drivers, repoRoot);
+    const can = await entryCanStart(entry, drivers, repoRoot, cache);
     if (can.ok) return { picked: { driver: can.driver, version: can.version, bin: can.bin, entry, index: i }, passed };
     passed.push({ ...entryOf(entry), outcome: "skipped", reason: can.reason });
   }
@@ -390,9 +403,9 @@ export function reviewerOrder(choice: string, drivers: readonly ReviewerDriver[]
     : [...drivers.filter((d) => d.name === host), ...drivers.filter((d) => d.name !== host)];
 }
 
-async function chooseReviewer(choice: string | readonly ReviewerEntry[], drivers: readonly ReviewerDriver[], repoRoot: string): Promise<Chosen> {
+async function chooseReviewer(choice: string | readonly ReviewerEntry[], drivers: readonly ReviewerDriver[], repoRoot: string, cache: ReadinessCache): Promise<Chosen> {
   if (typeof choice !== "string") {
-    const { picked, passed } = await pickFrom(choice, 0, drivers, repoRoot);
+    const { picked, passed } = await pickFrom(choice, 0, drivers, repoRoot, cache);
     return picked === null ? { unavailable: passed.length > 0 ? passed.map(passedReason) : ["the project's reviewer list is empty"], passed } : { ...picked, passed };
   }
   const order = reviewerOrder(choice, drivers);
@@ -544,7 +557,9 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
   // Each phase timed as it runs, for the report's timings.
   const clock = deps.clock ?? phaseClock(deps.now);
   clock.enter("reviewer");
-  const chosen: Chosen = deps.model ? { model: deps.model } : await chooseReviewer(inputs.reviewer, deps.drivers, repoRoot);
+  // One run's readiness answers, kept for the entries a fallback reaches.
+  const readiness = readinessCache();
+  const chosen: Chosen = deps.model ? { model: deps.model } : await chooseReviewer(inputs.reviewer, deps.drivers, repoRoot, readiness);
   const deadline = inputs.deadlineAt ?? deps.now() + inputs.timeoutMs;
 
   const changes = new Set<Change>();
@@ -691,6 +706,12 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     // The usage of runs a later entry replaced: their calls were made.
     const earlierCalls: CallRecord[] = [];
     const withEarlier = (usage: { calls: CallRecord[]; totals: UsageTotals }) => (earlierCalls.length === 0 ? usage : { calls: [...earlierCalls, ...usage.calls], totals: usageTotals([...earlierCalls, ...usage.calls]) });
+    // Whether any entry's reviewer started, and the snapshot's hash before
+    // the first one did: every attempt is checked against that one baseline,
+    // so a change made during an attempt a later entry replaced still counts.
+    let anyStarted = false;
+    let baseline: string | null = null;
+    const tools = inputs.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS;
     // The reviewer phase with one reviewer, from its boundary check to the
     // result: a fresh conversation, coverage counted from nothing, the
     // driver's own `traced`, and `deadline`. The snapshot, the scan and the
@@ -709,6 +730,10 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       // serve (a list only). It stops every live session at once, and no new
       // one starts: none of their answers is used.
       let unserved: string | null = null;
+      // A failed attempt is dropped for the next entry only when it kept to
+      // its boundary: no served call outside it, no tool it was not given,
+      // the snapshot as it was. Else it ends the review, as any run does.
+      const keptBoundary = (trace: readonly TraceEntry[]): boolean => !(traced && crossedBoundary(trace, tools)) && hashSnapshot(prep.snapshot.tree) === before;
       const watch = async (sent: Promise<Turn>): Promise<Turn> => {
         const turn = await sent;
         if (list !== null && agent !== null && unserved === null && cannotServe(turn.failure)) {
@@ -729,7 +754,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
         return await finish({ ended: "unavailable", reasons: [`${agent.driver.name}: ${unsafe}`], change, scan, secrets: p.secrets });
       }
       clock.enter("brief");
-      const before = hashSnapshot(prep.snapshot.tree);
+      const before = (baseline ??= hashSnapshot(prep.snapshot.tree));
       const lineCount = lineCounter(prep.snapshot.tree);
       // A secret in a path would reach the reviewer through any listing: the
       // reviewer is not started and the review is incomplete.
@@ -792,7 +817,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
           onBrief: (role, text) => deps.onEvent({ type: "staged-brief", role, brief: redact(text) }),
           onRound: (round) => deps.onEvent({ type: "round", round: redactStored(round, p.secrets) }),
         });
-        if (unserved !== null) return { restart: "failed", reason: unserved, calls: stagedRun.usage.calls };
+        if (unserved !== null && keptBoundary(stagedRun.trace)) return { restart: "failed", reason: unserved, calls: stagedRun.usage.calls };
         clock.enter("finalize");
         const after = hashSnapshot(prep.snapshot.tree);
         const sessionOrder = new Map(stagedRun.sessions.map((s, i) => [s.role, i]));
@@ -829,7 +854,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
         }
         const totals = stagedRun.usage.totals;
         const reviewer: ReviewerRecord = { driver: agent!.driver.name, version: agent!.version, ...tuned, ...(passed.length > 0 ? { passed } : {}), pid: null, started_at: startedIso, ended_at: new Date(deps.now()).toISOString(), duration_ms: deps.now() - started, rounds: stagedRun.sessions.reduce((n, s) => n + s.rounds, 0), usage: { turns: stagedRun.sessions.reduce((n, s) => n + s.usage.turns, 0), input_tokens: totals.inputTokens, output_tokens: totals.outputTokens, cost_usd: totals.costUsd }, sessions: stagedRun.sessions };
-        const completion = redactStored(completionRecord({ change, reviewer, snapshot: { tree: prep.tree, before, after }, candidates: { total: stagedRun.required, disposed: stagedRun.disposed }, coverage, trace: stagedRun.trace, submissionErrors: [], wholeRepo: false, missing: stagedRun.missing, traced, tools: inputs.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS }), p.secrets);
+        const completion = redactStored(completionRecord({ change, reviewer, snapshot: { tree: prep.tree, before, after }, candidates: { total: stagedRun.required, disposed: stagedRun.disposed }, coverage, trace: stagedRun.trace, submissionErrors: [], wholeRepo: false, missing: stagedRun.missing, traced, tools }), p.secrets);
         report.completion = completion;
         if (completion.status !== "complete") report.verdict = "incomplete";
         return await finish({ ended: "reviewed", report, completion, display: buildDisplay({ change: full, secrets: p.secrets }), submission: stagedRun.submission, trace: redactStored(stagedRun.trace, p.secrets), change: full, secrets: p.secrets, whole: false, target: prep.target ?? null, usage: redactStored(withEarlier(stagedRun.usage), p.secrets), rounds: redactStored(stagedRun.rounds, p.secrets), ...(context ? { context: context.manifest } : {}) });
@@ -920,7 +945,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       }).finally(async () => {
         await session?.close();
       });
-      if (list !== null && agent !== null && cannotServe(talk.failure)) return { restart: "failed", reason: talk.failure!, calls: metered?.calls() ?? [] };
+      if (list !== null && agent !== null && cannotServe(talk.failure) && keptBoundary(talk.trace)) return { restart: "failed", reason: talk.failure!, calls: metered?.calls() ?? [] };
       clock.enter("finalize");
       if (talk.failure !== null) warn(`openqodex: ${talk.failure}`);
       const after = hashSnapshot(prep.snapshot.tree);
@@ -963,7 +988,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
         submissionErrors: talk.errors,
         wholeRepo: prep.whole !== undefined,
         failure: talk.failure,
-        tools: inputs.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS,
+        tools,
         traced,
       }), p.secrets);
       // An incomplete review keeps the findings of an answer that passed every
@@ -1002,14 +1027,19 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       const failed: PassedReviewer = { ...entryOf(agent!.entry!), outcome: outcome.restart, reason: redact(outcome.reason) };
       passed.push(failed);
       earlierCalls.push(...outcome.calls);
-      const next = stopped ? { picked: null, passed: [] } : await pickFrom(list!, agent!.index + 1, deps.drivers, repoRoot);
+      // A boundary check that failed (`skipped`) started no reviewer.
+      if (outcome.restart === "failed") anyStarted = true;
+      const next = stopped ? { picked: null, passed: [] } : await pickFrom(list!, agent!.index + 1, deps.drivers, repoRoot, readiness);
       passed.push(...next.passed);
+      // Every line here goes through the run's redaction, the entries'
+      // models included: a model value can match a secret.
       if (next.picked === null) {
-        warn(`openqodex: ${passedReason(failed)}; no reviewer of the project's list is left`);
-        return await finish({ ended: "unavailable", reasons: [...passed.map(passedReason), ...(stopped ? ["the review stopped"] : [])], change, scan, secrets: p.secrets });
+        warn(redact(`openqodex: ${passedReason(failed)}; no reviewer of the project's list is left`));
+        const reasons = [...passed.map(passedReason), ...(stopped ? ["the review stopped"] : [])].map(redact);
+        return await finish({ ended: "unavailable", reasons, change, scan, secrets: p.secrets, ...(anyStarted ? { started: true as const } : {}), ...(earlierCalls.length > 0 ? { usage: { calls: earlierCalls, totals: usageTotals(earlierCalls) } } : {}) });
       }
       agent = next.picked;
-      deps.onEvent({ type: "reviewer-restarted", line: `openqodex: ${passedReason(failed)}; the review starts again with ${entryLabel(agent.entry!)}` });
+      deps.onEvent({ type: "reviewer-restarted", line: redact(`openqodex: ${passedReason(failed)}; the review starts again with ${entryLabel(agent.entry!)}`) });
       // A fresh time budget: the first reviewer's time is not taken from it.
       until = deps.now() + inputs.timeoutMs;
     }

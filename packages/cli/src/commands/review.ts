@@ -35,6 +35,7 @@ import {
   readRepoFile,
   redactByFingerprint,
   repoStat,
+  reviewerModelProblem,
   SEVERITIES,
   STATE_DIR,
   selectLenses,
@@ -124,7 +125,7 @@ export async function run(args: string[], drivers?: ReviewerDriver[]): Promise<n
   if (web !== undefined && web !== "on" && web !== "off") throw new OpenQodexError(`--reviewer-web must be on or off, not ${web}`);
   // Retired in 0.24.0: a model alone does not say which tool it is for.
   const reviewerModel = values.get("--reviewer-model");
-  if (reviewerModel !== undefined) throw new OpenQodexError(`--reviewer-model is replaced by --reviewer <tool>:<model>, such as --reviewer codex:${reviewerModel}`);
+  if (reviewerModel !== undefined) throw new OpenQodexError(`--reviewer-model is replaced by --reviewer <tool>:<model>, such as --reviewer codex:${reviewerModelProblem("codex", reviewerModel) === null ? reviewerModel : "gpt-5.5"}`);
   const reviewerEffort = values.get("--reviewer-effort");
   const target = finalize ? undefined : positionals[0];
   if (target !== undefined && bools.has(ALL)) {

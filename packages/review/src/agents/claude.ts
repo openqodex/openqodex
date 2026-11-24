@@ -219,6 +219,8 @@ function start(opts: StartOptions): ReviewerSession {
     const turn: Turn = { finalText, calls, usage, sessionId, failure: why, ...(models.length > 0 ? { models } : {}), own: sessionId === null ? null : { configDir, sessionId } };
     calls = [];
     traceChars = 0;
+    // An API error belongs to the turn it came in, never to a later one.
+    apiErrors.clear();
     done?.(turn);
   };
   const fail = (why: string): void => {

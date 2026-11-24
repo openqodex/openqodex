@@ -8,7 +8,8 @@ export { buildGraphRun, buildHotSpots, nothingToReviewLine, ruleCoverage, scanCh
 export type { GraphHost, GraphRun, PipelineResult, ScanHost } from "./pipeline.js";
 export { redactStored, redactWith } from "./redact.js";
 export { lfsPaths } from "./snapshot.js";
-export { entryCanStart, reviewChange, reviewerOrder, runReviewCore } from "./review-change.js";
+export { entryCanStart, readinessCache, reviewChange, reviewerOrder, runReviewCore } from "./review-change.js";
+export type { ReadinessCache } from "./review-change.js";
 export type { ResolvedTarget, ReviewCoreResult, ReviewDeps, ReviewEvent, ReviewInputs, Snapshot, SnapshotMaker } from "./review-change.js";
 export { DEPTH_ENV, REVIEWER_NAMES, TIMED_OUT, cannotServe, findOnPath, hostAgent, killGroup, launch, reviewerError, spawnGroup, taskkillFailure, windowsStop } from "./agents/driver.js";
 export type { Detected, ReviewerDriver, ReviewerSession, StartOptions, Turn } from "./agents/driver.js";
