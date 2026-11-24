@@ -81,7 +81,7 @@ A picture drawn from real `openqodex graph` output on this repository, on 2026-1
 | Cline | yes | no | no, a rule asks Cline to review |
 | Goose | yes | no | no, the hints ask Goose to review |
 
-In Cursor, Cline and Goose, the review needs Claude Code or Codex installed as the reviewer. A push gate is a hook that looks for a review before your agent runs `git push`. [What init writes for each agent](https://github.com/openqodex/openqodex/blob/main/docs/agents.md) says how each gate works.
+In Cursor, Cline and Goose, the review needs Claude Code or Codex installed as the reviewer. Each project picks its reviewers, in order, with a model for each, in `.openqodex/config.yaml`: when one hits a usage limit, the review starts again with the next ([configuration](https://github.com/openqodex/openqodex/blob/main/docs/config.md#reviewers)). A push gate is a hook that looks for a review before your agent runs `git push`. [What init writes for each agent](https://github.com/openqodex/openqodex/blob/main/docs/agents.md) says how each gate works.
 
 <!-- benchmark-results:start -->
 ## Benchmark

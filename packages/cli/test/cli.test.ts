@@ -300,6 +300,19 @@ describe("review --agent and --finalize", () => {
     expect(existsSync(join(dir, "report.json"))).toBe(false);
   });
 
+  it("a reviewer list changed after the brief still finalizes", () => {
+    // The project's reviewer policy is part of the config's hash: a run
+    // briefed under one list is not finished under another.
+    const repo = repoWithChange("version: 1\nreview:\n  reviewers:\n    - tool: claude\n      model: opus\n");
+    const { dir, changeId } = brief(repo);
+    writeFileSync(join(repo, ".openqodex/config.yaml"), "version: 1\nreview:\n  reviewers:\n    - tool: codex\n");
+    submit(dir, changeId, [finding()]);
+    const r = cli(["review", "--finalize"], repo);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain("config changed");
+    expect(existsSync(join(dir, "report.json"))).toBe(false);
+  });
+
   it("block_on_severity is ignored or blocks below the threshold", () => {
     const repo = repoWithChange("version: 1\nreview:\n  block_on_severity: critical\n");
     const { dir, changeId } = brief(repo);

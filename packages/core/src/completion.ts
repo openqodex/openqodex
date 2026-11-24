@@ -44,7 +44,7 @@ export type Coverage = CompletionRecord["coverage"];
 
 // The tools a reviewer is given. A successful call to anything else fails the run.
 export const REVIEWER_TOOLS: readonly string[] = ["Read", "Grep", "Glob"];
-// Added unless the user config sets `reviewer_web: off`.
+// Added unless the project's config sets `review.reviewer_web: off`.
 export const REVIEWER_WEB_TOOLS: readonly string[] = ["WebSearch", "WebFetch"];
 
 // Shown in `missing`, so a long list stays readable.

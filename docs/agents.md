@@ -69,7 +69,7 @@ The reviewer edits nothing and runs none of the repository's code. Claude Code h
 |---|---|
 | Claude Code, logged in | A fresh Claude Code process that OpenQodex starts reviews the change. |
 | Codex, logged in, and no Claude Code (or Claude Code logged out) | A fresh Codex process that OpenQodex starts reviews the change. |
-| Both, logged in | The agent you run `review` from reviews: Codex from Codex, Claude Code from Claude Code. From anywhere else, Claude Code. `--reviewer codex` or `reviewer: codex` in `~/.openqodex/config.yaml` picks Codex. |
+| Both, logged in | The agent you run `review` from reviews: Codex from Codex, Claude Code from Claude Code. From anywhere else, Claude Code. The project's `review.reviewers` in `.openqodex/config.yaml` sets the order, with a model and effort for each (`config`); `--reviewer codex` picks Codex for one run. |
 | Only Cursor (or both logged out), or Codex inside Codex's own sandbox | "Full review unavailable", exit 2, and a fallback: run `review --agent` and the agent you are in follows the brief it prints, then `review --finalize`. That report says on its first line after the verdict "Reviewed by the coding agent you are using." |
 | None of them | "Full review unavailable", exit 2, and the scanner findings saved to a file as unchecked candidates, never as a review. The fallback line prints too, but no agent is there to follow it. |
 

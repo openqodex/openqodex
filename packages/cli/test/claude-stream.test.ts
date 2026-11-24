@@ -25,11 +25,18 @@
 //     another session's folder for the same snapshot, a folder of another
 //     working folder, a folder whose name only starts like the snapshot's,
 //     or what a link in the projects folder points to.
+// 10. A model the login cannot use (one that does not exist), a rate limit
+//     or an overload reads as any other error, so a project's reviewer list
+//     never moves on to its next entry; or a plain error reads as one of
+//     them, so the list starts a second full review for nothing. The
+//     fixture claude-stream-bad-model.jsonl is the assistant and result
+//     events of a real `claude -p --model bogus-model-xyz` run (Claude Code
+//     2.1.331, 2026-11-24), its init event left out.
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { claudeDriver, classify } from "@openqodex/review";
+import { cannotServe, claudeDriver, classify } from "@openqodex/review";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -39,6 +46,7 @@ const RECORDED = readFileSync(join(here, "fixtures/claude-stream.jsonl"), "utf8"
 // The two events a real run printed when a terminal wrapper added a
 // SessionStart hook to the reviewer (recorded before hooks were switched off).
 const RECORDED_HOOK = readFileSync(join(here, "fixtures/claude-stream-hook.jsonl"), "utf8");
+const RECORDED_BAD_MODEL = readFileSync(join(here, "fixtures/claude-stream-bad-model.jsonl"), "utf8");
 
 // A stand-in `claude` that waits for the first message on stdin, then prints
 // `body` (a JavaScript expression of the lines, evaluated in the stand-in),
@@ -118,6 +126,28 @@ describe("the Claude Code stream reader, on a recorded run", () => {
     expect(turn.failure).toMatch(/a hook ran in the reviewer session/);
     expect(turn.finalText).toBe("");
     expect(pids.filter(alive)).toEqual([]);
+  });
+
+  it("10. a model that does not exist is a failure the next list entry may take over, with Claude Code's own words", async () => {
+    const { turn, pids } = await runOnce(standIn(JSON.stringify(RECORDED_BAD_MODEL)));
+    expect(turn.finalText).toBe("");
+    expect(turn.failure).toMatch(/^the reviewer's model cannot serve this review: it does not exist or this login has no access to it \(There's an issue with the selected model \(bogus-model-xyz\)\. It may not exist or you may not have access to it\. model_not_found not_found_error\)$/);
+    expect(cannotServe(turn.failure)).toBe(true);
+    expect(pids.filter(alive)).toEqual([]);
+  });
+
+  it("10. a rejected rate limit and an overload are failures the next entry may take over; a plain error is not", async () => {
+    const result = (text: string, type: string | null) => JSON.stringify({ type: "result", subtype: "success", is_error: true, num_turns: 1, result: text, ...(type ? { api_error_type: type } : {}) });
+    const limited = [JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour" } }), result("Claude AI usage limit reached|1764000000", null), ""].join("\n");
+    expect((await runOnce(standIn(JSON.stringify(limited)))).turn.failure).toMatch(/^the reviewer hit /);
+    const overloaded = [result("API Error: 529 Overloaded", "overloaded_error"), ""].join("\n");
+    const turn = (await runOnce(standIn(JSON.stringify(overloaded)))).turn;
+    expect(turn.failure).toMatch(/^the reviewer's model cannot serve this review: it is overloaded/);
+    expect(cannotServe(turn.failure)).toBe(true);
+    const plain = [result("Execution error", null), ""].join("\n");
+    const other = (await runOnce(standIn(JSON.stringify(plain)))).turn;
+    expect(other.failure).toMatch(/^the reviewer stopped with an error \(Execution error/);
+    expect(cannotServe(other.failure)).toBe(false);
   });
 
   it("4, 6. an event line past the limit ends the turn as a failure and kills the group", async () => {

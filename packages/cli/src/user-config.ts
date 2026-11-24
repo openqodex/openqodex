@@ -3,13 +3,14 @@
 // is named the same way everywhere and a typo is never taken for a default.
 //
 //   update: on | off              the daily check for a new release (on)
-//   reviewer: auto | <agent>      which agent reviews (auto); reviewers/settings.ts
-//   reviewer_web: on | off        the reviewer's web tools (on); reviewers/settings.ts
-//   reviewer_model: <model id>    the Codex reviewer's model (Codex's own default)
-//   reviewer_effort: low | ...    the Codex reviewer's reasoning effort (Codex's
-//                                 own default); both in reviewers/settings.ts
 //   skip_version: <x.y.z>         a release `update --rollback` left: the
 //                                 update never installs it or an older one
+//
+// reviewer, reviewer_web, reviewer_model and reviewer_effort were read up to
+// 0.23.0; each project's .openqodex/config.yaml chooses its reviewer now.
+// They stay known keys, read only to name them in one warning
+// (reviewers/settings.ts), so a file that still holds them never pauses
+// automatic updates.
 //
 // A key this version does not know is named with the known key nearest to
 // it. While one is there, automatic updates pause (update/state.ts): the key

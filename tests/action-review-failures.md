@@ -47,3 +47,9 @@ Added after the third code review:
 34. The `version` or `claude-code-version` input is longer than 64 characters, or has a major, minor or patch number over 9 digits, which npm's version parser refuses and reads as a tag.
 
 35. A chosen convention file committed as a link is followed or stops a review, instead of being omitted by name while the review completes.
+
+Added with the project's reviewer list (`review.reviewers`):
+
+36. The Action ignores the config's reviewer list: it forces Claude Code when the list names Codex first, or reads the list from the pull request's head when `config-from` is base.
+37. A list that names only Codex, on a runner with no codex, installs Claude Code or reviews with it, instead of running the scanners only and saying why.
+38. With no list, the review no longer runs with Claude Code alone, as it did before lists existed.

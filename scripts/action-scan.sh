@@ -13,6 +13,9 @@
 #   EVENT_NAME          the event that started the workflow
 #   REVIEW              auto, off or required
 #   CLAUDE_CODE_VERSION the Claude Code version the review runs
+#   REVIEWERS           the tools of the config's reviewer list, in order
+#                       (claude, codex), from the plan step's doctor; empty
+#                       when the config lists none
 #   ANTHROPIC_API_KEY   the repository's key, set on the step from a secret
 #   OPENQODEX_STEP      plan for the Action's first step: the cache key of
 #                       the scanner folder, nothing installed or scanned
@@ -225,6 +228,19 @@ fi
 no_base=""
 [ -n "$base" ] || no_base=" This event gives no base to measure the change from, so OpenQodex uses its default scope."
 
+# The reviewers this job may start: the config's list (review.reviewers,
+# read from the same commit as the config), else Claude Code alone, as
+# before lists existed. A word that is not a reviewer is dropped. Claude
+# Code needs the Anthropic key or a runner login; Codex needs a codex on the
+# runner's PATH, logged in, since the Action installs none.
+listed=""
+for tool in ${REVIEWERS-}; do
+  case "$tool" in claude | codex) listed="${listed:+${listed} }${tool}" ;; esac
+done
+wants() { case " ${listed:-claude} " in *" $1 "*) return 0 ;; esac; return 1; }
+codex_bin=""
+if wants codex; then codex_bin="$(program codex)" || codex_bin=""; fi
+
 # Review mode or scan mode. `note` is the one line that says, in scan mode,
 # why there is no review or how to turn it on. The review never runs on
 # pull_request_target: that event hands the repository's secrets to a
@@ -238,17 +254,24 @@ elif [ "$EVENT_NAME" = "pull_request_target" ]; then
   note="The review never runs on pull_request_target, which hands the repository's secrets to code from forks, so this job runs the scanners only."
 elif [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "push" ]; then
   note="The review runs on pull_request and push events only, so this job runs the scanners only."
-elif [ -n "$key" ] || [ "$REVIEW" = "required" ]; then
+elif { wants claude && [ -n "$key" ]; } || [ -n "$codex_bin" ] || [ "$REVIEW" = "required" ]; then
   mode=review
-else
+elif wants claude; then
   note="To run the full review in this job, set ANTHROPIC_API_KEY on this step from a repository secret; GitHub gives no secrets to a pull request from a fork."
+  if wants codex; then note="${note} The config's list also names Codex, and this runner has no codex on its PATH."; fi
+else
+  note="The config's reviewer list names Codex only, and this runner has no codex on its PATH, logged in, so this job runs the scanners only."
 fi
 
 if [ "${OPENQODEX_STEP-}" = "plan" ]; then
   :
 elif [ "$mode" = "review" ]; then
-  if [ -n "$key" ]; then who="on the repository's Anthropic API key"; else who="on this runner's Claude Code login"; fi
-  echo "OpenQodex review: this job runs the full review of the change, with Claude Code ${CLAUDE_CODE_VERSION} as the reviewer, ${who}.${no_base}"
+  if [ -z "$listed" ] || [ "$listed" = "claude" ]; then
+    if [ -n "$key" ]; then who="on the repository's Anthropic API key"; else who="on this runner's Claude Code login"; fi
+    echo "OpenQodex review: this job runs the full review of the change, with Claude Code ${CLAUDE_CODE_VERSION} as the reviewer, ${who}.${no_base}"
+  else
+    echo "OpenQodex review: this job runs the full review of the change, with the config's reviewer list (${listed}), each entry tried in order.${no_base}"
+  fi
 else
   echo "OpenQodex scanners only: this job runs the scanners on the change and is not a review. The full review runs on your machine with openqodex review.${no_base}"
   echo "$note"
@@ -459,15 +482,23 @@ if (!r || typeof r.toolchain !== "string" || !Array.isArray(r.downloads)) proces
 const set = r.downloads.filter((x) => typeof x === "string").sort().join(",");
 const sha = (t) => crypto.createHash("sha256").update(t).digest("hex").slice(0, 16);
 const line = (x) => String(x).replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").slice(0, 300);
+const tools = ((r.reviewers && r.reviewers.entries) || []).map((e) => e && e.tool).filter((t) => t === "claude" || t === "codex");
 process.stdout.write(`${r.toolchain.slice(0, 16)}-${sha(set)}\n`);
+process.stdout.write(`${tools.join(" ")}\n`);
 for (const c of r.selection || []) if (c && c.wanted) process.stdout.write(`${line(c.line)}\n`);
 ' "$plan_file" || true)"
   cache_part="$(printf '%s\n' "$plan" | head -n 1)"
   if [[ ! "$cache_part" =~ ^[0-9a-f]{16}-[0-9a-f]{16}$ ]]; then cache_part="v${OPENQODEX_VERSION}"; fi
   echo "cache-key=openqodex-tools-${RUNNER_OS-}-${RUNNER_ARCH-}-${cache_part}" >> "$GITHUB_OUTPUT"
+  # The list's tools for the next step, each a known word only.
+  plan_tools=""
+  for tool in $(printf '%s\n' "$plan" | sed -n 2p); do
+    case "$tool" in claude | codex) plan_tools="${plan_tools:+${plan_tools} }${tool}" ;; esac
+  done
+  echo "reviewers=${plan_tools}" >> "$GITHUB_OUTPUT"
   echo "OpenQodex scanners this repository needs:"
   echo "::stop-commands::${token}"
-  printf '%s\n' "$plan" | tail -n +2
+  printf '%s\n' "$plan" | tail -n +3
   printf '\n::%s::\n' "$token"
   exit 0
 fi
@@ -489,19 +520,25 @@ if [ "$code" != "0" ]; then
   fi
 elif [ "$mode" = "scan" ]; then
   run_scan=1
-elif ! use_claude_code; then
+elif wants claude && ! use_claude_code && [ -z "$codex_bin" ]; then
   review_status=unavailable
   review_reason="Claude Code ${CLAUDE_CODE_VERSION} could not be installed from npm"
   run_scan=1
 else
+  # Codex from the runner's PATH, when the list names it. Claude Code that
+  # could not be installed is not on the programs' PATH, so the review
+  # passes its entry over with that reason.
+  if [ -n "$codex_bin" ]; then ln -s "$codex_bin" "${links}/codex"; fi
   # The run's files go to a folder of this run's own, and review touches
   # nothing under .openqodex/ in the checkout, so a report or a link the pull
   # request committed there is never read and cannot stop the run. The
-  # reviewer's web tools are off for this run, whatever the runner's user
-  # config says.
+  # reviewer's web tools are off for this run, whatever the config says.
+  # Without a list, Claude Code reviews, as before lists existed; with one,
+  # the list decides, and no reviewer it does not name is started.
   report_dir="${out_dir}/review"
   review_err="${out_dir}/review-stderr.txt"
-  rargs=(review "${config_args[@]}" "${instructions_args[@]}" --reviewer claude --reviewer-web off --report-dir "$report_dir")
+  rargs=(review "${config_args[@]}" "${instructions_args[@]}" --reviewer-web off --report-dir "$report_dir")
+  if [ -z "$listed" ]; then rargs+=(--reviewer claude); fi
   if [ -n "$base" ]; then rargs+=(--base "$base"); fi
   if [ -n "$BLOCK_ON_SEVERITY" ]; then rargs+=(--block-on-severity "$BLOCK_ON_SEVERITY"); fi
   if [ -n "$key" ]; then

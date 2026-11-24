@@ -1,93 +1,64 @@
-// The reviewer keys of the user config, <openqodex home>/config.yaml, read
-// through the one reader every command uses (user-config.ts):
-//   reviewer: auto | claude | codex | cursor   which agent reviews (the
-//                                              --reviewer flag wins)
-//   reviewer_web: on | off                     whether the reviewer gets its
-//                                              agent's web tools
-//   reviewer_model: <model id>                 the Codex reviewer's model
-//                                              (--reviewer-model wins)
-//   reviewer_effort: low | medium | high | xhigh   the Codex reviewer's
-//                                              reasoning effort
-//                                              (--reviewer-effort wins)
-// The model and the effort reach Codex only: one value cannot name a model
-// of both agents, and `auto` picks either. Claude Code takes its model from
-// ANTHROPIC_MODEL, which its reviewer already gets.
-// A file that cannot be used, or a value openqodex does not know, stops the
-// review with the file named, rather than reviewing with a setting the
-// developer did not choose. A bad reviewer_model or reviewer_effort stops
-// only a review Codex runs, and only when no flag replaces it. A key it does not know is named, with the known
-// key nearest to it, in a warning.
-import { OpenQodexError } from "@openqodex/core";
+// The reviewer is the project's choice now: review.reviewers and
+// review.reviewer_web in .openqodex/config.yaml, shared by the whole team.
+// The user config, <openqodex home>/config.yaml, held four reviewer keys up
+// to 0.23.0:
+//   reviewer: auto | claude | codex | cursor
+//   reviewer_web: on | off
+//   reviewer_model: <model id>       (Codex only)
+//   reviewer_effort: low | ... | xhigh   (Codex only)
+// None of them is read for a review any more. They stay known keys of the
+// user config (user-config.ts), so a file that still holds them never pauses
+// automatic updates; a review prints one warning that names them and the
+// exact lines to add to the project's file instead.
+import { REVIEWER_EFFORTS, reviewerModelProblem, shownValue } from "@openqodex/core";
 import { openqodexHomeDir } from "../launcher.js";
 import { readUserConfig, unknownKeysWarning } from "../user-config.js";
-import { REVIEWER_NAMES } from "@openqodex/review";
+import type { UserConfig } from "../user-config.js";
 
-// The one place the default lives. On (owner's decision, 2026-10-04): the
-// reviewer can look up a library or an advisory while it reviews. A reviewer
-// that reads private code and untrusted text and can open web addresses can
-// be talked into sending the code out, so `reviewer_web: off` removes the web
-// tools (docs/security.md).
-export const DEFAULT_REVIEWER_WEB: "on" | "off" = "on";
+// The retired keys, in the order the warning names them.
+export const RETIRED_REVIEWER_KEYS = ["reviewer", "reviewer_web", "reviewer_model", "reviewer_effort"] as const;
 
-// The reasoning efforts the Codex reviewer takes (Codex's
-// model_reasoning_effort). `minimal` is left out: OpenAI refuses web search
-// at that effort.
-export const REVIEWER_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+const set = (value: unknown): boolean => value !== undefined && value !== null;
+const off = (value: unknown): boolean => value === "off" || value === false;
 
-// A model id as Codex names one (`gpt-5.5`, `o3`): letters, digits and
-// `.`, `-`, `_`, `:`, `/`, never starting with `-`, so it cannot read as a flag.
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
-
-// A value from the file or the command line, safe to print on one line: a
-// line break or other control character is escaped, and a value that is
-// not a string, number or boolean is named by its kind, never converted
-// (a mapping's own `toString` key would make String() throw).
-export function shownValue(value: unknown): string {
-  // oxlint-disable-next-line no-control-regex
-  if (typeof value === "string") return value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
-  if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value);
-  return Array.isArray(value) ? "a list" : typeof value === "object" ? "a mapping" : typeof value;
+// The lines of .openqodex/config.yaml that keep what the retired keys did:
+// the reviewer they chose, and the model and effort, which reached Codex
+// only (so a model or effort under `reviewer: auto` names Codex). A value
+// that was not valid there is not carried over.
+function projectLines(v: UserConfig["values"]): string[] {
+  const reviewer = typeof v.reviewer === "string" ? v.reviewer : "auto";
+  const model = typeof v.reviewer_model === "string" && reviewerModelProblem("codex", v.reviewer_model) === null ? v.reviewer_model : null;
+  const effort = typeof v.reviewer_effort === "string" && REVIEWER_EFFORTS.codex.includes(v.reviewer_effort) ? v.reviewer_effort : null;
+  const tool = reviewer === "claude" || reviewer === "codex" ? reviewer : model !== null || effort !== null ? "codex" : null;
+  const lines: string[] = [];
+  if (tool !== null) {
+    lines.push("  reviewers:", `    - tool: ${tool}`);
+    if (tool === "codex" && model !== null) lines.push(`      model: ${model}`);
+    if (tool === "codex" && effort !== null) lines.push(`      effort: ${effort}`);
+  }
+  if (off(v.reviewer_web)) lines.push("  reviewer_web: off");
+  return lines.length === 0 ? [] : ["review:", ...lines];
 }
 
-// Null when `value` is a model id the reviewer can be given, else why not.
-export function modelProblem(value: unknown): string | null {
-  return typeof value === "string" && MODEL_ID.test(value) ? null : `must be a model id such as gpt-5.5, not ${shownValue(value)}`;
+// The one warning for a user config that still holds a retired key, or null.
+export function retiredReviewerWarning(config: UserConfig): string | null {
+  const present = RETIRED_REVIEWER_KEYS.filter((k) => set(config.values[k]));
+  if (present.length === 0) return null;
+  const named = present.map((k) => `${k}: ${shownValue(config.values[k])}`).join(", ");
+  const lines = projectLines(config.values);
+  const out = [`${config.path} sets ${named}. openqodex no longer reads ${present.length === 1 ? "it" : "them"} there: each project chooses its reviewer in .openqodex/config.yaml, which the whole team shares.`];
+  if (lines.length > 0) out.push("To keep this choice, add these lines to the project's .openqodex/config.yaml (into its review block, if it has one):", ...lines.map((l) => `  ${l}`));
+  out.push(`Then delete ${present.join(", ")} from ${config.path}.`);
+  if (off(config.values.reviewer_web)) out.push("Until the project's file says reviewer_web: off, the reviewer keeps its web tools: your reviewer_web: off is not honoured any more.");
+  return out.join("\n");
 }
 
-// Null when `value` is a reasoning effort the reviewer can be given, else why not.
-export function effortProblem(value: unknown): string | null {
-  return typeof value === "string" && (REVIEWER_EFFORTS as readonly string[]).includes(value) ? null : `must be one of ${REVIEWER_EFFORTS.join(", ")}, not ${shownValue(value)}`;
-}
-
-// `warnings`: lines for the command to print, one per problem it can go on with.
-// `model` and `effort`: null leaves Codex's own default, and is what a bad
-// value reads as. `modelProblem` and `effortProblem`: the line, naming the
-// file, that stops a Codex review when no flag replaces the bad value.
-export type ReviewerSettings = { reviewer: string; web: boolean; model: string | null; effort: string | null; modelProblem: string | null; effortProblem: string | null; warnings: string[] };
-
-export function readReviewerSettings(home: string = openqodexHomeDir()): ReviewerSettings {
+// What a review prints about the user config, one warning each: a file
+// that cannot be used, keys this version does not know, and the retired
+// reviewer keys. None of them stops the review: the file holds nothing a
+// review reads.
+export function userConfigNotes(home: string = openqodexHomeDir()): string[] {
   const config = readUserConfig(home);
-  if (config.error !== null) throw new OpenQodexError(`${config.error}; fix it or remove it`);
-  const reviewer = config.values.reviewer ?? "auto";
-  if (typeof reviewer !== "string" || !["auto", ...REVIEWER_NAMES].includes(reviewer)) {
-    throw new OpenQodexError(`${config.path}: reviewer must be auto or one of ${REVIEWER_NAMES.join(", ")}, not ${String(reviewer)}`);
-  }
-  const web = config.values.reviewer_web ?? DEFAULT_REVIEWER_WEB;
-  if (web !== "on" && web !== "off" && web !== true && web !== false) {
-    throw new OpenQodexError(`${config.path}: reviewer_web must be on or off, not ${String(web)}`);
-  }
-  const model = config.values.reviewer_model ?? null;
-  const modelBad = model === null ? null : modelProblem(model);
-  const effort = config.values.reviewer_effort ?? null;
-  const effortBad = effort === null ? null : effortProblem(effort);
-  const unknown = unknownKeysWarning(config);
-  return {
-    reviewer,
-    web: web === "on" || web === true,
-    model: modelBad === null ? (model as string | null) : null,
-    effort: effortBad === null ? (effort as string | null) : null,
-    modelProblem: modelBad === null ? null : `${config.path}: reviewer_model ${modelBad}`,
-    effortProblem: effortBad === null ? null : `${config.path}: reviewer_effort ${effortBad}`,
-    warnings: unknown === null ? [] : [unknown],
-  };
+  if (config.error !== null) return [`${config.error}; automatic updates are off until it is fixed`];
+  return [unknownKeysWarning(config), retiredReviewerWarning(config)].filter((w): w is string => w !== null);
 }

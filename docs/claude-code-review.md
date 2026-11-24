@@ -198,17 +198,18 @@ The verifier refutes placeholder claims where the copy reads `[redacted]`. It ca
 
 Claude Code's own permission rules refuse a read outside the frozen copy. OpenQodex also checks every tool call the reviewer makes. A refused attempt outside the copy, or on a tool the reviewer was not given, is listed on the receipt and does not fail the review. A read outside the copy or a successful call to a tool it was not given makes the review incomplete. A call with no result recorded still counts as a read. The report lists the files the reviewer read.
 
-Web search is on by default. A reviewer that reads private code and untrusted text from the change, and can open web addresses, can be talked into putting that code into a web address. Set this in `~/.openqodex/config.yaml` to remove the web tools:
+Web search is on by default. A reviewer that reads private code and untrusted text from the change, and can open web addresses, can be talked into putting that code into a web address. Set this in the project's `.openqodex/config.yaml` to remove the web tools:
 
 ```yaml
-reviewer_web: off
+review:
+  reviewer_web: off
 ```
 
 Claude Code sends the brief and files it reads to the model your Claude Code login uses.
 OpenQodex and the built-in scanners send no code anywhere.
 `security` lists every network call.
 
-When Codex is installed and logged in too, a review you run from Claude Code still uses Claude Code. `--reviewer codex` or `reviewer: codex` in `~/.openqodex/config.yaml` picks Codex.
+When Codex is installed and logged in too, a review you run from Claude Code still uses Claude Code. The project's `review.reviewers` in `.openqodex/config.yaml` sets which agent and model review, in order, with a fallback when one hits a limit (`config`). `--reviewer codex` picks Codex for one run.
 
 ## The push gate
 

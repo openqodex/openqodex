@@ -132,6 +132,7 @@ function runStep(dir: string, env: Record<string, string>, before: string[] = []
       "#!/bin/sh",
       'shift; shift',
       'if [ -n "$OQ_CALLS" ]; then echo "$1 key=${ANTHROPIC_API_KEY:+set}" >> "$OQ_CALLS"; fi',
+      'if [ -n "$OQ_ARGS" ]; then printf "%s\\n" "$*" >> "$OQ_ARGS"; fi',
       'if [ -n "$OQ_FOLDERS" ]; then pwd -P >> "$OQ_FOLDERS"; fi',
       'if [ -n "$OQ_PATHS" ]; then printf "%s\\n" "$PATH" >> "$OQ_PATHS"; fi',
       'if [ "$1" = "doctor" ]; then shift; set -- doctor $(for a in "$@"; do [ "$a" = "--install" ] || printf "%s\\n" "$a"; done); fi',
@@ -411,6 +412,29 @@ describe("the scan step, run", () => {
 // PATH without any folder that holds a `claude` program, so the review mode
 // must install Claude Code; npm pointed at a closed local port, so that
 // install fails at once and offline, with the real npm.
+// A PATH with neither Claude Code nor Codex on it, for a list's reviewers.
+// A folder that holds codex beside node (a package manager's bin folder) is
+// left out, and the programs the script needs from it are linked instead.
+function noAgents(): Record<string, string> {
+  const env = noClaude();
+  const dirs = env.PATH!.split(delimiter);
+  const links = tempDir("oq-no-agents-");
+  for (const name of ["node", "npm", "npx", "git"]) {
+    const from = dirs.find((d) => existsSync(join(d, "codex")) && existsSync(join(d, name)) && !dirs.slice(0, dirs.indexOf(d)).some((e) => existsSync(join(e, name))));
+    if (from !== undefined) symlinkSync(join(from, name), join(links, name));
+  }
+  return { ...env, PATH: [links, ...dirs.filter((d) => !existsSync(join(d, "codex")))].join(delimiter) };
+}
+
+// A folder outside any checkout holding a stand-in `name` that prints `says`
+// for every command: enough for the Action to find and link it.
+function standInAgent(name: string, says: string): string {
+  const dir = tempDir("oq-agent-");
+  writeFileSync(join(dir, name), `#!/bin/sh\necho "${says}"\nexit 1\n`);
+  chmodSync(join(dir, name), 0o755);
+  return dir;
+}
+
 function noClaude(): Record<string, string> {
   const path = (process.env.PATH ?? "").split(delimiter).filter((d) => d !== "" && !existsSync(join(d, "claude"))).join(delimiter);
   return { PATH: path, npm_config_registry: "http://127.0.0.1:9/", npm_config_fetch_retries: "0", npm_config_cache: tempDir("oq-npm-cache-") };
@@ -477,6 +501,46 @@ describe("the review mode, without a reviewer", () => {
       expect(run.stdout + run.stderr + run.outputs + run.summary).not.toContain(KEY);
       for (const f of allFiles(run.temp)) expect(readFileSync(f, "latin1"), f).not.toContain(KEY);
     }
+  }, 60_000);
+
+  it("R36. the plan step reads the reviewer list from the base branch, or from the pull request's head with config-from: head", () => {
+    const { dir, base } = pullRequest("version: 1\nreview:\n  reviewers:\n    - tool: codex\n      model: gpt-x\n    - tool: claude\n", "version: 1\nreview:\n  reviewers:\n    - tool: claude\n");
+    const pr = { OPENQODEX_STEP: "plan", EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main", ...noAgents() };
+    expect(outputOf(runStep(dir, pr).outputs, "reviewers")).toBe("codex claude");
+    expect(outputOf(runStep(dir, { ...pr, CONFIG_FROM: "head" }).outputs, "reviewers")).toBe("claude");
+    const none = pullRequest(null, null);
+    expect(outputOf(runStep(none.dir, { ...pr, BASE_SHA: none.base }).outputs, "reviewers")).toBe("");
+  });
+
+  it("R37. a list of Codex alone, on a runner with no codex, runs the scanners only, says why, and installs no Claude Code", () => {
+    const calls = callsFile();
+    const r = runStep(gitRepo().dir, { OQ_CALLS: calls, ANTHROPIC_API_KEY: KEY, REVIEWERS: "codex", ...noAgents() });
+    expect(r.stdout.split("\n")[0]).toMatch(/^OpenQodex scanners only/);
+    expect(r.stdout.split("\n")[1]).toBe("The config's reviewer list names Codex only, and this runner has no codex on its PATH, logged in, so this job runs the scanners only.");
+    expect(r.stdout).not.toContain("Installing Claude Code");
+    expect(readFileSync(calls, "utf8")).toBe("doctor key=\nscan key=\n");
+    expect(outputOf(r.outputs, "review-status")).toBe("off");
+  });
+
+  it("R36, R38. with a list the review gets no --reviewer claude and Codex from the runner; without one it gets --reviewer claude, as before", () => {
+    const codex = standInAgent("codex", "codex-cli 0.160.0");
+    const env = noAgents();
+    const args = callsFile();
+    const listed = runStep(gitRepo().dir, { ...env, OQ_ARGS: args, OQ_ONLY_SQLLINT: "1", REVIEWERS: "codex", PATH: `${codex}${delimiter}${env.PATH}` });
+    expect(listed.stdout.split("\n")[0]).toMatch(/^OpenQodex review: this job runs the full review of the change, with the config's reviewer list \(codex\), each entry tried in order\./);
+    expect(listed.stdout).not.toContain("Installing Claude Code");
+    const review = readFileSync(args, "utf8").split("\n").find((l) => l.startsWith("review "))!;
+    expect(review).toContain("--reviewer-web off");
+    expect(review).not.toContain("--reviewer claude");
+
+    const version = action.inputs["claude-code-version"]!.default!;
+    const claude = standInAgent("claude", `${version} (Claude Code)`);
+    const plain = callsFile();
+    const before = runStep(gitRepo().dir, { ...env, OQ_ARGS: plain, OQ_ONLY_SQLLINT: "1", ANTHROPIC_API_KEY: KEY, PATH: `${claude}${delimiter}${env.PATH}` });
+    expect(before.stdout.split("\n")[0]).toMatch(/with Claude Code \d+\.\d+\.\d+ as the reviewer, on the repository's Anthropic API key\./);
+    const old = readFileSync(plain, "utf8").split("\n").find((l) => l.startsWith("review "))!;
+    expect(old).toContain("--reviewer-web off");
+    expect(old).toContain("--reviewer claude");
   }, 60_000);
 
   it("R17. a claude program the checkout holds is never run, even first on PATH", () => {

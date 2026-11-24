@@ -15,6 +15,8 @@ import { z } from "zod";
 import { MAX_GLOB } from "./glob.js";
 import { nearestName } from "./names.js";
 import { isRepoState, readFileBounded, readRepoFile } from "./repo-state.js";
+import { LISTED_REVIEWERS, reviewerEffortProblem, reviewerModelProblem } from "./reviewers.js";
+import type { ReviewerEntry } from "./reviewers.js";
 import { SEVERITIES } from "./severity.js";
 import type { BuiltinScanner, Config, CustomInstall, CustomScanner, JsonMap, LoadedConfig, Severity } from "./types.js";
 import { OpenQodexError } from "./types.js";
@@ -88,6 +90,16 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
     key: "review.stages",
     default: "true",
     description: "Staged review, the default, splits the change into units. A unit holds a few small files, one measured part or one [structural summary](claude-code-review.md#structural-summaries). Two fresh finder sessions read each unit. A fresh verifier then checks the candidates on each changed file. `false` selects the legacy single pass, without parts, structural summaries or coverage labels. The single pass brief carries at most 200 KB of diff text. Only the single pass has that cap. Its delivery pages hold at most 4,000 rows and 512 KB, as in the staged review. Both routes cut a line over 2,000 bytes into fragments. The single pass does not require a replaced line's old text; its pages still carry pure deletions in fragments. `--agent` and `--all` always run one pass.",
+  },
+  {
+    key: "review.reviewers",
+    default: "[]",
+    description: "The reviewers to try, top to bottom, each a `tool` (claude or codex) with an optional `model` and `effort`. One that cannot start here is passed over with its reason; one whose model hits a limit or cannot serve stops the review, which starts again on the next entry. Empty: the agent you run the review from, then Claude Code, then Codex. `openqodex guide config` lists the values each tool takes.",
+  },
+  {
+    key: "review.reviewer_web",
+    default: "on",
+    description: "`off` removes the reviewer's web tools: Claude Code's WebSearch and WebFetch, Codex's cached web search. `--reviewer-web` wins for one run.",
   },
   { key: "scanners.disable", default: "[]", description: "Built-in scanners to switch off, by name." },
   {
@@ -289,6 +301,14 @@ function schemas(strict: boolean) {
     install: install.optional(),
   });
 
+  // Each tool's model and effort are checked once the entry is read
+  // (parseConfig), where the tool is known.
+  const reviewer = obj({
+    tool: z.enum(LISTED_REVIEWERS),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+  });
+
   const hostedOnly = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, z.unknown().optional()]));
   const positive = z.number().int().positive();
 
@@ -304,6 +324,8 @@ function schemas(strict: boolean) {
       include_fixtures: z.boolean().optional(),
       instructions_files: strings.optional(),
       stages: z.boolean().optional(),
+      reviewers: z.array(reviewer).nullish(),
+      reviewer_web: z.union([z.enum(["on", "off"]), z.boolean()]).optional(),
       ...hostedOnly(HOSTED_ONLY_REVIEW_KEYS),
     }).optional(),
     scanners: obj({
@@ -550,6 +572,15 @@ export function parseConfig(source: string, file: string = CONFIG_FILE, opts: Pa
     seen.add(c.name);
   });
 
+  const reviewers: ReviewerEntry[] = (yaml.review?.reviewers ?? []).map((entry, i) => {
+    for (const [key, problem] of [["model", reviewerModelProblem], ["effort", reviewerEffortProblem]] as const) {
+      const why = entry[key] === undefined ? null : problem(entry.tool, entry[key]);
+      if (why !== null) failAt(["review", "reviewers", i, key], why);
+    }
+    return { tool: entry.tool, ...(entry.model !== undefined ? { model: entry.model } : {}), ...(entry.effort !== undefined ? { effort: entry.effort } : {}) };
+  });
+  const web = yaml.review?.reviewer_web;
+
   const graph = DEFAULT_CONFIG.graph;
   return {
     config: {
@@ -561,6 +592,10 @@ export function parseConfig(source: string, file: string = CONFIG_FILE, opts: Pa
       includeFixtures: yaml.review?.include_fixtures ?? false,
       instructionsFiles: yaml.review?.instructions_files ?? [],
       stages: yaml.review?.stages ?? DEFAULT_CONFIG.stages,
+      // Set only when they differ from the defaults, so a file that leaves
+      // them out, or writes the defaults, hashes as before.
+      ...(reviewers.length > 0 ? { reviewers } : {}),
+      ...(web === "off" || web === false ? { reviewerWeb: false } : {}),
       disabledScanners: disabled,
       custom,
       graph: {

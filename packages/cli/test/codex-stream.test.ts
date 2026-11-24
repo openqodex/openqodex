@@ -44,16 +44,22 @@
 // 18. On Windows the path (named `Path` there), the home folder or what
 //     starts a program is dropped, or the path is split on ":" and loses
 //     every entry.
-// 21. reviewer_model or reviewer_effort is set and the Codex process is
+// 21. A list entry's model or effort is set and the Codex process is
 //     started without `-m` or `model_reasoning_effort`, so Codex's default
 //     model reviews; or they are unset and a flag is passed anyway, so the
 //     default changes under a developer who chose nothing.
+// 22. A model this Codex login cannot use reads as any other error, so a
+//     project's reviewer list never moves on to its next entry.
+// 23. The login's model list (`codex debug models`) is misread: a hidden
+//     model counts as missing, the top model is not the first listed one by
+//     priority, or output that is not the list reads as an empty list, so
+//     every model would be passed over.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { CODEX_TESTED, PROBE_REFUSED, codexArgs, codexDriver, codexEnv, codexVersion, olderThanTested, probeSandbox, probeVerdict } from "@openqodex/review";
+import { CODEX_TESTED, PROBE_REFUSED, cannotServe, codexArgs, codexCatalog, codexDriver, codexEnv, codexVersion, olderThanTested, probeSandbox, probeVerdict } from "@openqodex/review";
 import { DEPTH_ENV, findOnPath } from "@openqodex/review";
 import { openqodexHomeDir } from "../src/launcher.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
@@ -159,6 +165,17 @@ describe("the Codex stream reader, on a recorded run", () => {
     expect(turn.failure).toBe("the reviewer hit its usage or plan limit (You've hit your usage limit. Try again at 3:05 PM. Upgrade to Pro)");
   });
 
+  it("22. a model this login cannot use is a failure the next list entry may take over, with Codex's own words", async () => {
+    const said = "The 'gpt-gone' model is not supported when using Codex with a ChatGPT account.";
+    const error = JSON.stringify({ type: "error", message: said });
+    const failed = JSON.stringify({ type: "turn.failed", error: { message: said } });
+    const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"') && !l.includes('"agent_message"')), error, failed, ""].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.finalText).toBe("");
+    expect(turn.failure).toBe(`the reviewer's model cannot serve this review: it does not exist or this login has no access to it (${said})`);
+    expect(cannotServe(turn.failure)).toBe(true);
+  });
+
   it("3. a stream that ends with no terminal event is no answer", async () => {
     const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"')), ""].join("\n")));
     const { turn } = await runOnce(bin);
@@ -245,6 +262,18 @@ describe("the Codex command line and environment", () => {
       expect(argv.join(" ")).not.toMatch(/model_reasoning_effort/);
       expect(argv).toContain("--ignore-user-config");
     }
+  });
+
+  it("23. the login's model list holds every model, hidden ones too, and its top is the first listed by priority", () => {
+    const out = JSON.stringify({ models: [
+      { slug: "gpt-old", visibility: "list", priority: 9 },
+      { slug: "gpt-hidden", visibility: "hide", priority: 0 },
+      { slug: "gpt-top", visibility: "list", priority: 1 },
+    ] });
+    expect(codexCatalog(out)).toEqual({ models: ["gpt-old", "gpt-hidden", "gpt-top"], top: "gpt-top" });
+    expect(codexCatalog("Usage: codex debug [COMMAND]")).toBeNull();
+    expect(codexCatalog(JSON.stringify({ models: [] }))).toBeNull();
+    expect(codexCatalog(JSON.stringify({ other: 1 }))).toBeNull();
   });
 
   it("17. relative and empty PATH entries never reach the reviewer", () => {

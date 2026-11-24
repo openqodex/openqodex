@@ -8,7 +8,7 @@ Nothing. OpenQodex collects no usage data, no crash reports and no identifiers. 
 
 ## Who reviews your code
 
-By default, the review runs in a reviewer process OpenQodex starts on your machine: Claude Code or Codex, on your own login. That process sends the brief and what the reviewer reads to the model your login uses. OpenQodex adds no other model and needs no other key. By default the reviewer can also search the web, and Claude Code can open web pages; `reviewer_web: off` in `~/.openqodex/config.yaml` removes that.
+By default, the review runs in a reviewer process OpenQodex starts on your machine: Claude Code or Codex, on your own login. That process sends the brief and what the reviewer reads to the model your login uses. OpenQodex adds no other model and needs no other key. By default the reviewer can also search the web, and Claude Code can open web pages; `review.reviewer_web: off` in the project's `.openqodex/config.yaml` removes that. The same file's `review.reviewers` names which agent and model review, so the whole team sends code to the same model services.
 
 When neither Claude Code nor Codex can be the reviewer, `review` names a fallback, `review --agent`. In that fallback, the coding agent you are in reviews the change itself, on the model that agent already uses. So the session that wrote the code also reviews it. The report says which agent reviewed.
 
