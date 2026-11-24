@@ -18,7 +18,7 @@ Open source code review that runs inside your coding agent, before you push. A s
 npx openqodex init
 ```
 
-Then say to your agent: "review my change with openqodex". `init` finds the agents on your machine, lists the files it will write and asks you once. In your own terminal, run `~/.openqodex/bin/openqodex review`. An `npx` install puts no `openqodex` on your `PATH`.
+Then say to your agent: "review my change with openqodex". `init` finds the agents on your machine, lists the files it will write and the reviewers it plans for your team, and asks you. In your own terminal, run `~/.openqodex/bin/openqodex review`. An `npx` install puts no `openqodex` on your `PATH`.
 
 For agents, the same install with no question:
 

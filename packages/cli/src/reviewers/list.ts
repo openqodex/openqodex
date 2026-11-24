@@ -2,7 +2,7 @@
 // as the commands use it: the one-run override from the command line, the
 // list `init` writes when the file has none, and whether each entry can
 // start on this machine (doctor, init).
-import { OpenQodexError, REVIEWERS_SINCE, entryLabel, reviewerEffortProblem, reviewerModelProblem } from "@openqodex/core";
+import { CONFIG_MAX_BYTES, OpenQodexError, REVIEWERS_SINCE, entryLabel, loadConfig, readRepoFile, reviewerEffortProblem, reviewerModelProblem } from "@openqodex/core";
 import type { ReviewerEntry } from "@openqodex/core";
 import { REVIEWER_NAMES, entryCanStart, hostAgent, readinessCache } from "@openqodex/review";
 import type { ReviewerDriver } from "@openqodex/review";
@@ -58,6 +58,52 @@ export async function defaultReviewerList(drivers: readonly ReviewerDriver[], re
     ready.push(d.ok);
   }
   return { entries, ready };
+}
+
+// Whether the project's settings file names review.reviewers at all, an
+// empty list included: the team chose that, and init leaves it as it is.
+// The parsed config cannot tell an empty list from none.
+export function projectNamesReviewers(repoRoot: string): boolean {
+  const path = loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ }).path;
+  const text = path === null ? null : readRepoFile(repoRoot, path, CONFIG_MAX_BYTES);
+  if (text === null) return false;
+  const doc = parseDocument(text);
+  return doc.hasIn(["review", "reviewers"]) || doc.hasIn(["pr_review", "reviewers"]);
+}
+
+// One question with a list of answers; null when the person cancels. init
+// asks through @clack/prompts' select; the tests answer from a script.
+export type PickOne = (message: string, options: { value: string; label: string }[]) => Promise<string | null>;
+
+// The planned entry as a terminal shows it.
+export const plannedLabel = (entry: ReviewerEntry, ready: boolean): string => `${entryLabel(entry)} (${ready ? "can start here" : "cannot start here yet"})`;
+
+// What a person in a terminal makes of the planned list: the indexes of the
+// entries to write, in their order. Kept as shown, picked again one place at
+// a time (which reorders it and drops what is not picked), or none, which
+// writes no list. A cancel writes no list: the team gets only a list the
+// person saw through. Models and effort stay as planned.
+export async function chooseReviewerList(entries: readonly ReviewerEntry[], ready: readonly boolean[], pick: PickOne): Promise<number[]> {
+  const how = await pick("Write this reviewer list for the whole team?", [
+    { value: "keep", label: "Yes, as shown" },
+    { value: "change", label: "Change the order or leave reviewers out" },
+    { value: "none", label: "No list: each review picks the first reviewer that can start" },
+  ]);
+  const all = entries.map((_, i) => i);
+  if (how === "keep") return all;
+  if (how !== "change") return [];
+  const chosen: number[] = [];
+  for (;;) {
+    const left = all.filter((i) => !chosen.includes(i));
+    if (left.length === 0) return chosen;
+    const next = await pick(`Reviewer ${chosen.length + 1} of the list`, [
+      ...left.map((i) => ({ value: String(i), label: plannedLabel(entries[i]!, ready[i]!) })),
+      { value: "stop", label: chosen.length === 0 ? "None: write no list" : "No more" },
+    ]);
+    if (next === null) return [];
+    if (next === "stop") return chosen;
+    chosen.push(Number(next));
+  }
 }
 
 const newer = (a: string, b: string): boolean => {
