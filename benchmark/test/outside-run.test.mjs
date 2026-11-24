@@ -437,6 +437,20 @@ describe("an unpacked package edited after it was unpacked runs under the tarbal
     expect((await preparePackage(`file:${tarball}`, { cache })).extracted).toBe("again");
     expect(existsSync(join(again.dir, "dist", "extra.js"))).toBe(false);
   });
+
+  it("a cached unpacked file changed together with its record.json is unpacked again, never reused", async () => {
+    const cache = tempDir("oq-outside-cache-");
+    const first = await preparePackage(`file:${tarball}`, { cache });
+    const original = readFileSync(first.lib);
+    appendFileSync(first.lib, "\n// tuned build\n");
+    const recordPath = join(first.dir, "..", "record.json");
+    const edited = readJson(recordPath);
+    edited.files["package/dist/lib.js"] = sha256(first.lib);
+    writeFileSync(recordPath, JSON.stringify(edited, null, 2));
+    const again = await preparePackage(`file:${tarball}`, { cache });
+    expect(again.extracted, "an edited file vouched for by an edited record was reused").toBe("again");
+    expect(readFileSync(again.lib).equals(original)).toBe(true);
+  });
 });
 
 describe("a tarball member is written outside the package's folder, or as a link", () => {

@@ -224,12 +224,15 @@ function treeOf(dir) {
 }
 
 // Why the unpacked folder may not be used as it is (failure 6), or null.
-function folderProblem(dir, record, sha256) {
-  if (record.sha256 !== sha256 || !record.files) return "its record names another tarball, or no files";
+// `expected` comes from the tarball's own bytes ({ sha256, integrity, bytes,
+// files }), never from record.json alone: record.json is a file in the same
+// folder and can be edited together with the code it vouches for.
+function folderProblem(dir, record, expected) {
+  if (record.sha256 !== expected.sha256 || record.integrity !== expected.integrity || record.bytes !== expected.bytes) return "its record names another tarball";
   const { files, odd } = treeOf(dir);
   if (odd.length > 0) return `${odd[0]} is neither a file nor a folder`;
-  for (const [path, hash] of Object.entries(record.files)) if (files[path] !== hash) return `${path} is ${files[path] ? "changed" : "missing"}`;
-  const added = Object.keys(files).find((path) => !(path in record.files));
+  for (const [path, hash] of Object.entries(expected.files)) if (files[path] !== hash) return `${path} is ${files[path] ? "changed" : "missing"}`;
+  const added = Object.keys(files).find((path) => !(path in expected.files));
   return added ? `${added} was added` : null;
 }
 
@@ -278,9 +281,17 @@ export async function preparePackage(spec, { cache = cacheRoot() } = {}) {
   };
   let extracted = "now";
   if (existsSync(join(dir, "record.json"))) {
-    const problem = folderProblem(dir, JSON.parse(readFileSync(join(dir, "record.json"), "utf8")), sha256);
+    // The expected hashes come from the tarball bytes, not from record.json.
+    const expectedFiles = {};
+    for (const m of tarMembers(bytes)) if (m.type === "file") expectedFiles[m.path] = sha256Of(m.body);
+    let problem;
+    try {
+      problem = folderProblem(dir, JSON.parse(readFileSync(join(dir, "record.json"), "utf8")), { sha256, integrity: integrityOf(bytes), bytes: bytes.length, files: expectedFiles });
+    } catch {
+      problem = "its record cannot be read";
+    }
     if (problem === null) return result("reused");
-    // Never run what differs from its record: unpack it again from the bytes.
+    // Never run what differs from the tarball: unpack it again from the bytes.
     rmSync(dir, { recursive: true, force: true });
     extracted = "again";
   }
