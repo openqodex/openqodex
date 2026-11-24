@@ -1,5 +1,11 @@
 # openqodex
 
+## 0.23.0
+
+### Minor Changes
+
+- [#457](https://github.com/openqodex/openqodex/pull/457) [`4cdcebe`](https://github.com/openqodex/openqodex/commit/4cdcebe2cf0c80d1b7ab0614a4e9a80430a97bcf) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - You can now choose the Codex reviewer's model and reasoning effort. Set `reviewer_model` (a model id) and `reviewer_effort` (`low`, `medium`, `high` or `xhigh`) in `~/.openqodex/config.yaml`, or pass `--reviewer-model` and `--reviewer-effort` to `review` for one run. Without them Codex keeps its own default. The report's reviewer line and `openqodex doctor` name both. The Claude Code reviewer ignores them.
+
 ## 0.22.2
 
 ### Patch Changes
