@@ -271,9 +271,14 @@ export function composeIssue(problem: Problem, command: string, args: string[]):
   return { title: `OpenQodex ${__OPENQODEX_VERSION__}: ${problem.code}`, body };
 }
 
-export function issueText(issue: Issue): string {
+// The first line of the text a saved preview's checksum covers. A preview
+// saved by an earlier version has the old line; it is still accepted.
+const HEADLINE = "OpenQodex had a problem. This issue report has not been sent.";
+const OLD_HEADLINE = "OpenQodex had a problem. Nothing has been sent.";
+
+export function issueText(issue: Issue, headline = HEADLINE): string {
   return [
-    "OpenQodex had a problem. This issue report has not been sent.",
+    headline,
     `Issue title: ${issue.title}`,
     "Issue body:",
     issue.body,
@@ -371,7 +376,7 @@ export async function readLast(cwd: string): Promise<Issue | string> {
   const lines = v.body.split("\n");
   if (lines.length !== BODY_LABELS.length || lines.some((l, i) => !l.startsWith(BODY_LABELS[i] as string))) return changed;
   const issue = { title: v.title, body: v.body };
-  if (v.sha256 !== sha256(issueText(issue))) return changed;
+  if (v.sha256 !== sha256(issueText(issue)) && v.sha256 !== sha256(issueText(issue, OLD_HEADLINE))) return changed;
   return issue;
 }
 

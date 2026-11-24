@@ -736,11 +736,14 @@ export function telemetrySwitch(dir: string, configFlag?: string): { on: boolean
   if (configFlag !== undefined) {
     const candidates = isAbsolute(configFlag) ? [configFlag] : [join(resolve(dir), configFlag), ...folders.map((f) => join(f, configFlag))];
     for (const path of candidates) {
-      if (!existsSync(path)) continue;
+      // Only a file that is not there is passed over: one that cannot be
+      // reached (a folder without access on the way) turns usage data off.
       let text: string;
       try {
         text = readFileBounded(path, CONFIG_MAX_BYTES);
-      } catch {
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ENOTDIR") continue;
         return { on: false, why: "the --config file cannot be read" };
       }
       const why = offIn(text, "the --config file");

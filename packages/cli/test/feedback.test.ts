@@ -33,7 +33,10 @@
 //     then sends an older issue.
 // 12. --send-last follows a symbolic link, or sends a saved body that was
 //     edited after it was shown, or sends without printing it again.
+// 13. --send-last refuses a preview an earlier version saved, whose first
+//     line differs from today's.
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -238,6 +241,20 @@ describe("feedback offer", () => {
     const linked = cli(["report", "--send-last"], dir, h);
     expect(linked.code).toBe(2);
     expect(existsSync(h.record)).toBe(false);
+  });
+
+  it("report --send-last sends a preview an earlier version saved with its old first line", () => {
+    const h = harness();
+    const dir = repo(() => {});
+    cli(["report", "the review hung"], dir, h);
+    const saved = join(dir, ".openqodex", "last-report.json");
+    const v = JSON.parse(readFileSync(saved, "utf8")) as { title: string; body: string; sha256: string };
+    const old = ["OpenQodex had a problem. Nothing has been sent.", `Issue title: ${v.title}`, "Issue body:", v.body, "1 create a GitHub issue", "2 ignore", ""].join("\n");
+    v.sha256 = createHash("sha256").update(old).digest("hex");
+    writeFileSync(saved, JSON.stringify(v));
+    const r = cli(["report", "--send-last"], dir, h);
+    expect(r.code, r.stderr).toBe(0);
+    expect(existsSync(h.record)).toBe(true);
   });
 
   it("hook check prints no offer and exits 0 when its input breaks", () => {

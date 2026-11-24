@@ -42,6 +42,9 @@ const FLAGS = [
   "--install", "--all-scanners", "--json", "--require-all",
   "--project", "--hook", "--no-repo", "--no-review", "--mcp", "--no-mcp", "--yes", "-y", "--uninstall", "--dry-run",
   "--now", "--rollback", "--off", "--on", "--status", "--write", "--repo",
+  "--send-last", "--list", "--revoke", "--force",
+  "--full", "--compact", "--exclude-tests", "--file", "--name", "--tier", "--depth", "--limit", "--cursor", "--generation",
+  "--edges", "--level", "--text", "--tokens", "--budget-ms", "--context",
 ] as const;
 
 const FORMATS = ["terminal", "markdown", "json", "sarif"] as const;
@@ -312,14 +315,18 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-// Three numbers rebuilt from the digits found: "2.1.289 (Claude Code)" is
-// 2.1.289. No digits, or a number too large to count: unknown.
+// A version from text that states one: the first word shaped like 1.2 or
+// 1.2.3, with a v before it or a suffix such as -beta after it allowed,
+// rebuilt from its three numbers. "2.1.289 (Claude Code)" is 2.1.289. Text
+// with no such word, such as a path, is unknown: digits elsewhere in it,
+// such as a user id in a folder name, never leave.
 export function versionOf(raw: unknown): string {
   if (typeof raw !== "string") return "unknown";
-  const runs = raw.slice(0, 200).match(/\d+/g)?.slice(0, 3) ?? [];
-  if (runs.length === 0 || runs.some((r) => r.length > 9)) return "unknown";
-  while (runs.length < 3) runs.push("0");
-  return runs.map((r) => String(Number(r))).join(".");
+  for (const word of raw.slice(0, 200).split(/[\s(),;]+/)) {
+    const m = /^v?(\d{1,9})\.(\d{1,9})(?:\.(\d{1,9}))?(?:[-+][0-9A-Za-z.-]*)?$/.exec(word);
+    if (m) return [m[1]!, m[2]!, m[3] ?? "0"].map((r) => String(Number(r))).join(".");
+  }
+  return "unknown";
 }
 
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_COUNT;
@@ -433,16 +440,26 @@ function flagNames(args: string[]): string[] {
   return names;
 }
 
+// The format the command used, read the way parseFlags reads it: flags end
+// at `--` and the last --format wins; --json (doctor, graph) is json.
 function formatOf(args: string[]): string {
-  const i = args.findIndex((a) => a === "--format" || a.startsWith("--format="));
-  if (i === -1) return "terminal";
-  return args[i]!.startsWith("--format=") ? args[i]!.slice(9) : (args[i + 1] ?? "");
+  const flags = args.includes("--") ? args.slice(0, args.indexOf("--")) : args;
+  let format: string | undefined;
+  for (let i = 0; i < flags.length; i++) {
+    const a = flags[i]!;
+    if (a === "--format") format = flags[++i];
+    else if (a.startsWith("--format=")) format = a.slice(9);
+  }
+  return format ?? (flags.includes("--json") ? "json" : "terminal");
 }
 
-// The place of the first stack frame inside the bundle: its line and column only.
+// The place of the first stack frame inside the bundle: its line and column
+// only. The message, which can quote what was typed, comes before the
+// frames and is skipped whole; only a line shaped like a frame counts.
 function errorPlace(error: Error): { errorLine?: number; errorColumn?: number } {
-  for (const line of (error.stack ?? "").split("\n").slice(1)) {
-    const m = /[/\\]bin\.js:(\d+):(\d+)\)?\s*$/.exec(line);
+  const lines = (error.stack ?? "").split("\n").slice(error.message.split("\n").length);
+  for (const line of lines) {
+    const m = /^ {4}at (?:.* \()?[^()\n]*[/\\]bin\.js:(\d+):(\d+)\)?$/.exec(line);
     if (m) return { errorLine: Number(m[1]), errorColumn: Number(m[2]) };
   }
   return {};
@@ -486,7 +503,7 @@ function scannerProps(scanners: readonly ScannerRunSummary[]): Record<string, un
     scannersDisabled: named("disabled"),
     scannerMs: Object.fromEntries(builtin.filter((s) => s.status === "ran" || s.status === "failed").map((s) => [s.scanner, Math.round(s.durationMs)])),
     scannerFailures: Object.fromEntries(builtin.filter((s) => s.status === "failed").map((s) => [s.scanner, failureCode(s.reason, s.scanner)])),
-    customScanners: custom.length,
+    customScanners: custom.filter((s) => s.status === "ran" || s.status === "failed").length,
     customScannersFailed: custom.filter((s) => s.status === "failed").length,
   };
 }
@@ -536,12 +553,19 @@ export type ReviewInput = {
 };
 
 // The model the agent reported, across every call: one name, `mixed` for
-// more than one, `unknown` when it named none.
+// more than one, `unknown` when it named none. Two spellings of one public
+// model (a provider prefix, a date) count as one; names not on the list
+// count apart, so two private models are still mixed.
 function reported(models: (string | null)[]): string {
-  const names = new Set(models.flatMap((m) => (m === null ? [] : m.split(", "))).filter((m) => m !== ""));
+  const raw = models.flatMap((m) => (m === null ? [] : m.split(", "))).filter((m) => m !== "");
+  const names = new Set(raw.map((m) => {
+    const known = canonicalModel(m);
+    return known === "other" ? `other:${m}` : known;
+  }));
   if (names.size === 0) return "unknown";
   if (names.size > 1) return "mixed";
-  return canonicalModel([...names][0]);
+  const only = [...names][0]!;
+  return only.startsWith("other:") ? "other" : only;
 }
 
 export function reviewProps(o: ReviewInput): Record<string, unknown> {

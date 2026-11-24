@@ -289,6 +289,8 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   // Everything the run writes and prints from its result, before the core
   // removes the snapshot: a cleanup that fails then fails the command after
   // the review is on disk, recorded and printed.
+  // report.html could not be written: the review exits 2 and is not finished.
+  let htmlFailed = false;
   const finish = (result: ReviewCoreResult): number => {
     if (result.ended === "nothing") {
       if (o.end) o.end.ended = "nothing";
@@ -340,6 +342,7 @@ export async function runReview(o: ReviewOptions): Promise<number> {
       "trace.json": `${JSON.stringify(redactStored(result.trace, secrets), null, 2)}\n`,
     });
     if (!writeReportHtml(write, html!)) {
+      htmlFailed = true;
       if (o.end) {
         o.end.ended = "incomplete";
         o.end.why = "report.html could not be written";
@@ -394,14 +397,14 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   // The usage data of this review: recorded once the core call returned or
   // threw, so a review is never counted as done before its cleanup.
   let kept: ReviewCoreResult | null = null;
-  const usage: Pick<ReviewInput, "mode" | "scope" | "fromInit" | "staged" | "web"> = { mode: "reviewer", scope: o.all ? "all" : o.target !== undefined ? "target" : "change", fromInit: o.fromInit === true, staged: config.stages, web };
+  const usage: Pick<ReviewInput, "mode" | "scope" | "fromInit" | "staged" | "web"> = { mode: "reviewer", scope: o.all ? "all" : o.target !== undefined ? "target" : "change", fromInit: o.fromInit === true, staged: false, web };
   const noteReview = (result: ReviewCoreResult | null, exitCode: number, cleanupFailed: boolean): void => {
     try {
       if (result === null) {
         record("review.completed", () => reviewProps({ ...usage, ended: "error", cleanupFailed: false, exitCode, reviewer: reviewer?.driver ?? null }));
         return;
       }
-      const ended = result.ended === "nothing" ? "nothing" : result.ended === "unavailable" ? "unavailable" : o.end?.ended === "incomplete" || (result.ended === "reviewed" && result.completion.status !== "complete") ? "incomplete" : "finished";
+      const ended = result.ended === "nothing" ? "nothing" : result.ended === "unavailable" ? "unavailable" : htmlFailed || o.end?.ended === "incomplete" || (result.ended === "reviewed" && result.completion.status !== "complete") ? "incomplete" : "finished";
       const calls = result.ended === "nothing" ? undefined : result.usage?.calls;
       const totals = result.ended === "nothing" ? undefined : result.usage?.totals;
       record("review.completed", () => reviewProps({
@@ -443,6 +446,9 @@ export async function runReview(o: ReviewOptions): Promise<number> {
               "impact.json": `${JSON.stringify(e.impact, null, 2)}\n`,
             });
           } else if (e.type === "staged-units") {
+            // Only a review that ran in stages says so: a whole-repository
+            // review, or one with nothing to split, runs as one pass.
+            usage.staged = true;
             write({ "units.json": `${JSON.stringify(redactStored(e.units, secrets), null, 2)}\n` });
             const digests = e.units.filter((unit) => unit.digest);
             if (digests.length) {

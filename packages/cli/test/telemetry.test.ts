@@ -42,7 +42,8 @@ import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 import { run as e2eRun } from "../../../tests/e2e/support.js";
 import { AGENT_ENV, agentFreePath, BIN } from "./init-helpers.js";
 import type { Report } from "@openqodex/core";
-import { canonicalModel, propertyNames, PUBLIC_MODELS, scanProps, validate } from "../src/telemetry/events.js";
+import { canonicalModel, commandProps, propertyNames, PUBLIC_MODELS, reviewProps, scanProps, validate, versionOf } from "../src/telemetry/events.js";
+import { telemetryTarget } from "../src/telemetry/config.js";
 import { begin, context, dispatch, recordCommand } from "../src/telemetry/dispatch.js";
 import { parseFlags } from "../src/flags.js";
 
@@ -55,10 +56,19 @@ const cliRoot = dirname(here);
 const repoRoot = dirname(dirname(cliRoot));
 const VERSION = (JSON.parse(readFileSync(join(cliRoot, "package.json"), "utf8")) as { version: string }).version;
 
+// The variables that point git at another repository: a test run from a git
+// hook inherits them, and git would then work on the caller's repository.
+const GIT_OVERRIDES = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"];
+const gitEnv = (): NodeJS.ProcessEnv => {
+  const e: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
+  for (const key of GIT_OVERRIDES) delete e[key];
+  return e;
+};
+
 // The CI markers, written here rather than read from the code, so a marker
 // the code loses fails this file.
 const CI_MARKERS = ["CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL", "TF_BUILD", "TEAMCITY_VERSION", "BUILDKITE", "CODEBUILD_BUILD_ID", "BUILDER_OUTPUT"];
-const STRIP = [...CI_MARKERS, ...AGENT_ENV, "DO_NOT_TRACK", "OPENQODEX_OFFLINE", "OPENQODEX_REVIEW_DEPTH", "OPENQODEX_SKIP", "OPENQODEX_LAUNCHER", "OPENQODEX_TELEMETRY_KEY", "OPENQODEX_E2E", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"];
+const STRIP = [...CI_MARKERS, ...AGENT_ENV, "DO_NOT_TRACK", "OPENQODEX_OFFLINE", "OPENQODEX_REVIEW_DEPTH", "OPENQODEX_SKIP", "OPENQODEX_LAUNCHER", "OPENQODEX_TELEMETRY_KEY", "OPENQODEX_E2E", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", ...GIT_OVERRIDES];
 
 // No run prints a line about usage data: it is never announced on the terminal.
 const ANNOUNCED = /anonymous|sends usage data/i;
@@ -140,7 +150,7 @@ const named = (s: Server, event: string): Envelope[] => events(s).filter((e) => 
 type Box = { root: string; home: string; oqHome: string; repo: string };
 
 function git(cwd: string, ...args: string[]): string {
-  const r = spawnSync("git", ["-c", "user.name=T", "-c", "user.email=t@openqodex.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } });
+  const r = spawnSync("git", ["-c", "user.name=T", "-c", "user.email=t@openqodex.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8", env: gitEnv() });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
   return r.stdout;
 }
@@ -200,7 +210,10 @@ function start(args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; input?:
   child.stdin.on("error", () => undefined);
   child.stdin.end(o.input ?? "");
   child.once("exit", () => (exitAt = Date.now()));
-  const done = new Promise<Ran>((resolve) => child.once("close", (status, signal) => resolve({ status, signal, stdout, stderr, exitAt, pid: child.pid ?? 0 })));
+  const done = new Promise<Ran>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (status, signal) => resolve({ status, signal, stdout, stderr, exitAt, pid: child.pid ?? 0 }));
+  });
   return { pid: child.pid ?? 0, done, kill: (signal) => child.kill(signal) };
 }
 
@@ -353,6 +366,9 @@ describe("a switch that is off (failure 1)", () => {
     { name: "OPENQODEX_OFFLINE=1", env: { OPENQODEX_OFFLINE: "1" } },
     { name: "OPENQODEX_REVIEW_DEPTH=1", env: { OPENQODEX_REVIEW_DEPTH: "1" } },
     { name: "OPENQODEX_TELEMETRY=1 with CI=1", env: { OPENQODEX_TELEMETRY: "1", CI: "1" } },
+    { name: "CI set to an empty value", env: { CI: "" } },
+    // Only the value 1 lifts the local-build rule; this run is a local build.
+    { name: "OPENQODEX_TELEMETRY=true on a local build", env: { OPENQODEX_TELEMETRY: "true" } },
   ];
 
   it("no row sends, makes the id or prints a line about it; the same run with the switch on sends", async () => {
@@ -396,6 +412,70 @@ describe("a switch that is off (failure 1)", () => {
     expect(server.hits).toHaveLength(1);
     expect(events(server).map((e) => e.event)).toEqual(["command.completed"]);
   }, 60_000);
+
+  it("a worker handed an install.first_use drops it: only the worker that makes the id sends one", async () => {
+    const server = await capture();
+    const b = box();
+    seedId(b);
+    const handed = [{ ...ENVELOPE, uuid: "2c5ea4c0-4067-41b6-a3a7-8bb7a2f1b2b9", event: "install.first_use", properties: {} }, ENVELOPE];
+    const r = await runCli(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { OPENQODEX_TELEMETRY_EVENTS: JSON.stringify(handed), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
+    expect(r.status).toBe(0);
+    expect(events(server).map((e) => e.event)).toEqual(["command.completed"]);
+  }, 30_000);
+
+  it("a work tree that git is pointed at outside the folder: its switch counts", async () => {
+    // The command runs in a repository that is on; GIT_DIR and GIT_WORK_TREE
+    // point git at another one, which the command then scans.
+    const run = async (value: string): Promise<Server> => {
+      const server = await capture();
+      const here = box();
+      seedId(here);
+      const there = box({ config: `${BASE}openqodex_telemetry: ${value}\n` });
+      const r = await runCli(SCAN, { cwd: here.repo, env: onEnv(here, server.url, { GIT_DIR: join(there.repo, ".git"), GIT_WORK_TREE: there.repo }) });
+      expect(r.status, r.stderr).toBe(0);
+      return server;
+    };
+    const off = await run("0");
+    const on = await run("1");
+    await waitFor(() => on.hits.length === 1, 10_000, "the control's request");
+    await sleep(SETTLE_MS);
+    expect(off.hits).toEqual([]);
+  }, 60_000);
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("a --config the command cannot reach turns it off", async () => {
+    const server = await capture();
+    const b = box();
+    seedId(b);
+    const locked = join(b.root, "locked");
+    mkdirSync(locked);
+    writeFileSync(join(locked, "c.yaml"), BASE);
+    chmodSync(locked, 0o000);
+    try {
+      const r = await runCli([...SCAN, "--config", join(locked, "c.yaml")], { cwd: b.repo, env: onEnv(b, server.url) });
+      expect(r.status, r.stderr).toBe(2);
+      await sleep(SETTLE_MS);
+    } finally {
+      chmodSync(locked, 0o755);
+    }
+    expect(server.hits).toEqual([]);
+  }, 30_000);
+
+  it.skipIf(process.platform === "win32")("a user config that is a pipe turns it off, and the worker does not wait on it", async () => {
+    const server = await capture();
+    const b = box();
+    seedId(b);
+    const made = spawnSync("mkfifo", [join(b.oqHome, "config.yaml")]);
+    expect(made.status).toBe(0);
+    const started = Date.now();
+    const worker = start(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
+    // A read that blocks holds even the hard stop back: this test ends it.
+    const backstop = setTimeout(() => worker.kill("SIGKILL"), 8000);
+    const r = await worker.done;
+    clearTimeout(backstop);
+    expect(r.signal).toBeNull();
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(server.hits).toEqual([]);
+  }, 30_000);
 });
 
 // ---------- 2. a wrong value changes nothing but the switch ----------
@@ -501,7 +581,7 @@ const WORDS: Record<string, readonly string[]> = {
   blockOn: SEVERITIES,
 };
 const LISTS: Record<string, readonly string[]> = {
-  flags: ["--cwd", "--config", "--format", "--output", "--no-color", "--quiet", "--verbose", "--no-install", "--offline", "--uncommitted", "--base", "--only", "--skip", "--agent", "--finalize", "--all", "--no-graph", "--run", "--reviewer", "--timeout", "--block-on-severity", "--instructions", "--instructions-ref", "--report-dir", "--reviewer-web", "--reviewer-model", "--reviewer-effort", "--install", "--all-scanners", "--json", "--require-all", "--project", "--hook", "--no-repo", "--no-review", "--mcp", "--no-mcp", "--yes", "-y", "--uninstall", "--dry-run", "--now", "--rollback", "--off", "--on", "--status", "--write", "--repo"],
+  flags: ["--cwd", "--config", "--format", "--output", "--no-color", "--quiet", "--verbose", "--no-install", "--offline", "--uncommitted", "--base", "--only", "--skip", "--agent", "--finalize", "--all", "--no-graph", "--run", "--reviewer", "--timeout", "--block-on-severity", "--instructions", "--instructions-ref", "--report-dir", "--reviewer-web", "--reviewer-model", "--reviewer-effort", "--install", "--all-scanners", "--json", "--require-all", "--project", "--hook", "--no-repo", "--no-review", "--mcp", "--no-mcp", "--yes", "-y", "--uninstall", "--dry-run", "--now", "--rollback", "--off", "--on", "--status", "--write", "--repo", "--send-last", "--list", "--revoke", "--force", "--full", "--compact", "--exclude-tests", "--file", "--name", "--tier", "--depth", "--limit", "--cursor", "--generation", "--edges", "--level", "--text", "--tokens", "--budget-ms", "--context"],
   agents: ["claude-code", "cursor", "codex", "cline", "goose"],
   scannersRan: SCANNERS,
   scannersFailed: SCANNERS,
@@ -557,6 +637,7 @@ function checkPayloads(server: Server, canaries: string[]): void {
     expect(Array.isArray(body.batch)).toBe(true);
     for (const e of body.batch as Envelope[]) {
       expect(Object.keys(e).sort()).toEqual(["distinct_id", "event", "properties", "timestamp", "uuid"]);
+      expect(["install.first_use", "command.completed", "init.completed", "init.first_review", "review.completed", "scan.completed"]).toContain(e.event);
       expect(e.uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
       expect(e.distinct_id).toMatch(/^[0-9a-f]{64}$/);
       expect(e.distinct_id).toBe(e.properties.installId);
@@ -646,7 +727,7 @@ describe("a server that holds its answer (failure 5)", () => {
     const stuck = join(b.root, "stuck.cjs");
     writeFileSync(stuck, "globalThis.fetch = () => { setInterval(() => {}, 1000); return new Promise(() => {}); };\n");
     const started = Date.now();
-    const worker = start(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { NODE_OPTIONS: `--require ${stuck}`, OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
+    const worker = start(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { NODE_OPTIONS: `--require ${JSON.stringify(stuck)}`, OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
     // Without the hard stop it would run forever: this test ends it.
     const backstop = setTimeout(() => worker.kill("SIGKILL"), 8000);
     const r = await worker.done;
@@ -669,7 +750,7 @@ describe("a relative OPENQODEX_HOME (failure 18)", () => {
     const seen = join(b.root, "worker-home.txt");
     const recorder = join(b.root, "recorder.cjs");
     writeFileSync(recorder, `if (process.argv.includes("__telemetry")) require("node:fs").writeFileSync(${JSON.stringify(seen)}, process.env.OPENQODEX_HOME ?? "");\n`);
-    const r = await runCli(SCAN, { cwd: b.repo, env: onEnv(b, server.url, { OPENQODEX_HOME: ".oq", NODE_OPTIONS: `--require ${recorder}` }) });
+    const r = await runCli(SCAN, { cwd: b.repo, env: onEnv(b, server.url, { OPENQODEX_HOME: ".oq", NODE_OPTIONS: `--require ${JSON.stringify(recorder)}` }) });
     expect(r.status, r.stderr).toBe(0);
     await waitFor(() => server.hits.length === 1, 10_000, "the request");
     expect(readFileSync(seen, "utf8")).toBe(join(b.repo, ".oq"));
@@ -767,10 +848,11 @@ describe("a first review stopped by Ctrl-C (failure 7)", () => {
 // Any process a test waits on is started with spawn, never spawnSync: the
 // capture server runs in this process and answers only while it is free.
 function spawnAsync(command: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv }): Promise<{ status: number | null; stdout: string }> {
-  return new Promise((done) => {
+  return new Promise((done, fail) => {
     const child = spawn(command, args, { cwd: o.cwd, env: o.env, stdio: ["ignore", "pipe", "ignore"] });
     let stdout = "";
     child.stdout.on("data", (b: Buffer) => (stdout += String(b)));
+    child.once("error", fail);
     child.once("close", (status) => done({ status, stdout }));
   });
 }
@@ -813,6 +895,19 @@ describe("dry runs, uninstall and a declined init (failure 8)", () => {
     const u = await runCli(["init", "--uninstall", "--yes"], { cwd: un.repo, env: onEnv(un, unServer.url) });
     expect(u.status, u.stderr).toBe(0);
     expect(existsSync(join(un.oqHome, "telemetry"))).toBe(false);
+
+    // Only the id is the uninstall's to remove: anything else in its folder stays.
+    const keep = box();
+    const keepServer = await capture();
+    quiet.push(["init --uninstall with another file beside the id", keepServer]);
+    const keepInstalled = await runCli([...INSTALL, "--agent", "claude-code"], { cwd: keep.repo, env: onEnv(keep, keepServer.url, { OPENQODEX_TELEMETRY: "0" }) });
+    expect(keepInstalled.status, keepInstalled.stderr).toBe(0);
+    seedId(keep);
+    writeFileSync(join(keep.oqHome, "telemetry", "notes.txt"), "mine\n");
+    const uk = await runCli(["init", "--uninstall", "--yes"], { cwd: keep.repo, env: onEnv(keep, keepServer.url) });
+    expect(uk.status, uk.stderr).toBe(0);
+    expect(existsSync(join(keep.oqHome, "telemetry", "id"))).toBe(false);
+    expect(readFileSync(join(keep.oqHome, "telemetry", "notes.txt"), "utf8")).toBe("mine\n");
 
     const one = box();
     const oneServer = await capture();
@@ -1009,6 +1104,8 @@ describe("a custom scanner's name (failure 19)", () => {
       scanners: [
         { scanner: "custom:customerproject", status: "ran", durationMs: 5, reason: null },
         { scanner: "custom:acme-internal", status: "failed", durationMs: 5, reason: "customerproject exited 3 in /home/jdoe/acme" },
+        // Configured, but no file it reads changed: it did not run, so it is not counted.
+        { scanner: "custom:acme-skipped", status: "no_matching_files", durationMs: 0, reason: null },
         { scanner: "sqllint", status: "failed", durationMs: 3, reason: "customerproject crashed at /home/jdoe/acme" },
       ],
     } as unknown as Report;
@@ -1148,12 +1245,73 @@ describe("the feedback question after an internal error (failure 17)", () => {
     seedId(b);
     const waitMs = 2000;
     // The answer is typed only once the request has arrived, then after a wait.
-    const wait = `i=0; while [ ! -f '${marker}' ]; do i=$((i+1)); [ $i -gt 200 ] && exit 1; sleep 0.1; done; sleep ${waitMs / 1000}`;
-    const r = await pty(b.repo, onEnv(b, server.url), [...SCAN, "--output", join(b.root, "missing", "out.txt")], [["Choose 1 or 2", "2", wait]]);
+    // The marker's path reaches the shell through the environment, so no character in it can break the script.
+    const wait = `i=0; while [ ! -f "$OPENQODEX_TEST_FEEDBACK_MARKER" ]; do i=$((i+1)); [ $i -gt 200 ] && exit 1; sleep 0.1; done; sleep ${waitMs / 1000}`;
+    const started = Date.now();
+    const r = await pty(b.repo, onEnv(b, server.url, { OPENQODEX_TEST_FEEDBACK_MARKER: marker }), [...SCAN, "--output", join(b.root, "missing", "out.txt")], [["Choose 1 or 2", "2", wait]]);
+    const elapsed = Date.now() - started;
     expect(r.status, r.stdout).toBe(2);
     const command = named(server, "command.completed");
     expect(command).toHaveLength(1);
     expect(command[0]!.properties).toMatchObject({ threw: true, errorKind: "internal", exitCode: 2 });
-    expect(command[0]!.properties.durationMs as number).toBeLessThan(waitMs);
+    // The run lasted at least the wait longer than the command it measured,
+    // however slow the scan was.
+    expect(command[0]!.properties.durationMs as number).toBeLessThan(elapsed - waitMs);
   }, 90_000);
+});
+
+// ---------- 4. values built from what was typed or found ----------
+
+describe("values built from text (failure 4)", () => {
+  it("the error's place comes from a stack frame only, never from digits the message quotes", () => {
+    // parseFlags quotes what was typed in its message; here it looks like a place in the bundle.
+    const typed = new Error("unknown flag: --x\nsee /home/u4242/bin.js:4242:77");
+    expect(commandProps({ command: "scan", args: [], exitCode: 2, durationMs: 1, error: typed, threw: true, interrupted: false })).not.toHaveProperty("errorLine");
+    const real = new Error("two\nlines /x/bin.js:1:2");
+    real.stack = "Error: two\nlines /x/bin.js:1:2\n    at run (/opt/openqodex/dist/bin.js:10:20)\n    at /opt/openqodex/dist/bin.js:30:40";
+    expect(commandProps({ command: "scan", args: [], exitCode: 2, durationMs: 1, error: real, threw: true, interrupted: false })).toMatchObject({ errorLine: 10, errorColumn: 20 });
+  });
+
+  it("a version is taken only from a word shaped like one, never from digits in a path", () => {
+    expect(versionOf("2.1.289 (Claude Code)")).toBe("2.1.289");
+    expect(versionOf("codex-cli 0.46.0")).toBe("0.46.0");
+    expect(versionOf("v1.2")).toBe("1.2.0");
+    expect(versionOf("cursor-agent 2025.09.18-7ae6800")).toBe("2025.9.18");
+    for (const text of ["/Users/12345/.local/bin/claude", "/opt/claude-2.1.0/bin/claude", "build 42", "acmebuild (Claude Code)", "", 7]) expect(versionOf(text), String(text)).toBe("unknown");
+  });
+
+  it("the format is the one the command used, and the flags include every flag of the CLI", () => {
+    const format = (args: string[]) => commandProps({ command: "scan", args, exitCode: 0, durationMs: 1, threw: false, interrupted: false }).format;
+    expect(format(["--format", "markdown", "--format", "json"])).toBe("json");
+    expect(format(["--format=sarif"])).toBe("sarif");
+    expect(format(["--json"])).toBe("json");
+    expect(format(["--", "--format", "json"])).toBe("terminal");
+    expect(format([])).toBe("terminal");
+    const flags = commandProps({ command: "graph", args: ["callers", "x", "--depth", "2", "--generation", "g1", "--budget-ms=100", "--json"], exitCode: 0, durationMs: 1, threw: false, interrupted: false }).flags;
+    expect(flags).toEqual(["--depth", "--generation", "--budget-ms", "--json"]);
+  });
+
+  it("one public model under two spellings is that model; two names off the list are mixed", () => {
+    const base = { mode: "reviewer", scope: "change", fromInit: false, ended: "finished", cleanupFailed: false, exitCode: 0, reviewer: "claude" } as const;
+    expect(reviewProps({ ...base, modelsReported: ["claude-opus-5-5", "anthropic/claude-opus-5-5-20251101"] }).modelReported).toBe("claude-opus-5-5");
+    expect(reviewProps({ ...base, modelsReported: ["claude-opus-5-5", "claude-haiku-4-5"] }).modelReported).toBe("mixed");
+    expect(reviewProps({ ...base, modelsReported: ["acme-a", "acme-b"] }).modelReported).toBe("mixed");
+    expect(reviewProps({ ...base, modelsReported: ["acme-a", "acme-a"] }).modelReported).toBe("other");
+  });
+
+  it("a host that ends in ? or # still gets the request at /batch/ on its path", () => {
+    for (const host of ["http://127.0.0.1:9/?", "http://127.0.0.1:9/#", "http://127.0.0.1:9//"]) expect(telemetryTarget({ OPENQODEX_TELEMETRY_HOST: host })?.host, host).toBe("http://127.0.0.1:9");
+    expect(telemetryTarget({ OPENQODEX_TELEMETRY_HOST: "https://relay.invalid/ph/" })?.host).toBe("https://relay.invalid/ph");
+    expect(telemetryTarget({ OPENQODEX_TELEMETRY_HOST: "https://relay.invalid/?x=1" })).toBeNull();
+  });
+
+  it("graph names its question as the sub-command when a flag comes first", async () => {
+    const server = await capture();
+    const b = box();
+    seedId(b);
+    const r = await runCli(["graph", "--cwd", b.repo, "help"], { cwd: b.root, env: onEnv(b, server.url) });
+    expect(r.status, r.stderr).toBe(0);
+    await waitFor(() => server.hits.length === 1, 10_000, "the request");
+    expect(named(server, "command.completed")[0]!.properties).toMatchObject({ command: "graph", sub: "help" });
+  }, 30_000);
 });

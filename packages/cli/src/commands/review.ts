@@ -583,7 +583,10 @@ function finalizeOnVersion(version: unknown, args: string[], path: string | unde
   // --run chose the run here; the child gets that run's findings path instead,
   // and a version from before --run would not know the flag.
   const flags = given.filter((a, i) => a !== "--run" && given[i - 1] !== "--run" && !a.startsWith("--run="));
-  const child = spawnSync(process.execPath, [bin, "review", HANDED_OFF, ...flags, "--", findingsPath], { stdio: "inherit" });
+  // The launcher would have named the runtime it starts; the child is told
+  // the same, so it counts as the installed runtime it is.
+  const env = launcherStarted() ? { ...process.env, OPENQODEX_LAUNCHER: bin } : process.env;
+  const child = spawnSync(process.execPath, [bin, "review", HANDED_OFF, ...flags, "--", findingsPath], { stdio: "inherit", env });
   return child.status ?? EXIT_TOOL_FAILED;
 }
 

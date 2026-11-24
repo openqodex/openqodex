@@ -16,6 +16,8 @@ Every event also has: the OpenQodex version, your operating system and its major
 
 Every value is a yes or no, a whole number, a word from a fixed list in the OpenQodex program, a version number rebuilt from its digits, or the hash of the install id. A model name that is not on the list of public models is sent as `other`.
 
+Each event also carries a random event id and the time it happened, to the millisecond. PostHog needs both to store it.
+
 ### Every event
 
 | Field | Value |
@@ -54,17 +56,17 @@ One event per command. `hook check` and `mcp` send none.
 
 ### `install.first_use`
 
-Sent once, by the first command on a machine. It has only the fields of every event.
+Sent once for each OpenQodex home, by the background process that creates its install id. A command with usage data off creates no id, so it sends no event. It has only the fields of every event.
 
 ### `init.completed` and `init.first_review`
 
 | Field | Value |
 |---|---|
 | `ended` | How setup ended: `written`, `unchanged`, `unconfirmed`, `cancelled` or `stopped`. |
-| `agents` | The agents set up, such as `claude-code` or `codex`. |
+| `agents` | The agents chosen for setup, such as `claude-code` or `codex`. `ended` says whether setup wrote their files. |
 | `scope` | `user` or `project`. |
 | `hook` | `pre-push` or `none`. |
-| `mcp` | Whether the code graph's MCP server was set up. |
+| `mcp` | Whether the setup chosen registers the code graph's MCP server. |
 | `inRepo`, `interactive` | Whether `init` ran in a git repository, and in a terminal. |
 | `exitCode` | The exit code of setup. |
 | `result` | How the first review ended: `finished`, `incomplete`, `skipped` or `unavailable`. |
@@ -89,7 +91,7 @@ Sent once, by the first command on a machine. It has only the fields of every ev
 | `modelReported` | The model the reviewer said it used, `unknown` when it named none, `mixed` when it named more than one. |
 | `effortRequested` | The reasoning effort asked for, or `default`. |
 | `reviewersPassed` | How many entries of `review.reviewers` were passed over. |
-| `staged`, `web` | Whether the review was staged, and whether the reviewer had web tools. |
+| `staged`, `web` | Whether the review ran in stages, and whether the reviewer had web tools. |
 | `sessions`, `rounds`, `turns` | How many reviewer sessions, answers and turns the review took. |
 | `inputTokens`, `outputTokens` | The token counts the reviewer reported. |
 | `totalMs`, `changeMs`, `scanMs`, `graphMs`, `briefMs`, `reviewerMs`, `finalizeMs` | The time of each step, in milliseconds. |
@@ -112,19 +114,19 @@ Code. Diffs. File names and paths. Repository, branch and remote names. Finding 
 
 ## The id
 
-The background process of the first command creates a random id in `~/.openqodex/telemetry/id`. Events carry a hash of it. It is not linked to you, your account or your repository. Delete the file to get a new id. An `init --uninstall` that removes the `openqodex` launcher from `~/.openqodex/bin` removes the id too.
+The background process creates a random id in `~/.openqodex/telemetry/id` the first time it sends. Each OpenQodex home has its own id. Events carry a hash of it. It is not linked to you, your account or your repository. Delete the file to get a new id. An `init --uninstall` that removes the `openqodex` launcher from `~/.openqodex/bin` removes the id file too. Other files in that folder stay.
 
 ## Where it goes
 
-Events go to PostHog, an analytics service, at `eu.i.posthog.com` in the EU. PostHog receives each request from your IP address, as every server does. Each event tells PostHog not to work out a location from it.
+By default, events go to PostHog, an analytics service, at `eu.i.posthog.com` in the EU. The variable `OPENQODEX_TELEMETRY_HOST` sends them to another address instead. That address must use `https`, or `http` on `localhost` or `127.0.0.1`. PostHog receives each request from your IP address, as every server does. Each event tells PostHog not to work out a location from it.
 
 ## How it is sent
 
-When a command ends, it starts a separate background process and gives it the events. That process reads the config files and the id, makes one request and stops. Your command does not wait for it. If the request fails, the events are dropped. Nothing is kept on disk but the id.
+When a command ends, it starts a separate background process and gives it the events. That process reads the config files and the id, makes one request and stops. It reads the repository's config files even after `--report-dir`, which otherwise keeps OpenQodex out of `.openqodex/`. Your command does not wait for it. If the request fails, the events are dropped. Nothing is kept on disk but the id.
 
 ## Turn it off
 
-- For a repository: add `openqodex_telemetry: 0` to `.openqodex/config.yaml`. Commit it, and it is off for everyone who works there.
+- For a repository: add `openqodex_telemetry: 0` to `.openqodex/config.yaml`. Commit it, and it is off for everyone who works there. It counts in the folder the command runs in, in every parent folder, and in the repository git works on. That repository can be elsewhere when `GIT_DIR` or `GIT_WORK_TREE` is set.
 - For your machine: set `OPENQODEX_TELEMETRY=0` or `DO_NOT_TRACK=1` in your shell profile. This works with every version of OpenQodex.
 - For your machine, in a file: add `openqodex_telemetry: 0` to `~/.openqodex/config.yaml`. An OpenQodex older than 0.25.0 that reads the same file does not know the key. It prints a warning and pauses its own automatic updates.
 
@@ -132,6 +134,6 @@ The key takes these values. `0`, `false` and `off` turn usage data off. `1`, `tr
 
 When it is off, nothing is sent and no id is created. `openqodex doctor` shows whether it is on.
 
-Usage data is always off in CI, in the GitHub Action, with `--offline`, with `--dry-run`, and for commands the reviewer runs.
+Usage data is always off in CI, in the GitHub Action, with `--offline`, with `--dry-run`, and for commands the reviewer runs. CI counts when any CI variable is set, even to an empty value.
 
 semgrep runs with its own metrics switched off.

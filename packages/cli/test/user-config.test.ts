@@ -134,7 +134,7 @@ describe("one reader for the user config", () => {
     writeFileSync(config(s), "openqodex_telemetry: 0\n");
     // Every other switch out of the way; a dead loopback port, so nothing could reach any host.
     const e = { ...laptop(s), OPENQODEX_TELEMETRY_HOST: "http://127.0.0.1:9" };
-    for (const key of ["OPENQODEX_TELEMETRY", "DO_NOT_TRACK", "OPENQODEX_REVIEW_DEPTH", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL", "TF_BUILD", "TEAMCITY_VERSION", "BUILDKITE", "CODEBUILD_BUILD_ID", "BUILDER_OUTPUT"]) delete e[key];
+    for (const key of ["OPENQODEX_TELEMETRY", "OPENQODEX_TELEMETRY_KEY", "DO_NOT_TRACK", "OPENQODEX_REVIEW_DEPTH", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL", "TF_BUILD", "TEAMCITY_VERSION", "BUILDKITE", "CODEBUILD_BUILD_ID", "BUILDER_OUTPUT"]) delete e[key];
     const status = spawnSync("sh", [join(s.oqHome, "bin/openqodex"), "update", "--status"], { encoding: "utf8", env: e, cwd: s.repo, timeout: 120_000 });
     expect(status.stdout).toMatch(/^updates +on$/m);
     expect(`${status.stdout}${status.stderr}`).not.toMatch(/unknown key/);

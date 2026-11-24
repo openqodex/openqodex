@@ -1,10 +1,13 @@
 // `openqodex __telemetry`: the detached worker a command starts with its
 // events. It checks every switch (so starting it by hand gets past none, and
-// a project switched off meanwhile still wins), reads the install id or, on
+// a project switched off meanwhile still wins), asks git which work tree the
+// command worked on and checks its switch too, reads the install id or, on
 // a first run, makes it, stamps the events with it, checks every event
 // again, makes one request and exits. No retry. The only file it writes is
 // the install id; the files it reads are the config files and the id.
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { telemetrySwitch } from "@openqodex/core";
 import { openqodexHome } from "@openqodex/scanners";
 import { enabled, telemetryTarget } from "./config.js";
 import { MAX_BYTES, MAX_EVENTS, type WorkerContext } from "./dispatch.js";
@@ -14,6 +17,21 @@ import { ageDays, createId, installId, readId } from "./identity.js";
 // The hard stop: the worker never outlives this, whatever the network does.
 const DEADLINE_MS = 4000;
 const REQUEST_MS = 3000;
+const GIT_MS = 1500;
+
+// The top of the work tree git resolves for the folder, with the command's
+// own environment: GIT_DIR, GIT_WORK_TREE or core.worktree can put it
+// outside the folder's parents, and the command then works on it. Null
+// outside a repository; "unknown" when git did not answer in time.
+function workTree(cwd: string, env: NodeJS.ProcessEnv): Promise<string | null | "unknown"> {
+  return new Promise((done) => {
+    execFile("git", ["rev-parse", "--show-toplevel"], { cwd, env: { ...env, GIT_OPTIONAL_LOCKS: "0" }, timeout: GIT_MS, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
+      if (error !== null) return done(error.killed === true ? "unknown" : null);
+      const line = stdout.trim();
+      done(line === "" ? null : line);
+    });
+  });
+}
 
 function workerContext(raw: string | undefined): WorkerContext | null {
   if (raw === undefined || raw.length > 64_000) return null;
@@ -40,9 +58,14 @@ export async function runTelemetryWorker(env: NodeJS.ProcessEnv = process.env): 
   if (ctx === null || !Array.isArray(parsed)) return;
   const home = openqodexHome();
   if (!enabled({ env, home, context: ctx }).on) return;
+  // The repository the command worked on can lie outside the folder's
+  // parents; its own switch counts too.
+  const tree = await workTree(ctx.cwd, env);
+  if (tree === "unknown" || (tree !== null && !telemetrySwitch(tree, ctx.config).on)) return;
   const target = telemetryTarget(env);
   if (target === null) return;
-  const events = parsed.slice(0, MAX_EVENTS).map(validate).filter((e): e is Envelope => e !== null);
+  // install.first_use is made here only, by the worker that made the id.
+  const events = parsed.slice(0, MAX_EVENTS).map(validate).filter((e): e is Envelope => e !== null && e.event !== "install.first_use");
   if (events.length === 0) return;
   // The id: read it, or make it when the command may. Two workers started
   // at once on a fresh home make one id: the exclusive create lets one of

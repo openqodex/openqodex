@@ -14,7 +14,7 @@ export function telemetryDir(home: string): string {
   return join(home, "telemetry");
 }
 
-function idPath(home: string): string {
+export function idPath(home: string): string {
   return join(telemetryDir(home), "id");
 }
 

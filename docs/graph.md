@@ -1,6 +1,6 @@
 # The code graph
 
-The code graph is a map of your repository: every function, method, class and type as a point, and every call, import and inheritance between them as a line, with the proof attached. `openqodex review` builds it on your machine and puts what your change reaches into the reviewer's brief. No model is called to build it, and no part of the graph is sent anywhere.
+The code graph is a map of your repository: every function, method, class and type as a point, and every call, import and inheritance between them as a line, with the proof attached. `openqodex review` builds it on your machine and puts what your change reaches into the reviewer's brief. No model is called to build it. The reviewer sends the brief, and with it those parts of the graph, to its model service.
 
 ## At a glance
 

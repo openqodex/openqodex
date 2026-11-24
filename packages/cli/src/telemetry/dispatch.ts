@@ -58,7 +58,9 @@ export function silentCommand(command: string, args: string[]): boolean {
 
 // Called at the top of every command's action.
 export function begin(command: string, args: string[], started = Date.now()): void {
-  const handedOff = args.includes(HANDED_OFF);
+  // Only a review's own flag: words after `--` are a path or report text.
+  const flags = args.includes("--") ? args.slice(0, args.indexOf("--")) : args;
+  const handedOff = command === "review" && flags.includes(HANDED_OFF);
   run = { command, args, started, silent: silentCommand(command, args), mayCreate: command !== "init" && command !== "hook" && !handedOff, handedOff, commandSent: false };
   pending = [];
 }
