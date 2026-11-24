@@ -1,6 +1,6 @@
 # Configuration
 
-OpenQodex reads `.openqodex/config.yaml` in the repository. Every key is optional. With no file, the defaults apply, and OpenQodex warns but never blocks.
+OpenQodex reads `.openqodex/config.yaml` in the repository. Every key is optional. With no file, the defaults apply, and OpenQodex warns but never blocks. The file is also what opts a repository in: the line `init` adds to each agent's global instructions, and the push checks inside Claude Code and Codex, act only in a repository that has it (or `.openqodex.yaml`).
 
 - `.openqodex.yaml` at the root, the 0.1.0 location, is still read when `.openqodex/config.yaml` does not exist. With both, OpenQodex reads `.openqodex/config.yaml` only and warns.
 - `--config <path>` reads another file instead of either.

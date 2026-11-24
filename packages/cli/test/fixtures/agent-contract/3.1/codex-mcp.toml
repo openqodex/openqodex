@@ -1,0 +1,5 @@
+# openqodex:start
+[mcp_servers.openqodex]
+command = "/home/dev/.openqodex/bin/openqodex"
+args = ["mcp"]
+# openqodex:end

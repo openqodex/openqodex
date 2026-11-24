@@ -60,11 +60,15 @@
 //     it is judged in the session's folder instead of the `cd` folder; or a
 //     line that hides something else (`$`, a second command, a pipe into a
 //     shell, `cd -`, `~`) is recognised.
+// 25. The agent hook speaks in a repository with no OpenQodex settings file,
+//     which has not opted in; or stays silent in one that has, through
+//     .openqodex/config.yaml or the legacy .openqodex.yaml.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   DEFAULT_CONFIG,
+  DEFAULT_CONFIG_YAML,
   getChange,
   loadConfig,
   openReportDir,
@@ -99,7 +103,7 @@ const BLOCK_YAML = "review:\n  block_on_severity: major\n";
 describe("hook check: which commands are pushes", () => {
   let s: Sandbox;
   beforeAll(() => {
-    s = sandbox({ "README.md": "hello\n", "sub/file.txt": "x\n" });
+    s = sandbox({ "README.md": "hello\n", "sub/file.txt": "x\n", ".openqodex/config.yaml": DEFAULT_CONFIG_YAML });
     git(s.repo, "config", "alias.ship", "push origin HEAD");
     writeFileSync(join(s.repo, "README.md"), "changed\n");
   });
@@ -404,6 +408,21 @@ describe("hook check: decisions", () => {
   });
 });
 
+describe("hook check in a repository that has not opted in", () => {
+  it("25. prints nothing without a settings file, and speaks once .openqodex/config.yaml or .openqodex.yaml is there", () => {
+    const s = sandbox({ "README.md": "hello\n" });
+    writeFileSync(join(s.repo, "README.md"), "changed\n");
+    expect(check(s, "git push").stdout).toBe("");
+    expect(check(s, "cd ./sub && git push && gh pr create").stdout).toBe("");
+    writeFileSync(join(s.repo, BLOCK), DEFAULT_CONFIG_YAML);
+    expect(check(s, "git push").stdout).toContain(UNREVIEWED);
+    rmSync(join(s.repo, BLOCK));
+    mkdirSync(join(s.repo, ".openqodex"));
+    writeFileSync(join(s.repo, ".openqodex/config.yaml"), BLOCK_YAML);
+    expect(decision(check(s, "git push").stdout)).toBe("deny");
+  });
+});
+
 describe("hook check through the launcher", () => {
   it("exits 0 with one repair line when no node can be found or the CLI cannot start", () => {
     const s = sandbox();
@@ -513,7 +532,7 @@ const LEGACY = "reviewed by the coding agent you are using";
 
 describe("the record the hooks trust", () => {
   it("15. a complete passing record the repository carries counts as no review", async () => {
-    const s = sandbox({ "README.md": "hello\n" });
+    const s = sandbox({ "README.md": "hello\n", [BLOCK]: DEFAULT_CONFIG_YAML });
     writeFileSync(join(s.repo, "README.md"), "changed\n");
     published(s);
     await repoRecord(s.repo);

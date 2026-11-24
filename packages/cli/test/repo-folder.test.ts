@@ -17,6 +17,9 @@
 //  8. Uninstall deletes a Day 0 .gitignore that init only migrated.
 //  9. Init or the first scan tells the developer to commit a team file the
 //     repo's own .gitignore ignores.
+// 10. A review run by hand in a repo with no settings file says nothing of
+//     the file it created opting the repo in, or of init; or says so in a
+//     repo that already had a settings file.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -71,6 +74,19 @@ describe("the repo folder's team files", () => {
     expect(existsSync(join(s.repo, CONFIG))).toBe(true);
     expect(existsSync(join(s.repo, INSTRUCTIONS))).toBe(true);
     expect(r.stderr).toContain(`Commit ${CONFIG} and ${INSTRUCTIONS} so your team shares them.`);
+  });
+
+  it("10. a review by hand in a repo with no settings file says the new file opts it in and names init, and says it once", () => {
+    const s = sandbox({ "README.md": "hello\n" });
+    writeFileSync(join(s.repo, "README.md"), "changed\n");
+    const first = cli(s, ["review", "--agent", "--no-install"]);
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.stderr).toContain(`openqodex: The new ${CONFIG} opts this repo in: agents now review here before a push. Run openqodex init here to set it up for your team.\n`);
+    const second = cli(s, ["review", "--agent", "--no-install"]);
+    expect(second.stderr).not.toContain("opts this repo in");
+    const legacy = sandbox({ "README.md": "hello\n", ".openqodex.yaml": "version: 1\n" });
+    writeFileSync(join(legacy.repo, "README.md"), "changed\n");
+    expect(cli(legacy, ["review", "--agent", "--no-install"]).stderr).not.toContain("opts this repo in");
   });
 
   it("creates no config.yaml while a root .openqodex.yaml exists, and says the root file is still read", () => {

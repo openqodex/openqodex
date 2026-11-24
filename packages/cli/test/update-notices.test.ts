@@ -18,6 +18,9 @@
 //     into the home is counted as stale, though init refuses to write it.
 //  9. With stale Cursor rules recorded in several repositories, the line says
 //     one init refreshes them, which no single init can.
+// 10. After an update, the global note an older init wrote (the one that
+//     asks for a review in every repository) is not counted, so the agent
+//     keeps it until someone happens to run init.
 //  6. A notice of a change not yet released names a version chosen by hand,
 //     so when changesets gives the release another number it prints after
 //     the wrong update, or never.
@@ -92,6 +95,25 @@ describe("after an update", () => {
     expect(readFileSync(skill, "utf8")).toContain("guide skill");
     expect(readFileSync(rule, "utf8")).toContain("My own line.");
     expect(launch(s, ["update", "--status"]).stdout).toMatch(/^agent files +up to date$/m);
+  });
+});
+
+describe("the global note after an update", () => {
+  it("counts the note an older init wrote, and init puts the current one in its place (failure 10)", () => {
+    const s = installed(["claude-code"]);
+    const file = join(s.home, ".claude/CLAUDE.md");
+    const old = readFileSync(join(import.meta.dirname, "..", "templates", "previous", "global-0.9.0.md"), "utf8");
+    writeFileSync(file, `My own rule.\n\n${old}`);
+    const record = JSON.parse(readFileSync(join(s.oqHome, "install.json"), "utf8")) as { sections: { path: string; text: string }[] };
+    for (const sec of record.sections) if (sec.path === file) sec.text = old.trimEnd();
+    writeFileSync(join(s.oqHome, "install.json"), JSON.stringify(record, null, 2));
+    switchedFrom(s, "0.5.0");
+    expect(launch(s, ["guide", "config"]).stderr).toContain("1 file OpenQodex wrote is from an older version");
+    expect(cli(s, ["init", "--yes", "--hook", "none", "--no-repo", "--agent", "claude-code"]).status).toBe(0);
+    const now = readFileSync(file, "utf8");
+    expect(now.startsWith("My own rule.\n\n<!-- openqodex:start -->\nBefore any push in a repository that has an OpenQodex settings file")).toBe(true);
+    expect(now).not.toContain(old.trimEnd());
+    expect(now.split("<!-- openqodex:start -->").length).toBe(2);
   });
 });
 

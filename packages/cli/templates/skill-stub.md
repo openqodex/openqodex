@@ -1,13 +1,13 @@
 ---
 name: openqodex
-description: Code review for the current change, before it is pushed. Use before every git push, when asked for a code review, a security scan, or to review changes, a diff or a pull request, and when a push was blocked or warned by OpenQodex.
+description: Code review for the current change, before it is pushed. Use before every git push in a repository that has an OpenQodex settings file (.openqodex/config.yaml or .openqodex.yaml), when asked for a code review, a security scan, or to review changes, a diff or a pull request, and when a push was blocked or warned by OpenQodex.
 ---
 
 # OpenQodex: review the change before it is pushed
 
 ## When to run
 
-- Before any `git push`.
+- Before any `git push` in a repository that has an OpenQodex settings file (`.openqodex/config.yaml`, or `.openqodex.yaml` at its root).
 - When the developer asks you to review their changes.
 - When a push was blocked or warned by the OpenQodex hook.
 - After fixing findings, to check the change again.

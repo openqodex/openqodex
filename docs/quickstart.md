@@ -34,7 +34,7 @@ From inside an agent, the line is `npx -y openqodex@0.24.0 init --yes --agent <h
 Inside a repository, `init` also:
 
 - adds the git pre-push hook, so every push from that repository is checked for a review, from an agent or by hand. `--hook none` leaves it out.
-- adds one line to each agent's global instruction file, such as `~/.claude/CLAUDE.md` for Claude Code: before any push, review the change with the openqodex skill. It prints the line before writing it.
+- adds one line to each agent's global instruction file, such as `~/.claude/CLAUDE.md` for Claude Code: before any push in a repository that has an OpenQodex settings file (`.openqodex/config.yaml`), review the change with the openqodex skill. It prints the line before writing it. A repository without that file is never reviewed unless you ask.
 - adds a review section to the repository's `CLAUDE.md` and `AGENTS.md`, so a teammate's agent reviews before it pushes too. `--no-repo` leaves it out.
 - creates `.openqodex/config.yaml` and `.openqodex/custom-instructions.md`. Commit both. Write in `custom-instructions.md` what a reviewer of your repository must know: conventions, what never to flag, what always to check. The review brief carries it word for word. You can also choose [convention files](config.md#convention-files) for the brief.
 

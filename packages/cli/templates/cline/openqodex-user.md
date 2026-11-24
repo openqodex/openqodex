@@ -1,3 +1,3 @@
 {{INSTRUCTIONS}}
 
-Before any `git push`, and whenever you are asked to review the changes, run `{{LAUNCHER}} guide skill` from the repository and follow what it prints: the review procedure of the OpenQodex version installed here.
+When that review is due, and whenever you are asked to review the changes, run `{{LAUNCHER}} guide skill` from the repository and follow what it prints: the review procedure of the OpenQodex version installed here.

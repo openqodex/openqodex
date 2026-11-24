@@ -11,7 +11,7 @@ import type { Guard } from "./guarded-fs.js";
 import { MCP_SERVER, planJsonInstall, planJsonRemoval, planTomlInstall, planTomlRemoval, TOML_START } from "./mcp.js";
 import { canonical, type InstallRecord } from "./record.js";
 import type { Scope, Target } from "./targets.js";
-import { isShippedSkill, SECTION_END, SECTION_START, TEAM_HEADING } from "./targets.js";
+import { isShippedSkill, sameSection, SECTION_END, SECTION_START, TEAM_OPENINGS } from "./targets.js";
 
 export type Verb = "create" | "update" | "merge" | "append" | "replace" | "remove" | "restore" | "skip" | "keep" | "refuse";
 
@@ -344,7 +344,7 @@ export function planInstall(t: Target, ctx: Ctx): Action {
         if (!rec) remember(false);
         return { ...base, verb: "skip", note: `${t.label} section already present` };
       }
-      if ((rec && existing === rec.text) || t.replaces?.includes(existing)) {
+      if ((rec && existing === rec.text) || t.replaces?.some((r) => sameSection(existing, r))) {
         const replaced = before.slice(0, at.start) + section + before.slice(at.end);
         return {
           ...base,
@@ -408,7 +408,8 @@ export function setUpAt(t: Target): boolean {
     case "md-section": {
       // The team section shares the markers but is the team's, never an agent's.
       const at = text.indexOf(SECTION_START);
-      return at !== -1 && !text.slice(at + SECTION_START.length).replace(/^\r?\n/, "").startsWith(TEAM_HEADING);
+      const inside = at === -1 ? "" : text.slice(at + SECTION_START.length).replace(/^\r?\n/, "");
+      return at !== -1 && !TEAM_OPENINGS.some((o) => inside.startsWith(o));
     }
     case "mcp-toml":
       return text.includes(TOML_START);
