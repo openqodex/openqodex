@@ -7,6 +7,8 @@
 // of a run into the developer's own OpenQodex home, never the files under
 // the repository's .openqodex/, which a branch can carry (the CLI reads and
 // writes it, in receipts.ts).
+import { createHash } from "node:crypto";
+import { canonicalJson } from "./config.js";
 import { countedSeverities, severityBreakdown } from "./render/common.js";
 import type { Config, PushDecision, Report, Severity, Verdict } from "./types.js";
 
@@ -38,11 +40,22 @@ export type GateReceipt = {
   // The first missing condition, with its first range when it is coverage.
   missing: string | null;
   written_at: string;
+  // reviewerPolicy() of the config the review ran under; absent in receipts
+  // written before reviewer lists, which keep the gate's old rule.
+  reviewer_policy?: string;
 };
 
+// The project's reviewer policy: its review.reviewers and review.reviewer_web,
+// hashed. Neither moves the change id (they live in .openqodex/), so a
+// receipt carries it, and one reviewed under another policy does not count.
+export function reviewerPolicy(config: Config): string {
+  return createHash("sha256").update(canonicalJson({ reviewers: config.reviewers ?? [], web: config.reviewerWeb ?? true })).digest("hex");
+}
+
 // The receipt of a finished run. `dir`: the run folder, relative to the
-// repository. `html`: the absolute path of its report.html.
-export function gateReceipt(report: Report, kind: ReceiptKind, dir: string, html?: string): GateReceipt {
+// repository. `html`: the absolute path of its report.html. `config`: the
+// config the review ran under, for its reviewer policy.
+export function gateReceipt(report: Report, kind: ReceiptKind, dir: string, html?: string, config?: Config): GateReceipt {
   const severities = countedSeverities(report);
   const missing = report.completion?.missing ?? [];
   const firstMissing = /^\d+ changed (?:range was|ranges were) not examined$/.test(missing[0] ?? "") ? missing.slice(0, 2).join("; ") : missing[0] ?? null;
@@ -58,6 +71,7 @@ export function gateReceipt(report: Report, kind: ReceiptKind, dir: string, html
     counts: kind === "incomplete" || severities.length === 0 ? null : severityBreakdown(severities),
     missing: kind === "incomplete" ? firstMissing : null,
     written_at: new Date().toISOString(),
+    ...(config !== undefined ? { reviewer_policy: reviewerPolicy(config) } : {}),
   };
 }
 
@@ -85,10 +99,12 @@ export function checkPush(args: { currentChangeId: string; receipt: GateReceipt 
   // threshold does not move the change id: a review judged under another
   // threshold does not count once one is set.
   const otherRule = sameChange && threshold !== null && receipt.block_on_severity !== threshold;
-  const reviewed = sameChange && !otherRule;
+  // Nor does one reviewed under another reviewer list or reviewer_web.
+  const otherPolicy = sameChange && receipt.reviewer_policy !== undefined && receipt.reviewer_policy !== reviewerPolicy(config);
+  const reviewed = sameChange && !otherRule && !otherPolicy;
   const earlier = receipt !== null && !sameId && receipt.kind !== "incomplete";
   const notReviewed = `OpenQodex has not reviewed this change${
-    otherRule ? " under the current block_on_severity" : earlier ? " (the last review was of an earlier version)" : ""
+    otherRule ? " under the current block_on_severity" : otherPolicy ? " under the current review.reviewers and review.reviewer_web" : earlier ? " (the last review was of an earlier version)" : ""
   }`;
 
   if (!reviewed || receipt === null) {

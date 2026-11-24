@@ -34,6 +34,13 @@ export function leftSnapshot(t: TraceEntry): boolean {
   return outsideSnapshot(t) && t.ok;
 }
 
+// Whether a traced reviewer crossed its boundary, as completionRecord counts
+// it: a served call outside the snapshot, or a served tool it was not
+// given. A list's fallback never drops an attempt that did.
+export function crossedBoundary(trace: readonly TraceEntry[], tools: readonly string[]): boolean {
+  return trace.some((t) => leftSnapshot(t) || (t.ok && !tools.includes(t.tool)));
+}
+
 export function refusedOutside(t: TraceEntry): boolean {
   return outsideSnapshot(t) && !t.ok;
 }
@@ -44,7 +51,7 @@ export type Coverage = CompletionRecord["coverage"];
 
 // The tools a reviewer is given. A successful call to anything else fails the run.
 export const REVIEWER_TOOLS: readonly string[] = ["Read", "Grep", "Glob"];
-// Added unless the user config sets `reviewer_web: off`.
+// Added unless the project's config sets `review.reviewer_web: off`.
 export const REVIEWER_WEB_TOOLS: readonly string[] = ["WebSearch", "WebFetch"];
 
 // Shown in `missing`, so a long list stays readable.

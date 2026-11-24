@@ -2,7 +2,7 @@
 
 This page is for an AI coding agent that installs or configures OpenQodex for a developer. A person reads the README instead.
 
-This page describes `openqodex@0.22.1`. The same page ships in the package. After the install, `~/.openqodex/bin/openqodex guide for-agents` prints the copy for the installed version.
+This page describes `openqodex@0.24.0`. The same page ships in the package. After the install, `~/.openqodex/bin/openqodex guide for-agents` prints the copy for the installed version.
 
 The review procedure is not on this page. The openqodex skill holds it. `init` installs that skill. Run `guide skill` to read it (see "Review a change").
 
@@ -45,7 +45,7 @@ CI tests OpenQodex on Node 22, on macOS and on Ubuntu Linux. No test runs on Win
 1. Run this command from the repository. Put the agent you are in place of `<host>`: `claude-code`, `codex`, `cursor`, `cline` or `goose`.
 
    ```
-   npx -y openqodex@0.22.1 init --yes --agent <host>
+   npx -y openqodex@0.24.0 init --yes --agent <host>
    ```
 
 2. Run it in the background. Wait until it exits. It downloads the scanners that the repository needs. Then it reviews the change. The two steps can take several minutes.
@@ -94,7 +94,7 @@ The skill holds the procedure. Run this from the repository, then follow what it
 ~/.openqodex/bin/openqodex guide skill
 ```
 
-In project scope, the launcher may not exist on this machine. Then run `npx -y openqodex@0.22.1 guide skill`.
+In project scope, the launcher may not exist on this machine. Then run `npx -y openqodex@0.24.0 guide skill`.
 
 A review can take minutes. OpenQodex stops the reviewer after 30 minutes for a change. With `--all`, it stops the reviewer after 2 hours. An agent's shell tool may stop a command sooner. So run the review in the background and wait until it exits.
 
@@ -169,12 +169,12 @@ Write what a reviewer of this repository must know in `.openqodex/custom-instruc
 | files from an older version, and an `init` command | Tell the developer in one line. Give them the command. Run it only if they ask. |
 | `OpenQodex had a problem. Nothing has been sent.` | Follow the skill's rule for this message. Never choose to send the report yourself. |
 
-In a sandbox that cannot download, a scanner that is not installed yet cannot install. Ask the developer to run `npx -y openqodex@0.22.1 doctor --install` in their own terminal, inside the repository.
+In a sandbox that cannot download, a scanner that is not installed yet cannot install. Ask the developer to run `npx -y openqodex@0.24.0 doctor --install` in their own terminal, inside the repository.
 
 ## What leaves the machine
 
 - The reviewer sends the brief and the files it reads to the model service of the developer's login.
-- By default, the reviewer can also search the web. `reviewer_web: off` in `~/.openqodex/config.yaml` turns that off.
+- By default, the reviewer can also search the web. `review.reviewer_web: off` in the project's `.openqodex/config.yaml` turns that off.
 - Of the built-in scanners, four use the network. As OpenQodex runs them, none of the four sends code. semgrep downloads its rule packs. osv-scanner sends dependency names and versions to osv.dev. kubeconform downloads Kubernetes schemas. cargo-deny downloads the RustSec advisory database.
 - `--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny. It also stops scanner downloads. It does not stop the reviewer's model service or an approved custom scanner.
 - A custom scanner does whatever its own command does.

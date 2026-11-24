@@ -21,6 +21,8 @@ claude -p --output-format stream-json --verbose --input-format stream-json
   --strict-mcp-config --mcp-config {"mcpServers":{}}
   --disable-slash-commands
   --no-session-persistence
+  [--model <model>]                   (only with a list entry's model, or --reviewer claude:<model>)
+  [--effort <effort>]                 (only with a list entry's effort, or --reviewer-effort)
 ```
 
 The child gets an environment built from an allowlist (`reviewerEnv` in `packages/review/src/agents/claude.ts`): `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, locale, `TERM`, `TZ`, `CLAUDE_CONFIG_DIR`, proxy and CA settings, the `ANTHROPIC_*` key, URL and model variables, and the Bedrock, Vertex or Foundry variables only when the matching `CLAUDE_CODE_USE_*` flag is set; plus `OPENQODEX_REVIEW_DEPTH=1`. No other variable is copied, so no developer token and nothing that ties the child to a running Claude Code session (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, messaging sockets) reaches it. A run from inside a Claude Code session with this environment worked as the runs below did.
@@ -33,12 +35,14 @@ The child gets an environment built from an allowlist (`reviewerEnv` in `package
 | `--output-format stream-json --verbose` | One JSON event per line: an `init` event (tools, MCP servers, plugins, permission mode, memory paths, version), every `tool_use` with its input, every `tool_result` with `is_error`, a `permission_denied` event for each refusal, and a `result` event with the final text, turns, usage and cost. For a Read, `tool_use_result.file` gives the path, `startLine` and `numLines` delivered. |
 | `--tools Read,Grep,Glob` | The `init` event lists exactly `Glob`, `Grep`, `Read`. Asked to run `ls /` and to write a file, the model answered that it has no Bash or Write tool; no such tool call appears in the trace. The `Agent` tool is absent, so no subagent can start. |
 | `--permission-mode dontAsk` | Reads inside the working directory succeed. A Read of an absolute path outside it (`/tmp/.../outside/secret.txt`, `/etc/hosts`, a decoy ssh config), a relative path that leaves it (`../outside/secret.txt`), a Read through a link inside the folder that points outside, and a Grep or Glob rooted outside (`/tmp/...`, `/`) were each refused with a `permission_denied` event and an error result. A recursive Grep and a `**/*` Glob in the folder did not follow the link out. |
-| `--tools Read,Grep,Glob,WebSearch,WebFetch --allowedTools WebSearch,WebFetch` (the default; dropped with `reviewer_web: off` or `review --reviewer-web off`) | The `init` event lists the five tools. Without `--allowedTools`, `dontAsk` refused both web tools ("Permission to use WebFetch has been denied because Claude Code is running in don't ask mode"); with it, a WebFetch of example.com and a WebSearch both returned results (2026-10-03). |
+| `--tools Read,Grep,Glob,WebSearch,WebFetch --allowedTools WebSearch,WebFetch` (the default; dropped with `review.reviewer_web: off` or `review --reviewer-web off`) | The `init` event lists the five tools. Without `--allowedTools`, `dontAsk` refused both web tools ("Permission to use WebFetch has been denied because Claude Code is running in don't ask mode"); with it, a WebFetch of example.com and a WebSearch both returned results (2026-10-03). |
 | `--setting-sources ""` | No user, project or local settings file is read. In the same folder, a run without this flag loaded the project `CLAUDE.md` canary (the answer ended with the canary word) and the user's global instructions (the answer quoted them, about 155,000 input tokens); with it, the input was about 4,500 tokens and neither canary nor any sentence of the global file appeared anywhere in the event stream. With `--include-hook-events`, a run reading user settings showed 11 hook events; this run showed none. |
 | `--settings {"autoMemoryEnabled":false,"hooks":{},"disableAllHooks":true}` | The `init` event has no `memory_paths`: auto memory is off. With `disableAllHooks`, a SessionStart hook that a terminal wrapper (cmux) added to every `claude` it starts no longer ran: 2 hook events without it, 0 with it (2026-10-04, Claude Code 2.1.289). The driver also stops the run if any hook event appears in the stream. A repository `AGENTS.md` with a canary instruction was not followed. |
 | `--strict-mcp-config --mcp-config {"mcpServers":{}}` | The `init` event lists no MCP server. |
 | `--disable-slash-commands` | The `init` event lists no skill and no slash command. |
 | `--no-session-persistence` | Nothing is saved for a later `--resume`; the correction rounds use the open process instead. |
+| `--model haiku --effort low` (Claude Code 2.1.331, 2026-11-24) | The run answered; its `init` event named the model `claude-haiku-5-5`. A model given here wins over `ANTHROPIC_MODEL`. No `--fallback-model` is passed: the project's list decides what happens next. |
+| `--model bogus-model-xyz` (Claude Code 2.1.331, 2026-11-24) | Exit 1 after about a second. Stderr: `[claude-code:unrecognized_model]`. The `assistant` event has `"error": "model_not_found"`, `"api_error_status": 404`, `"api_error_type": "not_found_error"` and the text "There's an issue with the selected model (bogus-model-xyz). It may not exist or you may not have access to it." The `result` event has `"is_error": true`, `"subtype": "success"`, `"terminal_reason": "api_error"` and the same text. The driver reads this as a model that cannot serve (`reviewerError` in `driver.ts`), so a project's list moves on to its next entry. The recorded events are `packages/cli/test/fixtures/claude-stream-bad-model.jsonl`. |
 
 `AGENTS.md`: a canary there was not loaded in any run, with or without settings. The built-in plugins (`cc-plugin-agents-md`, `cc-plugin-telemetry`, `cc-plugin-plugin-authoring`) stay listed; they are part of Claude Code and read no repository instruction file in this configuration.
 
@@ -90,11 +94,13 @@ The driver starts this command without a shell, with the snapshot as the working
 ```
 codex exec --json --color never --ephemeral --skip-git-repo-check
   --ignore-user-config --ignore-rules
+  [-m <model>]                        (only with a list entry's model, or --reviewer codex:<model>)
+  [-c model_reasoning_effort="<effort>"]  (only with a list entry's effort, or --reviewer-effort)
   -C <snapshot>
   -c approval_policy="never"
   -c default_permissions="openqodex_review"
   -c permissions.openqodex_review.filesystem={":minimal"="read",":project_roots"="read","/tmp"="deny"}
-  -c web_search="disabled"            (web_search="cached" unless reviewer_web: off)
+  -c web_search="disabled"            (web_search="cached" unless review.reviewer_web: off)
   -c project_doc_max_bytes=0
   -c allow_login_shell=false
   -c shell_environment_policy.inherit="core"
@@ -159,6 +165,8 @@ Read confinement held in every test: the permission profile is a real boundary, 
 ### Detecting it
 
 - `codex --version` prints `codex-cli 0.160.0`.
+- `codex debug models` (codex-cli 0.171.0, 2026-11-24) prints JSON, `{"models":[{"slug": ..., "visibility": "list" or "hide", "priority": ...}, ...]}`, in about 20 ms. The driver reads every slug as a model this login has, and the first listed one by priority as its top model, which `init` writes. A list entry whose model is not there is passed over before anything starts. Output that is not that JSON counts as no list, and the entry is tried.
+- A model the login cannot use ends the run with `{"type":"error","message":"The '<model>' model is not supported when using Codex with a ChatGPT account."}` and then `turn.failed`. The driver reads this as a model that cannot serve, so a project's list moves on to its next entry.
 - `codex login status` prints "Logged in using ChatGPT" and exits 0 when logged in. With an empty `CODEX_HOME` it prints "Not logged in" and exits 1. The driver takes exit 0 as logged in.
 - A Codex session sets these variables for the commands it runs (seen in a `codex exec` run, 2026-10-04): `CODEX_THREAD_ID` and `CODEX_SESSION_ID` (the thread id), `CODEX_VERSION` and `CODEX_CI=1`. Under a sandbox it also sets `CODEX_SANDBOX=seatbelt`, and `CODEX_SANDBOX_NETWORK_DISABLED=1` when network is off. `hostAgent` takes `CODEX_THREAD_ID` as "running inside Codex". The interactive Codex was not run for this; the binary holds the same name.
 

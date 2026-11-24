@@ -35,6 +35,7 @@ import {
   readRepoFile,
   redactByFingerprint,
   repoStat,
+  reviewerModelProblem,
   SEVERITIES,
   STATE_DIR,
   selectLenses,
@@ -95,10 +96,10 @@ const RUN_AGAIN = "run openqodex review --agent first";
 type RunFile = { version: 1; scope: ChangeScope | "all" | "target" };
 
 // Flags of the review openqodex runs itself only. The GitHub Action passes
-// the last four: a gate the change's own config cannot weaken, the base
+// four of them: a gate the change's own config cannot weaken, the base
 // branch's instructions, a folder of its own for this run's report, and the
-// reviewer's web tools off whatever the runner's user config says.
-const OWN_REVIEW_FLAGS = ["--reviewer", "--timeout", "--block-on-severity", "--instructions", "--instructions-ref", "--report-dir", "--reviewer-web"];
+// reviewer's web tools off whatever the config says.
+const OWN_REVIEW_FLAGS = ["--reviewer", "--timeout", "--block-on-severity", "--instructions", "--instructions-ref", "--report-dir", "--reviewer-web", "--reviewer-model", "--reviewer-effort"];
 
 // `drivers`: the reviewers to choose from; tests pass a model provider stand-in.
 export async function run(args: string[], drivers?: ReviewerDriver[]): Promise<number> {
@@ -122,6 +123,10 @@ export async function run(args: string[], drivers?: ReviewerDriver[]): Promise<n
   }
   const web = values.get("--reviewer-web");
   if (web !== undefined && web !== "on" && web !== "off") throw new OpenQodexError(`--reviewer-web must be on or off, not ${web}`);
+  // Retired in 0.24.0: a model alone does not say which tool it is for.
+  const reviewerModel = values.get("--reviewer-model");
+  if (reviewerModel !== undefined) throw new OpenQodexError(`--reviewer-model is replaced by --reviewer <tool>:<model>, such as --reviewer codex:${reviewerModelProblem("codex", reviewerModel) === null ? reviewerModel : "gpt-5.5"}`);
+  const reviewerEffort = values.get("--reviewer-effort");
   const target = finalize ? undefined : positionals[0];
   if (target !== undefined && bools.has(ALL)) {
     throw new OpenQodexError("--all reviews the whole repository and takes no branch or pull request");
@@ -157,6 +162,7 @@ export async function run(args: string[], drivers?: ReviewerDriver[]): Promise<n
       instructionsRef: values.get("--instructions-ref"),
       reportDir: values.get("--report-dir"),
       web: web === undefined ? undefined : web === "on",
+      reviewerEffort,
       drivers,
     });
   }
