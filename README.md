@@ -10,7 +10,7 @@
 [![CI](https://github.com/openqodex/openqodex/actions/workflows/ci.yml/badge.svg)](https://github.com/openqodex/openqodex/actions/workflows/ci.yml)
 [![Discussions](https://img.shields.io/github/discussions/openqodex/openqodex)](https://github.com/openqodex/openqodex/discussions)
 
-Open source code review that runs inside your coding agent, before you push. A separate reviewer checks every change your agent writes. A code graph gives your agent a map of your codebase. Works in Claude Code, Codex, Cursor, Cline and Goose.
+Open source code review that runs inside your coding agent, before you push. A separate reviewer checks every change your coding agent makes. A code graph gives your agent a map of your codebase. Works in Claude Code, Codex, Cursor, Cline, and Goose.
 
 ## Install
 
@@ -18,15 +18,15 @@ Open source code review that runs inside your coding agent, before you push. A s
 npx openqodex init
 ```
 
-Then say to your agent: "review my change with openqodex". `init` finds the agents on your machine, lists the files it will write and asks you once. In your own terminal, run `~/.openqodex/bin/openqodex review`. An `npx` install puts no `openqodex` on your `PATH`.
+Then say to your agent: "review my change with openqodex". `init` finds the agents on your machine, lists the files it will write, and asks you once. To run a review from your terminal, use `~/.openqodex/bin/openqodex review`. An `npx` install does not put `openqodex` on your `PATH`.
 
-For agents, the same install with no question:
+For agents, use the same install without a prompt:
 
 ```
 npx -y openqodex@0.24.0 init --yes --agent <host>
 ```
 
-`<host>` is `claude-code`, `codex`, `cursor`, `cline` or `goose`. In its default sandbox, Codex gives commands no network, so run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent. AI agents: read the [agent guide](https://github.com/openqodex/openqodex/blob/main/docs/for-agents.md).
+`<host>` is `claude-code`, `codex`, `cursor`, `cline`, or `goose`. In its default sandbox, Codex blocks network access for commands, so run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent. AI agents: read the [agent guide](https://github.com/openqodex/openqodex/blob/main/docs/for-agents.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/review-dark.svg">
@@ -41,13 +41,13 @@ Looking for hosted pull request review? [Sign up for Qodex](https://agents.qodex
 
 ## What you get: a review before every push
 
-- `openqodex review` reviews your change in one command. Your change is the commits you have not pushed plus everything uncommitted.
-- It runs the scanners that fit the files you changed, and keeps their findings on the lines you changed. A scanner is a program that checks code without a model, such as gitleaks or semgrep.
-- Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. Advisories outside the changed lines are shown, never counted.
+- `openqodex review` reviews your change in one command. Your change includes the commits you have not pushed, plus everything uncommitted.
+- It runs the scanners that fit the files you changed and keeps their findings on the lines you changed. A scanner is a program that checks code without a model, such as gitleaks or semgrep.
+- Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. Advisories outside the changed lines are shown, but never counted.
 - Fresh reviewers check the change: separate Claude Code or Codex processes on your own login, with no memory of your session.
 - A script checks every line a reviewer quotes as evidence against the code. Verifiers confirm or refute every candidate and every scanner finding.
-- At the end, it prints a receipt: the verdict, one line per finding and the path of `report.html`. It also writes `report.md`, `report.json` and `report.sarif`. Here is an [example report](https://github.com/openqodex/openqodex/blob/main/tests/golden/expected/claude/run/report.md).
-- You choose what gets fixed. Your agent asks "Fix all, or tell me which?" and fixes only the findings you name.
+- At the end, it prints a receipt: the verdict, one line per finding, and the path to `report.html`. It also writes `report.md`, `report.json`, and `report.sarif`. Here is an [example report](https://github.com/openqodex/openqodex/blob/main/tests/golden/expected/claude/run/report.md).
+- You choose what gets fixed. Your agent asks, "Fix all, or tell me which?" and fixes only the findings you name.
 - The push gate warns by default. It blocks only when `.openqodex/config.yaml` sets `review.block_on_severity`.
 
 ## What you get: a code graph
@@ -59,17 +59,17 @@ Looking for hosted pull request review? [Sign up for Qodex](https://agents.qodex
 
 A picture drawn from real `openqodex graph` output on this repository, on 2026-11-21. The tool answers in text and JSON. It has no graph viewer.
 
-- The graph maps every function, class and type, and every call and import between them. It is built on your machine, with no model.
-- A review gives the reviewer what your change reaches in the graph: callers, callees, uses and importers.
-- Languages: TypeScript, TSX, JavaScript, Python, Go, Ruby and Java. Framework readers: Express, Hono, Nest, React, Next.js, FastAPI, Go net/http, gin, Django, Rails and JUnit. They add routes and tests.
+- The graph maps every function, class, and type, along with the calls and imports between them. It is built on your machine, with no model.
+- A review gives the reviewer the parts of the graph your change reaches: callers, callees, uses, and importers.
+- Languages: TypeScript, TSX, JavaScript, Python, Go, Ruby, and Java. Framework readers: Express, Hono, Nest, React, Next.js, FastAPI, Go net/http, gin, Django, Rails, and JUnit. They add routes and tests.
 - You or your agent can ask it questions, such as who calls a function, what a change could affect, or which tests reach it. The [code graph page](https://github.com/openqodex/openqodex/blob/main/docs/graph.md) lists every question.
   ```
   npx openqodex graph callers <name>
   npx openqodex graph impact <name>
   npx openqodex graph tests <name>
   ```
-- An MCP server is a local tool server that your agent starts. `init` gives your agent the graph questions through one. For the Cline VS Code extension and for Goose, `init` prints the entry for you to add.
-- Every answer says when it may be incomplete, and why. Zero callers on such an answer never means unused.
+- An MCP server is a local tool server that your agent starts. `init` gives your agent the graph questions through one. For the Cline VS Code extension and Goose, `init` prints the entry for you to add.
+- Every answer says when it may be incomplete and why. Zero callers in such an answer never means unused.
 
 ## Where it runs
 
@@ -81,7 +81,7 @@ A picture drawn from real `openqodex graph` output on this repository, on 2026-1
 | Cline | yes | no | no, a rule asks Cline to review |
 | Goose | yes | no | no, the hints ask Goose to review |
 
-In Cursor, Cline and Goose, the review needs Claude Code or Codex installed as the reviewer. Each project picks its reviewers, in order, with a model for each, in `.openqodex/config.yaml`: when one hits a usage limit, the review starts again with the next ([configuration](https://github.com/openqodex/openqodex/blob/main/docs/config.md#reviewers)). A push gate is a hook that looks for a review before your agent runs `git push`. [What init writes for each agent](https://github.com/openqodex/openqodex/blob/main/docs/agents.md) says how each gate works.
+In Cursor, Cline, and Goose, the review needs Claude Code or Codex installed as the reviewer. A push gate is a hook that checks for a review before your agent runs `git push`. [What init writes for each agent](https://github.com/openqodex/openqodex/blob/main/docs/agents.md) explains how each gate works.
 
 <!-- benchmark-results:start -->
 ## Benchmark
@@ -91,7 +91,7 @@ In Cursor, Cline and Goose, the review needs Claude Code or Codex installed as t
   <img alt="Planted bugs: Claude Code review with claude-opus-5-5. Issue recall 150/153 (98.0%), Location recall 153/153 (100.0%), Precision 254/302 (84.1%) to 301/302 (99.7%), Clean rate 5/6 (83.3%)." src="https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/benchmark-light.svg" width="960">
 </picture>
 
-The chart shows one accepted run: Claude Code with claude-opus-5-5 on openqodex 0.15.0, run on 2026-10-27. Each number adds up 3 repeats of every case, and repeats of one case can give different results. The table shows selected accepted runs. [The full results](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md) list every accepted run.
+The chart shows one accepted run: Claude Code with claude-opus-5-5 on openqodex 0.15.0, dated 2026-10-27. Each result combines three runs of every case, and results can vary across repeats of the same case. The table shows selected accepted runs. [The full results](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md) list every accepted run.
 
 | Reviewer | Model | Cases | Issue recall | Precision | Clean rate | Cost per review | openqodex | Run date |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -118,21 +118,21 @@ AACR-Bench is a set of real pull requests. Its own evaluator gives the board num
   <img alt="The stages of a review: your change, scanners, the changed-line filter, code graph context, finder sessions, the quote check, verifier sessions, and the receipt and report" src="https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/pipeline-light.svg" width="960">
 </picture>
 
-1. Scanners run on the files you changed. OpenQodex drops findings off the changed lines, in test fixtures and in rules you switched off.
+1. Scanners run on the files you changed. OpenQodex drops findings outside the changed lines, in test fixtures, and in rules you switched off.
 2. The code graph gives each part of the change the code that calls it and the code it calls.
 3. Finder sessions read each part of the change and propose candidates, each with a quoted line as evidence.
-4. A script checks every quote against the code. Verifier sessions then confirm or refute each candidate and each scanner finding, with a reason.
-5. Scripts check that every scanner finding was answered and every changed line was given to a reviewer. Then the receipt and the report are written.
+4. A script checks every quote against the code. Verifier sessions then confirm or refute each candidate and scanner finding, with a reason.
+5. Scripts check that every scanner finding was answered and every changed line was given to a reviewer. Then the receipt and report are written.
 
 ## Privacy
 
-OpenQodex itself collects no usage data and sends no telemetry. The built-in scanners, as OpenQodex runs them, send no code. OpenQodex starts semgrep with its metrics switched off. The reviewer sends your change to the model service of your Claude Code or Codex login.
+OpenQodex itself collects no usage data and sends no telemetry. The built-in scanners, as OpenQodex runs them, send no code. OpenQodex starts semgrep with its metrics switched off. The reviewer sends your change to the model service used by your Claude Code or Codex login.
 
-`--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny, the built-in scanners that use the network. It also stops scanner downloads. The reviewer still sends your change to its model service. An approved custom scanner still runs its own command. The [privacy page](https://github.com/openqodex/openqodex/blob/main/docs/privacy.md) lists each network use of this version. The [telemetry page](https://github.com/openqodex/openqodex/blob/main/docs/telemetry.md) says more.
+`--offline` skips semgrep, osv-scanner, kubeconform, and cargo-deny, the built-in scanners that use the network. It also stops scanner downloads. The reviewer still sends your change to its model service. An approved custom scanner still runs its own command. The [privacy page](https://github.com/openqodex/openqodex/blob/main/docs/privacy.md) lists each network use in this version. The [telemetry page](https://github.com/openqodex/openqodex/blob/main/docs/telemetry.md) has more information.
 
 ## Built-in scanners
 
-OpenQodex has 22 built-in scanners. Most scanners run when your change holds a file they read. Some also read the project or folder around a changed file. Each scanner that needs a download gets it on first use, pinned to one version.
+OpenQodex has 22 built-in scanners. Most scanners run when your change includes a file they read. Some also read the project or folder around a changed file. Each scanner that needs a download gets it on first use, pinned to one version.
 
 | What it checks | Built-in scanners |
 |---|---|
@@ -141,12 +141,12 @@ OpenQodex has 22 built-in scanners. Most scanners run when your change holds a f
 | Dependencies with known vulnerabilities | 2 |
 | Lint | 5 |
 | GitHub Actions workflows | 2 |
-| Dockerfiles, Terraform, Kubernetes and CloudFormation | 6 |
+| Dockerfiles, Terraform, Kubernetes, and CloudFormation | 6 |
 | SQL and database migrations | 3 |
 
-The [scanner list](https://github.com/openqodex/openqodex/blob/main/docs/scanners.md) gives each scanner, its version, the files it reads and what it does not check.
+The [scanner list](https://github.com/openqodex/openqodex/blob/main/docs/scanners.md) gives each scanner, its version, the files it reads, and what it does not check.
 
-You or your agent can also add a compatible scanner by its GitHub link in `.openqodex/config.yaml`. It must write SARIF, or one JSON document that a `map` block turns into findings. `npx openqodex trust` shows what will run and asks you yes or no. OpenQodex runs it only after that approval. The [custom scanner guide](https://github.com/openqodex/openqodex/blob/main/docs/custom-scanners.md) explains every key.
+You or your agent can also add a compatible scanner by its GitHub link in `.openqodex/config.yaml`. It must write SARIF, or one JSON document that a `map` block turns into findings. `npx openqodex trust` shows what will run and asks you to approve or decline. OpenQodex runs it only after approval. The [custom scanner guide](https://github.com/openqodex/openqodex/blob/main/docs/custom-scanners.md) explains every key.
 
 ## What it does not do yet
 
@@ -154,13 +154,13 @@ You or your agent can also add a compatible scanner by its GitHub link in `.open
 - Without a reviewer, `review` prints "Full review unavailable" and exits 2. It saves the scanner findings, unchecked, to `unchecked-candidates.json`. It also names a fallback command, `review --agent`. In that fallback, your coding agent reviews its own change.
 - Inside the Codex sandbox, a second Codex process does not start. So Codex cannot be the reviewer there. OpenQodex tested this with codex-cli 0.160.0 on macOS.
 - No review on your own API key, except in the GitHub Action.
-- No Homebrew formula, no install script and no Docker image in this version. Install through npm.
+- No Homebrew formula, install script, or Docker image in this version. Install through npm.
 - No offline copy of the vulnerability databases. osv-scanner checks every lockfile through osv.dev. cargo-deny downloads the RustSec advisory database.
-- No review finds every problem. The report names each stage that did not run.
+- No review can find every problem. The report names each stage that did not run.
 
 ## Open source and hosted
 
-OpenQodex is free and open source under Apache 2.0. It runs on your machine, on your own Claude Code or Codex login, with no account and no key of its own. Nothing that is open today becomes paid later.
+OpenQodex is free and open source under Apache 2.0. It runs on your machine, using your own Claude Code or Codex login, with no account and no API key of its own. The current open source code will remain open source.
 
 [Qodex](https://qodex.ai?utm_source=openqodex&utm_medium=readme) makes OpenQodex. Looking for hosted pull request review? [Sign up for Qodex](https://agents.qodex.ai/login/pr-review?utm_source=openqodex&utm_medium=readme&utm_campaign=readme-hosted).
 
@@ -169,21 +169,21 @@ OpenQodex is free and open source under Apache 2.0. It runs on your machine, on 
 ## Requirements
 
 - Node 22 or newer, and git.
-- macOS or Linux. CI runs the gate on Node 22, on macOS and on Ubuntu Linux. No test runs on Windows or WSL.
+- macOS or Linux. CI runs the gate on Node 22, macOS, and Ubuntu Linux. No tests run on Windows or WSL.
 - For a full review: Claude Code or Codex, installed and logged in. OpenQodex needs no account or API key of its own.
-- Some scanners need a language runtime that OpenQodex does not install. brakeman and rubocop need Ruby. golangci-lint needs Go. cargo-deny needs Cargo.
+- Some scanners require a language runtime that OpenQodex does not install. brakeman and rubocop need Ruby. golangci-lint needs Go. cargo-deny needs Cargo.
 
 ## Documentation
 
 The docs ship inside the package. `npx openqodex guide <topic>` prints one page in your terminal.
 
-- [Quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md), [agent guide](https://github.com/openqodex/openqodex/blob/main/docs/for-agents.md) and [commands](https://github.com/openqodex/openqodex/blob/main/docs/cli.md)
+- [Quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md), [agent guide](https://github.com/openqodex/openqodex/blob/main/docs/for-agents.md), and [commands](https://github.com/openqodex/openqodex/blob/main/docs/cli.md)
 - [Configuration](https://github.com/openqodex/openqodex/blob/main/docs/config.md) and [what init writes for each agent](https://github.com/openqodex/openqodex/blob/main/docs/agents.md)
-- [GitHub Action](https://github.com/openqodex/openqodex/blob/main/docs/github-action.md), [Node library](https://github.com/openqodex/openqodex/blob/main/docs/library.md) and [security](https://github.com/openqodex/openqodex/blob/main/docs/security.md)
+- [GitHub Action](https://github.com/openqodex/openqodex/blob/main/docs/github-action.md), [Node library](https://github.com/openqodex/openqodex/blob/main/docs/library.md), and [security](https://github.com/openqodex/openqodex/blob/main/docs/security.md)
 - [All pages](https://github.com/openqodex/openqodex/blob/main/docs/index.md)
 
-## Status, security and licence
+## Status, security, and licence
 
-OpenQodex is on the way to 1.0. Commands, flags and the configuration file can change between minor releases. The [changelog](https://github.com/openqodex/openqodex/blob/main/packages/cli/CHANGELOG.md) lists the changes in each release.
+OpenQodex is on the way to 1.0. Commands, flags, and the configuration file can change between minor releases. The [changelog](https://github.com/openqodex/openqodex/blob/main/packages/cli/CHANGELOG.md) lists the changes in each release.
 
 Report a vulnerability through GitHub's private vulnerability reporting, as the [security policy](https://github.com/openqodex/openqodex/blob/main/SECURITY.md) says. Never open a public issue for one. Licensed under [Apache 2.0](https://github.com/openqodex/openqodex/blob/main/LICENSE). The [NOTICE](https://github.com/openqodex/openqodex/blob/main/NOTICE) file gives the scanners' licences.
