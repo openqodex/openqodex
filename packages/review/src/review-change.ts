@@ -171,6 +171,10 @@ export type ReviewInputs = {
   reviewer: string;
   // The reviewer gets its agent's web tools.
   web: boolean;
+  // The Codex reviewer's model and reasoning effort; left out or null,
+  // Codex's own default. Another agent's reviewer is not given them.
+  reviewerModel?: string | null;
+  reviewerEffort?: string | null;
   // The deadline for the scan, the graph and every reviewer turn, fixed
   // this long after the reviewer is chosen and before anything is scanned.
   timeoutMs: number;
@@ -626,6 +630,10 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     // coverage is the brief and the correction rounds only. The brain's own
     // log of a model reviewer's tools is complete.
     const traced = agent ? agent.driver.traced : true;
+    // The model and the effort go to Codex only: one value cannot name a
+    // model of both agents, and `auto` picks either.
+    const tuning = agent?.driver.name === "codex" ? { model: inputs.reviewerModel ?? null, effort: inputs.reviewerEffort ?? null } : { model: null, effort: null };
+    const tuned = { ...(tuning.model !== null ? { model: tuning.model } : {}), ...(tuning.effort !== null ? { effort: tuning.effort } : {}) };
     // The driver's per-run proof of its boundary (Codex's sandbox probe),
     // on the redacted snapshot, before its hash is taken.
     clock.enter("reviewer");
@@ -675,7 +683,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
           if (stopped) throw new Error("the review stopped");
           const modelSessionForRole = model ? modelSession({ reviewer: model.reviewer, role, budget: model.budget, box, now: deps.now, deadline, shared, budgetState }) : null;
           if (modelSessionForRole) modelSessions.push(modelSessionForRole);
-          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, secrets: p.secrets }), { driver: agent.driver.name, role, now: deps.now }) : null;
+          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, ...tuning, secrets: p.secrets }), { driver: agent.driver.name, role, now: deps.now }) : null;
           const opened = register(modelSessionForRole ?? metered!.session);
           return {
             send: (text) => opened.send(text),
@@ -729,7 +737,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
         return await finish({ ended: "model-reviewed", report, evidence, submission: stagedRun.submission, change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds: redactStored(stagedRun.rounds, p.secrets), ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
       }
       const totals = stagedRun.usage.totals;
-      const reviewer: ReviewerRecord = { driver: agent!.driver.name, version: agent!.version, pid: null, started_at: startedIso, ended_at: new Date(deps.now()).toISOString(), duration_ms: deps.now() - started, rounds: stagedRun.sessions.reduce((n, s) => n + s.rounds, 0), usage: { turns: stagedRun.sessions.reduce((n, s) => n + s.usage.turns, 0), input_tokens: totals.inputTokens, output_tokens: totals.outputTokens, cost_usd: totals.costUsd }, sessions: stagedRun.sessions };
+      const reviewer: ReviewerRecord = { driver: agent!.driver.name, version: agent!.version, ...tuned, pid: null, started_at: startedIso, ended_at: new Date(deps.now()).toISOString(), duration_ms: deps.now() - started, rounds: stagedRun.sessions.reduce((n, s) => n + s.rounds, 0), usage: { turns: stagedRun.sessions.reduce((n, s) => n + s.usage.turns, 0), input_tokens: totals.inputTokens, output_tokens: totals.outputTokens, cost_usd: totals.costUsd }, sessions: stagedRun.sessions };
       const completion = redactStored(completionRecord({ change, reviewer, snapshot: { tree: prep.tree, before, after }, candidates: { total: stagedRun.required, disposed: stagedRun.disposed }, coverage, trace: stagedRun.trace, submissionErrors: [], wholeRepo: false, missing: stagedRun.missing, traced, tools: inputs.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS }), p.secrets);
       report.completion = completion;
       if (completion.status !== "complete") report.verdict = "incomplete";
@@ -755,7 +763,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
       deps.onEvent({ type: "started", driver: "model", version: model.reviewer.model, pid: null });
       say(`Reviewer: model ${model.reviewer.model} started; this takes several minutes`);
     } else if (notStarted === null && agent) {
-      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, secrets: p.secrets }), { driver: agent.driver.name, now: deps.now });
+      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, ...tuning, secrets: p.secrets }), { driver: agent.driver.name, now: deps.now });
       session = register(metered.session);
       pid = metered.session.pid;
       deps.onEvent({ type: "started", driver: agent.driver.name, version: agent.version, pid });
@@ -841,6 +849,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     const reviewer: ReviewerRecord | null = session === null ? null : {
       driver: chosen.driver.name,
       version: chosen.version,
+      ...tuned,
       pid,
       started_at: startedIso,
       ended_at: new Date(talk.endedAt).toISOString(),

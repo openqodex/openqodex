@@ -20,7 +20,7 @@ import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
 import { progress } from "../pipeline.js";
 import { REVIEWER_NAMES } from "@openqodex/review";
-import { DEFAULT_REVIEWER_WEB } from "../reviewers/settings.js";
+import { DEFAULT_REVIEWER_WEB, REVIEWER_EFFORTS, effortProblem, modelProblem } from "../reviewers/settings.js";
 import { readUserConfig, unknownKeysWarning } from "../user-config.js";
 import { statusLines } from "./update.js";
 
@@ -91,8 +91,18 @@ function userSettings(home: string, env: NodeJS.ProcessEnv): Report["settings"] 
     : onOff(v.reviewer_web) !== null
       ? { key: "reviewer_web", value: onOff(v.reviewer_web)!, source: file }
       : { key: "reviewer_web", value: String(v.reviewer_web), source: `${file}: neither on nor off, a review stops` };
+  const model = !set(v.reviewer_model)
+    ? { key: "reviewer_model", value: "Codex's own", source: "default" }
+    : modelProblem(v.reviewer_model) === null
+      ? { key: "reviewer_model", value: String(v.reviewer_model), source: file }
+      : { key: "reviewer_model", value: String(v.reviewer_model), source: `${file}: not a model id, a review stops` };
+  const effort = !set(v.reviewer_effort)
+    ? { key: "reviewer_effort", value: "Codex's own", source: "default" }
+    : effortProblem(v.reviewer_effort) === null
+      ? { key: "reviewer_effort", value: String(v.reviewer_effort), source: file }
+      : { key: "reviewer_effort", value: String(v.reviewer_effort), source: `${file}: not ${REVIEWER_EFFORTS.join(", ")}, a review stops` };
   const skip = !set(v.skip_version) ? { key: "skip_version", value: "none", source: "default" } : { key: "skip_version", value: String(v.skip_version), source: file };
-  return { file: config.path, values: [update, reviewer, web, skip], warnings };
+  return { file: config.path, values: [update, reviewer, web, model, effort, skip], warnings };
 }
 
 const STATE_WORDS: Record<ToolStatus["state"], string> = {
@@ -131,7 +141,7 @@ function text(r: Report): string {
     for (const c of r.custom) lines.push(`  ${c.name}  ${c.source}  ${c.trust}`);
   }
   lines.push("", `Your settings  ${r.settings.file}`);
-  for (const s of r.settings.values) lines.push(`  ${s.key.padEnd(12)}  ${s.value} (${s.source})`);
+  for (const s of r.settings.values) lines.push(`  ${s.key.padEnd(15)}  ${s.value} (${s.source})`);
   for (const w of r.settings.warnings) lines.push(`  ${w}`);
   lines.push("", "Updates", ...r.update.map((l) => `  ${l}`));
   if (r.required) {

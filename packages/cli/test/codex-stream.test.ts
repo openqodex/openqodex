@@ -44,6 +44,10 @@
 // 18. On Windows the path (named `Path` there), the home folder or what
 //     starts a program is dropped, or the path is split on ":" and loses
 //     every entry.
+// 21. reviewer_model or reviewer_effort is set and the Codex process is
+//     started without `-m` or `model_reasoning_effort`, so Codex's default
+//     model reviews; or they are unset and a flag is passed anyway, so the
+//     default changes under a developer who chose nothing.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -79,6 +83,7 @@ function standIn(body: string, code: number | null = 0): string {
       "process.stdin.on('data', (c) => (prompt += c));",
       "process.stdin.on('end', () => {",
       "  appendFileSync(__filename + '.prompts', JSON.stringify(prompt) + '\\n');",
+      "  appendFileSync(__filename + '.argv', JSON.stringify(process.argv.slice(2)) + '\\n');",
       "  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
       "  appendFileSync(__filename + '.pids', `${process.pid} ${child.pid} `);",
       `  process.stdout.write(${body}, () => { ${code === null ? "setInterval(() => {}, 1000);" : `process.exit(${code});`} });`,
@@ -99,6 +104,7 @@ const alive = (pid: number) => {
   }
 };
 const pidsOf = (bin: string) => (existsSync(`${bin}.pids`) ? readFileSync(`${bin}.pids`, "utf8").trim().split(" ").map(Number) : []);
+const argvOf = (bin: string) => readFileSync(`${bin}.argv`, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
 const promptsOf = (bin: string) => readFileSync(`${bin}.prompts`, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string);
 const snap = () => realpathSync(tempDir("oq-codex-snap-"));
 const settle = () => new Promise((done) => setTimeout(done, 200));
@@ -212,6 +218,32 @@ describe("the Codex command line and environment", () => {
       expect(args.join(" ")).not.toMatch(/network/);
       expect(args).toContain('default_permissions="openqodex_review"');
       expect(args[args.indexOf("-C") + 1]).toBe("/snap");
+    }
+  });
+
+  it("21. reviewer_model and reviewer_effort reach every Codex process of a session as -m and model_reasoning_effort, and nothing is passed without them", async () => {
+    const tuned = standIn(text(RECORDED));
+    const session = codexDriver.start({ snapshotDir: snap(), deadline: Date.now() + 30_000, bin: tuned, web: false, model: "gpt-test-model", effort: "medium" });
+    await session.send("THE BRIEF");
+    await session.send("THE CORRECTION");
+    await session.close();
+    const runs = argvOf(tuned);
+    expect(runs).toHaveLength(2);
+    for (const argv of runs) {
+      expect(argv[0]).toBe("exec");
+      expect(argv[argv.indexOf("-m") + 1]).toBe("gpt-test-model");
+      expect(argv).toContain('model_reasoning_effort="medium"');
+      expect(argv[argv.indexOf('model_reasoning_effort="medium"') - 1]).toBe("-c");
+      expect(argv).toContain("--ignore-user-config");
+      expect(argv.at(-1)).toBe("-");
+    }
+    const plain = standIn(text(RECORDED));
+    await runOnce(plain);
+    for (const argv of argvOf(plain)) {
+      expect(argv).not.toContain("-m");
+      expect(argv).not.toContain("--model");
+      expect(argv.join(" ")).not.toMatch(/model_reasoning_effort/);
+      expect(argv).toContain("--ignore-user-config");
     }
   });
 

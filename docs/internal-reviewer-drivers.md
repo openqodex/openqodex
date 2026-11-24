@@ -90,6 +90,8 @@ The driver starts this command without a shell, with the snapshot as the working
 ```
 codex exec --json --color never --ephemeral --skip-git-repo-check
   --ignore-user-config --ignore-rules
+  [-m <model>]                        (only with reviewer_model or --reviewer-model)
+  [-c model_reasoning_effort="<effort>"]  (only with reviewer_effort or --reviewer-effort)
   -C <snapshot>
   -c approval_policy="never"
   -c default_permissions="openqodex_review"

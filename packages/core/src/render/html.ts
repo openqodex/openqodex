@@ -220,7 +220,10 @@ function reviewerSentence(report: Report): string {
   const r = report.completion?.reviewer;
   if (!r) return "not recorded in this report";
   const usage = r.usage ?? { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null };
-  const parts = [`${r.driver} ${r.version}`, `${fixed((r.duration_ms ?? 0) / 1000, 0)} s`, plural(usage.turns ?? 0, "turn")];
+  const parts = [`${r.driver} ${r.version}`];
+  if (typeof r.model === "string") parts.push(`model ${r.model}`);
+  if (typeof r.effort === "string") parts.push(`effort ${r.effort}`);
+  parts.push(`${fixed((r.duration_ms ?? 0) / 1000, 0)} s`, plural(usage.turns ?? 0, "turn"));
   if ((r.rounds ?? 1) > 1) parts.push(plural(r.rounds - 1, "correction round"));
   if (usage.input_tokens !== null) parts.push(`${grouped(usage.input_tokens, 0)} tokens in`);
   if (usage.output_tokens !== null) parts.push(`${grouped(usage.output_tokens, 0)} out`);

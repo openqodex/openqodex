@@ -91,6 +91,10 @@ export type ReviewOptions = {
   // --reviewer-web: the reviewer's web tools for this run, over the user
   // config's reviewer_web.
   web?: boolean;
+  // --reviewer-model and --reviewer-effort: the Codex reviewer's model and
+  // reasoning effort for this run, over reviewer_model and reviewer_effort.
+  reviewerModel?: string;
+  reviewerEffort?: string;
   // Filled with how the review ended, beside the exit code, which cannot
   // tell an incomplete review from one that never had a reviewer.
   end?: ReviewEnd;
@@ -212,6 +216,8 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   const settings = readReviewerSettings();
   for (const w of settings.warnings) warn(`openqodex: ${w}`);
   const web = o.web ?? settings.web;
+  const reviewerModel = o.reviewerModel ?? settings.model;
+  const reviewerEffort = o.reviewerEffort ?? settings.effort;
   const parts = laptopParts({ ...o, instructionsRef }, repoRoot, config);
   const choice = o.reviewer ?? settings.reviewer;
   // An unknown reviewer name stops the run before the scanner lists are read.
@@ -370,7 +376,7 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   let code: number = EXIT_OK;
   try {
     await runReviewCore(
-      { repoRoot, config, scope: o.scope, all: o.all, target: o.target, overlay: o.overlay, only, skip, noGraph: o.noGraph, reviewer: choice, web, timeoutMs: o.timeoutMs, timedOut: timedOutLine(o.timeoutMs), runtimeVersion: __OPENQODEX_VERSION__ },
+      { repoRoot, config, scope: o.scope, all: o.all, target: o.target, overlay: o.overlay, only, skip, noGraph: o.noGraph, reviewer: choice, web, reviewerModel, reviewerEffort, timeoutMs: o.timeoutMs, timedOut: timedOutLine(o.timeoutMs), runtimeVersion: __OPENQODEX_VERSION__ },
       {
         ...parts,
         clock,

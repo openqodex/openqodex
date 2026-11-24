@@ -5,6 +5,9 @@
 //   update: on | off              the daily check for a new release (on)
 //   reviewer: auto | <agent>      which agent reviews (auto); reviewers/settings.ts
 //   reviewer_web: on | off        the reviewer's web tools (on); reviewers/settings.ts
+//   reviewer_model: <model id>    the Codex reviewer's model (Codex's own default)
+//   reviewer_effort: low | ...    the Codex reviewer's reasoning effort (Codex's
+//                                 own default); both in reviewers/settings.ts
 //   skip_version: <x.y.z>         a release `update --rollback` left: the
 //                                 update never installs it or an older one
 //
@@ -17,7 +20,7 @@ import { isScalar, parseDocument, type Document } from "yaml";
 import { nearestName } from "@openqodex/core";
 import { readText } from "./agents/files.js";
 
-export const USER_KEYS = ["update", "reviewer", "reviewer_web", "skip_version"] as const;
+export const USER_KEYS = ["update", "reviewer", "reviewer_web", "reviewer_model", "reviewer_effort", "skip_version"] as const;
 export type UserKey = (typeof USER_KEYS)[number];
 
 export type UserConfig = {

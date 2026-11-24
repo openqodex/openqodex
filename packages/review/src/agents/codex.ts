@@ -20,7 +20,7 @@ import type { ReviewerUsage } from "@openqodex/core";
 import { openqodexHome } from "@openqodex/scanners";
 import { checkoutsDir } from "../checkouts.js";
 import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, namesLimit, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
-import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
+import type { Detected, ReviewerDriver, ReviewerSession, StartOptions, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
 const execFileAsync = promisify(execFile);
@@ -44,8 +44,10 @@ function profileConfig(filesystem: string): string[] {
 
 // `web`: Codex's web search tool is on only when the user config sets
 // `reviewer_web: on`. Shell commands get no network either way: the
-// permission profile has no network entry.
-export function codexArgs(snapshotDir: string, web: boolean): string[] {
+// permission profile has no network entry. `model` and `effort`: the
+// user config's reviewer_model and reviewer_effort; null leaves Codex's
+// own default, as --ignore-user-config keeps the developer's config.toml out.
+export function codexArgs(snapshotDir: string, web: boolean, model: string | null = null, effort: string | null = null): string[] {
   return [
     "exec",
     // One JSON event per line; the run ends after one answer.
@@ -60,6 +62,8 @@ export function codexArgs(snapshotDir: string, web: boolean): string[] {
     // projects) and rules files are not read.
     "--ignore-user-config",
     "--ignore-rules",
+    ...(model !== null ? ["-m", model] : []),
+    ...(effort !== null ? ["-c", `model_reasoning_effort="${effort}"`] : []),
     "-C",
     snapshotDir,
     "-c",
@@ -360,7 +364,7 @@ export function replay(history: string[]): string {
   return out.join("\n\n").trimEnd();
 }
 
-function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): ReviewerSession {
+function start(opts: StartOptions): ReviewerSession {
   // The brief, then each answer and each correction, in the order they came.
   const history: string[] = [];
   let usage: ReviewerUsage = { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null };
@@ -370,7 +374,7 @@ function start(opts: { snapshotDir: string; deadline: number; bin: string; web: 
   const run = (prompt: string): Promise<CodexRun> =>
     new Promise((done) => {
       const stream = codexStream(opts.secrets);
-      const proc = spawnGroup(opts.bin, codexArgs(opts.snapshotDir, opts.web), { cwd: opts.snapshotDir, env: codexEnv() });
+      const proc = spawnGroup(opts.bin, codexArgs(opts.snapshotDir, opts.web, opts.model ?? null, opts.effort ?? null), { cwd: opts.snapshotDir, env: codexEnv() });
       child = proc;
       let stopped: string | null = null;
       let errLine: string | null = null;

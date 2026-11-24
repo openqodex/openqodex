@@ -57,6 +57,7 @@ import { readHomeRun, writeHomeLastReview, writeHomeReceipt, writeHomeRun } from
 import type { RunRecord } from "../receipts.js";
 import { ALL, NO_GRAPH, parseFlags, scannerList } from "../flags.js";
 import { ALL_TIMEOUT_SECONDS, CHANGE_TIMEOUT_SECONDS, runReview } from "../review-run.js";
+import { effortProblem, modelProblem } from "../reviewers/settings.js";
 import type { GlobalFlags } from "../flags.js";
 import {
   buildHotSpots,
@@ -95,10 +96,10 @@ const RUN_AGAIN = "run openqodex review --agent first";
 type RunFile = { version: 1; scope: ChangeScope | "all" | "target" };
 
 // Flags of the review openqodex runs itself only. The GitHub Action passes
-// the last four: a gate the change's own config cannot weaken, the base
+// four of them: a gate the change's own config cannot weaken, the base
 // branch's instructions, a folder of its own for this run's report, and the
 // reviewer's web tools off whatever the runner's user config says.
-const OWN_REVIEW_FLAGS = ["--reviewer", "--timeout", "--block-on-severity", "--instructions", "--instructions-ref", "--report-dir", "--reviewer-web"];
+const OWN_REVIEW_FLAGS = ["--reviewer", "--timeout", "--block-on-severity", "--instructions", "--instructions-ref", "--report-dir", "--reviewer-web", "--reviewer-model", "--reviewer-effort"];
 
 // `drivers`: the reviewers to choose from; tests pass a model provider stand-in.
 export async function run(args: string[], drivers?: ReviewerDriver[]): Promise<number> {
@@ -122,6 +123,12 @@ export async function run(args: string[], drivers?: ReviewerDriver[]): Promise<n
   }
   const web = values.get("--reviewer-web");
   if (web !== undefined && web !== "on" && web !== "off") throw new OpenQodexError(`--reviewer-web must be on or off, not ${web}`);
+  const reviewerModel = values.get("--reviewer-model");
+  const modelBad = reviewerModel === undefined ? null : modelProblem(reviewerModel);
+  if (modelBad !== null) throw new OpenQodexError(`--reviewer-model ${modelBad}`);
+  const reviewerEffort = values.get("--reviewer-effort");
+  const effortBad = reviewerEffort === undefined ? null : effortProblem(reviewerEffort);
+  if (effortBad !== null) throw new OpenQodexError(`--reviewer-effort ${effortBad}`);
   const target = finalize ? undefined : positionals[0];
   if (target !== undefined && bools.has(ALL)) {
     throw new OpenQodexError("--all reviews the whole repository and takes no branch or pull request");
@@ -157,6 +164,8 @@ export async function run(args: string[], drivers?: ReviewerDriver[]): Promise<n
       instructionsRef: values.get("--instructions-ref"),
       reportDir: values.get("--report-dir"),
       web: web === undefined ? undefined : web === "on",
+      reviewerModel,
+      reviewerEffort,
       drivers,
     });
   }

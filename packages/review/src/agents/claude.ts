@@ -13,7 +13,7 @@ import { DELIVERY_ROW_BYTES, REVIEWER_TOOLS, REVIEWER_WEB_TOOLS } from "@openqod
 import { checkoutsDir } from "../checkouts.js";
 import { claudeHome } from "./homes.js";
 import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
-import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./driver.js";
+import type { Detected, ReviewerDriver, ReviewerSession, StartOptions, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
 const execFileAsync = promisify(execFile);
@@ -177,7 +177,9 @@ function removeSavedOutput(configDir: string, snapshotDir: string, sessionId: st
   }
 }
 
-function start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): ReviewerSession {
+// `model` and `effort` are not taken: Claude Code's model comes from
+// ANTHROPIC_MODEL, which reviewerEnv passes on.
+function start(opts: StartOptions): ReviewerSession {
   const allowed = opts.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS;
   const env = reviewerEnv();
   const child = spawnGroup(opts.bin, claudeArgs(opts.web), { cwd: opts.snapshotDir, env });
