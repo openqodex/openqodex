@@ -1,8 +1,10 @@
 // The ReviewBench entrypoint (benchmark/outside/reviewbench/entry.mjs), run
 // as ReviewBench runs it: a subprocess with the RB_* variables, a real git
 // clone at head with its base reachable, and the built CLI. The only
-// stand-in is the reviewer (fixtures/reviewbench/claude.cjs, put on PATH as
-// `claude`); git, the CLI, the change source and the report are real.
+// stand-ins are the reviewer (fixtures/reviewbench/claude.cjs, put on PATH as
+// `claude`) and, for the model configuration, the model API
+// (fixtures/reviewbench/openrouter.mjs on 127.0.0.1); git, the CLI, the
+// library, the change source and the report are real.
 //
 // Failures guarded, written before the code:
 // 1. pr.head or pr.pr_number differs from RB_HEAD or RB_PR_NUMBER (or the
@@ -39,13 +41,24 @@
 //    link was planted, so root overwrites the file the link names.
 // 11. At the deadline the review is killed at once, so openqodex never stops
 //    its reviewer, which leads a process group of its own and keeps running.
-import { execFileSync, spawnSync } from "node:child_process";
+// 12. The model configuration (RB_CONFIG_REVIEWER=model) sends the review to
+//    another URL, path or model id than RB_MODEL_BASE_URL/responses and
+//    RB_CONFIG_MODEL (default openai/gpt-6.1-sol), or without the key as a
+//    bearer header; or the key reaches RB_OUT or the log, also when the
+//    provider quotes it back in an error.
+// 13. Adding the model configuration changes the claude configuration: its
+//    reviewer, model or findings differ with RB_CONFIG_REVIEWER=claude, or
+//    with an OPENROUTER_API_KEY in the environment.
+// 14. A model configuration without its key, with an http URL to another
+//    machine (the key would go in clear), or an unknown reviewer, starts a
+//    review instead of failing every attempt.
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { decide, findingsOf, readReviewFile, runReview, writeFindingsFile } from "../outside/reviewbench/entry.mjs";
+import { decide, findingsOf, readContract, readReviewFile, runReview, writeFindingsFile } from "../outside/reviewbench/entry.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -54,6 +67,23 @@ const here = dirname(fileURLToPath(import.meta.url));
 const ENTRY = join(here, "../outside/reviewbench/entry.mjs");
 const CLI = join(here, "../../packages/cli/dist/bin.js");
 const STANDIN = join(here, "fixtures/reviewbench/claude.cjs");
+const MODEL_API = join(here, "fixtures/reviewbench/openrouter.mjs");
+// A key no other text holds, so finding it anywhere is a leak.
+const KEY = "sk-or-v1-standin-7f3a9c2e5b18d4f6a0c3e9b2d7f1a8c4";
+
+// The model API stand-in in a process of its own (run() blocks this one):
+// { baseUrl, requests(), stop() }.
+async function modelApi(mode = "") {
+  const dir = tempDir("oq-rb-api-");
+  const child = spawn(process.execPath, [MODEL_API, dir, ...(mode ? [mode] : [])], { stdio: "ignore" });
+  for (let i = 0; i < 100 && !existsSync(join(dir, "port")); i++) await sleep(50);
+  if (!existsSync(join(dir, "port"))) throw new Error("the model API stand-in did not start");
+  return {
+    baseUrl: `http://127.0.0.1:${readFileSync(join(dir, "port"), "utf8")}/api/v1`,
+    requests: () => (existsSync(join(dir, "requests.jsonl")) ? readFileSync(join(dir, "requests.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)) : []),
+    stop: () => child.kill("SIGKILL"),
+  };
+}
 
 const git = (cwd, ...args) => execFileSync("git", ["-c", "user.email=rb@example.com", "-c", "user.name=rb", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" }).trim();
 
@@ -104,7 +134,8 @@ function run({ repo, base, head }, { mode = "", env = {} } = {}) {
       ...env,
     },
   });
-  return { code: p.status, stderr: p.stderr, out: existsSync(out) ? JSON.parse(readFileSync(out, "utf8")) : null };
+  const text = existsSync(out) ? readFileSync(out, "utf8") : null;
+  return { code: p.status, stderr: p.stderr, text, out: text === null ? null : JSON.parse(text) };
 }
 
 describe("ReviewBench entrypoint", () => {
@@ -276,5 +307,66 @@ setInterval(() => {}, 1000);
     } finally {
       if (reviewer !== null && alive(reviewer)) process.kill(-reviewer, "SIGKILL");
     }
+  });
+
+  it("12. the model configuration passes the OpenRouter base URL, model id and bearer key to the reviewer and never into RB_OUT or the log", async () => {
+    const api = await modelApi();
+    try {
+      const pr = pullRequest();
+      const r = run(pr, { env: { RB_CONFIG_REVIEWER: "model", RB_MODEL_BASE_URL: api.baseUrl, OPENROUTER_API_KEY: KEY } });
+      expect(r.code, r.stderr).toBe(0);
+      const requests = api.requests();
+      expect(requests.length, "the reviewer never called the model API").toBeGreaterThan(0);
+      for (const q of requests) expect(q).toEqual({ path: "/api/v1/responses", authorization: `Bearer ${KEY}`, model: "openai/gpt-6.1-sol" });
+      expect(r.out.pr).toEqual({ repo: "https://github.com/example/calc", pr_number: 7, base: pr.base, head: pr.head });
+      expect(r.out.findings).toHaveLength(1);
+      expect(r.out.findings[0]).toMatchObject({ file: "calc.py", start_line: 2, end_line: 2, producer: "openqodex" });
+      expect(r.out.findings[0].message).toContain("with model openai/gpt-6.1-sol");
+      expect(r.stderr).toContain("model=openai/gpt-6.1-sol reviewer=model");
+      expect(r.text).not.toContain(KEY);
+      expect(r.stderr).not.toContain(KEY);
+    } finally {
+      api.stop();
+    }
+  });
+
+  it("12b. a model API that quotes the key back in its error never puts it in RB_OUT or the log", async () => {
+    const api = await modelApi("reject");
+    try {
+      const pr = pullRequest();
+      const env = { RB_CONFIG_REVIEWER: "model", RB_CONFIG_MODEL: "openai/gpt-6.1-sol", RB_MODEL_BASE_URL: api.baseUrl, OPENROUTER_API_KEY: KEY };
+      const first = run(pr, { env });
+      expect(first.code).toBe(1);
+      expect(first.stderr).toContain("the reviewer never answered");
+      expect(first.stderr).not.toContain(KEY);
+      expect(api.requests().length, "the stand-in was never asked, so its error was never read").toBeGreaterThan(0);
+      const second = run(pr, { env: { ...env, RB_ATTEMPT: "2" } });
+      expect(second.code, second.stderr).toBe(0);
+      expect(second.out.findings).toEqual([]);
+      expect(second.text).not.toContain(KEY);
+      expect(second.stderr).not.toContain(KEY);
+    } finally {
+      api.stop();
+    }
+  });
+
+  it("13. the claude configuration is unchanged by RB_CONFIG_REVIEWER=claude or an OPENROUTER_API_KEY beside it", () => {
+    const pr = pullRequest();
+    const plain = run(pr);
+    const named = run(pr, { env: { RB_CONFIG_REVIEWER: "claude", OPENROUTER_API_KEY: KEY } });
+    expect(plain.code, plain.stderr).toBe(0);
+    expect(named.code, named.stderr).toBe(0);
+    expect(named.out).toEqual(plain.out);
+    expect(named.out.findings[0].message).toContain("with model claude-opus-5-5");
+    expect(named.stderr).toContain("model=claude-opus-5-5 reviewer=claude");
+  });
+
+  it("14. refuses a model configuration with no key or an http URL to another machine, and an unknown reviewer", () => {
+    const env = { RB_OUT: "/work/out/findings.json", RB_HEAD: "a".repeat(40), RB_BASE: "b".repeat(40), RB_PR_NUMBER: "7", RB_NWO: "example/calc", RB_AGENT: "openqodex" };
+    expect(() => readContract({ ...env, RB_CONFIG_REVIEWER: "model" })).toThrow("OPENROUTER_API_KEY is not set");
+    expect(() => readContract({ ...env, RB_CONFIG_REVIEWER: "model", OPENROUTER_API_KEY: KEY, RB_MODEL_BASE_URL: "http://openrouter.ai/api/v1" })).toThrow("RB_MODEL_BASE_URL must be an https URL");
+    expect(() => readContract({ ...env, RB_CONFIG_REVIEWER: "codex" })).toThrow("RB_CONFIG_REVIEWER must be claude or model, not codex");
+    expect(readContract({ ...env, RB_CONFIG_REVIEWER: "model", OPENROUTER_API_KEY: KEY })).toMatchObject({ reviewer: "model", model: "openai/gpt-6.1-sol", baseUrl: "https://openrouter.ai/api/v1" });
+    expect(readContract(env)).toMatchObject({ reviewer: "claude", model: "claude-opus-5-5", baseUrl: null });
   });
 });

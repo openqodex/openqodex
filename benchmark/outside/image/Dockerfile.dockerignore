@@ -4,3 +4,4 @@
 !image/package-lock.json
 !image/preinstall.mjs
 !reviewbench/entry.mjs
+!reviewbench/model-review.mjs

@@ -102,7 +102,9 @@ RUN node preinstall.mjs \
 
 # The entrypoint starts as root only to write the findings file into the
 # folder ReviewBench mounts, which another user may own; it starts the
-# review as the node user (reviewbench/entry.mjs).
+# review as the node user (reviewbench/entry.mjs). model-review.mjs is the
+# review of the model configuration (RB_CONFIG_REVIEWER=model).
 COPY reviewbench/entry.mjs ./entry.mjs
+COPY reviewbench/model-review.mjs ./model-review.mjs
 USER root
 ENTRYPOINT ["node", "/srv/entry.mjs"]

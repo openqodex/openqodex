@@ -2,14 +2,23 @@
 // The ReviewBench entrypoint: one pull request per container, as their agent
 // contract (AGENT_CONTRACT.md in review-bench/ReviewBench) gives it. The
 // clone is at RB_REPO (default /work/repo), checked out at RB_HEAD with
-// RB_BASE reachable; the findings file goes to RB_OUT. It runs
-// `openqodex review --base RB_BASE` as a developer runs it, with Claude Code
-// as the reviewer, then writes every finding the report shows.
+// RB_BASE reachable; the findings file goes to RB_OUT. RB_CONFIG_REVIEWER
+// picks one of two configurations; either way every finding the report
+// shows is written.
 //
+// claude (the default): `openqodex review --base RB_BASE` as a developer
+// runs it, with Claude Code as the reviewer.
 //   RB_CONFIG_MODEL      the Claude model (default claude-opus-5-5), passed
 //                        as ANTHROPIC_MODEL, which the reviewer reads
 //   RB_MODEL_BASE_URL    the model API, passed as ANTHROPIC_BASE_URL
 //   ANTHROPIC_API_KEY    the key, handed in by ReviewBench
+// model: the library's server profile with a model API reviewer
+// (model-review.mjs), the path the benchmark calls model-gpt-6.1-sol.
+//   RB_CONFIG_MODEL      the model id, sent as given (default openai/gpt-6.1-sol)
+//   RB_MODEL_BASE_URL    the OpenAI-compatible model API (default
+//                        https://openrouter.ai/api/v1)
+//   OPENROUTER_API_KEY   the key, sent as `Authorization: Bearer`, never printed
+// Both:
 //   RB_ATTEMPT           the attempt number, from 1
 //   OPENQODEX_CLI        the CLI to run (tests); default the image's package
 //
@@ -37,6 +46,10 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
+// The model configuration's defaults: OpenRouter's id for gpt-6.1-sol, and its API.
+export const DEFAULT_API_MODEL = "openai/gpt-6.1-sol";
+export const DEFAULT_API_URL = "https://openrouter.ai/api/v1";
+const LOOPBACK = new Set(["127.0.0.1", "[::1]", "localhost"]);
 // The manifest asks for 3600 s per pull request. The reviewer gets 2700 s;
 // the whole review is asked to stop at 3300 s and killed 30 s later, so this
 // process always ends first.
@@ -44,6 +57,7 @@ const REVIEW_TIMEOUT_SECONDS = 2700;
 const REVIEW_DEADLINE_MS = 3300_000;
 const STOP_GRACE_MS = 30_000;
 const SHA = /^[0-9a-f]{40}$/;
+const MODEL_REVIEW = join(dirname(fileURLToPath(import.meta.url)), "model-review.mjs");
 
 /** The contract's inputs from the environment; throws naming the first that is wrong. */
 export function readContract(env = process.env) {
@@ -63,6 +77,20 @@ export function readContract(env = process.env) {
   const nwo = need("RB_NWO");
   if (!/^[^/\s]+\/[^/\s]+$/.test(nwo)) throw new Error(`RB_NWO must be owner/repo, not ${nwo}`);
   const attempt = Number(env.RB_ATTEMPT ?? "1");
+  const reviewer = env.RB_CONFIG_REVIEWER?.trim() || "claude";
+  if (reviewer !== "claude" && reviewer !== "model") throw new Error(`RB_CONFIG_REVIEWER must be claude or model, not ${reviewer}`);
+  const baseUrl = env.RB_MODEL_BASE_URL?.trim() || (reviewer === "model" ? DEFAULT_API_URL : null);
+  if (reviewer === "model") {
+    // The key goes in a header to this URL: https only, or http to this machine (a test's stand-in).
+    let url = null;
+    try {
+      url = new URL(baseUrl);
+    } catch {
+      // refused below
+    }
+    if (!url || !(url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK.has(url.hostname)))) throw new Error(`RB_MODEL_BASE_URL must be an https URL, not ${baseUrl}`);
+    if ((env.OPENROUTER_API_KEY ?? "").trim() === "") throw new Error("OPENROUTER_API_KEY is not set");
+  }
   return {
     out,
     head,
@@ -72,8 +100,9 @@ export function readContract(env = process.env) {
     agent: need("RB_AGENT"),
     repoDir: resolve(env.RB_REPO?.trim() || "/work/repo"),
     prJson: env.RB_PR_JSON?.trim() || "/work/pr/pr.json",
-    model: env.RB_CONFIG_MODEL?.trim() || DEFAULT_MODEL,
-    baseUrl: env.RB_MODEL_BASE_URL?.trim() || null,
+    reviewer,
+    model: env.RB_CONFIG_MODEL?.trim() || (reviewer === "model" ? DEFAULT_API_MODEL : DEFAULT_MODEL),
+    baseUrl,
     attempt: Number.isSafeInteger(attempt) && attempt >= 1 ? attempt : 1,
   };
 }
@@ -264,7 +293,7 @@ async function main(env = process.env) {
   const pr = readJson(contract.prJson);
   const cli = cliPath(env);
   const version = JSON.parse(readFileSync(join(dirname(cli), "..", "package.json"), "utf8")).version;
-  console.error(`openqodex-reviewbench: model=${contract.model} reviewer=claude openqodex=${version} attempt=${contract.attempt}`);
+  console.error(`openqodex-reviewbench: model=${contract.model} reviewer=${contract.reviewer} openqodex=${version} attempt=${contract.attempt}`);
 
   const root = typeof process.getuid === "function" && process.getuid() === 0;
   const user = root ? nodeUser() : null;
@@ -273,13 +302,18 @@ async function main(env = process.env) {
   const reportDir = join(work, "report");
   mkdirSync(reportDir);
   if (user) for (const dir of [work, reportDir]) chownSync(dir, user.uid, user.gid);
-  const childEnv = { ...env, GIT_LFS_SKIP_SMUDGE: "1", ANTHROPIC_MODEL: contract.model, ...(contract.baseUrl ? { ANTHROPIC_BASE_URL: contract.baseUrl } : {}), ...(user ? { HOME: user.home, USER: "node", LOGNAME: "node" } : {}) };
+  const claude = contract.reviewer === "claude";
+  const childEnv = { ...env, GIT_LFS_SKIP_SMUDGE: "1", ...(claude ? { ANTHROPIC_MODEL: contract.model, ...(contract.baseUrl ? { ANTHROPIC_BASE_URL: contract.baseUrl } : {}) } : {}), ...(user ? { HOME: user.home, USER: "node", LOGNAME: "node" } : {}) };
   const as = { env: childEnv, ...(user ? { uid: user.uid, gid: user.gid } : {}) };
   const cloned = Date.now();
   execFileSync("git", ["clone", "--quiet", "--shared", "--no-checkout", contract.repoDir, repo], { ...as, stdio: ["ignore", "ignore", "inherit"] });
   execFileSync("git", ["-C", repo, "checkout", "--quiet", "--detach", contract.head], { ...as, stdio: ["ignore", "ignore", "inherit"] });
   console.error(`openqodex-reviewbench: shared clone at ${contract.head.slice(0, 12)} in ${Math.round((Date.now() - cloned) / 1000)} s`);
-  const args = [cli, "review", "--cwd", repo, "--base", contract.base, "--reviewer", "claude", "--reviewer-web", "off", "--report-dir", reportDir, "--timeout", String(REVIEW_TIMEOUT_SECONDS), "--no-install", "--no-color"];
+  // The model configuration's key goes to model-review.mjs in its
+  // environment, never its arguments, which a process listing shows.
+  const args = claude
+    ? [cli, "review", "--cwd", repo, "--base", contract.base, "--reviewer", "claude", "--reviewer-web", "off", "--report-dir", reportDir, "--timeout", String(REVIEW_TIMEOUT_SECONDS), "--no-install", "--no-color"]
+    : [MODEL_REVIEW, "--lib", join(dirname(cli), "lib.js"), "--clone", repo, "--base", contract.base, "--head", contract.head, "--report-dir", reportDir, "--work-dir", join(work, "w"), "--model", contract.model, "--base-url", contract.baseUrl, "--timeout", String(REVIEW_TIMEOUT_SECONDS)];
   const started = Date.now();
   const code = await runReview(process.execPath, args, as);
   const reviewUid = user ? user.uid : process.getuid();
