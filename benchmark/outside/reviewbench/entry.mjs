@@ -27,11 +27,11 @@
 // first attempt and is written empty from the second, so one pull request
 // the review cannot finish costs that pull request, not the whole run.
 // The failure list is in benchmark/test/reviewbench-entry.test.mjs.
-import { spawn, execFileSync } from "node:child_process";
-import { chownSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
+import { chownSync, closeSync, constants, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
@@ -160,6 +160,34 @@ function nodeUser() {
 
 const readJson = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null);
 
+/**
+ * One file the review wrote: null when it is absent, else { json } or
+ * { refused: reason }. The review reads an untrusted pull request in a folder
+ * its user owns, so it could plant a link, a pipe or another user's file
+ * there for root to read. Only a regular file owned by `uid` is read: it is
+ * opened without following a link, and the opened file itself is checked.
+ */
+export function readReviewFile(file, uid) {
+  const name = basename(file);
+  let fd;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    return { refused: error.code === "ELOOP" ? `${name} is a symbolic link` : `${name} could not be opened (${error.code ?? error.message})` };
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return { refused: `${name} is not a regular file` };
+    if (stat.uid !== uid) return { refused: `${name} is owned by uid ${stat.uid}, not the review's user ${uid}` };
+    return { json: JSON.parse(readFileSync(fd, "utf8")) };
+  } catch (error) {
+    return { refused: `${name} could not be read as JSON (${error.message})` };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function cliPath(env) {
   if (env.OPENQODEX_CLI) return resolve(env.OPENQODEX_CLI);
   const pkg = createRequire(import.meta.url).resolve("openqodex/package.json");
@@ -169,18 +197,23 @@ function cliPath(env) {
 
 // Runs the review and resolves with its exit code, or null when the
 // deadline stopped it. The child leads a process group of its own, so the
-// stop reaches the reviewer and the scanners too.
+// stop reaches the reviewer and the scanners too. The group is also killed
+// when the review ends, so no process of it is left to change the files
+// root reads next.
 function runReview(command, args, options) {
   return new Promise((done) => {
     const child = spawn(command, args, { ...options, detached: true, stdio: ["ignore", "inherit", "inherit"] });
     let stopped = false;
-    const timer = setTimeout(() => {
-      stopped = true;
+    const stopGroup = () => {
       try {
         process.kill(-child.pid, "SIGKILL");
       } catch {
         // already gone
       }
+    };
+    const timer = setTimeout(() => {
+      stopped = true;
+      stopGroup();
     }, REVIEW_DEADLINE_MS);
     child.on("error", (error) => {
       clearTimeout(timer);
@@ -189,6 +222,7 @@ function runReview(command, args, options) {
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      stopGroup();
       done(stopped ? null : code);
     });
   });
@@ -219,11 +253,18 @@ async function main(env = process.env) {
   const args = [cli, "review", "--cwd", repo, "--base", contract.base, "--reviewer", "claude", "--reviewer-web", "off", "--report-dir", reportDir, "--timeout", String(REVIEW_TIMEOUT_SECONDS), "--no-install", "--no-color"];
   const started = Date.now();
   const code = await runReview(process.execPath, args, as);
-  const report = readJson(join(reportDir, "report.json"));
-  const usage = readJson(join(reportDir, "usage.json"));
+  const reviewUid = user ? user.uid : process.getuid();
+  const reportRead = readReviewFile(join(reportDir, "report.json"), reviewUid);
+  const usageRead = readReviewFile(join(reportDir, "usage.json"), reviewUid);
+  const report = reportRead?.json ?? null;
+  const usage = usageRead?.json ?? null;
   const served = [...new Set((usage?.calls ?? []).map((c) => c.model).filter((m) => typeof m === "string" && m !== ""))];
   console.error(`openqodex-reviewbench: review exited ${code} after ${Math.round((Date.now() - started) / 1000)} s; served models: ${served.join(", ") || "none named"}; report timings: ${JSON.stringify(report?.timings ?? null)}`);
-  rmSync(work, { recursive: true, force: true });
+  // Removed as the review's user, so a link planted in it never leads root
+  // to delete anything else.
+  spawnSync("rm", ["-rf", work], { stdio: "ignore", ...(user ? { uid: user.uid, gid: user.gid } : {}) });
+  const refused = reportRead?.refused ?? usageRead?.refused;
+  if (refused) throw new Error(`the review's files were refused: ${refused}`);
 
   const decision = decide({ code, report, usage, attempt: contract.attempt, agent: contract.agent });
   if (decision.fail) throw new Error(decision.fail);

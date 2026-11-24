@@ -28,12 +28,15 @@
 // 8. The review writes into the mounted clone (openqodex adds a work tree
 //    under its .git), which fails when another user owns the clone, as on
 //    ReviewBench, where the review runs as the node user.
+// 9. A report.json symlink planted by the reviewer is refused, not read as
+//    root: the reviewer reads an untrusted pull request and owns the folder
+//    root reads the report from.
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { findingsOf } from "../outside/reviewbench/entry.mjs";
+import { findingsOf, readReviewFile } from "../outside/reviewbench/entry.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -179,5 +182,19 @@ describe("ReviewBench entrypoint", () => {
       { file: "lib.py", start_line: 4, end_line: 6, message: "Divides by zero. b can be 0. The call raises. Fix: Check b.", producer: "openqodex" },
     ]);
     expect(dropped).toBe(3);
+  });
+
+  it("9. a report.json symlink planted by the reviewer is refused, not read as root", () => {
+    const dir = tempDir("oq-rb-report-");
+    const secret = join(tempDir("oq-rb-secret-"), "secret.json");
+    writeFileSync(secret, JSON.stringify({ secret: "root only" }));
+    symlinkSync(secret, join(dir, "report.json"));
+    const uid = process.getuid();
+    expect(readReviewFile(join(dir, "report.json"), uid)).toEqual({ refused: "report.json is a symbolic link" });
+    // The regular file the review wrote is read only when its user owns it.
+    writeFileSync(join(dir, "usage.json"), JSON.stringify({ calls: [] }));
+    expect(readReviewFile(join(dir, "usage.json"), uid)).toEqual({ json: { calls: [] } });
+    expect(readReviewFile(join(dir, "usage.json"), uid + 1)).toEqual({ refused: `usage.json is owned by uid ${uid}, not the review's user ${uid + 1}` });
+    expect(readReviewFile(join(dir, "absent.json"), uid)).toBeNull();
   });
 });
