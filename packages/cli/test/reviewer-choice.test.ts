@@ -29,14 +29,31 @@
 // 12. `--reviewer-web off` (the GitHub Action passes it) loses to the user
 //     config, or needs the file edited: a config written as a flow mapping
 //     breaks, and a run that dies leaves the file changed.
+// 14. reviewer_model or reviewer_effort in the user config does not reach the
+//     Codex reviewer, or the report does not say which model reviewed.
+// 15. --reviewer-model or --reviewer-effort loses to the user config.
+// 16. A reviewer_model that is not a model id (a number, a value that reads
+//     as a flag) or a reviewer_effort Codex does not take is passed on, or
+//     silently dropped, instead of stopping the run with the file named.
+// 17. The Codex model reaches Claude Code, whose models have other names,
+//     so a review `auto` gives to Claude Code fails; or Claude Code is
+//     started with the Codex keys at all, even as null.
+// 18. A bad reviewer_model or reviewer_effort stops a review Claude Code
+//     runs, which never uses them.
+// 19. A valid --reviewer-model or --reviewer-effort cannot start a review
+//     while the file holds a bad value of the same key.
+// 20. A bad value that is a mapping (whose own toString key breaks String())
+//     or holds a line break crashes the run, or splits its one-line error.
 import { stagedFake } from "../../review/test/staged-fake.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Report } from "@openqodex/core";
+import { reviewerLine } from "@openqodex/core";
 import { parseFlags } from "../src/flags.js";
 import { runReview } from "../src/review-run.js";
+import { run as runCommand } from "../src/commands/review.js";
 import { DEPTH_ENV, claudeArgs, codexDriver, cursorDriver } from "@openqodex/review";
 import type { ReviewerDriver, ReviewerSession, Turn } from "@openqodex/review";
 import { DEFAULT_REVIEWER_WEB } from "../src/reviewers/settings.js";
@@ -62,7 +79,7 @@ function repo(): string {
   return dir;
 }
 
-type Fake = ReviewerDriver & { starts: { web: boolean }[] };
+type Fake = ReviewerDriver & { starts: { web: boolean; model?: string | null; effort?: string | null }[] };
 
 // The model provider stand-in: reads the changed file, then answers with an
 // empty, valid submission. `calls` adds tool calls to the answer. `name`
@@ -78,7 +95,8 @@ function fake(calls: Turn["calls"] = [], name = "claude", available = true): Fak
     },
     start(opts): ReviewerSession {
       const { snapshotDir } = opts;
-      driver.starts.push({ web: opts.web });
+      // A key the run did not pass stays absent, so a test can tell it from null.
+      driver.starts.push({ web: opts.web, ...("model" in opts ? { model: opts.model } : {}), ...("effort" in opts ? { effort: opts.effort } : {}) });
       return stagedFake({
         pid: 4242,
         async send(text: string): Promise<Turn> {
@@ -189,6 +207,96 @@ describe("choosing the reviewer", () => {
     await expect(review([fake()])).rejects.toThrow(/config\.yaml.*reviewer/);
     userConfig("reviewer_web: sometimes\n");
     await expect(review([fake()])).rejects.toThrow(/config\.yaml.*reviewer_web/);
+  });
+});
+
+describe("the Codex reviewer's model and reasoning effort", () => {
+  it("14. reviewer_model and reviewer_effort reach every Codex session, and the report names them", async () => {
+    userConfig("reviewer_model: gpt-test-model\nreviewer_effort: high\n");
+    const codex = fake([], "codex");
+    expect(await review([codex], "codex")).toBe(0);
+    expect(codex.starts.length).toBeGreaterThan(0);
+    for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-test-model", effort: "high" });
+    const report = JSON.parse(out) as Report;
+    expect(report.completion?.reviewer).toMatchObject({ driver: "codex", model: "gpt-test-model", effort: "high" });
+    expect(reviewerLine(report.completion?.reviewer ?? null)).toMatch(/^Reviewer: codex 9\.9\.9, model gpt-test-model, effort high, /);
+  });
+
+  it("14. without the keys Codex gets no model and no effort, and the report names none", async () => {
+    const codex = fake([], "codex");
+    expect(await review([codex], "codex")).toBe(0);
+    for (const start of codex.starts) expect(start).toStrictEqual({ web: true });
+    const reviewer = (JSON.parse(out) as Report).completion?.reviewer;
+    expect(reviewer).not.toHaveProperty("model");
+    expect(reviewer).not.toHaveProperty("effort");
+  });
+
+  it("15. --reviewer-model and --reviewer-effort win over the user config, which stays as it was", async () => {
+    const text = "reviewer_model: gpt-test-model\nreviewer_effort: high\n";
+    userConfig(text);
+    const codex = fake([], "codex");
+    const { global } = parseFlags(["--cwd", repo(), "--no-color", "--format", "json"], {});
+    expect(await runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer: "codex", timeoutMs: 60_000, drivers: [codex], reviewerModel: "gpt-other", reviewerEffort: "low" })).toBe(0);
+    for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-other", effort: "low" });
+    expect(readFileSync(join(home, "config.yaml"), "utf8")).toBe(text);
+  });
+
+  it("15, 16. the review command takes --reviewer-model and --reviewer-effort, and refuses a value Codex cannot take before anything runs", async () => {
+    const codex = fake([], "codex");
+    const cwd = repo();
+    expect(await runCommand(["--cwd", cwd, "--no-color", "--format", "json", "--only", "sqllint", "--no-graph", "--reviewer", "codex", "--reviewer-model", "gpt-flag", "--reviewer-effort", "xhigh"], [codex])).toBe(0);
+    for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-flag", effort: "xhigh" });
+    const unused = fake([], "codex");
+    await expect(runCommand(["--cwd", cwd, "--reviewer", "codex", "--reviewer-effort", "extreme"], [unused])).rejects.toThrow(/^--reviewer-effort must be one of low, medium, high, xhigh, not extreme$/);
+    await expect(runCommand(["--cwd", cwd, "--reviewer", "codex", "--reviewer-model", "a b"], [unused])).rejects.toThrow(/^--reviewer-model must be a model id/);
+    expect(unused.starts).toHaveLength(0);
+  });
+
+  it("16. a reviewer_model that is not a model id, or a reviewer_effort Codex does not take, stops the run and names the file", async () => {
+    for (const bad of ["reviewer_model: 5\n", "reviewer_model: '--yolo'\n", "reviewer_model: ''\n", "reviewer_effort: extreme\n", "reviewer_effort: minimal\n"]) {
+      userConfig(bad);
+      const codex = fake([], "codex");
+      await expect(review([codex], "codex")).rejects.toThrow(new RegExp(`config\\.yaml: ${bad.split(":")[0]} must be`));
+      expect(codex.starts).toHaveLength(0);
+    }
+  });
+
+  it("18. a bad reviewer_model or reviewer_effort does not stop a review Claude Code runs", async () => {
+    userConfig("reviewer_model: '--yolo'\nreviewer_effort: extreme\n");
+    const claude = fake();
+    expect(await review([claude], "claude")).toBe(0);
+    expect(claude.starts.length).toBeGreaterThan(0);
+    for (const start of claude.starts) expect(start).toStrictEqual({ web: true });
+  });
+
+  it("19. a valid flag wins over a bad file value of the same key, and the other key's bad value still stops Codex", async () => {
+    userConfig("reviewer_model: '--yolo'\nreviewer_effort: extreme\n");
+    const codex = fake([], "codex");
+    const { global } = parseFlags(["--cwd", repo(), "--no-color", "--format", "json"], {});
+    expect(await runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer: "codex", timeoutMs: 60_000, drivers: [codex], reviewerModel: "gpt-flag", reviewerEffort: "low" })).toBe(0);
+    for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-flag", effort: "low" });
+    const half = fake([], "codex");
+    await expect(runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer: "codex", timeoutMs: 60_000, drivers: [half], reviewerModel: "gpt-flag" })).rejects.toThrow(/config\.yaml: reviewer_effort must be one of low, medium, high, xhigh, not extreme$/);
+    expect(half.starts).toHaveLength(0);
+  });
+
+  it("20. a bad value that is a mapping with its own toString, or holds a line break, stops Codex with one line naming the file", async () => {
+    userConfig("reviewer_model: {toString: x}\nreviewer_effort: \"high\\nlow\"\n");
+    const codex = fake([], "codex");
+    const error = await review([codex], "codex").then(() => null, (e: Error) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.constructor.name).not.toBe("TypeError");
+    expect(error!.message).not.toContain("\n");
+    expect(error!.message).toMatch(/config\.yaml: reviewer_model must be a model id such as gpt-5\.5, not a mapping; .*config\.yaml: reviewer_effort must be one of low, medium, high, xhigh, not high\\u000alow$/);
+    expect(codex.starts).toHaveLength(0);
+  });
+
+  it("17. Claude Code is not given the Codex model or effort, and its report names none", async () => {
+    userConfig("reviewer_model: gpt-test-model\nreviewer_effort: high\n");
+    const claude = fake();
+    expect(await review([claude], "claude")).toBe(0);
+    for (const start of claude.starts) expect(start).toStrictEqual({ web: true });
+    expect((JSON.parse(out) as Report).completion?.reviewer).not.toHaveProperty("model");
   });
 });
 

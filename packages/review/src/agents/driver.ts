@@ -106,6 +106,8 @@ export interface ReviewerSession {
   kill?(): void;
 }
 
+export type StartOptions = { snapshotDir: string; deadline: number; bin: string; web: boolean; model?: string | null; effort?: string | null; secrets?: string[] };
+
 export interface ReviewerDriver {
   readonly name: string;
   // True when the agent's event stream shows every tool call, so the run can
@@ -126,9 +128,11 @@ export interface ReviewerDriver {
   check?(opts: { snapshotDir: string; bin: string; register: (cleanup: (() => void) | null) => void }): Promise<string | null>;
   // `deadline`: epoch milliseconds after which the process group is killed.
   // `web`: the agent gets its web tools (on unless reviewer_web: off).
+  // `model` and `effort`: the model and reasoning effort to ask for; left
+  // out or null, the agent's own default. Only Codex is given them.
   // `secrets`: what the scanners found, removed from the agent's own error
   // text before it is cut.
-  start(opts: { snapshotDir: string; deadline: number; bin: string; web: boolean; secrets?: string[] }): ReviewerSession;
+  start(opts: StartOptions): ReviewerSession;
 }
 
 const NODE_SCRIPT = [".js", ".cjs", ".mjs"];

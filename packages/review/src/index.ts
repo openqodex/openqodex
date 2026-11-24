@@ -11,7 +11,7 @@ export { lfsPaths } from "./snapshot.js";
 export { reviewChange, reviewerOrder, runReviewCore } from "./review-change.js";
 export type { ResolvedTarget, ReviewCoreResult, ReviewDeps, ReviewEvent, ReviewInputs, Snapshot, SnapshotMaker } from "./review-change.js";
 export { DEPTH_ENV, REVIEWER_NAMES, TIMED_OUT, findOnPath, hostAgent, killGroup, launch, spawnGroup, taskkillFailure, windowsStop } from "./agents/driver.js";
-export type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./agents/driver.js";
+export type { Detected, ReviewerDriver, ReviewerSession, StartOptions, Turn } from "./agents/driver.js";
 export { claudeArgs, claudeDriver, reviewerEnv } from "./agents/claude.js";
 export { CODEX_TESTED, PROBE_REFUSED, codexArgs, codexDriver, codexEnv, codexVersion, detectCodex, olderThanTested, probeSandbox, probeVerdict } from "./agents/codex.js";
 export { CURSOR_NOT_ENABLED, cursorDriver } from "./agents/cursor.js";

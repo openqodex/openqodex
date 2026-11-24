@@ -31,7 +31,10 @@ export const product = (driver: string) => PRODUCT[driver] ?? driver;
 
 export function reviewerLine(r: ReviewerRecord | null): string {
   if (r === null) return "Reviewer: none started";
-  const parts = [`${r.driver} ${r.version}`, `${Math.round(r.duration_ms / 1000)} s`, plural(r.usage.turns, "turn", "turns")];
+  const parts = [`${r.driver} ${r.version}`];
+  if (r.model !== undefined) parts.push(`model ${r.model}`);
+  if (r.effort !== undefined) parts.push(`effort ${r.effort}`);
+  parts.push(`${Math.round(r.duration_ms / 1000)} s`, plural(r.usage.turns, "turn", "turns"));
   if (r.rounds > 1) parts.push(plural(r.rounds - 1, "correction round", "correction rounds"));
   if (r.usage.input_tokens !== null) parts.push(`${r.usage.input_tokens.toLocaleString("en-US")} tokens in`);
   if (r.usage.output_tokens !== null) parts.push(`${r.usage.output_tokens.toLocaleString("en-US")} out`);

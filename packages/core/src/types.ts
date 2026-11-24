@@ -620,6 +620,10 @@ export type ReviewerUsage = { turns: number; input_tokens: number | null; output
 export type ReviewerRecord = {
   driver: string;
   version: string;
+  // The model and reasoning effort the reviewer was asked for, when the user
+  // config or the command line set them (Codex only); absent, its own default.
+  model?: string;
+  effort?: string;
   pid: number | null;
   started_at: string;
   ended_at: string;

@@ -17,6 +17,8 @@
 //  7. A skip_version the update cannot read as a version (a part too large
 //     to count) passes the config check but is dropped when releases are
 //     chosen, so updates run with no threshold.
+//  8. doctor does not show reviewer_model and reviewer_effort with their
+//     source, or shows a value a review would refuse as if it were in force.
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -63,6 +65,26 @@ describe("one reader for the user config", () => {
     expect(r.stdout).toMatch(/^ {2}update +on \(default\)$/m);
     expect(r.stdout).toMatch(/unknown key reviewer-web in .*config\.yaml \(did you mean reviewer_web\?\)/);
     expect(r.stdout).toMatch(/^ {2}updates +paused: unknown key reviewer-web/m);
+  });
+
+  it("doctor shows reviewer_model and reviewer_effort from the file, Codex's own by default, and a value a review stops on (failure 8)", () => {
+    const s = installed();
+    writeFileSync(config(s), "reviewer_model: gpt-test-model\n");
+    const r = launch(s, ["doctor"]);
+    expect(r.stdout).toMatch(/^ {2}reviewer_model +gpt-test-model \(config\.yaml\)$/m);
+    expect(r.stdout).toMatch(/^ {2}reviewer_effort +Codex's own \(default\)$/m);
+    writeFileSync(config(s), "reviewer_effort: extreme\n");
+    const bad = launch(s, ["doctor"]);
+    expect(bad.stdout).toMatch(/^ {2}reviewer_model +Codex's own \(default\)$/m);
+    expect(bad.stdout).toMatch(/^ {2}reviewer_effort +extreme \(config\.yaml: not low, medium, high, xhigh, a Codex review stops\)$/m);
+    expect(bad.stdout).not.toMatch(/unknown key reviewer_/);
+    // A mapping whose own toString key breaks String(), and a value with a
+    // line break, each print on their own one row.
+    writeFileSync(config(s), "reviewer_model: {toString: x}\nreviewer_effort: \"high\\nlow\"\n");
+    const odd = launch(s, ["doctor"]);
+    expect(odd.status, odd.stderr).not.toBe(2);
+    expect(odd.stdout).toMatch(/^ {2}reviewer_model +a mapping \(config\.yaml: not a model id, a Codex review stops\)$/m);
+    expect(odd.stdout).toMatch(/^ {2}reviewer_effort +high\\u000alow \(config\.yaml: not low, medium, high, xhigh, a Codex review stops\)$/m);
   });
 
   it("an environment switch is named as the source of update off (failure 4)", () => {
