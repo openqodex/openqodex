@@ -1,9 +1,11 @@
 // Where the anonymous usage data goes, and whether it may go at all.
 //
-// enabled() is the one switch check. The command runs it before it starts
-// the worker, and the worker runs it again before it sends, so starting the
-// worker by hand gets past no switch. First match wins; only a clear "on"
-// or an absent key leaves usage data on:
+// enabled() is the one switch check. The command runs only rules 1 to 7,
+// which read no file but the link of its own entry (envSwitch), before it
+// starts the worker. The worker runs all nine before it sends, so starting
+// the worker by hand gets past no switch, and the config files are read by
+// the worker, never by the command. First match wins; only a clear "on" or
+// an absent key leaves usage data on:
 //   1  token empty, or a host that is not https (or http on loopback)  off
 //   2  OPENQODEX_REVIEW_DEPTH set: a command the reviewer runs          off
 //   3  any CI marker set                                                off
@@ -66,7 +68,9 @@ function realEntry(entry: string): string {
   }
 }
 
-export function enabled(o: { env: NodeJS.ProcessEnv; home: string; context: PolicyContext; entry?: string }): Switch {
+// Rules 1 to 7: the environment, the command line and the entry. Null when
+// none of them turns usage data off.
+export function envSwitch(o: { env: NodeJS.ProcessEnv; context: PolicyContext; entry?: string }): Switch | null {
   const { env, context } = o;
   const target = telemetryTarget(env);
   if (target === null) return { on: false, why: "no allowed host or token" };
@@ -80,8 +84,15 @@ export function enabled(o: { env: NodeJS.ProcessEnv; home: string; context: Poli
   const dnt = env.DO_NOT_TRACK;
   if (set(dnt) && !["0", "false"].includes(dnt!.trim().toLowerCase())) return { on: false, why: "DO_NOT_TRACK" };
   const entry = o.entry ?? process.argv[1];
-  const published = launcherStarted(env, entry) || (entry !== undefined && realEntry(entry).split(sep).includes("node_modules"));
+  const published = launcherStarted(env, entry) || (entry !== undefined && (entry.split(sep).includes("node_modules") || realEntry(entry).split(sep).includes("node_modules")));
   if (!published && !(forced !== undefined && target.loopback)) return { on: false, why: "a local build" };
+  return null;
+}
+
+export function enabled(o: { env: NodeJS.ProcessEnv; home: string; context: PolicyContext; entry?: string }): Switch {
+  const early = envSwitch(o);
+  if (early !== null) return early;
+  const { context } = o;
   const user = readUserConfig(o.home);
   if (user.error !== null) return { on: false, why: "the user config cannot be read" };
   if (user.values.openqodex_telemetry !== undefined && telemetryValue(user.values.openqodex_telemetry) !== "on") {

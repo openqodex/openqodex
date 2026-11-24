@@ -388,11 +388,11 @@ export function propertyNames(): string[] {
 
 // ---------- the builders: raw values in, properties out ----------
 
-export function commonProps(o: { installId: string; ageDays: number; hostAgent: string | null; launcher: boolean; env: NodeJS.ProcessEnv }): Record<string, unknown> {
+// The properties every event shares, but the install id and its age, which
+// the worker adds: only the worker reads the id.
+export function commonProps(o: { hostAgent: string | null; launcher: boolean; env: NodeJS.ProcessEnv }): Record<string, unknown> {
   const p = osPlatform();
   return {
-    installId: o.installId,
-    installAgeDays: o.ageDays,
     $process_person_profile: false,
     $geoip_disable: true,
     $lib: "openqodex",

@@ -8,7 +8,7 @@
 // the developer's machine. Hosted keys with no local meaning are read, warned
 // about once each and ignored, so one file can serve both.
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -688,11 +688,9 @@ export function telemetryValue(raw: unknown): "on" | "off" | "invalid" {
   return "invalid";
 }
 
-// How deep telemetrySwitch walks up from the command's folder.
-const SWITCH_MAX_LEVELS = 64;
-
 // Whether a project config near `dir` switches usage data off. It walks up
-// from `dir` to the filesystem root, at most 64 folders, and reads at each
+// from the real folder of `dir` (links resolved) to the filesystem root, and
+// reads at each
 // `.openqodex/config.yaml` and `.openqodex.yaml` (never through a link,
 // within the size cap), plus the `--config` file when one is given: as
 // given when absolute, else against `dir` and each folder above it. It
@@ -717,8 +715,15 @@ export function telemetrySwitch(dir: string, configFlag?: string): { on: boolean
       return `${name} cannot be read`;
     }
   };
+  // The real folder, so a link into an opted-out repository finds its config.
+  let start = resolve(dir);
+  try {
+    start = realpathSync(start);
+  } catch {
+    // A folder that cannot be resolved is walked as given.
+  }
   const folders: string[] = [];
-  for (let at = resolve(dir), n = 0; n < SWITCH_MAX_LEVELS; n++) {
+  for (let at = start; ; ) {
     folders.push(at);
     const up = dirname(at);
     if (up === at) break;
@@ -729,7 +734,7 @@ export function telemetrySwitch(dir: string, configFlag?: string): { on: boolean
     if (why !== null) return { on: false, why };
   }
   if (configFlag !== undefined) {
-    const candidates = isAbsolute(configFlag) ? [configFlag] : folders.map((f) => join(f, configFlag));
+    const candidates = isAbsolute(configFlag) ? [configFlag] : [join(resolve(dir), configFlag), ...folders.map((f) => join(f, configFlag))];
     for (const path of candidates) {
       if (!existsSync(path)) continue;
       let text: string;

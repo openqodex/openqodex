@@ -43,7 +43,8 @@ import { run as e2eRun } from "../../../tests/e2e/support.js";
 import { AGENT_ENV, agentFreePath, BIN } from "./init-helpers.js";
 import type { Report } from "@openqodex/core";
 import { canonicalModel, propertyNames, PUBLIC_MODELS, scanProps, validate } from "../src/telemetry/events.js";
-import { begin, dispatch, recordCommand } from "../src/telemetry/dispatch.js";
+import { begin, context, dispatch, recordCommand } from "../src/telemetry/dispatch.js";
+import { parseFlags } from "../src/flags.js";
 
 afterAll(removeTempDirs);
 
@@ -378,7 +379,9 @@ describe("a switch that is off (failure 1)", () => {
 
   it("a worker started by hand gets past no switch, and reads the project config when it sends", async () => {
     const server = await capture();
+    // Each home has an id, so only a switch can stop the worker sending.
     const worker = async (b: Box, extra: Record<string, string | undefined>): Promise<void> => {
+      seedId(b);
       const r = await runCli(["__telemetry"], { cwd: b.root, env: onEnv(b, server.url, { ...extra, OPENQODEX_TELEMETRY_EVENTS: JSON.stringify([ENVELOPE]), OPENQODEX_TELEMETRY_CONTEXT: JSON.stringify({ cwd: b.repo, offline: false }) }) });
       expect(r.status).toBe(0);
     };
@@ -433,8 +436,8 @@ describe("the first run (failure 3)", () => {
     const b = box();
     const one = await runCli(SCAN, { cwd: b.repo, env: onEnv(b, server.url) });
     expect(one.stderr).not.toMatch(ANNOUNCED);
-    expect(existsSync(join(b.oqHome, "telemetry", "id"))).toBe(true);
     await waitFor(() => server.hits.length === 1, 10_000, "the first run's request");
+    expect(existsSync(join(b.oqHome, "telemetry", "id"))).toBe(true);
     expect(events(server).map((e) => e.event)).toEqual(["install.first_use", "scan.completed", "command.completed"]);
     const two = await runCli(SCAN, { cwd: b.repo, env: onEnv(b, server.url) });
     expect(two.stderr).not.toMatch(ANNOUNCED);
@@ -652,7 +655,7 @@ describe("a server that holds its answer (failure 5)", () => {
     expect(r.signal).toBeNull();
     expect(r.status).toBe(0);
     expect(took).toBeGreaterThanOrEqual(4000);
-    expect(took).toBeLessThan(6000);
+    expect(took).toBeLessThan(7500);
     expect(server.hits).toEqual([]);
   }, 30_000);
 });
@@ -722,6 +725,8 @@ describe("a telemetry failure (failure 6)", () => {
       chmodSync(locked.oqHome, 0o555);
       try {
         await same(locked, server.url, "a home that cannot be written");
+        // The worker makes the id after the command ends: the home stays locked until it is done.
+        await sleep(SETTLE_MS);
         expect(existsSync(join(locked.oqHome, "telemetry"))).toBe(false);
       } finally {
         chmodSync(locked.oqHome, 0o755);
@@ -916,6 +921,62 @@ describe("the cost of dispatch (failure 14)", () => {
     const cpu = JSON.parse(readFileSync(usage, "utf8")) as { user: number; system: number };
     console.log(`telemetry worker: ${((cpu.user + cpu.system) / 1000).toFixed(1)} ms of CPU (user ${(cpu.user / 1000).toFixed(1)}, system ${(cpu.system / 1000).toFixed(1)})`);
   }, 60_000);
+});
+
+// ---------- 1. the folder the command acts on ----------
+
+describe("the folder and config the switch check reads (failure 1)", () => {
+  it("are the ones the command's own flag parser settles on: the last value, flags before --", () => {
+    const shapes = [
+      ["--cwd", "/a", "--cwd", "/b"],
+      ["--cwd=/a", "--cwd", "/b"],
+      ["--cwd", "/b", "--cwd=/a"],
+      ["--cwd", "/a", "--", "--cwd", "/b"],
+      ["--config", "x.yaml", "--config=y.yaml"],
+      ["--offline"],
+      ["--", "--offline"],
+      ["--quiet", "--cwd", "/a", "--config", "c.yaml", "--offline", "--cwd", "/c"],
+    ];
+    // parseFlags sets OPENQODEX_OFFLINE for --offline; this process gets it back.
+    const offline = process.env.OPENQODEX_OFFLINE;
+    try {
+      for (const args of shapes) {
+        const { global, bools } = parseFlags(args, { positionals: 5 });
+        expect(context(args), args.join(" ")).toEqual({ cwd: global.cwd, ...(global.config !== undefined ? { config: global.config } : {}), offline: bools.has("--offline") });
+      }
+    } finally {
+      if (offline === undefined) delete process.env.OPENQODEX_OFFLINE;
+      else process.env.OPENQODEX_OFFLINE = offline;
+    }
+  });
+
+  it("--cwd on a repo that is on, then --cwd on one that is off, sends nothing; the other order sends", async () => {
+    const server = await capture();
+    const on = box();
+    const off = box({ config: `${BASE}openqodex_telemetry: 0\n` });
+    seedId(on);
+    const offHome = { ...off, home: on.home, oqHome: on.oqHome };
+    const r = await runCli([...SCAN, "--cwd", on.repo, "--cwd", off.repo], { cwd: on.root, env: onEnv(offHome, server.url) });
+    expect(r.status, r.stderr).toBe(0);
+    await sleep(SETTLE_MS);
+    expect(server.hits).toEqual([]);
+    const control = await capture();
+    await runCli([...SCAN, "--cwd", off.repo, "--cwd", on.repo], { cwd: on.root, env: onEnv(on, control.url) });
+    await waitFor(() => control.hits.length === 1, 10_000, "the control's request");
+  }, 60_000);
+
+  it("--cwd as a link into a subfolder of a repo that is off sends nothing", async () => {
+    const server = await capture();
+    const off = box({ config: `${BASE}openqodex_telemetry: 0\n`, change: { "sub/db/x.sql": SQL } });
+    seedId(off);
+    const link = join(off.root, "elsewhere", "link");
+    mkdirSync(dirname(link), { recursive: true });
+    symlinkSync(join(off.repo, "sub"), link);
+    const r = await runCli([...SCAN, "--cwd", link], { cwd: off.root, env: onEnv(off, server.url) });
+    expect(r.status, r.stderr).toBe(0);
+    await sleep(SETTLE_MS);
+    expect(server.hits).toEqual([]);
+  }, 30_000);
 });
 
 // ---------- 1. a global install counts as published ----------

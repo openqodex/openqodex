@@ -112,7 +112,7 @@ Code. Diffs. File names and paths. Repository, branch and remote names. Finding 
 
 ## The id
 
-The first command creates a random id in `~/.openqodex/telemetry/id`. Events carry a hash of it. It is not linked to you, your account or your repository. Delete the file to get a new id. An `init --uninstall` that removes the `openqodex` launcher from `~/.openqodex/bin` removes the id too.
+The background process of the first command creates a random id in `~/.openqodex/telemetry/id`. Events carry a hash of it. It is not linked to you, your account or your repository. Delete the file to get a new id. An `init --uninstall` that removes the `openqodex` launcher from `~/.openqodex/bin` removes the id too.
 
 ## Where it goes
 
@@ -120,7 +120,7 @@ Events go to PostHog, an analytics service, at `eu.i.posthog.com` in the EU. Pos
 
 ## How it is sent
 
-When a command ends, it starts a separate background process and gives it the events. That process makes one request and stops. Your command does not wait for it. If the request fails, the events are dropped. Nothing is kept on disk but the id.
+When a command ends, it starts a separate background process and gives it the events. That process reads the config files and the id, makes one request and stops. Your command does not wait for it. If the request fails, the events are dropped. Nothing is kept on disk but the id.
 
 ## Turn it off
 
