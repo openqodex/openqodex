@@ -1,8 +1,9 @@
 // Which reviewer `review` starts, and with which tools: the --reviewer flag,
-// the `reviewer:` and `reviewer_web:` keys of the user config
-// (<openqodex home>/config.yaml), and `auto`. The Codex and Cursor drivers
-// are this repo's own modules; the reviewer model is the one stand-in, a
-// driver object that answers with a recorded submission.
+// the project's review.reviewers and review.reviewer_web
+// (.openqodex/config.yaml), and `auto`. The Codex and Cursor drivers are
+// this repo's own modules; the reviewer model is the one stand-in, a driver
+// object that answers with a recorded submission. What happens when a
+// listed reviewer cannot start or cannot serve is reviewer-list.test.ts.
 //
 // Ways it could fail, written before the code:
 //  1. `auto` picks a driver that is not enabled (Cursor).
@@ -18,32 +19,28 @@
 // 11. A driver whose per-run boundary check fails (Codex's sandbox probe)
 //     still starts the reviewer, or ends as "Review incomplete" instead of
 //     "Full review unavailable" with the reason and the fallback.
-//  3. The config's `reviewer:` key is ignored.
-//  4. The flag does not win over the config.
+//  3. The project's review.reviewers is ignored, or `auto` starts a reviewer
+//     it does not list.
+//  4. The flag does not win over the project's list.
 //  5. The reviewer lacks its web tools with no config file, or keeps them
-//     with `reviewer_web: off`.
+//     with review.reviewer_web: off.
 //  6. A run that uses the web tools while they are on is failed by the
 //     trace check.
-//  7. A config value that is neither a known reviewer nor on or off is
-//     silently ignored.
-// 12. `--reviewer-web off` (the GitHub Action passes it) loses to the user
-//     config, or needs the file edited: a config written as a flow mapping
-//     breaks, and a run that dies leaves the file changed.
-// 14. reviewer_model or reviewer_effort in the user config does not reach the
-//     Codex reviewer, or the report does not say which model reviewed.
-// 15. --reviewer-model or --reviewer-effort loses to the user config.
-// 16. A reviewer_model that is not a model id (a number, a value that reads
-//     as a flag) or a reviewer_effort Codex does not take is passed on, or
-//     silently dropped, instead of stopping the run with the file named.
-// 17. The Codex model reaches Claude Code, whose models have other names,
-//     so a review `auto` gives to Claude Code fails; or Claude Code is
-//     started with the Codex keys at all, even as null.
-// 18. A bad reviewer_model or reviewer_effort stops a review Claude Code
-//     runs, which never uses them.
-// 19. A valid --reviewer-model or --reviewer-effort cannot start a review
-//     while the file holds a bad value of the same key.
-// 20. A bad value that is a mapping (whose own toString key breaks String())
-//     or holds a line break crashes the run, or splits its one-line error.
+//  7. A list entry naming a tool openqodex does not know is silently ignored.
+// 12. `--reviewer-web off` (the GitHub Action passes it) loses to the
+//     project's reviewer_web: on.
+// 14. A list entry's model or effort does not reach every session of its
+//     agent, Claude Code or Codex, or the report does not say which model
+//     reviewed; or a reviewer with none is given an empty one.
+// 15. `--reviewer <tool>:<model>` with --reviewer-effort does not replace the
+//     list for the run, or a value the tool cannot take is passed on.
+// 16. --reviewer-model, retired, is taken silently for some tool, or
+//     --reviewer-effort is taken without a tool to give it to.
+// 17. Claude Code's command line does not carry --model and --effort from
+//     the entry, or carries them when the entry has none.
+// 18. A value of a list entry that a tool cannot take (a model that reads as
+//     a flag, an effort it does not have) reaches the agent instead of
+//     stopping the run with the file and the key named.
 import { stagedFake } from "../../review/test/staged-fake.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -54,9 +51,8 @@ import { reviewerLine } from "@openqodex/core";
 import { parseFlags } from "../src/flags.js";
 import { runReview } from "../src/review-run.js";
 import { run as runCommand } from "../src/commands/review.js";
-import { DEPTH_ENV, claudeArgs, codexDriver, cursorDriver } from "@openqodex/review";
+import { DEPTH_ENV, claudeArgs, cursorDriver } from "@openqodex/review";
 import type { ReviewerDriver, ReviewerSession, Turn } from "@openqodex/review";
-import { DEFAULT_REVIEWER_WEB } from "../src/reviewers/settings.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -69,10 +65,15 @@ function git(cwd: string, ...args: string[]): void {
 }
 
 // A repo with one commit and an uncommitted text file: no scanner candidate.
-function repo(): string {
+// `config`: the project's .openqodex/config.yaml, committed with the base.
+function repo(config?: string): string {
   const dir = tempDir("oq-choice-");
   git(dir, "init", "-q", "-b", "main");
   writeFileSync(join(dir, "README.md"), "hello\n");
+  if (config !== undefined) {
+    mkdirSync(join(dir, ".openqodex"));
+    writeFileSync(join(dir, ".openqodex", "config.yaml"), config);
+  }
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", "Base");
   writeFileSync(join(dir, "notes.txt"), "one line\n");
@@ -134,15 +135,12 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-function userConfig(text: string): void {
-  mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "config.yaml"), text);
-}
-
-function review(drivers: ReviewerDriver[], reviewer?: string): Promise<number> {
-  const { global } = parseFlags(["--cwd", repo(), "--no-color", "--format", "json"], {});
+function review(drivers: ReviewerDriver[], reviewer?: string, config?: string): Promise<number> {
+  const { global } = parseFlags(["--cwd", repo(config), "--no-color", "--format", "json"], {});
   return runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer, timeoutMs: 60_000, drivers });
 }
+
+const listing = (...entries: string[]) => `version: 1\nreview:\n  reviewers:\n${entries.map((e) => `    - ${e}\n`).join("")}`;
 
 describe("choosing the reviewer", () => {
   it("1. auto passes by Cursor, which is not enabled, and starts Claude Code", async () => {
@@ -187,34 +185,33 @@ describe("choosing the reviewer", () => {
     expect(reasons[1]).toMatch(/^- claude: /);
   });
 
-  it("3. the config's reviewer: key picks the driver", async () => {
-    userConfig("reviewer: cursor\n");
+  it("3. the project's review.reviewers picks the driver, and a driver it does not list is never started", async () => {
     const claude = fake();
-    expect(await review([codexDriver, cursorDriver, claude])).toBe(2);
+    const codex = fake([], "codex");
+    expect(await review([claude, codex], undefined, listing("tool: codex"))).toBe(0);
+    expect(codex.starts).toHaveLength(2);
     expect(claude.starts).toHaveLength(0);
-    expect(err).toMatch(/cursor: not enabled/);
+    expect((JSON.parse(out) as Report).completion?.reviewer?.driver).toBe("codex");
   });
 
-  it("4. --reviewer wins over the config", async () => {
-    userConfig("reviewer: codex\n");
+  it("4. --reviewer wins over the project's list", async () => {
     const claude = fake();
-    expect(await review([codexDriver, claude], "claude")).toBe(0);
+    const codex = fake([], "codex");
+    expect(await review([claude, codex], "claude", listing("tool: codex"))).toBe(0);
     expect(claude.starts).toHaveLength(2);
+    expect(codex.starts).toHaveLength(0);
   });
 
-  it("7. a reviewer: or reviewer_web: value openqodex does not know stops the run and names the file", async () => {
-    userConfig("reviewer: gemini\n");
-    await expect(review([fake()])).rejects.toThrow(/config\.yaml.*reviewer/);
-    userConfig("reviewer_web: sometimes\n");
-    await expect(review([fake()])).rejects.toThrow(/config\.yaml.*reviewer_web/);
+  it("7. a list entry naming a tool openqodex does not know stops the run and names the file and the key", async () => {
+    await expect(review([fake()], undefined, listing("tool: gemini"))).rejects.toThrow(/\.openqodex\/config\.yaml: review\.reviewers\[0\]\.tool: /);
+    await expect(review([fake()], undefined, "review:\n  reviewer_web: sometimes\n")).rejects.toThrow(/\.openqodex\/config\.yaml: review\.reviewer_web: /);
   });
 });
 
-describe("the Codex reviewer's model and reasoning effort", () => {
-  it("14. reviewer_model and reviewer_effort reach every Codex session, and the report names them", async () => {
-    userConfig("reviewer_model: gpt-test-model\nreviewer_effort: high\n");
+describe("a list entry's model and reasoning effort", () => {
+  it("14. a Codex entry's model and effort reach every Codex session, and the report names them", async () => {
     const codex = fake([], "codex");
-    expect(await review([codex], "codex")).toBe(0);
+    expect(await review([codex], undefined, listing("tool: codex\n      model: gpt-test-model\n      effort: high"))).toBe(0);
     expect(codex.starts.length).toBeGreaterThan(0);
     for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-test-model", effort: "high" });
     const report = JSON.parse(out) as Report;
@@ -222,81 +219,66 @@ describe("the Codex reviewer's model and reasoning effort", () => {
     expect(reviewerLine(report.completion?.reviewer ?? null)).toMatch(/^Reviewer: codex 9\.9\.9, model gpt-test-model, effort high, /);
   });
 
-  it("14. without the keys Codex gets no model and no effort, and the report names none", async () => {
-    const codex = fake([], "codex");
-    expect(await review([codex], "codex")).toBe(0);
-    for (const start of codex.starts) expect(start).toStrictEqual({ web: true });
-    const reviewer = (JSON.parse(out) as Report).completion?.reviewer;
-    expect(reviewer).not.toHaveProperty("model");
-    expect(reviewer).not.toHaveProperty("effort");
+  it("14. a Claude Code entry's model and effort reach every Claude Code session, and the report names them", async () => {
+    const claude = fake();
+    expect(await review([claude], undefined, listing("tool: claude\n      model: sonnet[1m]\n      effort: max"))).toBe(0);
+    expect(claude.starts.length).toBeGreaterThan(0);
+    for (const start of claude.starts) expect(start).toEqual({ web: true, model: "sonnet[1m]", effort: "max" });
+    expect((JSON.parse(out) as Report).completion?.reviewer).toMatchObject({ driver: "claude", model: "sonnet[1m]", effort: "max" });
   });
 
-  it("15. --reviewer-model and --reviewer-effort win over the user config, which stays as it was", async () => {
-    const text = "reviewer_model: gpt-test-model\nreviewer_effort: high\n";
-    userConfig(text);
-    const codex = fake([], "codex");
-    const { global } = parseFlags(["--cwd", repo(), "--no-color", "--format", "json"], {});
-    expect(await runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer: "codex", timeoutMs: 60_000, drivers: [codex], reviewerModel: "gpt-other", reviewerEffort: "low" })).toBe(0);
-    for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-other", effort: "low" });
-    expect(readFileSync(join(home, "config.yaml"), "utf8")).toBe(text);
-  });
-
-  it("15, 16. the review command takes --reviewer-model and --reviewer-effort, and refuses a value Codex cannot take before anything runs", async () => {
-    const codex = fake([], "codex");
-    const cwd = repo();
-    expect(await runCommand(["--cwd", cwd, "--no-color", "--format", "json", "--only", "sqllint", "--no-graph", "--reviewer", "codex", "--reviewer-model", "gpt-flag", "--reviewer-effort", "xhigh"], [codex])).toBe(0);
-    for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-flag", effort: "xhigh" });
-    const unused = fake([], "codex");
-    await expect(runCommand(["--cwd", cwd, "--reviewer", "codex", "--reviewer-effort", "extreme"], [unused])).rejects.toThrow(/^--reviewer-effort must be one of low, medium, high, xhigh, not extreme$/);
-    await expect(runCommand(["--cwd", cwd, "--reviewer", "codex", "--reviewer-model", "a b"], [unused])).rejects.toThrow(/^--reviewer-model must be a model id/);
-    expect(unused.starts).toHaveLength(0);
-  });
-
-  it("16. a reviewer_model that is not a model id, or a reviewer_effort Codex does not take, stops the run and names the file", async () => {
-    for (const bad of ["reviewer_model: 5\n", "reviewer_model: '--yolo'\n", "reviewer_model: ''\n", "reviewer_effort: extreme\n", "reviewer_effort: minimal\n"]) {
-      userConfig(bad);
+  it("14. an entry, a reviewer named alone and auto with no model give none, and the report names none", async () => {
+    for (const [reviewer, config] of [[undefined, listing("tool: codex")], ["codex", undefined], [undefined, undefined]] as const) {
       const codex = fake([], "codex");
-      await expect(review([codex], "codex")).rejects.toThrow(new RegExp(`config\\.yaml: ${bad.split(":")[0]} must be`));
-      expect(codex.starts).toHaveLength(0);
+      out = "";
+      expect(await review([codex], reviewer, config)).toBe(0);
+      for (const start of codex.starts) expect(start).toStrictEqual({ web: true });
+      const reviewerRecord = (JSON.parse(out) as Report).completion?.reviewer;
+      expect(reviewerRecord).not.toHaveProperty("model");
+      expect(reviewerRecord).not.toHaveProperty("effort");
     }
   });
 
-  it("18. a bad reviewer_model or reviewer_effort does not stop a review Claude Code runs", async () => {
-    userConfig("reviewer_model: '--yolo'\nreviewer_effort: extreme\n");
+  it("15. --reviewer <tool>:<model> with --reviewer-effort replaces the project's list for the run, and a value the tool cannot take is refused before anything runs", async () => {
     const claude = fake();
-    expect(await review([claude], "claude")).toBe(0);
-    expect(claude.starts.length).toBeGreaterThan(0);
-    for (const start of claude.starts) expect(start).toStrictEqual({ web: true });
-  });
-
-  it("19. a valid flag wins over a bad file value of the same key, and the other key's bad value still stops Codex", async () => {
-    userConfig("reviewer_model: '--yolo'\nreviewer_effort: extreme\n");
     const codex = fake([], "codex");
-    const { global } = parseFlags(["--cwd", repo(), "--no-color", "--format", "json"], {});
-    expect(await runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer: "codex", timeoutMs: 60_000, drivers: [codex], reviewerModel: "gpt-flag", reviewerEffort: "low" })).toBe(0);
-    for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-flag", effort: "low" });
-    const half = fake([], "codex");
-    await expect(runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", reviewer: "codex", timeoutMs: 60_000, drivers: [half], reviewerModel: "gpt-flag" })).rejects.toThrow(/config\.yaml: reviewer_effort must be one of low, medium, high, xhigh, not extreme$/);
-    expect(half.starts).toHaveLength(0);
+    const cwd = repo(listing("tool: claude\n      model: opus"));
+    expect(await runCommand(["--cwd", cwd, "--no-color", "--format", "json", "--only", "sqllint", "--no-graph", "--reviewer", "codex:gpt-flag", "--reviewer-effort", "xhigh"], [claude, codex])).toBe(0);
+    expect(claude.starts).toHaveLength(0);
+    for (const start of codex.starts) expect(start).toEqual({ web: true, model: "gpt-flag", effort: "xhigh" });
+    const unused = fake([], "codex");
+    await expect(runCommand(["--cwd", cwd, "--reviewer", "codex", "--reviewer-effort", "max"], [unused])).rejects.toThrow(/^--reviewer-effort must be one of low, medium, high, xhigh for codex, not max$/);
+    await expect(runCommand(["--cwd", cwd, "--reviewer", "codex:-m"], [unused])).rejects.toThrow(/^--reviewer codex:-m: the model must be a Codex model id/);
+    await expect(runCommand(["--cwd", cwd, "--reviewer", "gemini:pro"], [unused])).rejects.toThrow(/^--reviewer must be auto, one of claude, codex, cursor, or <tool>:<model>/);
+    expect(unused.starts).toHaveLength(0);
   });
 
-  it("20. a bad value that is a mapping with its own toString, or holds a line break, stops Codex with one line naming the file", async () => {
-    userConfig("reviewer_model: {toString: x}\nreviewer_effort: \"high\\nlow\"\n");
-    const codex = fake([], "codex");
-    const error = await review([codex], "codex").then(() => null, (e: Error) => e);
-    expect(error).toBeInstanceOf(Error);
-    expect(error!.constructor.name).not.toBe("TypeError");
-    expect(error!.message).not.toContain("\n");
-    expect(error!.message).toMatch(/config\.yaml: reviewer_model must be a model id such as gpt-5\.5, not a mapping; .*config\.yaml: reviewer_effort must be one of low, medium, high, xhigh, not high\\u000alow$/);
-    expect(codex.starts).toHaveLength(0);
+  it("16. --reviewer-model is refused with the flag that replaces it, and --reviewer-effort needs a tool", async () => {
+    const cwd = repo();
+    const unused = fake([], "codex");
+    await expect(runCommand(["--cwd", cwd, "--reviewer", "codex", "--reviewer-model", "gpt-5.5"], [unused])).rejects.toThrow(/^--reviewer-model is replaced by --reviewer <tool>:<model>, such as --reviewer codex:gpt-5\.5$/);
+    await expect(runCommand(["--cwd", cwd, "--reviewer-effort", "low"], [unused])).rejects.toThrow(/^--reviewer-effort goes with --reviewer <tool>/);
+    await expect(runCommand(["--cwd", cwd, "--reviewer", "auto", "--reviewer-effort", "low"], [unused])).rejects.toThrow(/not auto$/);
+    expect(unused.starts).toHaveLength(0);
   });
 
-  it("17. Claude Code is not given the Codex model or effort, and its report names none", async () => {
-    userConfig("reviewer_model: gpt-test-model\nreviewer_effort: high\n");
-    const claude = fake();
-    expect(await review([claude], "claude")).toBe(0);
-    for (const start of claude.starts) expect(start).toStrictEqual({ web: true });
-    expect((JSON.parse(out) as Report).completion?.reviewer).not.toHaveProperty("model");
+  it("18. a list entry value the tool cannot take stops the run, naming the file and the key", async () => {
+    for (const [entry, key] of [["tool: codex\n      model: '--yolo'", "model"], ["tool: codex\n      effort: max", "effort"], ["tool: codex\n      effort: minimal", "effort"], ["tool: claude\n      model: '-p'", "model"], ["tool: claude\n      effort: ultra", "effort"]] as const) {
+      const codex = fake([], "codex");
+      const claude = fake();
+      await expect(review([claude, codex], undefined, listing(entry))).rejects.toThrow(new RegExp(`\\.openqodex/config\\.yaml: review\\.reviewers\\[0\\]\\.${key}: must be`));
+      expect(codex.starts).toHaveLength(0);
+      expect(claude.starts).toHaveLength(0);
+    }
+  });
+
+  it("17. Claude Code's command line carries --model and --effort from the entry, and neither without one", () => {
+    const args = claudeArgs(true, "opus", "high");
+    expect(args[args.indexOf("--model") + 1]).toBe("opus");
+    expect(args[args.indexOf("--effort") + 1]).toBe("high");
+    const plain = claudeArgs(true);
+    expect(plain).not.toContain("--model");
+    expect(plain).not.toContain("--effort");
   });
 });
 
@@ -314,7 +296,6 @@ describe("the per-run boundary check", () => {
 
 describe("web tools", () => {
   it("5. with no config file the reviewer is started with web on and the Claude Code command line carries WebSearch and WebFetch", async () => {
-    expect(DEFAULT_REVIEWER_WEB).toBe("on");
     const claude = fake();
     expect(await review([claude])).toBe(0);
     expect(claude.starts).toEqual([{ web: true }, { web: true }]);
@@ -323,10 +304,9 @@ describe("web tools", () => {
     expect(args[args.indexOf("--allowedTools") + 1]).toBe("WebSearch,WebFetch");
   });
 
-  it("5. reviewer_web: off starts the reviewer without web tools, and the Claude Code command line names none", async () => {
-    userConfig("reviewer_web: off\n");
+  it("5. the project's review.reviewer_web: off starts the reviewer without web tools, and the Claude Code command line names none", async () => {
     const claude = fake();
-    expect(await review([claude])).toBe(0);
+    expect(await review([claude], undefined, "review:\n  reviewer_web: off\n")).toBe(0);
     expect(claude.starts).toEqual([{ web: false }, { web: false }]);
     const args = claudeArgs(false);
     expect(args[args.indexOf("--tools") + 1]).toBe("Read,Grep,Glob");
@@ -341,24 +321,23 @@ describe("web tools", () => {
     expect((JSON.parse(out) as Report).completion?.status).toBe("complete");
   });
 
-  it("12, R26. --reviewer-web off wins over reviewer_web: on in a user config written as a flow mapping, and the file stays as it was", async () => {
-    const text = "{reviewer: auto, reviewer_web: on}\n";
-    userConfig(text);
+  it("12, R26. --reviewer-web off wins over the project's reviewer_web: on, and the file stays as it was", async () => {
+    const text = "review: {reviewer_web: on}\n";
+    const cwd = repo(text);
     const claude = fake();
-    const { global } = parseFlags(["--cwd", repo(), "--no-color", "--format", "json"], {});
+    const { global } = parseFlags(["--cwd", cwd, "--no-color", "--format", "json"], {});
     expect(await runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", timeoutMs: 60_000, drivers: [claude], web: false })).toBe(0);
     expect(claude.starts).toEqual([{ web: false }, { web: false }]);
-    expect(readFileSync(join(home, "config.yaml"), "utf8")).toBe(text);
+    expect(readFileSync(join(cwd, ".openqodex", "config.yaml"), "utf8")).toBe(text);
     // Without the flag the same file turns the web tools on.
     const own = fake();
-    expect(await review([own])).toBe(0);
+    expect(await review([own], undefined, text)).toBe(0);
     expect(own.starts).toEqual([{ web: true }, { web: true }]);
   });
 
-  it("5. with reviewer_web: off, a web tool call makes the run incomplete", async () => {
-    userConfig("reviewer_web: off\n");
+  it("5. with review.reviewer_web: off, a web tool call makes the run incomplete", async () => {
     const web = [{ tool: "WebFetch", input: { url: "https://example.com", prompt: "read" }, ok: true, read: null }];
-    expect(await review([fake(web)])).toBe(2);
+    expect(await review([fake(web)], undefined, "review:\n  reviewer_web: off\n")).toBe(2);
     expect((JSON.parse(out) as Report).completion?.missing.join("\n")).toContain("WebFetch");
   });
 });

@@ -19,7 +19,7 @@ import { promisify } from "node:util";
 import type { ReviewerUsage } from "@openqodex/core";
 import { openqodexHome } from "@openqodex/scanners";
 import { checkoutsDir } from "../checkouts.js";
-import { DEPTH_ENV, TIMED_OUT, findOnPath, killGroup, launch, namesLimit, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
+import { DEPTH_ENV, TIMED_OUT, cannotServe, findOnPath, killGroup, launch, onAllowlist, reviewerError, spawnGroup } from "./driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, StartOptions, Turn } from "./driver.js";
 import type { ToolCall } from "./trace.js";
 
@@ -42,11 +42,12 @@ function profileConfig(filesystem: string): string[] {
   return ["-c", 'default_permissions="openqodex_review"', "-c", `permissions.openqodex_review.filesystem=${filesystem}`];
 }
 
-// `web`: Codex's web search tool is on only when the user config sets
-// `reviewer_web: on`. Shell commands get no network either way: the
+// `web`: Codex's web search tool is on unless the project's config sets
+// `review.reviewer_web: off`. Shell commands get no network either way: the
 // permission profile has no network entry. `model` and `effort`: the
-// user config's reviewer_model and reviewer_effort; null leaves Codex's
-// own default, as --ignore-user-config keeps the developer's config.toml out.
+// project's list entry, or --reviewer codex:<model> and --reviewer-effort;
+// null leaves Codex's own default, as --ignore-user-config keeps the
+// developer's config.toml out.
 export function codexArgs(snapshotDir: string, web: boolean, model: string | null = null, effort: string | null = null): string[] {
   return [
     "exec",
@@ -170,6 +171,36 @@ async function detect(repoRoot: string, env: NodeJS.ProcessEnv = process.env, pl
   return { ok: true, version, bin };
 }
 
+// The models this login can use, from `codex debug models` (seen with
+// codex-cli 0.171.0: {"models":[{"slug","visibility","priority"}...]}), and
+// the one Codex lists first (the lowest priority among those it shows).
+// Null when the command fails or prints something else: a lookup that
+// failed is not a model that is missing.
+export function codexCatalog(stdout: string): { models: string[]; top: string | null } | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const list = (data as { models?: unknown } | null)?.models;
+  if (!Array.isArray(list)) return null;
+  const rows = list.filter((m): m is { slug: string; visibility?: unknown; priority?: unknown } => typeof (m as { slug?: unknown } | null)?.slug === "string");
+  // A row without a slug may hide a model: the list is not whole, so it says nothing.
+  if (rows.length === 0 || rows.length !== list.length) return null;
+  const shown = rows.filter((m) => m.visibility === "list").sort((a, b) => (typeof a.priority === "number" ? a.priority : Infinity) - (typeof b.priority === "number" ? b.priority : Infinity));
+  return { models: rows.map((m) => m.slug), top: shown[0]?.slug ?? null };
+}
+
+async function models(bin: string): Promise<{ models: string[]; top: string | null } | null> {
+  try {
+    const { stdout } = await execFileAsync(...launch(bin, ["debug", "models"]), { env: codexEnv(), timeout: DETECT_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 });
+    return codexCatalog(stdout);
+  } catch {
+    return null;
+  }
+}
+
 // The per-run proof of the boundary. The permission keys are Codex
 // configuration that a newer version could rename or ignore, and the event
 // stream would not show it, so before the first model run the same keys run
@@ -291,6 +322,9 @@ export type CodexRun = { finalText: string; calls: ToolCall[]; input: number | n
 export function codexStream(secrets: string[] = []): { line(text: string): string | null; end(code: number | null, signal: string | null): CodexRun } {
   let answer: string | null = null;
   let completed = false;
+  // A `turn.failed` ends the turn; an `error` event alone may be a retry
+  // that recovered (a reconnect, an overload) before the turn completed.
+  let turnFailed = false;
   let failed: string | null = null;
   let input: number | null = null;
   let output: number | null = null;
@@ -305,10 +339,12 @@ export function codexStream(secrets: string[] = []): { line(text: string): strin
       return null;
     }
     if (e.type === "turn.failed" || e.type === "error") {
+      if (e.type === "turn.failed") turnFailed = true;
       const said = reviewerError(str((e.error as Record<string, unknown> | undefined)?.message) ?? str(e.message), undefined, secrets);
-      // The first error, unless a later one names a limit and it does not:
-      // a reconnect notice can come before the usage limit that ends the turn.
-      if (failed === null || (namesLimit(said) && !namesLimit(failed))) failed = said;
+      // The first error, unless a later one says the model cannot serve and
+      // it does not: a reconnect notice can come before the usage limit or
+      // the unsupported model that ends the turn.
+      if (failed === null || (cannotServe(said) && !cannotServe(failed))) failed = said;
       return null;
     }
     if (e.type !== "item.completed") return null;
@@ -344,6 +380,9 @@ export function codexStream(secrets: string[] = []): { line(text: string): strin
     },
     end(code: number | null, signal: string | null): CodexRun {
       const base = { calls, input, output };
+      // A turn that completed with an answer and exit 0 is answered, though
+      // an error event came before it: Codex retried and recovered.
+      if (!turnFailed && completed && code === 0 && answer !== null) return { ...base, finalText: answer, failure: null };
       if (failed !== null) return { ...base, finalText: "", failure: failed };
       if (code !== 0) return { ...base, finalText: "", failure: `the reviewer exited (${signal ?? `exit ${code}`}) before it answered` };
       if (!completed) return { ...base, finalText: "", failure: "the reviewer ended without finishing its turn" };
@@ -416,7 +455,11 @@ function start(opts: StartOptions): ReviewerSession {
         }
         const r = stream.end(code, signal);
         if (stopped !== null) return done({ ...r, finalText: "", failure: stopped });
-        if (r.failure !== null && errLine !== null && r.failure.includes("exited")) return done({ ...r, failure: `${r.failure}: ${errLine}` });
+        if (r.failure !== null && errLine !== null && r.failure.includes("exited")) {
+          // A model that cannot serve, said on stderr only, still lets a list move on.
+          const said = reviewerError(errLine, undefined, opts.secrets);
+          return done({ ...r, failure: cannotServe(said) ? said : `${r.failure}: ${errLine}` });
+        }
         done(r);
       });
       proc.stdin?.on("error", () => {
@@ -451,5 +494,5 @@ function start(opts: StartOptions): ReviewerSession {
   };
 }
 
-export const codexDriver: ReviewerDriver = { name: "codex", traced: false, detect: (repoRoot) => detect(repoRoot), check: ({ snapshotDir, bin, register }) => probeSandbox(bin, snapshotDir, PROFILE_FILESYSTEM, register), start };
+export const codexDriver: ReviewerDriver = { name: "codex", traced: false, detect: (repoRoot) => detect(repoRoot), check: ({ snapshotDir, bin, register }) => probeSandbox(bin, snapshotDir, PROFILE_FILESYSTEM, register), models, start };
 export { detect as detectCodex };

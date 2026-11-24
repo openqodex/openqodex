@@ -34,6 +34,21 @@ export const NOTICES: readonly Notice[] = [
     kind: "blocks a push",
     text: "A name in scanners.disable that this version does not know is ignored with a warning and the review runs, so it can block a push; before, the run stopped with exit 2 and the push went through.",
   },
+  {
+    version: "next",
+    kind: "who reviews",
+    text: "Each project chooses its reviewer in .openqodex/config.yaml (review.reviewers, tried in order, with model and effort); reviewer, reviewer_model and reviewer_effort in ~/.openqodex/config.yaml are no longer read, and a review names the lines to add instead.",
+  },
+  {
+    version: "next",
+    kind: "leaves the machine",
+    text: "A project's review.reviewers can send one review to more than one model service: when an entry hits a limit or its model cannot serve, the review starts again on the next entry. reviewer_web: off in ~/.openqodex/config.yaml still keeps the web tools off for now; move it to the project's review.reviewer_web.",
+  },
+  {
+    version: "next",
+    kind: "blocks a push",
+    text: "A review made under another review.reviewers or review.reviewer_web no longer counts for the push hooks, so a push under block_on_severity needs a new review after either changes.",
+  },
 ];
 
 type Version = [number, number, number];

@@ -21,6 +21,9 @@
 // 11. A blocked push tells the agent to fix everything, where the developer
 //     chooses what to fix.
 // 12. An unread-only failure omits the first range from the push message.
+// 13. A review made under another review.reviewers or review.reviewer_web
+//     passes the push (neither moves the change id), or a receipt written
+//     before reviewer lists stops passing.
 import { describe, expect, it } from "vitest";
 import { finalizeReview } from "./finalize.js";
 import { checkPush, gateReceipt } from "./push-gate.js";
@@ -126,6 +129,24 @@ describe("checkPush", () => {
         expect(["abstain", "deny"]).toContain(d.decision);
       }
     }
+  });
+
+  it("13. does not count a review made under another reviewer list or reviewer_web; an older receipt keeps its rule", () => {
+    const listed = makeConfig({ blockOnSeverity: "critical", reviewers: [{ tool: "codex", model: "gpt-x" }] });
+    const under = (config: ReturnType<typeof makeConfig>) => gateReceipt(judged("critical"), "complete", DIR, HTML, config);
+    // The same policy: the review counts (and its finding blocks).
+    expect(checkPush({ currentChangeId: change.id, receipt: under(listed), config: listed }).message).toContain("the review of this change found");
+    for (const before of [makeConfig({ blockOnSeverity: "critical" }), { ...listed, reviewerWeb: false }, makeConfig({ blockOnSeverity: "critical", reviewers: [{ tool: "claude" }] })]) {
+      const d = checkPush({ currentChangeId: change.id, receipt: under(before), config: listed });
+      expect(d.decision).toBe("deny");
+      expect(d.message).toContain("under the current review.reviewers and review.reviewer_web");
+    }
+    // Without a threshold it says so and does not block.
+    const quiet = checkPush({ currentChangeId: change.id, receipt: under(makeConfig()), config: { ...listed, blockOnSeverity: null } });
+    expect(quiet.decision).toBe("abstain");
+    expect(quiet.message).toContain("under the current review.reviewers");
+    // A receipt written before lists has no policy: the old rule holds.
+    expect(checkPush({ currentChangeId: change.id, receipt: complete("critical"), config: listed }).message).toContain("the review of this change found");
   });
 
   it("6. denies a passing review made before block_on_severity was set", () => {

@@ -6,6 +6,7 @@ import pc from "picocolors";
 import { deletionLabel, unreadRangeCount, deletionLabels, shortenedMissing } from "../completion.js";
 import { hunkFragmentLabel } from "../delivery.js";
 import type { CompletionRecord, ModelCompletionRecord, Report, ReportFinding, ReviewerRecord } from "../types.js";
+import { passedLines } from "../types.js";
 import { candidateLocation, coverageLine, display, escapeMarkdown, findingTitle, firstLine, location, lowConfidenceReason, notOpenedLabel, observationsOmittedLine, orderFindings, orderObservations, orderPossible, ruleLabel, severityBreakdown, verdictLine } from "./common.js";
 import { impactLine } from "./terminal.js";
 
@@ -39,7 +40,8 @@ export function reviewerLine(r: ReviewerRecord | null): string {
   if (r.usage.input_tokens !== null) parts.push(`${r.usage.input_tokens.toLocaleString("en-US")} tokens in`);
   if (r.usage.output_tokens !== null) parts.push(`${r.usage.output_tokens.toLocaleString("en-US")} out`);
   if (r.usage.cost_usd !== null) parts.push(`$${r.usage.cost_usd.toFixed(2)}`);
-  return `Reviewer: ${parts.join(", ")}`;
+  const passed = passedLines(r.passed);
+  return `Reviewer: ${parts.join(", ")}${passed.length > 0 ? `; tried first: ${passed.join("; ")}` : ""}`;
 }
 
 // The reviewer line of a model review, from the brain's own record of every

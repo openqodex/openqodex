@@ -18,6 +18,7 @@
 // hash. Secrets are redacted in the display model before this runs.
 import { createHash } from "node:crypto";
 import type { Candidate, ImpactEdge, ImpactSummary, Report, ReportFinding } from "../types.js";
+import { passedLines } from "../types.js";
 import type { Display, DisplayFile, DisplayHunk } from "./display.js";
 import { coverageLine, lowConfidenceReason, observationsOmittedLine, orderObservations, orderPossible, ruleLabel, verdictLine } from "./common.js";
 import { REPORT_CSS } from "./html-style.js";
@@ -228,7 +229,8 @@ function reviewerSentence(report: Report): string {
   if (usage.input_tokens !== null) parts.push(`${grouped(usage.input_tokens, 0)} tokens in`);
   if (usage.output_tokens !== null) parts.push(`${grouped(usage.output_tokens, 0)} out`);
   if (usage.cost_usd !== null) parts.push(`$${fixed(usage.cost_usd, 2)}`);
-  return parts.join(", ");
+  const passed = passedLines(r.passed);
+  return `${parts.join(", ")}${passed.length > 0 ? `; tried first: ${passed.join("; ")}` : ""}`;
 }
 
 function location(f: { file_path: string; line_number: number; line_end?: number | null }): string {

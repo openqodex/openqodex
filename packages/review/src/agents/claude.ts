@@ -18,9 +18,13 @@ import type { ToolCall } from "./trace.js";
 
 const execFileAsync = promisify(execFile);
 
-// `web`: WebSearch and WebFetch are added unless the user config sets
-// `reviewer_web: off`.
-export function claudeArgs(web: boolean): string[] {
+// `web`: WebSearch and WebFetch are added unless the project's config sets
+// `review.reviewer_web: off`. `model` and `effort`: the project's list
+// entry; `--model` wins over ANTHROPIC_MODEL, which the reviewer still gets
+// (shown with Claude Code 2.1.331: `--model haiku --effort low` started
+// claude-haiku-5-5). CLAUDE_CODE_EFFORT_LEVEL, which would win over
+// `--effort`, is not in the reviewer's environment.
+export function claudeArgs(web: boolean, model: string | null = null, effort: string | null = null): string[] {
   const tools = web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS;
   return [
     "-p",
@@ -51,6 +55,8 @@ export function claudeArgs(web: boolean): string[] {
     JSON.stringify({ mcpServers: {} }),
     "--disable-slash-commands",
     "--no-session-persistence",
+    ...(model !== null ? ["--model", model] : []),
+    ...(effort !== null ? ["--effort", effort] : []),
     // dontAsk refuses the web tools unless they are allowed by name.
     ...(web ? ["--allowedTools", REVIEWER_WEB_TOOLS.join(",")] : []),
   ];
@@ -177,12 +183,12 @@ function removeSavedOutput(configDir: string, snapshotDir: string, sessionId: st
   }
 }
 
-// `model` and `effort` are not taken: Claude Code's model comes from
-// ANTHROPIC_MODEL, which reviewerEnv passes on.
+// Without a model, Claude Code's model comes from ANTHROPIC_MODEL, which
+// reviewerEnv passes on, else from its own default.
 function start(opts: StartOptions): ReviewerSession {
   const allowed = opts.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS;
   const env = reviewerEnv();
-  const child = spawnGroup(opts.bin, claudeArgs(opts.web), { cwd: opts.snapshotDir, env });
+  const child = spawnGroup(opts.bin, claudeArgs(opts.web, opts.model ?? null, opts.effort ?? null), { cwd: opts.snapshotDir, env });
   // The configuration folder the agent uses, read from the environment it
   // was given as init reads it; it saves its own output for the session there.
   // Claude Code joins a relative CLAUDE_CONFIG_DIR as given, so it lands in
@@ -199,6 +205,11 @@ function start(opts: StartOptions): ReviewerSession {
   // The models the last result event named (its modelUsage keys).
   let models: string[] = [];
   let failure: string | null = null;
+  // What the stream said of an API error before the result: the assistant
+  // message's `error` (model_not_found, rate_limit, overloaded) and a
+  // rate_limit_event whose status is rejected. Added to the result's text,
+  // so reviewerError can tell a limit or a model that cannot serve.
+  const apiErrors = new Set<string>();
   let waiting: ((t: Turn) => void) | null = null;
   let exited = false;
 
@@ -208,6 +219,8 @@ function start(opts: StartOptions): ReviewerSession {
     const turn: Turn = { finalText, calls, usage, sessionId, failure: why, ...(models.length > 0 ? { models } : {}), own: sessionId === null ? null : { configDir, sessionId } };
     calls = [];
     traceChars = 0;
+    // An API error belongs to the turn it came in, never to a later one.
+    apiErrors.clear();
     done?.(turn);
   };
   const fail = (why: string): void => {
@@ -233,6 +246,8 @@ function start(opts: StartOptions): ReviewerSession {
       else if (e.memory_paths !== undefined && e.memory_paths !== null) fail("the reviewer started with memory turned on");
       return;
     }
+    if (e.type === "rate_limit_event" && (e.rate_limit_info as { status?: unknown } | undefined)?.status === "rejected") apiErrors.add("rate_limit rejected");
+    if (e.type === "assistant" && str(e.error) !== null) apiErrors.add(str(e.error)!);
     const content = ((e.message as { content?: unknown } | undefined)?.content ?? []) as Record<string, unknown>[];
     if (e.type === "assistant" && Array.isArray(content)) {
       for (const c of content) {
@@ -279,7 +294,10 @@ function start(opts: StartOptions): ReviewerSession {
       };
       const answer = str(e.result) ?? "";
       // The reason is in `result`; `subtype` can say "success" even then.
-      if (e.is_error === true) fail(reviewerError(str(e.result), str(e.subtype) ?? undefined, opts.secrets));
+      if (e.is_error === true) {
+        const said = [str(e.result), ...apiErrors, str(e.api_error_type)].filter((s) => s !== null).join(" ");
+        fail(reviewerError(said === "" ? null : said, str(e.subtype) ?? undefined, opts.secrets));
+      }
       else if (Buffer.byteLength(answer, "utf8") > MAX_ANSWER_BYTES) fail(`the reviewer stopped: its answer over ${MAX_ANSWER_BYTES / 1024 / 1024} MB`);
       else finish(answer, null);
     }

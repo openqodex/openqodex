@@ -24,6 +24,8 @@ An unknown key prints a warning and is ignored. A name in `scanners.disable` tha
 | `review.include_fixtures` | `false` | Keep scanner findings in test fixtures, mocks and snapshots. |
 | `review.instructions_files` | `[]` | Repo-relative convention paths or globs the owners chose for the reviewer. Empty reads none. |
 | `review.stages` | `true` | Staged review, the default, splits the change into units. A unit holds a few small files, one measured part or one [structural summary](claude-code-review.md#structural-summaries). Two fresh finder sessions read each unit. A fresh verifier then checks the candidates on each changed file. `false` selects the legacy single pass, without parts, structural summaries or coverage labels. The single pass brief carries at most 200 KB of diff text. Only the single pass has that cap. Its delivery pages hold at most 4,000 rows and 512 KB, as in the staged review. Both routes cut a line over 2,000 bytes into fragments. The single pass does not require a replaced line's old text; its pages still carry pure deletions in fragments. `--agent` and `--all` always run one pass. |
+| `review.reviewers` | `[]` | The reviewers to try, top to bottom, each a `tool` (claude or codex) with an optional `model` and `effort`. One that cannot start here is passed over with its reason; one whose model hits a limit or cannot serve stops the review, which starts again on the next entry. Empty: the agent you run the review from, then Claude Code, then Codex. `openqodex guide config` lists the values each tool takes. |
+| `review.reviewer_web` | `on` | `off` removes the reviewer's web tools: Claude Code's WebSearch and WebFetch, Codex's cached web search. `--reviewer-web` wins for one run. |
 | `scanners.disable` | `[]` | Built-in scanners to switch off, by name. |
 | `scanners.custom` | `[]` | Open source scanners to add by GitHub link; each runs only after openqodex trust. |
 | `graph.enabled` | `true` | Show the callers and importers of the changed code in the brief. |
@@ -286,18 +288,53 @@ The brief lists a function, class or type the change deletes as removed, with ea
 - `graph.max_cache_mb`: the size bound of `.openqodex/graph/`, in MB. The oldest builds and facts no kept build names are removed first; builds in use are never removed. The default is `512`.
 - `graph.max_heap_mb`: the memory the graph may take, in MB. Past it no more files are read, and the graph says how many it left out. The default is `1536`: a whole build of a 14,000-file repository from cached facts needs about 1 GB.
 
+## Reviewers
+
+`review.reviewers` says who reviews a change, for the whole team, in the order to try them. Each entry is a `tool`, `claude` or `codex`, with an optional `model` and `effort`:
+
+```yaml
+review:
+  reviewers:
+    - tool: claude
+      model: opus
+      effort: high
+    - tool: codex
+      model: gpt-5.5
+      effort: high
+  reviewer_web: on
+```
+
+- `tool: claude` is Claude Code. `model` is an alias (`fable`, `opus`, `sonnet`, `haiku`, also with a suffix such as `sonnet[1m]`) or a full model id. `effort` is `low`, `medium`, `high`, `xhigh` or `max`. Claude Code gets them as `--model` and `--effort`, so a model set here wins over `ANTHROPIC_MODEL`. Without a model, Claude Code takes `ANTHROPIC_MODEL`, else its own default.
+- `tool: codex` is Codex. `model` is a Codex model id. `effort` is `low`, `medium`, `high` or `xhigh`; `minimal` is refused, because OpenAI refuses web search at that effort. Codex gets them as `-m` and `-c model_reasoning_effort`. Without them, Codex uses its own defaults: the reviewer runs without your Codex `config.toml`.
+
+A value a tool cannot take, or one that starts like a flag, stops `review` with one line that names the file and the key, such as `review.reviewers[0].effort`.
+
+How `review` tries the list:
+
+1. Before anything starts, it passes over each entry that cannot start on this machine, with one line saying why: the agent is not installed, not logged in, or refused. A Codex entry is also passed over when the login's own list of models (`codex debug models`) does not hold its model. When that list cannot be read, the entry is tried.
+2. The first entry left reviews. When its reviewer hits a usage, rate or plan limit, or says its model does not exist, is not allowed for this login or is overloaded, `review` stops every reviewer session, drops their answers and starts the whole review again on the next entry. The next entry gets a fresh conversation and its own time budget. A timeout or a crash does not move to the next entry: it ends the run as before, since the next entry would most likely fail the same way. An overload Codex retries and recovers from within the same turn is not a failure. An entry that read or used anything outside the review copy, or during which the copy changed, is never dropped this way: the review ends incomplete and says why, as any review does.
+3. When no entry is left, the review is unavailable, and `review` names every entry and why. When an entry had started, `reviewer.json` in the run's folder says a reviewer started, and `usage.json` keeps the calls those runs made.
+
+`review` never starts a reviewer the list does not name. The report's reviewer line names the entry that reviewed, and each entry tried before it, with why.
+
+With no list, or `reviewers: []`, `review` picks the agent you run it from, then Claude Code, then Codex, as before lists existed.
+
+On the command line, `--reviewer <tool>` or `--reviewer <tool>:<model>`, with `--reviewer-effort`, replaces the list for one run, with no fallback. `--reviewer auto` ignores the list.
+
+`init` writes a list when the file has none: the agent running `init` first, then the other one when it can start on this machine. Claude Code gets `model: opus` and `effort: high`. Codex gets the first model its login lists, and `effort: high`. `init` keeps the rest of the file and its comments, and leaves a list the team already set, even an empty one. It also sets `min_version` to the release that reads the list (0.24.0) when the file has none, or sets it in place when it is empty, so an older openqodex stops and names the version it needs instead of ignoring the list. A `min_version` already there is never changed: a lower one is named, a higher one is kept.
+
+`review.reviewer_web` is `on` or `off`. The default is `on`: the reviewer gets Claude Code's WebSearch and WebFetch, or Codex's cached web search. `off` removes them. A reviewer that reads private code and untrusted text and can open web addresses can be talked into sending the code out, so set `off` if you do not accept that (`security`). `--reviewer-web` on the command line wins for one run.
+
+The list and `reviewer_web` are part of the config: a review briefed under one list does not finalize under another, and a review made under one list or `reviewer_web` does not satisfy the push hooks under another. In the GitHub Action they come from the pull request's base commit, like every other key; with `config-from: head`, a pull request can choose its own reviewer.
+
 ## The user config, ~/.openqodex/config.yaml
 
 One file in your home folder holds what is yours, not the team's. `OPENQODEX_HOME` moves it with the rest of `~/.openqodex/`.
 
 - `update`: `on` or `off`. The default is `on`. `off` stops the daily version check. `openqodex update --off` and `--on` write it.
-- `reviewer`: `auto`, `claude`, `codex` or `cursor`. The default is `auto`. The agent `review` starts as its reviewer; `--reviewer` on the command line wins. `claude` and `codex` are enabled; `cursor` makes `review` say why and exit 2. `auto` picks the agent running the command, then Claude Code, then Codex.
 - `skip_version`: a version such as `0.9.2`. No default. `openqodex update --rollback` writes it: the update never installs that release or an older one, and stays on for the next. A value that is not such a version pauses automatic updates, naming the value, until it is fixed.
-- `reviewer_web`: `on` or `off`. The default is `on`: the reviewer gets Claude Code's WebSearch and WebFetch, or Codex's cached web search. `off` removes them. A reviewer that reads private code and untrusted text and can open web addresses can be talked into sending the code out, so set `off` if you do not accept that (`security`). `--reviewer-web` on the command line wins for one run.
-- `reviewer_model`: a Codex model id, such as `gpt-5.5`. No default: Codex uses its own default model, because the reviewer runs without your Codex `config.toml`. When set, every Codex reviewer process gets `-m <model>`. `--reviewer-model` on the command line wins for one run.
-- `reviewer_effort`: `low`, `medium`, `high` or `xhigh`. No default: Codex uses the model's own reasoning effort. When set, every Codex reviewer process gets `-c model_reasoning_effort="<effort>"`. `--reviewer-effort` on the command line wins for one run.
 
-`reviewer_model` and `reviewer_effort` reach the Codex reviewer only. Claude Code names its models differently, and `reviewer: auto` can pick either agent, so the Claude Code reviewer ignores both keys; it takes its model from `ANTHROPIC_MODEL`, which it is given. The report's reviewer line names the model and the effort when they are set.
+Up to 0.23.0 this file also held `reviewer`, `reviewer_web`, `reviewer_model` and `reviewer_effort`. The project's `review.reviewers` and `review.reviewer_web` replace them. While they are there, `review` and `doctor` print one warning that names them and the lines to add to the project's config file: the one a review reads (`.openqodex/config.yaml`, or `.openqodex.yaml` in a project that still uses it), inside its `review:` or `pr_review:` block when it has one, leaving out a key it already holds. `reviewer: auto` needs no line: a project with no `review.reviewers` keeps the auto order. `reviewer`, `reviewer_model` and `reviewer_effort` are not read. A personal `reviewer_web: off` still keeps the web tools off, for now, unless `--reviewer-web on` is given; a later release stops reading it, so move it into the project's file. They are still known keys, so they never pause automatic updates.
 
-A key OpenQodex does not know is ignored and named, with the known key nearest to it (`updat` is named with `update`), by `review`, `doctor` and `update --status`. While it is there, automatic updates pause: it may be a misspelled `update: off`. A file that does not parse or is not a list of keys and values, or an `update` value that is neither `on` nor `off`, turns updates off until it is fixed. A file that does not parse or is not a list of keys and values, or a `reviewer` or `reviewer_web` value not listed above, stops `review` with one line naming the file. A `reviewer_model` or `reviewer_effort` value not listed above does the same, but only when Codex is the reviewer and no `--reviewer-model` or `--reviewer-effort` replaces it. `openqodex doctor` prints each key with the value in force and where it comes from: the file, the default, or an environment variable that turns updates off.
+A key OpenQodex does not know is ignored and named, with the known key nearest to it (`updat` is named with `update`), by `review`, `doctor` and `update --status`. While it is there, automatic updates pause: it may be a misspelled `update: off`. A file that does not parse or is not a list of keys and values, or an `update` value that is neither `on` nor `off`, turns updates off until it is fixed. `review` names a file that does not parse or is not a list of keys and values, and goes on; `doctor` and `update --status` also name an `update` value that is neither `on` nor `off`. `openqodex doctor` prints each key with the value in force and where it comes from: the file, the default, or an environment variable that turns updates off.
 

@@ -45,7 +45,18 @@ export function onAllowlist(names: string[], name: string, platform: NodeJS.Plat
 // "You've hit your limit" and "usage limit reached", Codex's "You've hit
 // your usage limit". A rate limit is a short wait instead, and checked first.
 const RATE_LIMIT = /rate limit|rate_limit|too many requests|\bHTTP 429\b/i;
-const PLAN_LIMIT = /usage limit|plan limit|limit reached|hit your (\S+ )?limit/i;
+const PLAN_LIMIT = /usage limit|plan limit|limit reached|hit your (\S+ )?limit|billing_error|credits_required/i;
+// The words of a reviewer whose model cannot be used by this login, as the
+// real agents print them: Claude Code's "There's an issue with the selected
+// model (x). It may not exist or you may not have access to it." with the
+// API error model_not_found (Claude Code 2.1.331), and Codex's "The 'x'
+// model is not supported when using Codex with a ChatGPT account."
+// (codex-cli 0.171.0). Not authorized for a model is the same. A bare
+// not_found_error is not enough: it can name another missing resource.
+const MODEL_UNAVAILABLE = /model_not_found|issue with the selected model|model is not supported|not supported when using codex|unrecognized_model|(do not|don't|does not) have access to (the |this )?model|not (authorized|allowed) to use (the |this )?model/i;
+// The API is overloaded (Claude's 529 overloaded_error): this model cannot
+// serve now, another may.
+const OVERLOADED = /overloaded/i;
 
 // The failure of a turn the reviewer itself ended with an error, from the
 // reviewer's own message, so the receipt says what happened and, for a
@@ -57,12 +68,25 @@ export function reviewerError(message: string | null, fallback = "unknown", secr
   const whole = message === null ? "" : redactSecrets(message, secrets).replace(/\s+/g, " ").trim();
   const said = whole.slice(0, 200) || fallback;
   if (RATE_LIMIT.test(whole)) return `the reviewer hit a rate limit (${said})`;
-  return PLAN_LIMIT.test(whole) ? `the reviewer hit its usage or plan limit (${said})` : `the reviewer stopped with an error (${said})`;
+  if (PLAN_LIMIT.test(whole)) return `the reviewer hit its usage or plan limit (${said})`;
+  if (MODEL_UNAVAILABLE.test(whole)) return `${MODEL_CANNOT_SERVE}: it does not exist or this login has no access to it (${said})`;
+  return OVERLOADED.test(whole) ? `${MODEL_CANNOT_SERVE}: it is overloaded (${said})` : `the reviewer stopped with an error (${said})`;
 }
+
+const MODEL_CANNOT_SERVE = "the reviewer's model cannot serve this review";
 
 // The failure names a rate, usage or plan limit (reviewerError).
 export function namesLimit(failure: string): boolean {
   return failure.startsWith("the reviewer hit ");
+}
+
+// The failure says this reviewer's model cannot serve the review: a rate,
+// usage or plan limit, a model this login does not have, or an overloaded
+// API. A project's reviewer list then starts the review again on its next
+// entry. A timeout, a crash or any other error says nothing about the
+// model, so it never does.
+export function cannotServe(failure: string | null): boolean {
+  return failure !== null && (namesLimit(failure) || failure.startsWith(MODEL_CANNOT_SERVE));
 }
 
 export type Detected = { ok: true; version: string; bin: string } | { ok: false; missing: string; fix: string };
@@ -126,10 +150,15 @@ export interface ReviewerDriver {
   // `register` receives a synchronous cleanup while the check runs (and null
   // after), which the run's signal handler calls before it exits.
   check?(opts: { snapshotDir: string; bin: string; register: (cleanup: (() => void) | null) => void }): Promise<string | null>;
+  // The models this login can use (Codex's `codex debug models`), so a
+  // listed model the login does not have is passed over before the review
+  // starts. Null when the list could not be read: the entry is then tried.
+  // Left out (Claude Code has no such list): every entry is tried.
+  models?(bin: string): Promise<{ models: string[]; top: string | null } | null>;
   // `deadline`: epoch milliseconds after which the process group is killed.
   // `web`: the agent gets its web tools (on unless reviewer_web: off).
   // `model` and `effort`: the model and reasoning effort to ask for; left
-  // out or null, the agent's own default. Only Codex is given them.
+  // out or null, the agent's own default.
   // `secrets`: what the scanners found, removed from the agent's own error
   // text before it is cut.
   start(opts: StartOptions): ReviewerSession;

@@ -12,10 +12,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
-import { CONFIG_MAX_BYTES, DEFAULT_CONFIG_YAML, readRepoFile, FOLDER_CONFIG, INSTRUCTIONS_FILE, STATE_DIR, loadConfig, repoStat } from "@openqodex/core";
+import { CONFIG_MAX_BYTES, DEFAULT_CONFIG_YAML, REVIEWERS_SINCE, entryLabel, readRepoFile, FOLDER_CONFIG, INSTRUCTIONS_FILE, STATE_DIR, loadConfig, repoStat } from "@openqodex/core";
 import type { BuiltinScanner } from "@openqodex/core";
 import { AGENT_NAMES, AGENTS, detectAgents, type AgentId } from "../agents/detect.js";
-import { readText } from "../agents/files.js";
+import { readText, sha256 } from "../agents/files.js";
 import { Guard } from "../agents/guarded-fs.js";
 import { claudeHome, codexHome, gooseHome } from "../agents/homes.js";
 import { excludeLine, gitDirs, gitPath, inWorkTree, planExclude, planUnexclude, repoRootOf } from "../agents/git.js";
@@ -26,7 +26,8 @@ import { commitLines, INSTRUCTIONS_LINE, planRepoFiles, planRepoFilesRemoval, RO
 import { clineCliData, targetsFor, teamSection, teamTargets, type Scope, type Target } from "../agents/targets.js";
 import { runningContract } from "../contract.js";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
-import { hostAgent } from "@openqodex/review";
+import { claudeDriver, codexDriver, hostAgent } from "@openqodex/review";
+import { defaultReviewerList, insertReviewerList } from "../reviewers/list.js";
 import { launcherPath, launcherRunner, launcherUsers, oldLocks, openqodexHomeDir, planRuntime, planRuntimeRemoval, pruneRuntimes, removeOldLocks, staleRuntimes } from "../launcher.js";
 import { planGitHook, planGitHookRemoval, setHookChoice } from "./hook.js";
 import { instructionCandidates, mergeInstructionChoice, writeInstructionChoice } from "../instructions.js";
@@ -454,6 +455,7 @@ async function runLocked(s: Setup): Promise<Outcome> {
       rootConfig = repo.rootConfig;
       team.push(...repo.actions);
       await planConventionChoice(s, team);
+      await planReviewerList(s, team, record);
       const hook = hookChoiceFor(s, record);
       hookChoice = hook.hook;
       if (!s.flags.dryRun) setHookChoice(record, s.repoRoot, hookChoice);
@@ -681,6 +683,55 @@ async function planConventionChoice(s: Setup, actions: Action[]): Promise<void> 
     create.note += "; includes your chosen convention files";
   } else {
     actions.push({ verb: "update", path, note: "your chosen convention files", guard: { path, before }, apply: () => { s.guard.write(path, text, { keepMode: true }); } });
+  }
+}
+
+// The project's reviewer list, when its config has none (review.reviewers
+// absent; an empty list is the team's choice and stays): the agent running
+// init first, then the other one when it can start here (defaultReviewerList).
+// It asks nothing, so the agent and --yes path writes it too. It is written
+// after whatever else the plan writes to the file, read back from disk, so a
+// convention choice and the file's own comments stay; init's record of a
+// file it created follows the new bytes, so uninstall still knows it.
+async function planReviewerList(s: Setup, actions: Action[], record: InstallRecord): Promise<void> {
+  if (s.repoRoot === null) return;
+  const repoRoot = s.repoRoot;
+  let loadedPath: string | null;
+  try {
+    loadedPath = loadConfig(repoRoot, undefined, { runtimeVersion: s.version }).path;
+  } catch {
+    // A config that does not load, or needs a newer openqodex, is left as it
+    // is; review names the problem.
+    return;
+  }
+  const path = loadedPath ?? join(repoRoot, STATE_DIR, FOLDER_CONFIG);
+  const before = readRepoFile(repoRoot, path, CONFIG_MAX_BYTES);
+  if (insertReviewerList(before ?? DEFAULT_CONFIG_YAML, []) === null) return;
+  const planned = actions.find((a) => a.path === path && a.apply !== undefined);
+  if (before === null && planned === undefined) return;
+  const { entries, ready } = await defaultReviewerList([claudeDriver, codexDriver], repoRoot);
+  if (entries.length === 0) {
+    out("Reviewer list: none written, since neither Claude Code nor Codex can start here; a review tries the agent it runs from, then Claude Code, then Codex. Set review.reviewers in .openqodex/config.yaml to choose.");
+    return;
+  }
+  out(`Reviewer list for ${shown(s, path)}, tried top to bottom, shared by the whole team: ${entries.map((e, i) => `${i + 1}. ${entryLabel(e)} (${ready[i] ? "can start here" : "cannot start here yet"})`).join("; ")}. An entry that cannot start on a teammate's machine is passed over with its reason.`);
+  const write = (): void => {
+    const now = readRepoFile(repoRoot, path, CONFIG_MAX_BYTES);
+    if (now === null) return;
+    const next = insertReviewerList(now, entries);
+    // A file the list would push past the size a review reads is left as it is.
+    if (next === null || Buffer.byteLength(next.text, "utf8") > CONFIG_MAX_BYTES) return;
+    s.guard.write(path, next.text, { keepMode: true });
+    const owned = record.files.find((f) => f.path === path);
+    if (owned !== undefined && owned.sha256 === sha256(now)) owned.sha256 = sha256(next.text);
+    if (next.oldMin !== null) out(`${shown(s, path)} says min_version: ${next.oldMin}; openqodex older than ${REVIEWERS_SINCE} ignores the reviewer list, so raise min_version to ${REVIEWERS_SINCE} if teammates may run one.`);
+  };
+  if (planned !== undefined) {
+    const apply = planned.apply!;
+    planned.apply = async () => { await apply(); write(); };
+    planned.note += "; with the reviewer list";
+  } else {
+    actions.push({ verb: "update", path, note: "the reviewer list, tried top to bottom", guard: { path, before }, apply: write });
   }
 }
 

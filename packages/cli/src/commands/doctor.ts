@@ -19,8 +19,10 @@ import type { PreinstallResult, ScannerChoice } from "@openqodex/scanners";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
 import { progress } from "../pipeline.js";
-import { REVIEWER_NAMES } from "@openqodex/review";
-import { DEFAULT_REVIEWER_WEB, REVIEWER_EFFORTS, effortProblem, modelProblem, shownValue } from "../reviewers/settings.js";
+import { claudeDriver, codexDriver, cursorDriver } from "@openqodex/review";
+import type { ReviewerEntry } from "@openqodex/core";
+import { listReadiness } from "../reviewers/list.js";
+import { personalWebOff, projectFile, retiredReviewerWarning } from "../reviewers/settings.js";
 import { readUserConfig, unknownKeysWarning } from "../user-config.js";
 import { statusLines } from "./update.js";
 
@@ -51,6 +53,10 @@ type Report = {
   // `downloads`, what a cache of the tools folder is keyed on.
   toolchain: string;
   custom: { name: string; source: string; trust: string }[];
+  // In a repository whose config loads: the project's reviewer list, each
+  // entry and whether it can start on this machine, and the web tools.
+  // `entries` is null when the file lists none (auto).
+  reviewers: { web: "on" | "off"; entries: (ReviewerEntry & { ready: boolean; line: string })[] | null } | null;
   home: string;
   settings: { file: string; values: Setting[]; warnings: string[] };
   update: string[];
@@ -61,14 +67,17 @@ type Report = {
 type Setting = { key: string; value: string; source: string };
 
 // Each key of the user config with the value in force and where it comes
-// from: the environment, the file, or the default.
-function userSettings(home: string, env: NodeJS.ProcessEnv): Report["settings"] {
+// from: the environment, the file, or the default. The reviewer keys it held
+// up to 0.23.0 are named in a warning: the project's file holds them now.
+function userSettings(home: string, env: NodeJS.ProcessEnv, repo: string | null): Report["settings"] {
   const config = readUserConfig(home);
   const file = "config.yaml";
   const warnings: string[] = [];
-  if (config.error !== null) warnings.push(`${config.error}: updates are off and a review stops until it is fixed`);
+  if (config.error !== null) warnings.push(`${config.error}: updates are off until it is fixed`);
   const unknown = unknownKeysWarning(config);
   if (unknown !== null) warnings.push(unknown);
+  const retired = config.error === null ? retiredReviewerWarning(config, projectFile(repo)) : null;
+  if (retired !== null) warnings.push(...retired.split("\n"));
   const v = config.values;
   const set = (value: unknown): boolean => value !== undefined && value !== null;
   const onOff = (value: unknown): "on" | "off" | null => (value === "on" || value === true ? "on" : value === "off" || value === false ? "off" : null);
@@ -81,28 +90,8 @@ function userSettings(home: string, env: NodeJS.ProcessEnv): Report["settings"] 
   else if (!set(v.update)) update = { key: "update", value: "on", source: "default" };
   else update = { key: "update", value: onOff(v.update) ?? "off", source: onOff(v.update) === null ? `${file}: ${String(v.update)} is neither on nor off` : file };
 
-  const reviewer = !set(v.reviewer)
-    ? { key: "reviewer", value: "auto", source: "default" }
-    : typeof v.reviewer === "string" && ["auto", ...REVIEWER_NAMES].includes(v.reviewer)
-      ? { key: "reviewer", value: v.reviewer, source: file }
-      : { key: "reviewer", value: String(v.reviewer), source: `${file}: not a reviewer, a review stops` };
-  const web = !set(v.reviewer_web)
-    ? { key: "reviewer_web", value: DEFAULT_REVIEWER_WEB, source: "default" }
-    : onOff(v.reviewer_web) !== null
-      ? { key: "reviewer_web", value: onOff(v.reviewer_web)!, source: file }
-      : { key: "reviewer_web", value: String(v.reviewer_web), source: `${file}: neither on nor off, a review stops` };
-  const model = !set(v.reviewer_model)
-    ? { key: "reviewer_model", value: "Codex's own", source: "default" }
-    : modelProblem(v.reviewer_model) === null
-      ? { key: "reviewer_model", value: String(v.reviewer_model), source: file }
-      : { key: "reviewer_model", value: shownValue(v.reviewer_model), source: `${file}: not a model id, a Codex review stops` };
-  const effort = !set(v.reviewer_effort)
-    ? { key: "reviewer_effort", value: "Codex's own", source: "default" }
-    : effortProblem(v.reviewer_effort) === null
-      ? { key: "reviewer_effort", value: String(v.reviewer_effort), source: file }
-      : { key: "reviewer_effort", value: shownValue(v.reviewer_effort), source: `${file}: not ${REVIEWER_EFFORTS.join(", ")}, a Codex review stops` };
   const skip = !set(v.skip_version) ? { key: "skip_version", value: "none", source: "default" } : { key: "skip_version", value: String(v.skip_version), source: file };
-  return { file: config.path, values: [update, reviewer, web, model, effort, skip], warnings };
+  return { file: config.path, values: [update, skip], warnings };
 }
 
 const STATE_WORDS: Record<ToolStatus["state"], string> = {
@@ -139,6 +128,14 @@ function text(r: Report): string {
   if (r.custom.length > 0) {
     lines.push("", "Custom scanners");
     for (const c of r.custom) lines.push(`  ${c.name}  ${c.source}  ${c.trust}`);
+  }
+  if (r.reviewers !== null) {
+    if (r.reviewers.entries === null) lines.push("", "Reviewers  none listed in the project's config: the agent you run the review from, then Claude Code, then Codex");
+    else {
+      lines.push("", "Reviewers  the project's list, tried top to bottom");
+      r.reviewers.entries.forEach((e, i) => lines.push(`  ${i + 1}. ${[e.tool, ...(e.model !== undefined ? [`model ${e.model}`] : []), ...(e.effort !== undefined ? [`effort ${e.effort}`] : [])].join(", ")}: ${e.line}`));
+    }
+    lines.push(`  reviewer_web: ${r.reviewers.web}`);
   }
   lines.push("", `Your settings  ${r.settings.file}`);
   for (const s of r.settings.values) lines.push(`  ${s.key.padEnd(15)}  ${s.value} (${s.source})`);
@@ -189,6 +186,7 @@ export async function run(args: string[]): Promise<number> {
 
   let configLine = inputError ? `folder not found: ${global.cwd}` : "no repository, defaults in use";
   const custom: Report["custom"] = [];
+  let reviewers: Report["reviewers"] = null;
   let choices: ScannerChoice[] | null = null;
   if (repo !== null) {
     try {
@@ -196,6 +194,9 @@ export async function run(args: string[]): Promise<number> {
       choices = selectScanners({ repoDir: repo, paths: await repoInventory(repo, loaded.config), config: loaded.config });
       const n = loaded.config.custom.length;
       configLine = loaded.path === null ? "no config, defaults in use" : `ok, ${n} custom scanner${n === 1 ? "" : "s"}`;
+      const listed = loaded.config.reviewers;
+      const rows = listed === undefined ? null : await listReadiness(listed, [claudeDriver, codexDriver, cursorDriver], repo);
+      reviewers = { web: loaded.config.reviewerWeb === false || personalWebOff(openqodexHome()) ? "off" : "on", entries: rows === null ? null : rows.map((row) => ({ ...row.entry, ready: row.version !== null, line: row.line })) };
       if (loaded.warnings.length > 0) configLine += ` (${loaded.warnings.join("; ")})`;
       for (const row of n > 0 ? trustState(repo, loaded.config) : []) {
         const trust =
@@ -234,8 +235,9 @@ export async function run(args: string[]): Promise<number> {
     downloads,
     toolchain: toolchainHash(),
     custom,
+    reviewers,
     home: openqodexHome(),
-    settings: userSettings(openqodexHome(), process.env),
+    settings: userSettings(openqodexHome(), process.env, repo),
     update: statusLines(openqodexHome()),
     ...(required ? { required } : {}),
   };
