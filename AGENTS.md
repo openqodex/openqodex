@@ -59,6 +59,7 @@ OpenQodex is open source AI code review for Claude Code and Codex. It runs befor
 
 - No test fakes a module that lives in this repo or a program on this machine. `vi.mock` is not used. Tests use real temporary folders, real git repositories and real scanner output.
 - The only fakes allowed are a model provider and a reviewer driver (`ReviewerDriver`) that stands in for the model.
+- One more is allowed: the usage data worker's hard-stop test replaces `fetch` with a call that never answers. No real program can hang a request on demand.
 - A test makes its temporary folders with `tempDir()` from `tests/temp-dirs.mjs`, and its file calls `afterAll(removeTempDirs)`. Each test run keeps its temporary folders in one folder of its own and fails when a test leaves one behind (`tests/temp-guard.ts`).
 - End-to-end first: a feature is proved by running the real CLI on a real repo and reading the saved report.
 - A piece that must be tested alone starts with its failure cases, listed in a comment at the top of the test file. The tests follow that list, and the code comes last. Do not add unit tests after the code to raise coverage.
