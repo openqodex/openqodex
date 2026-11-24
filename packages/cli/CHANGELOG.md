@@ -1,5 +1,11 @@
 # openqodex
 
+## 0.24.0
+
+### Minor Changes
+
+- [#460](https://github.com/openqodex/openqodex/pull/460) [`471d345`](https://github.com/openqodex/openqodex/commit/471d345b86f6d6fcccd50fa1d62bf78fc96b7857) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - Each project now chooses who reviews, in `.openqodex/config.yaml`, and the whole team shares the choice. `review.reviewers` lists the reviewers to try, top to bottom, each a tool (`claude` or `codex`) with an optional model and effort. An entry that cannot start on your machine is passed over with its reason. When the reviewer hits a usage or rate limit, or its model does not exist or is not allowed, the review starts again with the next entry. `review.reviewer_web` replaces your personal `reviewer_web`. The personal keys `reviewer`, `reviewer_model` and `reviewer_effort` in `~/.openqodex/config.yaml` are no longer read, and a review and `doctor` name the lines to add to the project's file instead. Your personal `reviewer_web: off` still keeps the web tools off for now, with a warning to move it into the project's file. A review made under another reviewer list no longer satisfies the push hooks. `init` writes a list when the project has none, with `min_version: 0.24.0`. `--reviewer <tool>:<model>` with `--reviewer-effort` picks one reviewer for one run; `--reviewer-model` is gone. The GitHub Action reads the config and its list from the pull request's base commit, not the base branch's tip, and can review with Codex when the runner has it logged in.
+
 ## 0.23.0
 
 ### Minor Changes
