@@ -80,6 +80,10 @@ recheck
 if grep -q '^installing ' "$out/recheck.log"; then
   fail "the full image lacked a scanner at run time: $(grep '^installing ' "$out/recheck.log" | tr '\n' ' ')(log: $out/recheck.log)"
 fi
+# No step of the build or the recheck may create the usage data's install id.
+if ! docker run --rm --platform linux/amd64 --entrypoint sh "$tag" -c 'test ! -e "${OPENQODEX_HOME:-$HOME/.openqodex}/telemetry"' >/dev/null 2>&1; then
+  fail "the full image holds a telemetry folder in its OpenQodex home; the image must send no usage data"
+fi
 line=$({ grep -oE '[0-9]+ of [0-9]+ built-in scanners ready.*' "$out/recheck.log" || true; } | tail -n 1)
 case "$line" in
   "$expected of $expected built-in scanners ready"*) echo "check-build: full: at run time, $line" ;;

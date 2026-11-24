@@ -70,6 +70,21 @@ export function failureClass(reason: string | null, source = ""): string {
   return parts.includes(NOT_LISTED) ? [...listed, "a reason not listed"].join(", ") : listed.join(", ");
 }
 
+// The same failure as one word from a closed list, for the usage data: the
+// class of the first part of the reason, never any of its text.
+export function failureCode(reason: string | null, source = ""): "timeout" | "exit" | "could_not_start" | "output_limit" | "killed" | "no_report" | "unreadable_report" | "other" {
+  const r = reason ?? "";
+  const c = partClass(source === "golangci" ? (r.split("; ")[0] ?? "") : r);
+  if (c.startsWith("timed out after") || c === "ran out of time before a Go module") return "timeout";
+  if (c.startsWith("exited with code")) return "exit";
+  if (c === "could not start") return "could_not_start";
+  if (c === "printed more output than the limit") return "output_limit";
+  if (c === "was killed") return "killed";
+  if (c === "printed no report") return "no_report";
+  if (c === "its report could not be read") return "unreadable_report";
+  return "other";
+}
+
 // The fixed text the golangci adapter writes before any tool output, so it
 // is matched first: a type-check message can quote anything.
 const GOLANGCI_CLASSES: [RegExp, string][] = [

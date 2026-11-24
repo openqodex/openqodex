@@ -90,7 +90,7 @@ export async function run(args: string[]): Promise<number> {
   }
 
   warn(`Demo repo built in ${dir}`);
-  const outcome = await runScan({ flags: { ...global, cwd: dir }, scope: {} });
+  const outcome = await runScan({ flags: { ...global, cwd: dir }, scope: {}, demo: true });
   warn("");
   warn(`The demo repo is in ${dir}`);
   const installing = outcome.report?.scanners.filter((s) => s.status === "installing").length ?? 0;

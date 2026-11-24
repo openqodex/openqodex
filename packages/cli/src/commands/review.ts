@@ -46,7 +46,7 @@ import {
 } from "@openqodex/core";
 import type { Change, ChangeScope, Config, Display, ImpactSummary, Latest, RunManifest, RunTarget, ScanResult, Severity, WholeRepo } from "@openqodex/core";
 import { renderImpactBlock } from "@openqodex/graph";
-import { checkoutsDir, redactStored, ruleCoverage, wholeRepoLenses } from "@openqodex/review";
+import { checkoutsDir, hostAgent, redactStored, ruleCoverage, wholeRepoLenses } from "@openqodex/review";
 import type { PipelineResult, ReviewerDriver } from "@openqodex/review";
 import { announceRepoFiles } from "../agents/repo-folder.js";
 import { addTargetCheckout, checkoutOwner, inCheckouts, lfsPaths, placeSettings, removeTargetCheckout, sweepCheckouts } from "../checkout.js";
@@ -77,6 +77,8 @@ import {
   writeReportHtml,
 } from "../pipeline.js";
 import { dropTempRef, resolveTarget, sweepTempRefs } from "../target.js";
+import { noteSub, record as recordEvent } from "../telemetry/dispatch.js";
+import { reviewProps } from "../telemetry/events.js";
 import type { Resolved } from "../target.js";
 import { SCOPE_BOOLS, SCOPE_VALUES, scopeFrom } from "./scan.js";
 
@@ -128,6 +130,7 @@ export async function run(args: string[], drivers?: ReviewerDriver[]): Promise<n
   if (reviewerModel !== undefined) throw new OpenQodexError(`--reviewer-model is replaced by --reviewer <tool>:<model>, such as --reviewer codex:${reviewerModelProblem("codex", reviewerModel) === null ? reviewerModel : "gpt-5.5"}`);
   const reviewerEffort = values.get("--reviewer-effort");
   const target = finalize ? undefined : positionals[0];
+  noteSub(finalize ? "finalize" : agent ? "agent" : bools.has(ALL) ? "all" : target !== undefined ? "target" : "change");
   if (target !== undefined && bools.has(ALL)) {
     throw new OpenQodexError("--all reviews the whole repository and takes no branch or pull request");
   }
@@ -718,7 +721,11 @@ async function runFinalize(flags: GlobalFlags, path: string | undefined, all: bo
     }
     await discard();
     emitReview(out.report, flags, repoRoot, paths);
-    return exitFor(report);
+    const exitCode = exitFor(report);
+    // The process that writes the report owns the review's usage data: a
+    // finalize handed here by another version records it, its parent does not.
+    recordEvent("review.completed", reviewProps({ mode: "agent", scope: whole ? "all" : target ? "target" : "change", fromInit: false, ended: "finished", cleanupFailed: false, exitCode, reviewer: hostAgent(), report: { ...report, timings: undefined } }));
+    return exitCode;
   } finally { removeDiffs(change); }
 }
 

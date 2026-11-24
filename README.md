@@ -126,9 +126,11 @@ AACR-Bench is a set of real pull requests. Its own evaluator gives the board num
 
 ## Privacy
 
-OpenQodex itself collects no usage data and sends no telemetry. The built-in scanners, as OpenQodex runs them, send no code. OpenQodex starts semgrep with its metrics switched off. The reviewer sends your change to the model service of your Claude Code or Codex login.
+The built-in scanners, as OpenQodex runs them, send no code. OpenQodex starts semgrep with its metrics switched off. The reviewer sends your change to the model service of your Claude Code or Codex login.
 
 `--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny, the built-in scanners that use the network. It also stops scanner downloads. The reviewer still sends your change to its model service. An approved custom scanner still runs its own command. The [privacy page](https://github.com/openqodex/openqodex/blob/main/docs/privacy.md) lists each network use of this version. The [telemetry page](https://github.com/openqodex/openqodex/blob/main/docs/telemetry.md) says more.
+
+OpenQodex sends anonymous usage data, never code. `openqodex_telemetry: 0` in `.openqodex/config.yaml`, `OPENQODEX_TELEMETRY=0` or `DO_NOT_TRACK=1` turns it off ([details](https://github.com/openqodex/openqodex/blob/main/docs/telemetry.md)).
 
 ## Built-in scanners
 

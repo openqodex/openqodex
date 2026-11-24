@@ -11,6 +11,10 @@
 # node:22-bookworm, pinned by its index digest.
 FROM node:22-bookworm@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8
 
+# No usage data from the build or from any evaluation container: the image
+# runs the published package, so the local build rule does not hold.
+ENV OPENQODEX_TELEMETRY=0
+
 # The Go, Rust and scanner downloads below are amd64 builds.
 RUN test "$(dpkg --print-architecture)" = amd64 || { echo "build this image with --platform linux/amd64" >&2; exit 1; }
 

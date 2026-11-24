@@ -809,7 +809,7 @@ function runHome(tempRoot) {
 // own home, no update check, no colour, and none of the caller's git
 // variables.
 function cliEnv(home) {
-  const env = { ...process.env, OPENQODEX_AUTO_UPDATE: "0", NO_COLOR: "1", OPENQODEX_HOME: home };
+  const env = { ...process.env, OPENQODEX_AUTO_UPDATE: "0", OPENQODEX_TELEMETRY: "0", NO_COLOR: "1", OPENQODEX_HOME: home };
   for (const k of Object.keys(env)) if (k.startsWith("GIT_") || k === "FORCE_COLOR") delete env[k];
   return env;
 }
@@ -1229,7 +1229,7 @@ async function main() {
   if (o.web === "on") console.log("Web access is on: the reviewer may read each case and its discussion online.");
 
   // The environment every review, probe and doctor run gets.
-  const env = { ...process.env, OPENQODEX_AUTO_UPDATE: "0", NO_COLOR: "1" };
+  const env = { ...process.env, OPENQODEX_AUTO_UPDATE: "0", OPENQODEX_TELEMETRY: "0", NO_COLOR: "1" };
   for (const k of Object.keys(env)) if (k.startsWith("GIT_") || k === "FORCE_COLOR") delete env[k];
   if (o.model) env.ANTHROPIC_MODEL = o.model;
 

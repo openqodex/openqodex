@@ -9,6 +9,8 @@ import type { ChangeScope, PhaseClock, Report, Severity } from "@openqodex/core"
 import { parseFlags, scannerList } from "../flags.js";
 import type { GlobalFlags } from "../flags.js";
 import { checkReportFolder, emitReport, exitFor, nothingToReview, reportFiles, runPipeline, writeReportCopies } from "../pipeline.js";
+import { record } from "../telemetry/dispatch.js";
+import { scanProps } from "../telemetry/events.js";
 
 export const SCOPE_BOOLS = ["--uncommitted"];
 export const SCOPE_VALUES = ["--base"];
@@ -36,6 +38,8 @@ export async function runScan(args: {
   // --config, the built-in defaults), so a link a branch committed there
   // cannot stop the scan (the GitHub Action).
   reportDir?: string;
+  // The scan `openqodex demo` runs on the planted repo, for the usage data.
+  demo?: boolean;
 }): Promise<ScanOutcome> {
   // The report's timings run from here.
   const clock = phaseClock(Date.now);
@@ -58,7 +62,9 @@ export async function runScan(args: {
   });
   if (args.blockOn !== undefined) p.config = { ...p.config, blockOnSeverity: args.blockOn as Severity };
   if (args.reportDir === undefined) announceRepoFiles(p.repoRoot);
-  return reportScan(p, flags, clock, args.reportDir);
+  const outcome = reportScan(p, flags, clock, args.reportDir);
+  record("scan.completed", scanProps({ report: outcome.report, exitCode: outcome.exitCode, candidates: p.scan?.candidates.length ?? 0, demo: args.demo === true, reportDir: args.reportDir !== undefined, blockOnFlag: args.blockOn !== undefined }));
+  return outcome;
 }
 
 // The scan report of a pipeline run, with the timings `clock` reads once

@@ -10,5 +10,7 @@ export default defineConfig({
     testTimeout: 300_000,
     hookTimeout: 300_000,
     fileParallelism: false,
+    // No usage data from any test: every child that spreads process.env inherits this.
+    env: { OPENQODEX_TELEMETRY: "0" },
   },
 });

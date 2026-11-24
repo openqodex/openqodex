@@ -25,6 +25,7 @@ import { listReadiness } from "../reviewers/list.js";
 import { personalWebOff, projectFile, retiredReviewerWarning } from "../reviewers/settings.js";
 import { readUserConfig, unknownKeysWarning } from "../user-config.js";
 import { statusLines } from "./update.js";
+import { telemetryStatus } from "../telemetry/dispatch.js";
 
 const run$ = promisify(execFile);
 
@@ -60,6 +61,8 @@ type Report = {
   home: string;
   settings: { file: string; values: Setting[]; warnings: string[] };
   update: string[];
+  // Whether the anonymous usage data is on here, and the switch that decided.
+  telemetry: { on: boolean; why: string };
   // With --require-all: every scanner checked after the install.
   required?: PreinstallResult;
 };
@@ -141,6 +144,7 @@ function text(r: Report): string {
   for (const s of r.settings.values) lines.push(`  ${s.key.padEnd(15)}  ${s.value} (${s.source})`);
   for (const w of r.settings.warnings) lines.push(`  ${w}`);
   lines.push("", "Updates", ...r.update.map((l) => `  ${l}`));
+  lines.push("", `telemetry   ${r.telemetry.on ? "on" : `off (${r.telemetry.why})`}`);
   if (r.required) {
     const ready = r.required.tools.filter((t) => t.ok).length;
     lines.push("", "Required scanners", r.required.ok ? `  all ${ready} ready, each tool reported its check case` : `  ${ready} ready, ${r.required.missing.length} missing (listed on stderr)`);
@@ -239,6 +243,7 @@ export async function run(args: string[]): Promise<number> {
     home: openqodexHome(),
     settings: userSettings(openqodexHome(), process.env, repo),
     update: statusLines(openqodexHome()),
+    telemetry: telemetryStatus(args),
     ...(required ? { required } : {}),
   };
   process.stdout.write(bools.has("--json") ? `${JSON.stringify(report, null, 2)}\n` : text(report));

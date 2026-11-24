@@ -433,7 +433,7 @@ describe("a model run on a machine without Ruby or Go is accepted as having ever
     mkdirSync(bin);
     symlinkSync(process.execPath, join(bin, "node"));
     symlinkSync(gitPath(), join(bin, "git"));
-    const env = { HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, PATH: bin, OPENQODEX_HOME: home, OPENQODEX_AUTO_UPDATE: "0" };
+    const env = { HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, PATH: bin, OPENQODEX_HOME: home, OPENQODEX_AUTO_UPDATE: "0", OPENQODEX_TELEMETRY: "0" };
     expect(spawnSync("ruby", ["--version"], { env }).error?.code).toBe("ENOENT");
     expect(spawnSync("go", ["version"], { env }).error?.code).toBe("ENOENT");
     const preflight = scannerPreflight({ cli, repos, env });

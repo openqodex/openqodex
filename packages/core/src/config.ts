@@ -9,7 +9,7 @@
 // about once each and ignored, so one file can serve both.
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { MAX_GLOB } from "./glob.js";
@@ -49,8 +49,9 @@ export const DEFAULT_CONFIG: Config = {
 // Every key of the file in order, with its default as YAML text and one line
 // on what it does. The default config text and the key table in
 // docs/config.md are both written from this list, and a test holds it equal
-// to the schema's keys and to DEFAULT_CONFIG.
-export type ConfigKey = { key: string; default: string; description: string };
+// to the schema's keys and to DEFAULT_CONFIG. `unlisted`: a key the default
+// config text leaves out, not even as a comment; docs/config.md still lists it.
+export type ConfigKey = { key: string; default: string; description: string; unlisted?: true };
 
 export const CONFIG_KEYS: readonly ConfigKey[] = [
   { key: "version", default: "1", description: "The file format version. 1 is the only one." },
@@ -129,6 +130,12 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
     default: "1536",
     description: "The memory the code graph may use, in MB; files past it are left out and the graph says so.",
   },
+  {
+    key: "openqodex_telemetry",
+    default: "1",
+    unlisted: true,
+    description: "0 stops the anonymous usage data for this repository: nothing is sent. `openqodex guide telemetry` lists what is sent.",
+  },
 ];
 
 // The config `init` and the first review write as .openqodex/config.yaml:
@@ -150,7 +157,8 @@ function defaultYaml(): string {
     "# above it. Each key is explained by: openqodex guide config",
   ];
   let open: string[] = [];
-  for (const { key, default: value, description } of CONFIG_KEYS) {
+  for (const { key, default: value, description, unlisted } of CONFIG_KEYS) {
+    if (unlisted) continue;
     if (key === "version") {
       out.push(`${key}: ${value}`);
       continue;
@@ -343,6 +351,10 @@ function schemas(strict: boolean) {
       max_heap_mb: positive.optional(),
     }).optional(),
     ...hostedOnly(HOSTED_ONLY_TOP_KEYS),
+    // Any value is accepted: a wrong one turns usage data off with a
+    // warning and never fails a command (telemetryValue). Not z.unknown(),
+    // which schemaKeys() leaves out of the key table.
+    openqodex_telemetry: z.any().optional(),
   });
 
   return { file, map, custom };
@@ -572,6 +584,12 @@ export function parseConfig(source: string, file: string = CONFIG_FILE, opts: Pa
     seen.add(c.name);
   });
 
+  // Read for the warning only: the key is not part of Config, so no value
+  // changes the config hash, a brief or a receipt.
+  if (isRecord(data) && "openqodex_telemetry" in data && telemetryValue(data.openqodex_telemetry) === "invalid") {
+    warnings.push("openqodex_telemetry: expected 0 or 1 (true, false, on and off also work); usage data is off for this repository");
+  }
+
   const reviewers: ReviewerEntry[] = (yaml.review?.reviewers ?? []).map((entry, i) => {
     for (const [key, problem] of [["model", reviewerModelProblem], ["effort", reviewerEffortProblem]] as const) {
       const why = entry[key] === undefined ? null : problem(entry.tool, entry[key]);
@@ -658,6 +676,73 @@ export function loadConfig(repoRoot: string, explicitPath?: string, opts: ParseO
     );
   }
   return { config, path, warnings };
+}
+
+// The project switch for the anonymous usage data, `openqodex_telemetry`:
+// 1, true or on leave it on; 0, false or off turn it off; anything else is
+// invalid, which turns it off too.
+export function telemetryValue(raw: unknown): "on" | "off" | "invalid" {
+  const v = typeof raw === "string" ? raw.trim().toLowerCase() : raw;
+  if (v === 1 || v === true || v === "1" || v === "true" || v === "on") return "on";
+  if (v === 0 || v === false || v === "0" || v === "false" || v === "off") return "off";
+  return "invalid";
+}
+
+// How deep telemetrySwitch walks up from the command's folder.
+const SWITCH_MAX_LEVELS = 64;
+
+// Whether a project config near `dir` switches usage data off. It walks up
+// from `dir` to the filesystem root, at most 64 folders, and reads at each
+// `.openqodex/config.yaml` and `.openqodex.yaml` (never through a link,
+// within the size cap), plus the `--config` file when one is given: as
+// given when absolute, else against `dir` and each folder above it. It
+// never calls git. A file that says anything but on, or that cannot be
+// read or parsed, turns it off: reading more can only turn it off.
+export function telemetrySwitch(dir: string, configFlag?: string): { on: boolean; why: string | null } {
+  const offIn = (text: string | null, label: string): string | null => {
+    if (text === null) return null;
+    let data: unknown;
+    try {
+      data = parseYaml(text);
+    } catch {
+      return `${label} does not parse`;
+    }
+    if (!isRecord(data) || !("openqodex_telemetry" in data)) return null;
+    return telemetryValue(data.openqodex_telemetry) === "on" ? null : `openqodex_telemetry in ${label}`;
+  };
+  const readAt = (folder: string, name: string): string | null => {
+    try {
+      return offIn(readRepoFile(folder, name, CONFIG_MAX_BYTES), name);
+    } catch {
+      return `${name} cannot be read`;
+    }
+  };
+  const folders: string[] = [];
+  for (let at = resolve(dir), n = 0; n < SWITCH_MAX_LEVELS; n++) {
+    folders.push(at);
+    const up = dirname(at);
+    if (up === at) break;
+    at = up;
+  }
+  for (const folder of folders) {
+    const why = readAt(folder, CONFIG_FILE) ?? readAt(folder, LEGACY_CONFIG_FILE);
+    if (why !== null) return { on: false, why };
+  }
+  if (configFlag !== undefined) {
+    const candidates = isAbsolute(configFlag) ? [configFlag] : folders.map((f) => join(f, configFlag));
+    for (const path of candidates) {
+      if (!existsSync(path)) continue;
+      let text: string;
+      try {
+        text = readFileBounded(path, CONFIG_MAX_BYTES);
+      } catch {
+        return { on: false, why: "the --config file cannot be read" };
+      }
+      const why = offIn(text, "the --config file");
+      if (why !== null) return { on: false, why };
+    }
+  }
+  return { on: true, why: null };
 }
 
 // JSON with object keys sorted at every level, so equal values hash equally.

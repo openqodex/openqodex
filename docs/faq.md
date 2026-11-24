@@ -6,7 +6,7 @@ No other key and no account. The reviewer is Claude Code or Codex, on your own l
 
 ## Does OpenQodex send my code anywhere?
 
-Not through the built-in scanners. Their network use is listed in `security`: scanner downloads, Semgrep rule packs, dependency names and versions sent to osv.dev, Kubernetes schemas and the RustSec advisory database. The reviewer sends the brief and the files it reads to the model of your Claude Code or Codex login. The brief includes any [convention files](config.md#convention-files) you chose. A custom scanner you approved does whatever its own command does.
+Not through the built-in scanners. Their network use is listed in `security`: scanner downloads, Semgrep rule packs, dependency names and versions sent to osv.dev, Kubernetes schemas and the RustSec advisory database. The reviewer sends the brief and the files it reads to the model of your Claude Code or Codex login. The brief includes any [convention files](config.md#convention-files) you chose. A custom scanner you approved does whatever its own command does. OpenQodex itself sends anonymous usage data, never code; `telemetry` lists every field.
 
 ## Will it block my push?
 

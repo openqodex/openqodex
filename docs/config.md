@@ -34,7 +34,10 @@ An unknown key prints a warning and is ignored. A name in `scanners.disable` tha
 | `graph.max_file_bytes` | `524288` | Files larger than this, in bytes, are left out of the code graph. |
 | `graph.max_cache_mb` | `512` | The size bound of .openqodex/graph/, in MB; the oldest builds and facts no kept build names are removed first. |
 | `graph.max_heap_mb` | `1536` | The memory the code graph may use, in MB; files past it are left out and the graph says so. |
+| `openqodex_telemetry` | `1` | 0 stops the anonymous usage data for this repository: nothing is sent. `openqodex guide telemetry` lists what is sent. |
 <!-- config-keys:end -->
+
+`openqodex_telemetry` is not in the config file `init` writes; add the line yourself. `telemetry` lists the other ways to turn usage data off.
 
 ## A full example
 

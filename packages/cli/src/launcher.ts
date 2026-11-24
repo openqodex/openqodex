@@ -16,6 +16,7 @@ import { openqodexHome } from "@openqodex/scanners";
 import { assetPath } from "./assets.js";
 import { readText, sha256 } from "./agents/files.js";
 import { homeGuard, type Guard } from "./agents/guarded-fs.js";
+import { telemetryDir } from "./telemetry/identity.js";
 import { ownedFile, type Action } from "./agents/plan.js";
 import type { InstallRecord } from "./agents/record.js";
 import { readState, statePath, userConfigPath } from "./update/state.js";
@@ -525,6 +526,9 @@ function planUpdateFilesRemoval(home: string, guard: Guard): Action[] {
   }
   const path = statePath(home);
   if (existsSync(path)) actions.push({ verb: "remove", path, note: "the update check's state", apply: () => guard.remove(path) });
+  // The usage data's install id: a new install is a new id.
+  const telemetry = telemetryDir(home);
+  if (existsSync(telemetry)) actions.push({ verb: "remove", path: telemetry, note: "the usage data's install id", apply: () => guard.removeTree(telemetry) });
   return actions;
 }
 

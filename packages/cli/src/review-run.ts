@@ -37,6 +37,8 @@ import { listReadiness, reviewerChoice } from "./reviewers/list.js";
 import { personalWebOff, userConfigNotes } from "./reviewers/settings.js";
 import { conventionHint } from "./instructions.js";
 import { dropTempRef, resolveTarget } from "./target.js";
+import { dispatch, record, recordCommand } from "./telemetry/dispatch.js";
+import { reviewProps, type ReviewInput } from "./telemetry/events.js";
 
 // How long a review runs before its reviewer is stopped, when --timeout
 // does not say: a change, a branch or a pull request, and the whole
@@ -103,6 +105,8 @@ export type ReviewOptions = {
   // How long a scanner still downloading is waited for; the scan's default
   // (INSTALL_BUDGET_MS) when left out.
   installBudgetMs?: number;
+  // The first review `init` runs, for the usage data.
+  fromInit?: boolean;
 };
 
 // The agents' names as a developer knows them.
@@ -387,6 +391,36 @@ export async function runReview(o: ReviewOptions): Promise<number> {
     return exitFor(report);
   };
   let code: number = EXIT_OK;
+  // The usage data of this review: recorded once the core call returned or
+  // threw, so a review is never counted as done before its cleanup.
+  let kept: ReviewCoreResult | null = null;
+  const usage: Pick<ReviewInput, "mode" | "scope" | "fromInit" | "staged" | "web"> = { mode: "reviewer", scope: o.all ? "all" : o.target !== undefined ? "target" : "change", fromInit: o.fromInit === true, staged: config.stages, web };
+  const noteReview = (result: ReviewCoreResult | null, exitCode: number, cleanupFailed: boolean): void => {
+    try {
+      if (result === null) {
+        record("review.completed", reviewProps({ ...usage, ended: "error", cleanupFailed: false, exitCode, reviewer: reviewer?.driver ?? null }));
+        return;
+      }
+      const ended = result.ended === "nothing" ? "nothing" : result.ended === "unavailable" ? "unavailable" : o.end?.ended === "incomplete" || (result.ended === "reviewed" && result.completion.status !== "complete") ? "incomplete" : "finished";
+      const calls = result.ended === "nothing" ? undefined : result.usage?.calls;
+      const totals = result.ended === "nothing" ? undefined : result.usage?.totals;
+      record("review.completed", reviewProps({
+        ...usage,
+        ended,
+        cleanupFailed,
+        exitCode,
+        reviewer: reviewer?.driver ?? null,
+        ...(reviewer ? { reviewerVersion: reviewer.version } : {}),
+        completion: result.ended === "reviewed" ? result.completion : null,
+        report: result.ended === "reviewed" ? result.report : null,
+        ...(calls !== undefined ? { modelsReported: calls.map((c) => c.model) } : {}),
+        inputTokens: totals?.inputTokens,
+        outputTokens: totals?.outputTokens,
+      }));
+    } catch {
+      // never a reason to fail
+    }
+  };
   try {
     await runReviewCore(
       { repoRoot, config, scope: o.scope, all: o.all, target: o.target, overlay: o.overlay, only, skip, noGraph: o.noGraph, reviewer: choice, web, timeoutMs: o.timeoutMs, timedOut: timedOutLine(o.timeoutMs), runtimeVersion: __OPENQODEX_VERSION__ },
@@ -451,12 +485,23 @@ export async function runReview(o: ReviewOptions): Promise<number> {
         onStop: (stop) => {
           onSignal = (signal) => {
             stop();
-            process.exit(signal === "SIGINT" ? 130 : 143);
+            const exit = signal === "SIGINT" ? 130 : 143;
+            // spawn has started the worker by the time it returns, so the
+            // events of a stopped review still leave.
+            try {
+              record("review.completed", reviewProps({ ...usage, ended: "interrupted", cleanupFailed: false, exitCode: exit, reviewer: reviewer?.driver ?? null, ...(reviewer ? { reviewerVersion: reviewer.version } : {}) }));
+              recordCommand({ exitCode: exit, threw: false, interrupted: true });
+              dispatch();
+            } catch {
+              // never a reason to fail
+            }
+            process.exit(exit);
           };
           process.once("SIGINT", onSignal);
           process.once("SIGTERM", onSignal);
         },
         onResult: (result) => {
+          kept = result;
           try {
             code = finish(result);
           } finally {
@@ -465,7 +510,12 @@ export async function runReview(o: ReviewOptions): Promise<number> {
         },
       },
     );
+    noteReview(kept, code, false);
     return code;
+  } catch (error) {
+    // A result kept, then a failure: the review was written and its cleanup failed.
+    noteReview(kept, EXIT_TOOL_FAILED, kept !== null);
+    throw error;
   } finally {
     offSignals();
   }

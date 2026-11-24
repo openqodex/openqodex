@@ -176,8 +176,9 @@ In a sandbox that cannot download, a scanner that is not installed yet cannot in
 - The reviewer sends the brief and the files it reads to the model service of the developer's login.
 - By default, the reviewer can also search the web. `review.reviewer_web: off` in the project's `.openqodex/config.yaml` turns that off.
 - Of the built-in scanners, four use the network. As OpenQodex runs them, none of the four sends code. semgrep downloads its rule packs. osv-scanner sends dependency names and versions to osv.dev. kubeconform downloads Kubernetes schemas. cargo-deny downloads the RustSec advisory database.
-- `--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny. It also stops scanner downloads. It does not stop the reviewer's model service or an approved custom scanner.
+- `--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny. It also stops scanner downloads. It also stops usage data for that run. It does not stop the reviewer's model service or an approved custom scanner.
 - A custom scanner does whatever its own command does.
+- OpenQodex sends anonymous usage data: version, operating system, agent and model names, timings, counts and token counts. It never sends code, paths or names. `openqodex_telemetry: 0` in `.openqodex/config.yaml` turns it off.
 
 The [privacy page](privacy.md) lists each network use of this version.
 

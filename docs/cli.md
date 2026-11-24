@@ -264,4 +264,5 @@ Asks the code graph of the repository a question: `callers`, `callees`, `impleme
 - `OPENQODEX_HOME`: where OpenQodex keeps scanners, the launcher and approvals. The default is `~/.openqodex`.
 - `OPENQODEX_SKIP=1`: the push gate lets the push through and says so. It is your switch, not your agent's.
 - `OPENQODEX_AUTO_UPDATE=0`: no daily version check. `OPENQODEX_OFFLINE=1` and a set `CI` variable do the same.
+- `OPENQODEX_TELEMETRY=0`: no usage data. `DO_NOT_TRACK=1`, `OPENQODEX_OFFLINE=1` and a set `CI` variable do the same.
 - `NO_COLOR`: no colour in the terminal report.
