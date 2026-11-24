@@ -450,7 +450,7 @@ function parseArgs(argv) {
   // The server profile always builds the code graph.
   o.graph ??= o.control ? ["off"] : server ? ["on"] : ["off", "on"];
   if (o.control && (o.graph.some((g) => g !== "off") || o.web !== "off")) throw new Error("the control reviewer uses no OpenQodex graph or web tools: use --graph off --web off");
-  if (o.release && (o.smoke || o.draft || o.package !== "local" || o.split !== "test" || !o.real)) throw new Error("--release requires a comparison's local build and a real suite's test split, without --smoke or --draft");
+  if (o.release && (o.smoke || o.draft || (o.package !== "local" && !o.package.startsWith("npm:")) || o.split !== "test" || !o.real)) throw new Error("--release requires a comparison's local build or a published npm package and a real suite's test split, without --smoke or --draft");
   if (o.release && !scan && SUITES[o.suite]?.board && o.repeat < BOARD_REPEATS) throw new Error(`--repeat ${o.repeat}: a release review run of a board suite attaches with ${BOARD_REPEATS} repeats (the comparison record's pin), so a run of fewer is refused before it spends`);
   // Model reviews wait on the endpoint, not this machine, so two run at once.
   o.concurrency ??= server ? 2 : 1;
