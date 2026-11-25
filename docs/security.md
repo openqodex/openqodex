@@ -54,6 +54,7 @@ OpenQodex and the built-in scanners use the network for these things only:
 - Custom scanners. `openqodex trust` reads the release from the GitHub API and downloads the asset. After approval, a custom scanner does whatever its own command does.
 - The problem report, only when you choose it. When OpenQodex fails, a scanner breaks, or you run `openqodex report`, it prints the GitHub issue it would create and two choices. Nothing is sent unless you press 1 or run `openqodex report --send-last`. Then, when the GitHub CLI `gh` is installed and signed in, `gh` creates the issue in `openqodex/openqodex` with your GitHub account. Otherwise OpenQodex opens GitHub's new-issue page in your browser, or prints its link, with the title and body filled in, and you submit it there. The issue holds the OpenQodex version, the command and its arguments with paths and secrets taken out, the part of OpenQodex that failed, a scrubbed error line, the scanner statuses and your platform (OS, CPU type, Node major version). It never holds code, file names, paths, repository names, config or secrets.
 - The daily version check, for an install made with `init`. See "Updates" below.
+- Usage data. When a command ends, a background process sends anonymous events to `eu.i.posthog.com`. It never sends code, paths or names. `telemetry` lists the fields. `openqodex_telemetry: 0` in `.openqodex/config.yaml` turns it off.
 - A review of a branch or a pull request (`review <branch>`, `review '#<number>'`). git fetches the branch or `pull/<number>/head` from your remote with its own credentials, and `gh`, when it is installed and signed in, is asked for the pull request's base. OpenQodex reads no token. The target is checked out in `~/.openqodex/checkouts/`, a folder only you can open, with every git hook and filter switched off, so checking it out runs nothing from it, and a link in it becomes a small plain file. The scanners you approved for this repository do run on the target's files, with this repository's settings; one named only in the target's config never runs. If you review pull requests from people you do not trust, approve only custom scanners that do not execute the code they scan.
 
 golangci-lint runs with the Go module proxy off, so it downloads no modules.
@@ -84,7 +85,7 @@ The lock: while `init`, `init --uninstall`, `hook install`, `update --rollback`,
 
 Updates are off with `openqodex update --off`, `update: off` in `~/.openqodex/config.yaml`, `OPENQODEX_AUTO_UPDATE=0`, `--offline` or `OPENQODEX_OFFLINE=1`, and whenever `CI` is set. They pause while `~/.openqodex/config.yaml` holds a key OpenQodex does not know. A run through `npx` or a project-scope file never checks.
 
-OpenQodex sends no telemetry. See `telemetry`.
+OpenQodex sends anonymous usage data from a separate background process. It is off in CI, with `--offline` and with `openqodex_telemetry: 0`. See `telemetry`.
 
 ## The reviewer process
 

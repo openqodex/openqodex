@@ -70,6 +70,21 @@ export function failureClass(reason: string | null, source = ""): string {
   return parts.includes(NOT_LISTED) ? [...listed, "a reason not listed"].join(", ") : listed.join(", ");
 }
 
+// The same failure as one word from a closed list, for the usage data: the
+// class of the first part of the reason, never any of its text.
+export function failureCode(reason: string | null, source = ""): "timeout" | "exit" | "could_not_start" | "output_limit" | "killed" | "no_report" | "unreadable_report" | "other" {
+  const r = reason ?? "";
+  const c = partClass(source === "golangci" ? (r.split("; ")[0] ?? "") : r);
+  if (c.startsWith("timed out after") || c === "ran out of time before a Go module") return "timeout";
+  if (c.startsWith("exited with code")) return "exit";
+  if (c === "could not start") return "could_not_start";
+  if (c === "printed more output than the limit") return "output_limit";
+  if (c === "was killed") return "killed";
+  if (c === "printed no report") return "no_report";
+  if (c === "its report could not be read") return "unreadable_report";
+  return "other";
+}
+
 // The fixed text the golangci adapter writes before any tool output, so it
 // is matched first: a type-check message can quote anything.
 const GOLANGCI_CLASSES: [RegExp, string][] = [
@@ -256,9 +271,14 @@ export function composeIssue(problem: Problem, command: string, args: string[]):
   return { title: `OpenQodex ${__OPENQODEX_VERSION__}: ${problem.code}`, body };
 }
 
-export function issueText(issue: Issue): string {
+// The first line of the text a saved preview's checksum covers. A preview
+// saved by an earlier version has the old line; it is still accepted.
+const HEADLINE = "OpenQodex had a problem. This issue report has not been sent.";
+const OLD_HEADLINE = "OpenQodex had a problem. Nothing has been sent.";
+
+export function issueText(issue: Issue, headline = HEADLINE): string {
   return [
-    "OpenQodex had a problem. Nothing has been sent.",
+    headline,
     `Issue title: ${issue.title}`,
     "Issue body:",
     issue.body,
@@ -356,7 +376,7 @@ export async function readLast(cwd: string): Promise<Issue | string> {
   const lines = v.body.split("\n");
   if (lines.length !== BODY_LABELS.length || lines.some((l, i) => !l.startsWith(BODY_LABELS[i] as string))) return changed;
   const issue = { title: v.title, body: v.body };
-  if (v.sha256 !== sha256(issueText(issue))) return changed;
+  if (v.sha256 !== sha256(issueText(issue)) && v.sha256 !== sha256(issueText(issue, OLD_HEADLINE))) return changed;
   return issue;
 }
 

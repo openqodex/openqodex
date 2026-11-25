@@ -328,7 +328,7 @@ export function renderReceipt(report: Report, opts: { html: string; md: string; 
   }
   out.push(receiptCoverage(record));
   if (record?.refused?.length) out.push(display(`These requests were refused and were not served: ${record.refused.join(", ")}`));
-  for (const note of report.notes ?? []) if (/^Convention(?:s supplied| omitted| transformed):/.test(note)) out.push(display(note));
+  for (const note of report.notes ?? []) if (/^(?:Convention(?:s supplied| omitted| transformed)|Reviewer list):/.test(note)) out.push(display(note));
   out.push(`Report: ${opts.html}`, `Markdown: ${opts.md}`);
   return `${out.join("\n")}\n`;
 }

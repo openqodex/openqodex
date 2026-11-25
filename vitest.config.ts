@@ -28,6 +28,9 @@ export default defineConfig({
       { extends: true, test: { name: "quarantine", include: held.length > 0 ? held : ["tests/quarantine.json.none"], retry: 1 } },
     ],
     passWithNoTests: true,
+    // No usage data from any test: every child that spreads process.env
+    // inherits this. The telemetry tests set their own, to a loopback server.
+    env: { OPENQODEX_TELEMETRY: "0" },
     // Every temp folder a test makes is removed by its file; the run fails
     // when one is left (tests/temp-guard.ts).
     globalSetup: ["tests/temp-guard.ts"],

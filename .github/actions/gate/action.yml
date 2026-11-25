@@ -77,8 +77,11 @@ runs:
       shell: bash
       run: node scripts/require-scanners.mjs
       env:
+        OPENQODEX_TELEMETRY: "0"
         OPENQODEX_E2E_HOME: ${{ runner.temp }}/openqodex-e2e-home
         GITHUB_TOKEN: ${{ github.token }}
+    # Every step that starts the CLI sends no usage data
+    # (OPENQODEX_TELEMETRY=0), besides the CI marker GitHub sets.
     # Only the test steps and the scanner install get the token: the custom
     # scanner tests read a release from the GitHub API, and hosted runners
     # share addresses, so the anonymous rate limit is often spent. Install
@@ -87,6 +90,7 @@ runs:
       shell: bash
       run: pnpm test
       env:
+        OPENQODEX_TELEMETRY: "0"
         OPENQODEX_E2E_HOME: ${{ runner.temp }}/openqodex-e2e-home
         OPENQODEX_GROWTH_TESTS: ${{ inputs.full == 'true' && '1' || '' }}
         GITHUB_TOKEN: ${{ github.token }}
@@ -95,6 +99,7 @@ runs:
       shell: bash
       run: pnpm test:e2e
       env:
+        OPENQODEX_TELEMETRY: "0"
         OPENQODEX_E2E_HOME: ${{ runner.temp }}/openqodex-e2e-home
         GITHUB_TOKEN: ${{ github.token }}
     # The review of the demo's planted change with both reviewer drivers,
@@ -103,6 +108,8 @@ runs:
       if: inputs.full == 'true'
       shell: bash
       run: pnpm golden:check
+      env:
+        OPENQODEX_TELEMETRY: "0"
     - name: Skill and plugin manifests
       shell: bash
       run: node scripts/validate-skill.mjs
@@ -115,6 +122,8 @@ runs:
     - name: Docs facts
       shell: bash
       run: node scripts/docs-facts.mjs
+      env:
+        OPENQODEX_TELEMETRY: "0"
     - name: Benchmark results
       shell: bash
       run: node scripts/benchmark-results.mjs --check

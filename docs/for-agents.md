@@ -167,7 +167,7 @@ Write what a reviewer of this repository must know in `.openqodex/custom-instruc
 | a scanner `untrusted` | A custom scanner is not approved. The developer decides. |
 | a scanner `disabled` | The config or `--offline` switched it off. |
 | files from an older version, and an `init` command | Tell the developer in one line. Give them the command. Run it only if they ask. |
-| `OpenQodex had a problem. Nothing has been sent.` | Follow the skill's rule for this message. Never choose to send the report yourself. |
+| `OpenQodex had a problem. This issue report has not been sent.` | Follow the skill's rule for this message. Never choose to send the report yourself. |
 
 In a sandbox that cannot download, a scanner that is not installed yet cannot install. Ask the developer to run `npx -y openqodex@0.24.0 doctor --install` in their own terminal, inside the repository.
 
@@ -176,8 +176,9 @@ In a sandbox that cannot download, a scanner that is not installed yet cannot in
 - The reviewer sends the brief and the files it reads to the model service of the developer's login.
 - By default, the reviewer can also search the web. `review.reviewer_web: off` in the project's `.openqodex/config.yaml` turns that off.
 - Of the built-in scanners, four use the network. As OpenQodex runs them, none of the four sends code. semgrep downloads its rule packs. osv-scanner sends dependency names and versions to osv.dev. kubeconform downloads Kubernetes schemas. cargo-deny downloads the RustSec advisory database.
-- `--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny. It also stops scanner downloads. It does not stop the reviewer's model service or an approved custom scanner.
+- `--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny. It also stops scanner downloads. It also stops usage data for that run. It does not stop the reviewer's model service or an approved custom scanner.
 - A custom scanner does whatever its own command does.
+- OpenQodex sends anonymous usage data: version, operating system, agent and model names, timings, counts and token counts. It never sends code, paths or names. `openqodex_telemetry: 0` in `.openqodex/config.yaml` turns it off.
 
 The [privacy page](privacy.md) lists each network use of this version.
 

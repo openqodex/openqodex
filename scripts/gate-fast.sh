@@ -10,6 +10,8 @@
 # without the cases that call a real model); the real model (pnpm gate:model).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# No usage data from any run of the gate (packages/cli/src/telemetry).
+export OPENQODEX_TELEMETRY=0
 
 all=0
 for arg in "$@"; do

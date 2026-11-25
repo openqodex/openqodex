@@ -5,6 +5,9 @@
 //   update: on | off              the daily check for a new release (on)
 //   skip_version: <x.y.z>         a release `update --rollback` left: the
 //                                 update never installs it or an older one
+//   openqodex_telemetry: 0 | 1    the anonymous usage data on this machine
+//                                 (1); any value but 1, true or on turns it
+//                                 off (telemetry/config.ts)
 //
 // reviewer, reviewer_web, reviewer_model and reviewer_effort were read up to
 // 0.23.0; each project's .openqodex/config.yaml chooses its reviewer now.
@@ -21,7 +24,7 @@ import { isScalar, parseDocument, type Document } from "yaml";
 import { nearestName } from "@openqodex/core";
 import { readText } from "./agents/files.js";
 
-export const USER_KEYS = ["update", "reviewer", "reviewer_web", "reviewer_model", "reviewer_effort", "skip_version"] as const;
+export const USER_KEYS = ["update", "reviewer", "reviewer_web", "reviewer_model", "reviewer_effort", "skip_version", "openqodex_telemetry"] as const;
 export type UserKey = (typeof USER_KEYS)[number];
 
 export type UserConfig = {

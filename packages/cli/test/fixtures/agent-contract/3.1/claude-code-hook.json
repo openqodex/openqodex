@@ -1,0 +1,10 @@
+{
+  "matcher": "Bash",
+  "hooks": [
+    {
+      "type": "command",
+      "if": "Bash(git push*)",
+      "command": "/home/dev/.openqodex/bin/openqodex hook check"
+    }
+  ]
+}

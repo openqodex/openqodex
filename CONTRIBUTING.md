@@ -49,6 +49,8 @@ node benchmark/release-check.mjs --install-scanners
 
 It runs no model and spends nothing. It must exit 0. Exit 1 names each loss, such as a planted bug the published package found and the new build misses: fix it before the release. Exit 2 means it could not run and shows nothing either way. On a machine without Ruby, Go or Cargo, add `--allow-missing-scanners`. `docs/benchmark.md` ("The release check") says what it compares. The release workflow runs the planted part again before it publishes, and does not publish on any exit but 0.
 
+A fresh-machine install test (`npm install -g <tgz>`, then `init` and a review) runs the package as a user would, so it sends usage data. Run `export OPENQODEX_TELEMETRY=0` in that shell first.
+
 ## After a release
 
 The self-update can only be proven between two real releases. After a publish, run the release check from the previous release to the new one:

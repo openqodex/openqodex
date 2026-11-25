@@ -4,7 +4,7 @@ This page is the privacy policy for OpenQodex: the `openqodex` package on npm, i
 
 ## What OpenQodex collects
 
-Nothing. OpenQodex collects no usage data, no crash reports and no identifiers. This covers OpenQodex and its built-in scanners. Claude Code, Codex and any custom scanner you approve follow their own policies. It has no server and no account, and it sends no telemetry. semgrep runs with its own metrics switched off.
+Anonymous usage data. The events hold the OpenQodex version, your operating system, the agent and model that reviewed, timings, scanner names, counts and token counts, with a random id for the install. `telemetry` lists every field and every way to turn it off. No event holds code, a path, a repository name or finding text. OpenQodex has no account and no server of its own; the events go to PostHog in the EU. PostHog works out an approximate location from the IP address of each request: country, city and time zone. The OpenQodex project in PostHog discards the IP address itself, so it is not stored. This covers OpenQodex and its built-in scanners. Claude Code, Codex and any custom scanner you approve follow their own policies. semgrep runs with its own metrics switched off.
 
 ## Who reviews your code
 
@@ -26,9 +26,10 @@ OpenQodex and the built-in scanners send no code anywhere. They use the network 
 - Custom scanners. `openqodex trust` reads the scanner's release from the GitHub API and downloads the asset.
 - The problem report, only when you choose it. When OpenQodex fails, a scanner breaks, or you run `openqodex report`, it prints the GitHub issue it would create and two choices. Nothing is sent unless you press 1 or run `openqodex report --send-last`. The issue holds the OpenQodex version, the command and its arguments with paths and secrets taken out, the part that failed, a scrubbed error line, the scanner statuses and your platform. It never holds code, file names, paths, repository names, config or secrets.
 - The daily version check, for an install made with `init`. It sends GET requests to `registry.npmjs.org` only, with nothing about you, your code or your repository. `security` describes what it checks before it installs a release.
+- Usage data. When a command ends, a background process sends anonymous events to `eu.i.posthog.com`. It never sends code, paths or names. `telemetry` lists the fields. `openqodex_telemetry: 0` in `.openqodex/config.yaml` turns it off.
 - A review of a branch or a pull request. git fetches it from your own remote with git's own credentials, and the GitHub CLI, when it is installed and signed in, is asked for the pull request's base. OpenQodex reads no token.
 
-`--offline` skips osv-scanner, semgrep, kubeconform and cargo-deny and turns scanner downloads and the version check off.
+`--offline` skips osv-scanner, semgrep, kubeconform and cargo-deny and turns scanner downloads and the version check off. It also stops usage data for that run.
 
 The plugins, the GitHub Action and the pre-commit hook fetch the `openqodex` package from npm to run it. In its review mode the Action also installs Claude Code from npm, unless the runner already has the pinned version.
 
@@ -40,7 +41,7 @@ A custom scanner named in `.openqodex/config.yaml` is a command that runs on you
 
 ## What stays on your machine
 
-Scanners, caches and your approvals stay under `~/.openqodex/`. Each review writes its brief, findings and reports under `.openqodex/` in your repository. When gitleaks finds a secret in the change, OpenQodex removes it from the brief, every report file and the terminal.
+Scanners, caches and your approvals stay under `~/.openqodex/`. The install id is in `~/.openqodex/telemetry/id`. Each review writes its brief, findings and reports under `.openqodex/` in your repository. When gitleaks finds a secret in the change, OpenQodex removes it from the brief, every report file and the terminal.
 
 ## Contact
 

@@ -16,6 +16,7 @@ import { openqodexHome } from "@openqodex/scanners";
 import type { Answer, GraphStore, Item, Operation, Pinned, Request, Shaped } from "@openqodex/graph";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
+import { noteSub } from "../telemetry/dispatch.js";
 
 export const USAGE = [
   "usage: openqodex graph <question> [<target>] [options]",
@@ -139,10 +140,12 @@ export async function run(args: string[]): Promise<number> {
   const op = positionals[0];
   if (op === undefined) throw new OpenQodexError(`name a question\n${USAGE}`);
   if (op === "help") {
+    noteSub(op);
     out(USAGE);
     return EXIT_OK;
   }
   if (op !== "build" && !(OPERATIONS as readonly string[]).includes(op)) throw new OpenQodexError(`unknown question: ${op}\n${USAGE}`);
+  noteSub(op);
   if (positionals.length > (op === "path" ? 3 : 2)) throw new OpenQodexError(`unexpected argument: ${positionals[op === "path" ? 3 : 2]}`);
   const json = bools.has("--json");
   const repoRoot = await findRepoRoot(global.cwd);

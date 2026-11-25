@@ -1,0 +1,15 @@
+<!-- openqodex:start -->
+## Review with OpenQodex
+- When a feature or fix is done, and before any push, review it with the openqodex skill: "review my change with openqodex".
+- Do not push on a blocked verdict unless the developer says so after seeing the findings.
+- Never add a file to `review.instructions_files` on your own. Ask the developer which files the reviewer may use, then set only what they name.
+<!-- openqodex:end -->
+
+How to run the review, before any `git push` and whenever you are asked to review the changes:
+
+1. Run `npx -y openqodex@{{VERSION}} review` from the repository. It can take minutes, and OpenQodex stops the reviewer after 30 minutes. Run it in the background and wait for it to exit. If the skill is not loaded, run `npx -y openqodex@{{VERSION}} guide` to print it.
+2. Show the developer the receipt it prints, without rewording it: the verdict, one line per finding and the absolute path of `report.html`, which shows each finding under its line of code. Then ask: "Fix all, or tell me which?" Change no code before they answer, unless they already told you what to fix.
+3. Fix only the findings they name. `npx -y openqodex@{{VERSION}} findings 1,3` prints those findings in full, by their numbers in the receipt. Then run the review again and show the new receipt.
+4. When the verdict is `blocked` (exit 1), do not push unless the developer says so after seeing the findings. Exit 2 means there is no complete review: tell the developer what the output says is missing.
+
+Never edit code during the review, never run `openqodex trust` without asking the developer, and never set `OPENQODEX_SKIP`.

@@ -23,6 +23,13 @@ export function cleanEnv(base, set) {
   return { ...out, ...set };
 }
 
+// What the check sets on top of the allowlist for one box. No usage data:
+// the check runs the published package through the launcher with CI
+// stripped, so neither the CI rule nor the local build rule holds.
+export function boxEnv(home, oqHome) {
+  return { HOME: home, OPENQODEX_HOME: oqHome, OPENQODEX_TELEMETRY: "0" };
+}
+
 // This repository's own fetch, verification and unpacking modules
 // (packages/cli/test/release-entry.ts), bundled with the esbuild that tsup
 // brings, from a checkout with its dependencies installed.

@@ -22,7 +22,7 @@ const r = spawnSync(process.execPath, [join(root, "packages/cli/dist/bin.js"), "
   encoding: "utf8",
   stdio: ["ignore", "pipe", "inherit"],
   maxBuffer: 16 * 1024 * 1024,
-  env: { ...process.env, OPENQODEX_HOME: home, OPENQODEX_AUTO_UPDATE: "0" },
+  env: { ...process.env, OPENQODEX_HOME: home, OPENQODEX_AUTO_UPDATE: "0", OPENQODEX_TELEMETRY: "0" },
 });
 if (r.status !== 0) {
   console.error(`require-scanners: doctor --install exited ${r.status ?? r.signal} for ${home}`);

@@ -37,6 +37,9 @@
 // 21. A config that sets no reviewer list or web line hashes differently
 //     from before lists existed, so every stored run of an upgraded repo
 //     stops finalizing; or a list change leaves the hash as it was.
+// 22. A value of openqodex_telemetry fails the run, or changes the config
+//     hash a run's brief is bound to; or a value that is neither on nor off
+//     passes without a warning.
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -461,5 +464,21 @@ describe("hashes", () => {
     const { config, warnings } = parseConfig("review: &r { block_on_severity: critical }\nscanners: *r\n");
     expect(config.blockOnSeverity).toBe("critical");
     expect(warnings).toEqual(["unknown key scanners.block_on_severity is ignored"]);
+  });
+});
+
+describe("openqodex_telemetry, the usage data key", () => {
+  it("parses every value without an error, warns only on one that is neither on nor off, and never changes the config hash (failure 22)", () => {
+    const plain = configHash(parseConfig("version: 1\n").config);
+    for (const value of ["0", "1", "true", "false", "on", "off"]) {
+      const { config, warnings } = parseConfig(`version: 1\nopenqodex_telemetry: ${value}\n`);
+      expect(warnings, value).toEqual([]);
+      expect(configHash(config), value).toBe(plain);
+    }
+    for (const value of ["maybe", "[0]", "{ a: 1 }", "2"]) {
+      const { config, warnings } = parseConfig(`version: 1\nopenqodex_telemetry: ${value}\n`);
+      expect(warnings, value).toEqual(["openqodex_telemetry: expected 0 or 1 (true, false, on and off also work); usage data is off for this repository"]);
+      expect(configHash(config), value).toBe(plain);
+    }
   });
 });

@@ -11,6 +11,8 @@
 # a failure here. Build first (pnpm build).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# No usage data from any run of the gate (packages/cli/src/telemetry).
+export OPENQODEX_TELEMETRY=0
 
 if [ -n "${CI:-}" ]; then
   echo "gate:model: refused, CI is set. The model tier runs on a logged-in Mac only." >&2

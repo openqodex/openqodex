@@ -10,7 +10,7 @@ For machines. Kept for the pre-commit hook and the GitHub Action, which call it,
 openqodex scan [--base <ref>] [--uncommitted] [--only <list>] [--skip <list>] [--block-on-severity <severity>] [--report-dir <folder>]
 ```
 
-Runs the scanners on the change and prints their findings, labelled as scanner data. No model is involved and nothing is checked: it is not a review. The pre-commit hook runs this command, and so does the GitHub Action when it has no key for the review or no reviewer could start. `--block-on-severity` sets the severity that makes it exit 1, and wins over `review.block_on_severity` in the config. Its `report.json` says how long it took under `timings`: `change_ms`, `scan_ms` and `total_ms`, in milliseconds. `--report-dir <folder>` writes this scan's files (`report.md`, `report.json`, `report.sarif`, `scan.json`) to that folder instead of `.openqodex/reviews/`, and then the scan creates, reads and writes nothing under `.openqodex/` in the repository, as for `review`: without `--config` it uses the built-in defaults.
+Runs the scanners on the change and prints their findings, labelled as scanner data. No model is involved and nothing is checked: it is not a review. The pre-commit hook runs this command, and so does the GitHub Action when it has no key for the review or no reviewer could start. `--block-on-severity` sets the severity that makes it exit 1, and wins over `review.block_on_severity` in the config. Its `report.json` says how long it took under `timings`: `change_ms`, `scan_ms` and `total_ms`, in milliseconds. `--report-dir <folder>` writes this scan's files (`report.md`, `report.json`, `report.sarif`, `scan.json`) to that folder instead of `.openqodex/reviews/`, and then the scan creates, reads and writes nothing under `.openqodex/` in the repository, as for `review`: without `--config` it uses the built-in defaults. When usage data is on, its background process still reads `openqodex_telemetry` from the repository's config files.
 
 ## review --agent and review --finalize
 
@@ -133,7 +133,7 @@ When the issue could not be saved, OpenQodex says so and does not offer `--send-
 
 In a terminal, press 1 or 2. Any other key, Enter, Ctrl-C or the end of input counts as 2. Without a terminal (an agent, a git hook, CI), OpenQodex prints the issue and how to create it later with `openqodex report --send-last`; doing nothing ignores it.
 
-Choice 1 creates the issue with the GitHub CLI when `gh auth status` says you are signed in. Otherwise it opens the new issue page on GitHub with the title and body filled in, and prints the link. OpenQodex never signs you in. Choice 2 sends nothing. Nothing leaves your machine without choice 1. The last issue shown is kept in `.openqodex/last-report.json`, which git ignores.
+Choice 1 creates the issue with the GitHub CLI when `gh auth status` says you are signed in. Otherwise it opens the new issue page on GitHub with the title and body filled in, and prints the link. OpenQodex never signs you in. Choice 2 sends nothing. The issue report leaves your machine only with choice 1. The last issue shown is kept in `.openqodex/last-report.json`, which git ignores.
 
 ## mcp
 

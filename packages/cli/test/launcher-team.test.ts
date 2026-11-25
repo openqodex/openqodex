@@ -25,6 +25,12 @@
 //     Ubuntu.
 // 13. init --project and then init in user scope leave two sections in one
 //     file.
+// 14. A re-run of init leaves the longer, version-pinned team section an
+//     earlier version wrote, recorded or not (a teammate's checkout), or
+//     replaces one the developer edited.
+// 15. The team section lets a teammate's agent push on a blocked verdict
+//     without the developer's say: a teammate with nothing installed has no
+//     skill to say so.
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -138,15 +144,18 @@ describe("the user-scope skill calls the launcher", () => {
 });
 
 describe("the team section in the repo", () => {
-  it("is written into CLAUDE.md and AGENTS.md once, shows in git status, never names the skill (failures 6, 7, 11)", () => {
+  it("is written into CLAUDE.md and AGENTS.md once, shows in git status, never names the skill, and stops on a blocked verdict (failures 6, 7, 11, 15)", () => {
     const s = sandbox();
     const first = cli(s, ["init", "--yes", "--agent", "claude-code"]);
     expect(first.status, first.stderr).toBe(0);
     for (const f of ["CLAUDE.md", "AGENTS.md"]) {
       const text = readFileSync(join(s.repo, f), "utf8");
       expect(count(text, START), f).toBe(1);
-      expect(text).toContain(`npx -y openqodex@${version} review\``);
+      expect(text).toContain("`npx -y openqodex review`");
+      expect(text).not.toContain("openqodex@");
+      expect(text.split("\n").filter((l) => l !== "" && !l.startsWith("<!-- openqodex:"))).toHaveLength(1);
       expect(text.toLowerCase()).not.toContain("skill");
+      expect(text).toContain("Do not push on a blocked verdict unless the developer says so after seeing the findings.");
       expect(text).not.toContain(String.fromCodePoint(0x2014));
     }
     expect(status(s)).toContain("?? AGENTS.md\n");
@@ -181,7 +190,7 @@ describe("the team section in the repo", () => {
 
     expect(cli(s, ["init", "--yes", "--agent", "claude-code"]).status).toBe(0);
     const claude = join(s.repo, "CLAUDE.md");
-    const edited = readFileSync(claude, "utf8").replace("before you push", "before you push, always");
+    const edited = readFileSync(claude, "utf8").replace("Before any push", "Before any push, always");
     expect(edited).not.toBe(readFileSync(claude, "utf8"));
     writeFileSync(claude, edited);
     const u = cli(s, ["init", "--uninstall", "--yes"]);
@@ -197,6 +206,16 @@ describe("the team section in the repo", () => {
     const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
     expect(readFileSync(outside, "utf8")).toBe("mine\n");
     expect(`${r.stdout}${r.stderr}`).toContain("symbolic link");
+  });
+
+  it("replaces the team section an earlier version wrote, recorded or not, and keeps an edited one (failure 14)", () => {
+    const old = readFileSync(join(BIN, "..", "..", "templates", "previous", "team-49601e43.md"), "utf8").replaceAll("{{VERSION}}", "0.20.0");
+    const edited = old.replace("- The report is", "- Our own rule.\n- The report is");
+    const s = sandbox({ "CLAUDE.md": `# Rules\n\n${old}\nAfter.\n`, "AGENTS.md": edited });
+    const r = cli(s, ["init", "--yes", "--agent", "claude-code"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(s.repo, "CLAUDE.md"), "utf8")).toMatch(/^# Rules\n\n<!-- openqodex:start -->\nBefore any push, review the change with OpenQodex: run `npx -y openqodex review` [^\n]*\n<!-- openqodex:end -->\n\nAfter\.\n$/);
+    expect(readFileSync(join(s.repo, "AGENTS.md"), "utf8")).toBe(edited);
   });
 
   it("init --project then init leaves one section per file (failure 13)", () => {

@@ -1,0 +1,10 @@
+{
+  "matcher": "^Bash$",
+  "hooks": [
+    {
+      "type": "command",
+      "command": "/home/dev/.openqodex/bin/openqodex hook check",
+      "statusMessage": "OpenQodex: checking for a review before push"
+    }
+  ]
+}

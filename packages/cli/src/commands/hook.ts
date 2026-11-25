@@ -420,7 +420,10 @@ async function decide(input: HookInput): Promise<void> {
   }
   const home = openqodexHomeDir();
   for (const repoRoot of roots) {
-    const { config } = core.loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ });
+    const { config, path } = core.loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ });
+    // A repository opts in with a settings file (.openqodex/config.yaml, or
+    // the legacy .openqodex.yaml). Without one the hook says nothing.
+    if (path === null) continue;
     const where = (m: string) => (roots.length > 1 ? `${repoRoot}: ${m}` : m);
     const branch = spec === null || spec === "" || spec === "HEAD" ? null : await git(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
     if (spec === null || (spec !== "" && spec !== "HEAD" && spec !== branch)) {
