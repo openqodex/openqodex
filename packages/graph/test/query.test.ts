@@ -10,7 +10,8 @@
 // 4. A cursor from another request or another build pages through the wrong
 //    list instead of being refused.
 // 5. `explain` of an edge that is not in the graph returns an empty success.
-// 6. Search results are counted as callers.
+// 6. Search results are counted as callers, or a hit with only part of the
+//    name is put with the exact matches.
 // 7. An operation that did not run says nothing about which graph answered.
 import { afterAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -51,12 +52,12 @@ describe("the graph query", () => {
   it("marks zero callers on a floor as a floor with its reasons (2)", async () => {
     const { s } = await session({
       "lib.ts": "export function target() {\n  return 1;\n}\n",
-      "use.ts": "export function run(handlers: Record<string, () => void>, key: string) {\n  handlers[key]();\n}\n",
+      "use.ts": 'import { target } from "./lib";\nexport function run(handlers: Record<string, () => void>, key: string) {\n  handlers[key]();\n}\nrun({ target }, "target");\n',
     });
     const a = query(s, { apiVersion: 1, kind: "callers", target: { name: "target" } });
     expect(a.items).toEqual([]);
     expect(a.unknown.floor).toBe(true);
-    expect(a.unknown.reasons.join(" ")).toMatch(/through a value/);
+    expect(a.unknown.reasons.join(" ")).toMatch(/used as a value in 1 place, first at use\.ts:5/);
     expect(a.counts).toEqual({ certain: 0, likely: 0, possible: 0 });
     // A status the build did not count stays null.
     expect(query(s, { apiVersion: 1, kind: "status" }).counts.certain).toBeNull();
@@ -104,12 +105,15 @@ describe("the graph query", () => {
     expect(query(s, { apiVersion: 1, kind: "explain", target: { id: elsewhere } }).error?.code).toBe("not-found");
   });
 
-  it("returns search hits as leads, never as counted items (6)", async () => {
+  it("returns exact search hits as items and the rest as leads, never counted (6)", async () => {
     const { s } = await session(twoRun);
     const a = query(s, { apiVersion: 1, kind: "search", text: "run" });
-    expect(a.leads.map((l) => l.file).sort()).toEqual(["a.ts", "b.ts"]);
-    expect(a.items).toEqual([]);
+    expect((a.items as { file: string }[]).map((l) => l.file).sort()).toEqual(["a.ts", "b.ts"]);
+    expect(a.leads).toEqual([]);
     expect(a.counts).toEqual({ certain: null, likely: null, possible: null });
+    const part = query(s, { apiVersion: 1, kind: "search", text: "un" });
+    expect(part.items).toEqual([]);
+    expect(part.leads.map((l) => l.file).sort()).toEqual(["a.ts", "b.ts"]);
   });
 
   it("names the graph that answered on every answer, errors included (7)", async () => {

@@ -53,6 +53,7 @@ const VALUES = [
   "hotSymbols",
   "INDEX_FORMAT",
   "isTestPath",
+  "LineSet",
   "OPERATIONS",
   "parseTarget",
   "prepareIndexes",
@@ -140,6 +141,7 @@ const TYPES = [
   "Recipe",
   "Report",
   "ReportFinding",
+  "RuleCitation",
   "ResolveTool",
   "ReviewerRecord",
   "RunScannersResult",
@@ -247,7 +249,7 @@ const REPORT: Report = {
   ],
   below_threshold: 0,
   outside_change: [],
-  low_confidence: [],
+  possible: [], low_confidence: [],
   not_reviewed: [],
   dropped: [],
   scanners: [{ scanner: "semgrep", status: "ran", version: "1.94.0", rawCount: 1, keptCount: 1, durationMs: 1200, reason: null }],
@@ -353,6 +355,8 @@ describe("the installed package as a library", () => {
     const lines = [
       `import { ${values}, ${types} } from "openqodex"; import * as lib from "openqodex";`,
       `export const all = [${values}] as const; export type All = [${TYPES.join(", ")}]; type AnyNames<T> = { [K in keyof T]: 0 extends 1 & T[K] ? K : never }[keyof T]; export const noAny: [AnyNames<typeof lib>] extends [never] ? true : AnyNames<typeof lib> = true;`,
+      // Failure case: the installed declarations omit the possible result list.
+      "export const possibleItems = (result: ReviewResult): ResultFinding[] => result.possible;",
     ];
     const consumer = join(project, "consumer");
     mkdirSync(consumer);

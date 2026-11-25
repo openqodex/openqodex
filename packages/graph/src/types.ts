@@ -17,9 +17,21 @@ export function familyOf(lang: Lang): Family {
 
 // ---------- facts one parse of one file yields (cached by content) ----------
 
-// How deep a TypeRef may nest through `on`: the extractor drops `on` past
-// it and the validator refuses deeper ones, so a kept file is never refused.
+// Type nesting through `on` and `args` shares one depth limit.
 export const MAX_TYPE_DEPTH = 16;
+
+// The most global names one file's facts keep as declared plain data
+// (`ambient`, `ambientTop`): the extractor writes at most this many and the
+// reader of saved facts accepts as many, so saved facts read back whole. A
+// name past it is not vouched for, which can only add a floor.
+export const MAX_AMBIENT_NAMES = 200_000;
+// The longest string the reader of saved facts accepts. A global name
+// longer than it is not kept as declared plain data, so the facts that
+// hold it still read back.
+export const MAX_FACT_STRING = 4096;
+// The most words one region the parser could not read keeps
+// (UnreadRegion.names); past it the region may hide a call of anything.
+export const MAX_UNREAD_NAMES = 4096;
 
 // A type named in source: `Repo`, `pkg.Repo` (qualifier "pkg"), Ruby `A::B`
 // (whole path in `name`, the lexical nesting in `qualifier`).
@@ -37,14 +49,50 @@ export type TypeRef = {
   line: number;
   column: number;
   result?: number;
+  promise?: boolean; // The declared type wraps this type in Promise.
+  awaited?: boolean; // The call result is read through await.
   // With `result`: the method `name` is called on a value of type `on`
   // (`repo.find(id)` with `repo` a typed local or field); this type is that
   // method's declared result at position `result`. Chains nest through `on`.
   on?: TypeRef; // nested at most MAX_TYPE_DEPTH deep
   elem?: boolean;
+  // With `result`: the value is one element of what the call returns, which
+  // must be declared as an array or a set (`for (const s of all())`).
+  item?: boolean;
+  values?: TypeRef; // Map<K, V> and ReadonlyMap: V, read only through `values()`
+  // With `result`: not what the call returns but the declared type of
+  // parameter `param` of the function the call takes as argument `arg`
+  // (`span("x", (s) => ...)` with `span(name, fn: (s: Span) => T)`).
+  callback?: { arg: number; param: number };
   declared?: boolean;
+  // A TypeScript local given a member without an annotation: the member's
+  // type, so the value may be of any class below it, as a field's is; unlike
+  // `declared`, an assignment to the local ends it.
+  member?: boolean;
   bound?: BoundImport;
   rel?: "implements" | "include" | "prepend" | "extend";
+  args?: TypeRef[]; // Java and TypeScript type arguments, in declaration order.
+  kind?: "param"; // A Java result, or a TypeScript member, naming a class or interface type parameter.
+  param?: number; // The class type parameter's index.
+  // TypeScript only. `fields`: an object type written in place (name "{}")
+  // or an object literal a function returns, its members' types; a method
+  // or a function-typed member is a "{}" with no fields. `path`: the type of
+  // these members, read in turn, of the type this names (a name bound by
+  // destructuring). `parts`: an intersection (name "&"), each side.
+  fields?: Record<string, TypeRef>;
+  path?: string[];
+  parts?: TypeRef[];
+  // On an intersection of one side: `Pick<T, K>` keeps only the members
+  // `only` names, `Omit<T, K>` every member but those `omit` names. `open`:
+  // K also names keys not written out (`keyof X | "a"`), which may be kept.
+  only?: string[];
+  omit?: string[];
+  open?: boolean;
+  // On a function's result: read from what its body returns, not declared.
+  inferred?: boolean;
+  // With `result`: the call names this file's definition at that index, a
+  // function declared inside a function that no file-level name reaches.
+  localDef?: number;
 };
 
 export type DefFact = {
@@ -65,10 +113,19 @@ export type DefFact = {
   dynamicBases?: { line: number; column: number; head?: TypeRef; rel?: "include" | "extend" | "prepend" }[];
   fields: Record<string, TypeRef>; // classes and structs: field name to its declared or constructed type
   results?: (TypeRef | null)[]; // functions and methods: the declared result types
+  // Each parameter declared as a function type: its position and the
+  // declared type of each of that function's parameters (null: none, or a
+  // type parameter, which the call may fill with any type).
+  callbacks?: { arg: number; params: (TypeRef | null)[] }[];
   static?: boolean; // methods called on the class itself: JS `static`, Ruby `def self.x`
   // A hash of the definition without its name, comments and whitespace
   // (top-level definitions and members of top-level classes only).
   bodyHash?: string;
+  // A function written in place where a route handler goes (extract.ts,
+  // routeHandlerName): the index of the definition it is written in, -1 at
+  // the top level. It stays a definition only when a framework plugin binds
+  // it; otherwise its calls go back to that definition (inline-fold.ts).
+  inlineIn?: number;
   // A TypeScript type alias: the type it stands for (`type Loose = any`).
   alias?: TypeRef;
   // A member declared without a body that runs: a TypeScript interface
@@ -77,10 +134,21 @@ export type DefFact = {
   // never a dispatch target.
   abstract?: boolean;
   iface?: boolean; // a TypeScript interface or a Go interface type
+  // A TypeScript interface member marked `?` (`close?(): void`): a value of
+  // the interface need not have it, so a class matched by shape need not either.
+  optional?: boolean;
+  // A TypeScript interface declared in `declare module "x"` or `declare
+  // global`: it adds members to a type that may come from outside the repository.
+  augments?: boolean;
+  anonymous?: boolean; // a Java object or enum constant body, never a source-level type name
   pointer?: boolean; // a Go method with a pointer receiver
   // A Java method whose last parameter is varargs (`Object... rest`): it
   // takes any number of arguments from its fixed parameters up.
   varargs?: boolean;
+  // A TypeScript interface property typed by a named type (`resolve:
+  // ResolveFn`): a member a call may name, which returns what that type's
+  // call signature returns. The type as written.
+  signature?: TypeRef;
   // A Java constructor: a method named like its class, called by `new`.
   // It is not static: its body runs on the new instance.
   ctor?: boolean;
@@ -110,7 +178,11 @@ export type ValueRef = {
   recv: Receiver;
   local?: number;
   bound?: BoundImport;
-  role: "arg" | "assign" | "return" | "property" | "element";
+  // `other`: any read no other role took (a ternary's side, a spread, a
+  // default value). `object`: the name before a dot (`f.bind`, `ns.x`), a
+  // use of a function, never of a module. `index`: the name before a
+  // computed member (`ns[k]`), a use of a function and of a module.
+  role: "arg" | "assign" | "return" | "property" | "element" | "other" | "object" | "index";
   call?: number; // an argument: the call (index into calls) it is passed to
   arg?: number; // its position among the arguments
   key?: string; // a Python keyword argument's name
@@ -127,6 +199,8 @@ export type TypeUse = { ref: TypeRef; caller: number };
 // can write it), written through a member or an index, passed on, or has
 // a method called on it.
 export type TableFact = { name: string; line: number; values: number[]; open?: boolean };
+
+export type LiteralFact = { line: number; keys: string[]; open?: boolean; unread?: number; by?: string };
 
 // A name bound by an import made inside a function or a block, in that
 // scope only: the import (an index into FileFacts.imports) and the name it
@@ -167,14 +241,23 @@ export type CallFact = {
   arity?: number;
   // A computed callee (`table[key]()`): no name to bind. `name` is empty.
   dynamic?: boolean;
-  // A bare call of a local given one value once (`const fn = helper`):
-  // the value reference it holds (index into FileFacts.values).
+  // A method found by a name given at run time (Java `getMethod(n)`, Go
+  // `MethodByName(n)`, Python `getattr(o, n)`, Ruby `send(n)`): a call of
+  // the name written, or a computed callee.
+  byName?: boolean;
+  // A call of a local or its member uses the local's single callable value.
+  // The alias indexes FileFacts.values.
   alias?: number;
+  // The local given the value, when it is not the callee name.
+  aliasOf?: string;
   // A call of what a call returned: `pick(k)()`, or a local given that
   // value once (`const h = pick(k); h()`): the inner call (index into calls).
   result?: number;
   // A computed call on a name bound to a literal table (index into FileFacts.tables).
   table?: number;
+  // TypeScript and JavaScript: the receiver as written (`deps.sessions`),
+  // when it is a name or a member path; what ranks a gap the call leaves.
+  hint?: string;
 };
 
 export type ImportFact = {
@@ -197,6 +280,40 @@ export type ImportFact = {
   staticStar?: boolean;
 };
 
+// TypeScript and JavaScript: a place where a function may be reached by a
+// name the graph cannot follow. `module`: a module loaded in a way the
+// reader does not read whole (a pattern with a default, a rest or a nested
+// part, a load written in place), by its specifier. `own`: the file's own
+// `exports` or `module.exports` read as a value or given a value the reader
+// does not read whole. `eval`: a direct `eval(...)` or a `with` statement.
+// `global`: code or a name built at run time on the global scope
+// (`Function`, an indirect eval, `globalThis[k]`). `load`: a module loaded
+// by a computed path, `require` used other than as a direct call with a
+// written path, or a use of Node's module library that may make a loader;
+// `cjs` when it holds only outside a CommonJS file (`.cjs`, `.cts`), where
+// `__filename` is the file's own place.
+export type EscapeFact =
+  | { kind: "module"; spec: string; line: number }
+  | { kind: "own" | "eval" | "global"; line: number }
+  | { kind: "load"; line: number; cjs?: true };
+
+// `reach`: how far the place may reach past the file's own definitions and
+// the modules it imports. `global`: the global scope, so a script's
+// definitions. `any`: any module (code made from a string, the global
+// object indexed, a module loaded by a pattern).
+// `name`: the free name read, for a free name.
+// `passed`: a read by a computed key (`why` "*") whose value may be passed
+// on, so a method it takes may be called anywhere.
+// `plain`: a read by a computed key on a value whose declared type is plain
+// by its name alone; it counts only when the repository declares one of
+// these names.
+export type OpaqueFact = { why: string; line: number; count: number; reach?: "global" | "any"; name?: string; passed?: boolean; plain?: string[] };
+
+// A region of a file the parser could not read (walk.ts, unreadRegions):
+// where it starts, and the words written in and around it, which name
+// what a call hidden there may run; null when there are too many to keep.
+export type UnreadRegion = { line: number; column: number; names: string[] | null };
+
 export type FileFacts = {
   lang: Lang;
   defs: DefFact[];
@@ -204,7 +321,22 @@ export type FileFacts = {
   values: ValueRef[];
   types: TypeUse[];
   typeCuts?: number; // annotations too large to read whole: their types past the cut are not type uses
+  // The regions the parser could not read (a syntax error, or a shape the
+  // grammar does not know): a call there may be missing from `calls`.
+  unread?: UnreadRegion[];
   tables: TableFact[];
+  // TypeScript and JavaScript: each object literal that is no definition of
+  // the graph (an argument, a returned object, a local) and names a member
+  // that may hold code (a method, a function, a name), with those member
+  // names, and `open` when it may have others (a spread or a source of
+  // Object.assign that is no literal), `unread` the members whose names
+  // are not read (computed keys, keys past the cap). `by` names a value
+  // given its members in place (`f.get = g`, `Object.assign(f, { get })`).
+  // A call through an interface may run such an object's code.
+  // `literalsCut`: the file holds more literals than the cap, so any
+  // interface call may reach one not listed.
+  literals?: LiteralFact[];
+  literalsCut?: boolean;
   imports: ImportFact[];
   exportsLocal: { local: string; exported: string; line?: number }[]; // `export { a as b }` without a source
   defaultExport: string | null; // the local name `export default` names
@@ -215,6 +347,32 @@ export type FileFacts = {
   // Each framework plugin's context-free facts of the file, by plugin id
   // (frameworks/plugin.ts); absent when no plugin found anything.
   frameworks?: FrameworkFileFacts;
+  escapes?: EscapeFact[];
+  // TypeScript and JavaScript: why the reader cannot vouch for every value
+  // read in the file (a free name it does not know as harmless, `this`
+  // outside a class, a `.constructor` read, a construct it does not read),
+  // each with its first line and how many times it was seen.
+  opaque?: OpaqueFact[];
+  // TypeScript: the global names the file declares as plain data in
+  // `declare global`, and (`ambientTop`) at its top when it has no import
+  // or export (`declare const V: string`): global only in a script, so
+  // never in a `.mts` or `.cts` file, which is always a module.
+  ambient?: string[];
+  ambientTop?: string[];
+  // TypeScript and JavaScript: member names read, not called, on a value
+  // of unknown type (`c.total`, `const h = obj.save`): a getter runs there,
+  // or a method is taken as a value.
+  looseMembers?: OpaqueFact[];
+  // TypeScript and JavaScript: the module-level variables that are no
+  // definition (`const LIMIT = 10`), and those exported as declared
+  // (`export const LIMIT`, CommonJS `exports.LIMIT = 10`). An import of one
+  // binds a value the graph follows, not a name it could not find.
+  variables?: string[];
+  exportedVariables?: string[];
+  // TypeScript and JavaScript: the file has an `import` or `export`
+  // statement (`export {}` too), so it is a module, never a script whose
+  // definitions are names of the global scope.
+  esm?: true;
 };
 
 // ---------- the graph ----------
@@ -251,7 +409,7 @@ export type DispatchSite = {
   declared: string[]; // the definition the call binds to
   candidates: string[]; // ids of the implementations or overrides kept
   total: number;
-  rule: "dispatch-implements" | "dispatch-override";
+  rule: "dispatch-implements" | "dispatch-override" | "by-shape";
 };
 
 // What a function does with its parameters and what it returns, read from
@@ -266,10 +424,21 @@ export type InvocationSummary = { params: string[]; invokes: number[]; returns: 
 // callers are found here.
 export type Miss = { target: string; name: string; from: string; site: GraphSite };
 
-// A call site no rule could bind, kept small: the full Unknown record of
+// What a gap may hide a call to: the join key every caller floor reads
+// (impact.ts, floorOf). `names`: a definition of one of these names (a
+// call no rule bound, by its name). `ids`: these definitions. `file`: any
+// definition of the file. "values": what a call through a value may run,
+// which escape analysis narrows (only with scope "project"). "scope": the
+// graph gave up with no narrower target, so every definition of the gap's
+// project. An empty `ids` says the gap can hide no call, and the code that
+// writes it says why. Made only by `gap` (gap.ts).
+export type Reaches = { names: string[] } | { ids: string[] } | { file: string } | "values" | "scope";
+
+// A place the graph gave up, kept small: the full Unknown record of
 // model/records.ts is made from it when an answer shows it. `scope`
 // "project": the call goes through a value (a parameter, a computed
-// member), so it could reach any function of its project.
+// member), so it could reach any function of its project. `reaches`: what
+// a call it hides may run. `next`: what the reader should check there.
 export type UnknownSite = {
   file: string;
   line: number;
@@ -281,7 +450,62 @@ export type UnknownSite = {
   scope: "file" | "project";
   note?: string;
   candidates?: string[];
+  // The receiver as written and the type it was read as, when known
+  // (`sessions any`): which same-name gaps may be a class's callers.
+  receiver?: string;
+  // The call cannot run a plain function of that name: a bare call of a
+  // local or a parameter, `this.x()` where `this` is proved an instance of
+  // a class, or a call on a value whose class or interface the graph knows.
+  notPlain?: boolean;
+  reaches: Reaches;
+  next: string;
 };
+
+export type Place = { file: string; line: number };
+
+// Why a function's caller list may miss a caller the graph cannot see, as
+// the build found it (impact.ts, floorReasons reads it). `uses`: per
+// symbol id, its uses as a value under any of its names, its own body
+// included. `unbound`: value uses no rule could bind, by family and name
+// (`js:save`). `reach`: per symbol id, each place its module escapes
+// (`module`), or a name built at run time may reach it (`eval`, `global`).
+// `modules`: every module found escaping, with its place, for the
+// definitions a change removed. `loadAny`: the places that may load any
+// module (a load by a computed path, code built at run time), and
+// `offered`, then, every definition a module offers.
+export type Reach = Place & { why: "module" | "eval" | "global" };
+export type Escapes = {
+  uses: Map<string, Place & { count: number }>;
+  unbound: Map<string, Place & { count: number }>;
+  reach: Map<string, Reach[]>;
+  modules: Map<string, Place>;
+  loadAny: (Place & { why: "load" | "eval" | "global" })[];
+  offered: Set<string>;
+  // TypeScript and JavaScript files the reader cannot vouch for, by file:
+  // the first reason (one that reaches any module when there is one), its
+  // line, how many places in the file, and each reason. `any`: it may load
+  // any module. `global`: it reads the global scope (a free name, or the
+  // file is a script). `unbound`: an import of it names no file the graph
+  // found, so what it reaches is not known. `reach`: the file and the
+  // modules it imports, through their re-exports.
+  opaque: Map<string, Place & { why: string; count: number; all: OpaqueFact[]; any: boolean; global: boolean; unbound: boolean; reach: string[] }>;
+  // Scripts: files whose top-level definitions are names of the global scope.
+  scripts: Set<string>;
+  // Member reads on a value of unknown type, by "family:name". For the
+  // reads by a computed key ("js:*"), the first place in each file, and
+  // whether any read may pass its value on.
+  members: Map<string, Place & { count: number; places?: Place[]; passed?: boolean }>;
+  // Set when the graph was assembled without its escape facts (a program
+  // calling `assemble` the 0.22.0 way): no caller list is whole then.
+  missing?: true;
+  // Set when the build's budget ran out before escape analysis finished
+  // (Resolved.escapesCut): no caller list is whole then either.
+  cut?: true;
+};
+// The floor reason of a graph assembled without its escape facts.
+export const NO_ESCAPES = "the escape facts were not given when the graph was assembled, so any caller list may miss callers";
+// The floor reason of a graph whose escape analysis the budget cut.
+export const ESCAPES_CUT = "the budget ran out before every way a function escapes was found, so any caller list may miss callers";
 
 // An eligible file the graph did not read, and why.
 export type NotRead = { file: string; reason: "size" | "budget" | "parse-cap" | "memory" | "parse-error" | "slow-parse" | "unreadable" };
@@ -304,6 +528,10 @@ export type GraphStatus = {
   stages: Record<string, number>;
   cuts: Cut[];
   notRead: NotRead[];
+  // Source files of known languages the graph does not parse, by language.
+  // Informational: never a reason, never a floor. Absent in a build kept by
+  // an older version.
+  unreadLanguages?: { language: string; files: number }[];
 };
 
 export type Graph = {
@@ -328,6 +556,7 @@ export type Graph = {
   // folder: what makes a caller count a floor.
   unknownNames: Map<string, number>;
   valueCalls: Map<string, number>;
+  escapes: Escapes;
   model: ProjectModel;
   // Go module paths by folder, as the build read them: with `model`, what
   // the index needs to give back `projectOf`.
@@ -335,9 +564,18 @@ export type Graph = {
   projectOf(file: string): string;
   exportChanges: ImpactExportChange[]; // set when the build compared a base; every consumer, never cut
   status: GraphStatus;
+  // The graph input digest of what the build read (build.ts, captureDigest):
+  // set by a build of a work tree, absent on a graph read back from a kept build.
+  digest?: string;
   // What the framework plugins found (frameworks/stage.ts); absent when the
   // framework stage did not run. Read through frameworks/layer.ts.
   frameworks?: FrameworkData;
 };
 
 export type HotSymbol = { symbol: GraphNode; callers: number; sites: number; files: number };
+
+// The global names a file declares as plain data: those in `declare
+// global`, and its top-level ones when its name lets it be a script.
+export function ambientOf(path: string, f: Pick<FileFacts, "ambient" | "ambientTop">): string[] {
+  return [...(f.ambient ?? []), ...(/\.[cm]ts$/.test(path) ? [] : (f.ambientTop ?? []))];
+}

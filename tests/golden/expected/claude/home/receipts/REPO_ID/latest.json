@@ -12,5 +12,6 @@
   "html": "<DEMO>/.openqodex/reviews/<RUN_ID>/report.html",
   "counts": "14 major, 13 minor",
   "missing": null,
-  "written_at": "<TIMESTAMP>"
+  "written_at": "<TIMESTAMP>",
+  "reviewer_policy": "713f2e1c413178fa66878cca95f226b60867d5a3b9ede073db2cf687c9ff7080"
 }

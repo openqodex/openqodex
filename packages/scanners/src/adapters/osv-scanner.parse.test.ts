@@ -47,6 +47,7 @@
 //      the GHSA id, so cargo-deny's finding of the same advisory, named by
 //      its RustSec id, never merges with it.
 
+import { makeLineSet } from "../../../../tests/line-set.mjs";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseOsvScannerJson } from "./osv-scanner.js";
@@ -245,7 +246,7 @@ describe("choosing the place to anchor (13, 14)", () => {
     const [finding] = parseOsvScannerJson(
       report("package-lock.json", [pkg("lodash", "4.17.20", [{ id: "GHSA-x" }])]),
       new Map([["package-lock.json", DECLARED]]),
-      { coverage: new Map([["package-lock.json", new Set([6, 7])]]) },
+      { coverage: new Map([["package-lock.json", makeLineSet([6, 7])]]) },
     );
     expect(finding).toMatchObject({ lineStart: 5, lineEnd: 6 });
   });

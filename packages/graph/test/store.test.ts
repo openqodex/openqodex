@@ -97,6 +97,10 @@
 //     trusted by the next build.
 // 31. The record grows forever: facts and builds the collector removes, or
 //     the developer deletes, keep their entries.
+// 32. A kept build from before the list floor read value uses is read as
+//     though nothing were used as a value: its index (format 4) is read, or
+//     its facts are resolved again by a reader that expects facts they do
+//     not hold, so a caller list reads as whole where callers hide.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -105,6 +109,9 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildGraph, factsKey } from "../src/build.js";
+import { EXTRACTOR_VERSION } from "../src/extract.js";
+import { graphOf } from "../src/session.js";
+import { INDEX_FORMAT, readIndexFrom, writeIndex } from "../src/store/graph-files.js";
 import { blobId } from "../src/capture/inventory.js";
 import { isFileFacts } from "../src/safe-fs.js";
 import { ownStart } from "../src/store/lock.js";
@@ -325,8 +332,31 @@ describe("generations", () => {
       if (waiting === "") await sleep(5);
     }
     expect(waiting).not.toBe("");
-    rmSync(lock);
-    expect((await store.collect()).removedGenerations).toEqual([]);
+    // The publisher is stopped before the lock is freed, so the collection
+    // below runs with its folder written and unpublished, every time: freed
+    // with the publisher running, the publisher could take the lock first
+    // and publish, and the collection would then judge another state
+    // (issues 91 and 294). Stopped is read from ps, which macOS and Linux
+    // both have: its state starts with T.
+    const pid = run.proc.pid!;
+    let resumed = false;
+    try {
+      process.kill(pid, "SIGSTOP");
+      const stopBy = Date.now() + 10_000;
+      const state = () => spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+      while (!state().startsWith("T") && Date.now() < stopBy) await sleep(5);
+      expect(state()).toMatch(/^T/);
+      rmSync(lock);
+      const collected = await store.collect();
+      expect(collected.removedGenerations).not.toContain(waiting);
+      expect(collected.removedGenerations).toEqual([]);
+      expect(readdirSync(join(gens, waiting)).length).toBeGreaterThanOrEqual(53);
+      process.kill(pid, "SIGCONT");
+      resumed = true;
+    } finally {
+      // A check that failed leaves no stopped publisher behind.
+      if (!resumed) run.proc.kill("SIGKILL");
+    }
     const done = await run.done;
     const result = (done.out?.results as PublishResult[] | undefined)?.[0];
     expect(result, done.stderr).toMatchObject({ ok: true, id: waiting });
@@ -1214,5 +1244,33 @@ describe("the record of facts and builds", () => {
     for (const tag of ["b", "c", "d"]) ok(await store.publish(publishInput({ tag, keys: left })));
     expect(Object.keys(recordOf(root).builds).sort()).toEqual(ids(store).sort());
     expect(ids(store).length).toBe(2);
+  });
+});
+
+describe("a build from before the list floor", () => {
+  it("32. reads neither an index of the old format nor facts of the old reader, so the graph is built again", async () => {
+    const root = repo();
+    const store = await storeOf(root);
+    const g = await buildGraph({ repoRoot: root, store, mode: "fresh" });
+    const files = writeIndex(g);
+    expect(readIndexFrom((name) => files[name] ?? null, root)).not.toBeNull();
+    expect(INDEX_FORMAT).toBe(10);
+    const old = { ...files, "index/format.json": JSON.stringify({ format: 4 }) };
+    expect(readIndexFrom((name) => old[name] ?? null, root)).toBeNull();
+
+    // The build just kept is read back; the same build as the old reader kept it is not.
+    const kept = store.list()[0];
+    if (!kept) throw new Error("no kept build");
+    const gen = store.open({ id: kept.id });
+    if (!gen) throw new Error("kept build not opened");
+    expect(graphOf(store, gen)).not.toBeNull();
+    const copy: Record<string, string> = {};
+    for (const name of Object.keys(gen.manifest.files)) copy[name] = gen.read(name) ?? "";
+    copy["index/format.json"] = JSON.stringify({ format: 4 });
+    const { layout: _layout, id: _id, createdAt: _createdAt, files: _files, ...manifest } = gen.manifest;
+    const oldId = ok(await store.publish({ manifest: { ...manifest, capture: { ...manifest.capture, digest: `${manifest.capture.digest}-old` }, versions: { ...manifest.versions, extractor: EXTRACTOR_VERSION - 1 } }, files: copy }));
+    const oldGen = store.open({ id: oldId });
+    if (!oldGen) throw new Error("old build not opened");
+    expect(graphOf(store, oldGen)).toBeNull();
   });
 });

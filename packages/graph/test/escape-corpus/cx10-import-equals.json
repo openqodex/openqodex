@@ -1,0 +1,23 @@
+{
+  "covers": "a TypeScript import x = require() passed on (rule E1)",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/use.ts": "import m = require(\"./a\");\nkeep(m);\nfunction keep(x: any) { x.f(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/use.ts#keep",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "its module is used as a value at",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

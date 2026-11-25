@@ -1,0 +1,19 @@
+{
+  "covers": "`process.cpuUsage()` reads the CPU time and takes no function: the file stays readable",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/b.ts": "import { f } from \"./a\";\nexport const used = process.cpuUsage();\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/b.ts",
+      "file": "src/b.ts",
+      "line": 3
+    }
+  ],
+  "whole": [
+    "src/a.ts#f"
+  ],
+  "floored": []
+}

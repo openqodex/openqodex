@@ -771,6 +771,7 @@
           "contract": "openqodex-review-2",
           "status": "complete",
           "missing": [],
+          "refused": [],
           "reviewer": {
             "driver": "claude",
             "version": "2.1.289",
@@ -975,9 +976,9 @@
           },
           "snapshot": {
             "change_id": "597352237e5136f4462a792835c483d3224a4216fa84bbfbf2a9761a490605de",
-            "tree": "4c95ec9ba366b4790662be2fb4095289572c9a2c",
-            "before": "5ad4751a16619bf6011e3bf43e677b9d6f7ed5de7a3aa8ab86ca4ffbeef57eb8",
-            "after": "5ad4751a16619bf6011e3bf43e677b9d6f7ed5de7a3aa8ab86ca4ffbeef57eb8"
+            "tree": "116673877cf36d0daf1374fb8d906eae8ea3f13e",
+            "before": "0effa628c3ed7940a796fead84c96360b21a9e74ebab4f47a0345fc5e00adc2c",
+            "after": "0effa628c3ed7940a796fead84c96360b21a9e74ebab4f47a0345fc5e00adc2c"
           },
           "candidates": {
             "total": 24,
@@ -987,6 +988,300 @@
             "hunks": 18,
             "covered": 18,
             "unread": [],
+            "given": [
+              {
+                "path": ".github/workflows/ci.yml",
+                "start": 16,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 1,
+                "end": 1,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 3,
+                "end": 3,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 5,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 9,
+                "end": 10,
+                "deletion": "Dockerfile#0",
+                "old": [
+                  10,
+                  10
+                ],
+                "by": "brief"
+              },
+              {
+                "path": "app/config.py",
+                "start": 1,
+                "end": 3,
+                "by": "brief"
+              },
+              {
+                "path": "app/search.py",
+                "start": 1,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 5,
+                "end": 6,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 8,
+                "end": 8,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 23,
+                "end": 23,
+                "by": "brief"
+              },
+              {
+                "path": "db/migrations/002_index_item_names.sql",
+                "start": 1,
+                "end": 2,
+                "by": "brief"
+              },
+              {
+                "path": "deploy/deployment.yaml",
+                "start": 41,
+                "end": 43,
+                "by": "brief"
+              },
+              {
+                "path": "infra/main.tf",
+                "start": 27,
+                "end": 28,
+                "by": "brief"
+              },
+              {
+                "path": "package-lock.json",
+                "start": 11,
+                "end": 11,
+                "by": "brief"
+              },
+              {
+                "path": "package-lock.json",
+                "start": 15,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "package.json",
+                "start": 7,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "scripts/deploy.sh",
+                "start": 7,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "scripts/deploy.sh",
+                "start": 11,
+                "end": 11,
+                "by": "brief"
+              }
+            ],
+            "inventory": [
+              {
+                "path": ".github/workflows/ci.yml",
+                "start": 16,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 1,
+                "end": 1,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 3,
+                "end": 3,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 5,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "Dockerfile",
+                "start": 9,
+                "end": 10,
+                "deletion": "Dockerfile#0",
+                "by": "brief"
+              },
+              {
+                "path": "app/config.py",
+                "start": 1,
+                "end": 3,
+                "by": "brief"
+              },
+              {
+                "path": "app/search.py",
+                "start": 1,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 5,
+                "end": 6,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 8,
+                "end": 8,
+                "by": "brief"
+              },
+              {
+                "path": "app/server.py",
+                "start": 23,
+                "end": 23,
+                "by": "brief"
+              },
+              {
+                "path": "db/migrations/002_index_item_names.sql",
+                "start": 1,
+                "end": 2,
+                "by": "brief"
+              },
+              {
+                "path": "deploy/deployment.yaml",
+                "start": 41,
+                "end": 43,
+                "by": "brief"
+              },
+              {
+                "path": "infra/main.tf",
+                "start": 27,
+                "end": 28,
+                "by": "brief"
+              },
+              {
+                "path": "package-lock.json",
+                "start": 11,
+                "end": 11,
+                "by": "brief"
+              },
+              {
+                "path": "package-lock.json",
+                "start": 15,
+                "end": 17,
+                "by": "brief"
+              },
+              {
+                "path": "package.json",
+                "start": 7,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "scripts/deploy.sh",
+                "start": 7,
+                "end": 7,
+                "by": "brief"
+              },
+              {
+                "path": "scripts/deploy.sh",
+                "start": 11,
+                "end": 11,
+                "by": "brief"
+              }
+            ],
+            "files": [
+              {
+                "path": ".github/workflows/ci.yml",
+                "status": "modified",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "Dockerfile",
+                "status": "modified",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "app/config.py",
+                "status": "added",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "app/search.py",
+                "status": "added",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "app/server.py",
+                "status": "modified",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "db/migrations/002_index_item_names.sql",
+                "status": "added",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "deploy/deployment.yaml",
+                "status": "modified",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "infra/main.tf",
+                "status": "modified",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "package-lock.json",
+                "status": "modified",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "package.json",
+                "status": "modified",
+                "oldPath": null,
+                "binary": false
+              },
+              {
+                "path": "scripts/deploy.sh",
+                "status": "modified",
+                "oldPath": null,
+                "binary": false
+              }
+            ],
             "files_read": [
               "app/server.py"
             ],

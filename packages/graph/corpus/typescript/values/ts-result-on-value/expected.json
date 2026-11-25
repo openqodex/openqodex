@@ -1,0 +1,147 @@
+{
+  "guards": "follows declared method results on typed receivers and leaves untyped chains unresolved",
+  "callers": [
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/run.ts:5",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/run.ts:7",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/run.ts:10",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/run.ts:14",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/depth.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/callbacks.ts:8",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/callbacks.ts:12",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/promises.ts:14",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/promises.ts:20",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/promises.ts:22",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/run.ts",
+      "line": 17,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/run.ts",
+      "line": 20,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/reassign.ts",
+      "line": 5,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/depth.ts",
+      "line": 7,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/unmapped-results.ts",
+      "line": 8,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/unmapped-results.ts",
+      "line": 12,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/nested.ts",
+      "line": 13,
+      "cause": "no-receiver-type"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/run.ts:17"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/run.ts:20"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/run.ts:24"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/reassign.ts:5"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/depth.ts:7"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/unmapped-results.ts:8"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/unmapped-results.ts:12"
+    },
+    {
+      "to": "src/item.ts#Item.normalize",
+      "site": "src/nested.ts:13"
+    }
+  ],
+  "external": {
+    "min": 5,
+    "sites": [
+      "src/run.ts:24",
+      "src/promises.ts:9",
+      "src/promises.ts:11",
+      "src/promises.ts:13",
+      "src/promises.ts:19"
+    ]
+  },
+  "allRead": true
+}

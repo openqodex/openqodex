@@ -8,8 +8,8 @@ import { cacheRoot } from "./licence.mjs";
 import { benchRoot } from "./cases.mjs";
 import { nativeReviewBody } from "./claude-control.mjs";
 import { boardConfigOf, boardToolName, martianBody } from "./martian-board.mjs";
-import { attemptOf, findingId, judgeFieldsMissing, nativeFindingId, normPath, population, shownFindings } from "./score.mjs";
-import { readCase, readPinned, readSuite, realCaseId, realSpecProblems, truthHashOf, truthOf } from "./suites.mjs";
+import { attemptOf, findingId, judgeFieldsMissing, nativeFindingId, normPath, reviewHealth, reviewPopulation, shownFindings } from "./score.mjs";
+import { purposeHalf, readCase, readPinned, readSuite, realCaseId, realSpecProblems, truthHashOf, truthOf } from "./suites.mjs";
 
 export { boardToolName, martianBody, martianToolName } from "./martian-board.mjs";
 export { nativeFindingId } from "./score.mjs";
@@ -34,8 +34,8 @@ export function readAttempts(folder) {
   return out;
 }
 
-/** What happened to a planned review's first attempt. */
-export const statusOf = (first) => first === null ? "unstarted" : nativeReviewBody(first.row) !== null ? first.row.status : first.report === null ? "failed" : first.report.completion?.status === "complete" ? "complete" : "incomplete";
+/** What happened to a planned review's first attempt; an unhealthy one failed. */
+export const statusOf = (first, health = first === null ? null : reviewHealth(first.row, first.report)) => first === null ? "unstarted" : !health.ok ? "failed" : nativeReviewBody(first.row) !== null ? first.row.status : first.report === null ? "failed" : first.report.completion?.status === "complete" ? "complete" : "incomplete";
 
 /** A finding lacking any judge sentence holds every review of its tool. */
 export function heldFindings(review) {
@@ -45,15 +45,18 @@ export function heldFindings(review) {
   });
 }
 
-/** One first attempt as comments, with stable finding or native source ids. */
+/** One first attempt as comments, with stable finding or native source ids. An unhealthy one gives no comment, so its text never reaches a judge. */
 export function boardReview(job) {
   const first = job.first;
-  const status = job.notRun ? "not-run" : statusOf(first);
-  const native = nativeReviewBody(first?.row);
-  const shown = shownFindings(first?.report ?? null);
+  const health = first ? job.health ?? reviewHealth(first.row, first.report) : null;
+  const usable = health === null || health.ok;
+  const status = job.notRun ? "not-run" : statusOf(first, health);
+  const saved = nativeReviewBody(first?.row);
+  const native = saved !== null && !usable ? "" : saved;
+  const shown = usable ? shownFindings(first?.report ?? null) : [];
   const findingIds = native !== null ? native.trim() ? [nativeFindingId(job.caseId, job.config, job.repeat, native)] : [] : shown.map((f) => findingId(job.caseId, f));
   const comments = native !== null ? native.trim() ? [{ path: null, line: null, body: native, created_at: first.row.started_at ?? null }] : [] : shown.map((f) => ({ path: normPath(f.file_path) || null, line: Number.isInteger(f.line_number) ? f.line_number : null, body: martianBody(f), created_at: first?.row?.started_at ?? null, tier: f.tier ?? "finding" }));
-  return { ...job, status, shown, native, findingIds, comments };
+  return { ...job, health, status, shown, native, findingIds, comments };
 }
 
 /**
@@ -64,14 +67,23 @@ export function readBoardReviews(folder, { root = benchRoot, heading = `${folder
   const manifestBytes = readFileSync(join(folder, "manifest.json"));
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const suite = readSuite(manifest.suite, { root });
-  const cases = suite.file.cases.map((e) => readCase(realCaseId(manifest.suite, e.name, e.hash), { root }));
-  const byId = new Map(cases.map((c) => [c.id, c]));
+  const every = suite.file.cases.map((e) => readCase(realCaseId(manifest.suite, e.name, e.hash), { root }));
   const attempts = readAttempts(folder);
-  const pop = population(manifest, attempts);
+  const pop = reviewPopulation(manifest, attempts);
+  // The half the run's purpose reads (lib/suites.mjs purposeHalf): a tune
+  // run's denominator is the tune cases, and no score case is read. A
+  // diagnostic run's half is every case, so its denominator is the cases it
+  // planned: it is never judged over cases it never meant to run.
+  const half = purposeHalf(manifest.purpose ?? null, every, new Set(pop.jobs.map((j) => j.caseId)));
+  const cases = half.cases;
+  const byId = new Map(cases.map((c) => [c.id, c]));
+  const outside = new Set(every.filter((c) => !byId.has(c.id)).map((c) => c.id));
   const problems = [...pop.problems];
   if (pop.jobs.length === 0) problems.push("the run plans no review");
+  if (cases.length === 0) problems.push(`a ${manifest.purpose} run reads the ${half.subset} cases, and the ${manifest.suite} split holds none`);
   for (const j of pop.jobs) {
-    if (!byId.has(j.caseId)) problems.push(`${j.caseId}: not in the frozen ${manifest.suite} suite`);
+    if (outside.has(j.caseId)) problems.push(`${j.caseId}: a ${manifest.purpose} run reads ${half.subset} cases only, and this case is outside them`);
+    else if (!byId.has(j.caseId)) problems.push(`${j.caseId}: not in the frozen ${manifest.suite} suite`);
     else if (manifest.caseHashes?.[j.case] !== byId.get(j.caseId).hash) problems.push(`${j.caseId}: the run's case hash differs from the frozen suite`);
   }
   for (const c of cases) if (manifest.caseHashes?.[c.name] !== undefined && manifest.caseHashes[c.name] !== c.hash) problems.push(`${c.id}: the run's case hash differs from the frozen suite`);
@@ -95,7 +107,9 @@ export function readBoardReviews(folder, { root = benchRoot, heading = `${folder
     for (const c of cases) reviews.push(boardReview({ ...(jobs.get(c.id) ?? { case: c.name, caseId: c.id, config: t.config, repeat: t.repeat, first: null, notRun: true }), tool: t.tool }));
   }
   const held = reviews.flatMap(heldFindings);
-  return { manifest, manifestSha256: createHash("sha256").update(manifestBytes).digest("hex"), suite: { name: manifest.suite, cases: cases.map((c) => c.id) }, cases, reviews, tools: toolRows.map((t) => ({ ...t, held: held.some((h) => h.tool === t.tool) })), held };
+  // A run that names a purpose names its subset; an older run keeps its shape.
+  const named = manifest.purpose ? { purpose: manifest.purpose, subset: half.subset, size: cases.length } : {};
+  return { manifest, manifestSha256: createHash("sha256").update(manifestBytes).digest("hex"), suite: { name: manifest.suite, ...named, cases: cases.map((c) => c.id) }, cases, reviews, tools: toolRows.map((t) => ({ ...t, held: held.some((h) => h.tool === t.tool) })), held };
 }
 
 /** Shared rebuild: the judge reads not-run truth; readback supplies saved truth. */
@@ -168,7 +182,7 @@ export function martianReviewConversion(run) {
   const heldTools = new Set(held.map((h) => h.tool));
   for (const job of jobs) {
     const url = cases.get(job.caseId).source.prUrl;
-    if (job.native !== null && job.status === "failed") failures.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, failure: job.first.row.failure ?? null });
+    if (job.native !== null && job.status === "failed") failures.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, failure: job.first.row.failure ?? job.health?.reason ?? null });
     if (!heldTools.has(job.tool)) data[url].reviews.push({ tool: job.tool, repo_name: null, pr_url: url, review_comments: job.comments, openqodex: { caseId: job.caseId, case: job.case, config: job.config, repeat: job.repeat, attempt: 1, status: job.status, findingIds: job.findingIds } });
   }
 

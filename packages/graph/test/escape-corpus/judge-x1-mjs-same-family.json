@@ -1,0 +1,17 @@
+{
+  "covers": "an adversarial case from the review of piece A: mjs same family",
+  "files": {
+    "src/a.ts": "export function save() {}\n",
+    "src/b.mjs": "export function go(o) { o.save(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#save",
+      "caller": null,
+      "file": "src/b.mjs",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

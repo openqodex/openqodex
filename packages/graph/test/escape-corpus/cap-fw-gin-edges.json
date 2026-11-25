@@ -1,0 +1,39 @@
+{
+  "covers": "a Gin route past the edges the plugin lists in one build (gin MAX_EDGES)",
+  "caps": [
+    "frameworks/gin/resolve.ts#MAX_EDGES"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc h(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc rega() {\n\tr.Use(m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m)\n\tr.Use(m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m)\n\tr.Use(m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m, m)\n",
+      {
+        "repeat": "\tr.GET(\"/x\", h)\n",
+        "times": 940
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nvar r = gin.New()\n\nfunc main() {\n\trega()\n\tr.GET(\"/y\", deep)\n\tr.Run()\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 11
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped listing edges after 60000",
+      "at": "a.go:10",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "a.go:10"
+      }
+    }
+  ]
+}

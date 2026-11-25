@@ -39,6 +39,130 @@ function tiers(graph: Graph, id: string, kind = "calls"): string[] {
 
 const unknownsAt = (graph: Graph, site: string) => graph.unknowns.filter((u) => `${u.file}:${u.line}` === site);
 
+describe("java callable aliases and anonymous member classes", () => {
+  it("names the receiver local in the alias note when a callable held in a local is invoked through it", async () => {
+    const files = {
+      "Host.java": lines(
+        "class Host {",
+        "  void work() {}",
+        "  void use() {",
+        "    Runnable r = this::work;",
+        "    r.run(); // CALL",
+        "  }",
+        "}",
+      ),
+      "run.py": lines("def work():", "    pass", "", "def use():", "    callback = work", "    callback()"),
+    };
+    const g = await graphOf(files);
+    const sites = (id: string) => (g.in.get(id) ?? []).filter((e) => e.kind === "may_invoke").flatMap((e) => e.sites);
+    const receiver = sites(symbol(g, "Host.java", "work", "Host"));
+    expect(receiver).toHaveLength(1);
+    expect(`${receiver[0]?.file}:${receiver[0]?.line}`).toBe(at(files, "Host.java", "CALL"));
+    expect(receiver[0]?.note).toMatch(/^r is given/);
+    const bare = sites(symbol(g, "run.py", "work"));
+    expect(bare).toHaveLength(1);
+    expect(bare[0]?.note).toMatch(/^callback is given/);
+  });
+
+  it("binds a bare type name to the package class, not to a member class of an anonymous class", async () => {
+    const files = {
+      "A.java": lines(
+        "package p;",
+        "class Host {",
+        "  Runnable r = new Runnable() {",
+        "    class Inner { void go() {} }",
+        "    public void run() {}",
+        "  };",
+        "  void use() { new Inner().go(); } // CALL",
+        "}",
+        "class Outside extends Inner {",
+        "  void use() { go(); } // INHERITED",
+        "}",
+      ),
+      "B.java": lines("package p;", "class Inner { void go() {} }"),
+    };
+    const g = await graphOf(files);
+    expect(callSites(g, symbol(g, "B.java", "go", "Inner"))).toEqual([at(files, "A.java", "CALL"), at(files, "A.java", "INHERITED")].sort());
+    expect(callSites(g, symbol(g, "A.java", "go", "Host.$1.Inner"))).toEqual([]);
+  });
+});
+
+describe("java result candidates", () => {
+  const candidates = (other: string) => ({
+    "A.java": lines(
+      "class Repo { void find() {} }",
+      "class Other { void find() {} }",
+      "class Box<T> { T get() { return null; } }",
+      "class A {",
+      "  Box<Repo> make(Repo ignored) { return null; }",
+      `  Box<${other}> make(Other ignored) { return null; }`,
+      "}",
+      "class Use {",
+      "  void go(A a) { a.make(null).get().find(); } // CHAIN",
+      "}",
+    ),
+  });
+
+  it("leaves a chained call unresolved when result candidates carry different type arguments", async () => {
+    const files = candidates("Other");
+    const g = await graphOf(files);
+    const site = at(files, "A.java", "CHAIN");
+    const make = (g.defsByFile.get("A.java") ?? []).filter((d) => d.name === "make");
+    expect(make).toHaveLength(2);
+    for (const d of make) expect(tiers(g, d.id)).toEqual([`${site} possible`]);
+    expect(callSites(g, symbol(g, "A.java", "find", "Repo"))).not.toContain(site);
+    expect(callSites(g, symbol(g, "A.java", "find", "Other"))).not.toContain(site);
+    expect(unknownsAt(g, site).some((u) => u.name === "find")).toBe(true);
+  });
+
+  it("resolves a chained call when result candidates carry identical type arguments at different positions", async () => {
+    const files = candidates("Repo");
+    const g = await graphOf(files);
+    const site = at(files, "A.java", "CHAIN");
+    const make = (g.defsByFile.get("A.java") ?? []).filter((d) => d.name === "make");
+    expect(make).toHaveLength(2);
+    for (const d of make) expect(tiers(g, d.id)).toEqual([`${site} possible`]);
+    expect(callSites(g, symbol(g, "A.java", "find", "Repo"))).toEqual([site]);
+    expect(callSites(g, symbol(g, "A.java", "find", "Other"))).toEqual([]);
+  });
+});
+
+describe("java result candidates across classes", () => {
+  // Failure: an override that returns the same generic type as the method it
+  // overrides is a second candidate with another owner; comparing owners or
+  // files instead of the resolved arguments drops a certain chain.
+  it("resolves a chained call when an override in another file returns the same type arguments", async () => {
+    const files = {
+      "Repo.java": lines("class Repo { void find() {} }", "class Box<T> { T get() { return null; } }"),
+      "A.java": lines("class A {", "  Box<Repo> make() { return null; }", "}"),
+      "B.java": lines("class B extends A {", "  Box<Repo> make() { return null; }", "}"),
+      "Use.java": lines("class Use {", "  void go(B b) { b.make().get().find(); } // CHAIN", "}"),
+    };
+    const g = await graphOf(files);
+    const site = at(files, "Use.java", "CHAIN");
+    const makes = [...(g.defsByFile.get("A.java") ?? []), ...(g.defsByFile.get("B.java") ?? [])].filter((d) => d.name === "make");
+    expect(makes).toHaveLength(2);
+    expect(callSites(g, symbol(g, "Repo.java", "find", "Repo"))).toEqual([site]);
+  });
+});
+
+describe("java result candidates with external arguments", () => {
+  // Failure: an argument the graph cannot follow (a dependency type) must cost
+  // only the argument, never the container's own methods.
+  it("keeps a container method certain when an override returns the same container with an external argument", async () => {
+    const files = {
+      "Box.java": lines("class Box<T> { int size() { return 0; } T get() { return null; } }"),
+      "A.java": lines("class A {", "  Box<String> make() { return null; }", "}"),
+      "B.java": lines("class B extends A {", "  Box<String> make() { return null; }", "}"),
+      "Use.java": lines("class Use {", "  void go(B b) { b.make().size(); } // SIZE", "}"),
+    };
+    const g = await graphOf(files);
+    const site = at(files, "Use.java", "SIZE");
+    expect(callSites(g, symbol(g, "Box.java", "size", "Box"))).toEqual([site]);
+    expect(unknownsAt(g, site).some((u) => u.name === "size")).toBe(false);
+  });
+});
+
 describe("java tie rule", () => {
   const util = (n: number) => lines("package a.b;", "", "public class Util {", "    public static int v() {", `        return ${n};`, "    }", "}");
   const caller = (cls: string) => lines("package app;", "", "import a.b.Util;", "", `public class ${cls} {`, "    int go() {", "        return Util.v(); // CALL", "    }", "}");

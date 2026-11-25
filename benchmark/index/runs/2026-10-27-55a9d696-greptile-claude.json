@@ -1,0 +1,1861 @@
+{
+  "version": 1,
+  "runId": "2026-10-27-55a9d696-greptile-claude",
+  "date": "2026-10-27",
+  "startedAt": "2026-10-27T21:46:27.468Z",
+  "draft": false,
+  "suite": "greptile",
+  "split": "dev",
+  "splitHash": "8fa1088b3ddf5c61fa59d525712c94d7029a2015e0bb4b1128b5abf1018eac64",
+  "tunedOn": true,
+  "mode": "review",
+  "path": "laptop",
+  "build": {
+    "commit": "95fd51dced794bf6d6557544c9faa4d0c1d3ca26",
+    "short": "95fd51d",
+    "cliVersion": "0.15.0",
+    "dirty": false,
+    "bundleHash": "7b1034f473ad6ea7117bc780e653a8ee698445e0266adab0aa990187296ac8c5"
+  },
+  "reviewers": {
+    "claude": {
+      "version": "2.1.312",
+      "model": "claude-opus-5-5"
+    }
+  },
+  "configs": [
+    "claude-graph-on"
+  ],
+  "repeat": 1,
+  "web": "off",
+  "caseSetHash": "1f3781c98acd002b86d9c169eb23e8b137a15c4cc12a231cf118cd01f724695d",
+  "caseIds": [
+    "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7",
+    "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f",
+    "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71",
+    "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee",
+    "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8",
+    "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03",
+    "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e",
+    "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6",
+    "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c",
+    "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0",
+    "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b",
+    "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1",
+    "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b",
+    "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd",
+    "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208",
+    "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6",
+    "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f",
+    "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8",
+    "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12",
+    "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f",
+    "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a",
+    "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5",
+    "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b",
+    "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273",
+    "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd",
+    "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c",
+    "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d",
+    "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0",
+    "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664",
+    "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c",
+    "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca",
+    "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279"
+  ],
+  "rulesVersion": 12,
+  "rulesHash": "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
+  "decisionsHash": null,
+  "scannersComplete": true,
+  "external": null,
+  "ended": {
+    "how": "finished",
+    "why": null
+  },
+  "release": null,
+  "scores": {
+    "claude-graph-on": {
+      "population": {
+        "planned": 49,
+        "complete": 48,
+        "incomplete": 1,
+        "failed": 0,
+        "unstarted": 0,
+        "retries": 0,
+        "retryCostUsd": 0
+      },
+      "issueRecall": {
+        "all": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        }
+      },
+      "precision": {
+        "lower": {
+          "hit": 0,
+          "of": 292,
+          "ci": null
+        },
+        "upper": {
+          "hit": 292,
+          "of": 292,
+          "ci": null
+        }
+      },
+      "uniqueIssuePrecision": {
+        "lower": {
+          "hit": 0,
+          "of": 292,
+          "ci": null
+        },
+        "upper": {
+          "hit": 292,
+          "of": 292,
+          "ci": null
+        }
+      },
+      "redundancy": {
+        "hit": 0,
+        "of": 292
+      },
+      "f1": 0,
+      "controls": {
+        "hit": 0,
+        "of": 0
+      },
+      "cleanFindingsPerCase": {
+        "findings": 0,
+        "cases": 0
+      },
+      "location": {
+        "precision": {
+          "hit": 0,
+          "of": 292
+        },
+        "recall": {
+          "hit": 0,
+          "of": 0
+        },
+        "knownNoise": 0
+      },
+      "plantedLegacy": null,
+      "severity": {
+        "exact": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "withinOne": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "oneOff": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "off": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "over": 0,
+        "under": 0,
+        "unknown": 0
+      },
+      "finder": {
+        "match": {
+          "hit": 0,
+          "of": 0,
+          "ci": null
+        },
+        "byExpected": {},
+        "byFinder": {
+          "scanner": 0,
+          "reviewer": 0
+        },
+        "scannerExpectedReviewerFound": 0,
+        "unjudged": 0,
+        "droppedCandidates": 0
+      },
+      "wallMsMean": 136162.91836734695,
+      "costUsdMean": 2.5270632979591845,
+      "costUsdTotal": 123.82610160000003
+    }
+  },
+  "outside": {
+    "greptile": {
+      "board": {
+        "name": "greptile",
+        "repository": "ai-code-review-evaluations/golden_comments",
+        "commit": "3f2c8ab794b4ed71c099cbf0a7670555e90906dc",
+        "judgeModel": "gpt-5.2",
+        "promptHash": "6f8d2bcad75c8ce488c2c518b1752ae566a540c865e80ceddddae213ba09e388"
+      },
+      "truthSet": "greptile",
+      "judgeModel": "gpt-5.2",
+      "promptHash": "6f8d2bcad75c8ce488c2c518b1752ae566a540c865e80ceddddae213ba09e388",
+      "perTool": {
+        "openqodex-cli-claude-r1": {
+          "config": "claude-graph-on",
+          "boardConfig": "cli-claude",
+          "caught": 33,
+          "missed": 17,
+          "of": 50,
+          "planned": 49,
+          "notRun": 1,
+          "rate": 0.66,
+          "labels": [
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b",
+              "label": "caught",
+              "reason": "One comment explicitly identifies a case-sensitive comparison bug in blacklist checking: it notes the handler lowercases blacklistedGuestEmails but compares incoming guest emails without lowercasing, allowing uppercase variants to bypass the blacklist. This directly matches the golden bug “Case sensitivity bypass in email blacklist” and explains the impact (blacklisted address can be added by changing case)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938",
+              "label": "caught",
+              "reason": "A comment explicitly identifies that an empty Prisma updateMany call does not bump the @updatedAt field on SelectedCalendar, causing the cache-status timestamp to stay stale after cache fill. This directly matches the golden bug about inaccurate cache status tracking due to unreliable updatedAt usage and explains the impact (stale timestamp observed by readers)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226",
+              "label": "caught",
+              "reason": "Multiple comments explicitly identify using an async callback inside forEach, noting that forEach discards returned promises so rejections (e.g., from getCalendar) escape try/catch and become unhandled promise rejections. They also explain impact (crash/unlogged errors, premature success/email) and propose awaiting via Promise.all or using for...of."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f",
+              "label": "caught",
+              "reason": "A comment explicitly identifies that backup code consumption is non-atomic in packages/features/auth/lib/next-auth-options.ts:148, allowing two concurrent logins with the same backup code to both succeed. This directly matches the golden bug that backup codes are not properly invalidated after use (i.e., a single-use code can be reused)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e",
+              "label": "caught",
+              "reason": "A comment explicitly describes a null/empty list leading to dereferencing undefined: it says line 118 destructures the first destination calendar which is undefined for a null or empty list, and line 119 reads a property without optional chaining, causing a TypeError and booking creation failure. This matches the golden bug of a null reference error when an array is empty."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf",
+              "label": "missed",
+              "reason": "None of the comments mention raw SQL query construction, untrusted input, concatenation/interpolation into SQL, or any SQL injection risk. The feedback is about deleted caching tests, unreachable branches in condition building, and an options type allowing missing teamId leading to runtime safeParse failure and empty results, not injection."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac",
+              "label": "caught",
+              "reason": "A comment explicitly describes missing DB cleanup when immediate delete/cancel is intended: the scheduleEmailReminders.ts:56 review notes prisma.workflowReminder.delete calls are \"never awaited,\" so cancelled reminders \"keep their rows.\" That identifies the faulty deletion logic (cleanup not happening) and explains the impact (stale rows, repeated failures, and reminders still being sent). This aligns with the golden bug about missing database cleanup when immediateDelete is true."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde",
+              "label": "caught",
+              "reason": "A comment explicitly identifies the bug: in packages/trpc/server/routers/viewer/slots.ts it notes the slot end is computed from slotStartTime (using slotStartTime.hour()/minute() instead of slotEndTime) and explains the impact, slots that start within working hours but extend past the end are incorrectly accepted, allowing bookings beyond working hours. This matches the golden bug about incorrect end time calculation using slotStartTime instead of slotEndTime."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7",
+              "label": "caught",
+              "reason": "One comment explicitly flags a timing attack vulnerability due to non-constant-time string comparison: it points to apps/web/pages/api/webhook/app-credential.ts:25 where the webhook secret is compared with !==, explains that early-exit string comparison can leak timing info about the secret, and recommends using crypto.timingSafeEqual. This directly matches the golden bug (timing attack via direct string comparison) and describes its impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f",
+              "label": "missed",
+              "reason": "The golden bug is that an OR condition causes deletion of all workflow reminders. The provided comments describe different issues: (1) SMS lock leading to retryCount increments and eventual deletion of specific pending reminders, and (2) an unguarded prisma update in a catch block aborting the cron loop. Neither comment identifies an OR condition that would delete all workflow reminders."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee",
+              "label": "caught",
+              "reason": "A comment explicitly describes method overwriting in app/models/optimized_image.rb where a second self.downsize definition replaces the earlier one, leaving only the four-parameter version and causing Jobs::ResizeEmoji to call it with the old signature, raising ArgumentError and preventing emoji resizing. This directly matches the golden bug of method overwriting causing parameter mismatch and explains the impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71",
+              "label": "caught",
+              "reason": "One comment explicitly identifies a NoMethodError in a before_validation callback for EmbeddableHost: it says the before_validation block calls self.host.sub! without a nil check, so a missing host parameter leads to a 500 error instead of validation. This matches the golden bug ('NoMethodError before_validation in EmbeddableHost') by pointing to the faulty code and explaining the impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8",
+              "label": "caught",
+              "reason": "A comment explicitly matches the golden bug: it notes that TopicUser.find_by can return nil when the user has no TopicUser row, and the code then calls tu.notification_level causing a NoMethodError crash. This directly identifies the nil reference to a non-existent TopicUser and explains the impact (server error on unsubscribe link)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03",
+              "label": "caught",
+              "reason": "A comment explicitly identifies that BlockedEmail.should_block? increments match_count and saves (modifies DB) during what should be a read/validation check, and explains the impact: validations run twice so match_count is inflated, causing incorrect admin statistics. This matches the golden bug about DB modification during read."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e",
+              "label": "caught",
+              "reason": "One comment explicitly flags SSRF/RCE risk from calling Kernel open on an admin-set URL without validation (app/jobs/scheduled/poll_feed.rb:29). It explains that non-URI strings can fall through to Kernel#open allowing pipe commands or local file paths, and recommends restricting to http/https, matching the golden SSRF vulnerability from open(url) without validation."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6",
+              "label": "caught",
+              "reason": "The first comment explicitly ties a flexbox change to float-based button alignment breaking: making .small-action-desc a flex item causes floated delete/edit buttons to no longer reach the right edge, leaving them in the middle. This is a layout issue caused by mixing float positioning with a flexbox layout, matching the golden bug."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c",
+              "label": "missed",
+              "reason": "The golden bug is about unintended string mutation using the << operator. None of the supplied comments mention string mutation, the << operator, or any equivalent defect/impact. The comments instead discuss website_name exposure restrictions, predicate naming, URI port handling, domain comparison, and client staleness."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0",
+              "label": "caught",
+              "reason": "Multiple comments explicitly point to theme lightness changes (e.g., 30%→70%, 20%→50%) in specific SCSS lines and explain the impact on visibility/contrast/readability in light themes (links/headings/names becoming paler or losing distinction). This directly matches the golden bug about inconsistent theme color lightness affecting visibility."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b",
+              "label": "missed",
+              "reason": "The golden bug is \"Race conditions in async member loading\". None of the line-level comments mention concurrent/async loading hazards, out-of-order responses, or state updates being applied after a newer request. The comments instead cover pagination off-by-one, dropped promise rejections, public members pagination/limits, uniqueness errors, using an unsaved group name in member reload URL, a misleading assignment-in-condition, a spec using wrong HTTP verb, unbounded limit/offset, and removing non-members raising RecordNotFound."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1",
+              "label": "missed",
+              "reason": "Golden bug is a thread-safety issue with lazy @loaded_locales. The supplied comments discuss (1) incorrect translation caching keys missing per-site fallback/default locale, (2) stylistic use of send(:include), and (3) fallbacks/locales not being loaded outside controller requests leading to missing translations. None explicitly identifies a race/thread-safety problem around a lazily-initialized @loaded_locales or explains concurrency impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd",
+              "label": "caught",
+              "reason": "One comment explicitly describes a race condition in CreateOrUpdateDevice: it performs CountDevices and a later insert as separate statements without a transaction/lock, allowing concurrent requests to each observe a below-limit count and then insert, exceeding the device limit. This identifies the faulty code pattern and explains the impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b",
+              "label": "caught",
+              "reason": "A comment explicitly identifies a race condition around cache locking: it says TotalDocs reads the index cache map without a lock while another goroutine writes it, causing concurrent map read/write. Another comment also flags concurrent index builds racing on the cache. These directly match the golden bug 'Race condition in cache locking' and explain the impact (runtime abort/crash, missed updates)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208",
+              "label": "missed",
+              "reason": "Golden bug is about denial cache entries lacking expiration leading to permanent permission denials. The comments instead describe (1) denial cache key collisions causing incorrect denials with a 30s duration, and (2) a test that wouldn’t catch removal of the denial-cache short-circuit. Neither identifies missing expiration or permanent denials."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6",
+              "label": "missed",
+              "reason": "empty"
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f",
+              "label": "caught",
+              "reason": "Both comments explicitly identify repeated interpolation/application of template variables/ad hoc filters across runShardSplitQuery, runSplitQuery, and super.query, leading to the same filters being appended multiple times (especially after a parser via addFilterAsLabelFilter). They also explain the impact: longer/duplicated query text differing from user inspection, i.e., a double/multiple interpolation risk."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8",
+              "label": "missed",
+              "reason": "The golden bug is about a missing React `key` prop causing rendering issues. None of the supplied line-level comments mention missing `key` props, list rendering, React reconciliation warnings, or identify a specific JSX list element lacking `key`. The comments instead cover alerting abilities logic, menu item rendering/behavior, stale comments, unused props, and memoization."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12",
+              "label": "caught",
+              "reason": "Multiple comments explicitly identify incorrect metrics recording methods and explain the impact on performance tracking. E.g., the comment at dualwriter_mode3.go:45 says Storage failures are recorded in the legacy duration histogram via recordLegacyDuration instead of recordStorageDuration, causing the storage histogram to miss errors and the legacy histogram to include failures it shouldn’t, misleading dashboards/operators. Another comment at line 129 reiterates the same defect for Update."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f",
+              "label": "caught",
+              "reason": "A comment explicitly identifies incorrect error-level logging: it points to xorm_store.go:534 where r.log.Error is used twice during successful cleanup batches, logging full ID lists with a nil err, causing misleading error entries/noisy logs and false alerts. This directly matches the golden bug 'Incorrect error level logging' and explains the impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a",
+              "label": "missed",
+              "reason": "The golden bug is about deadlock potential during concurrent annotation deletion. The review comment instead describes a cache double-check issue causing redundant work and slower startup under concurrent access; it explicitly says it does not return wrong data and does not mention deadlock or annotation deletion."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12",
+              "label": "caught",
+              "reason": "A review comment explicitly identifies the bug: it says enableSqlExpressions always returns false due to storing the negated flag value and returning false in both branches, which causes ReadQuery to reject every SQL query even when the sqlExpressions flag is enabled. This matches the golden bug description and explains the impact (SQL functionality disabled)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96",
+              "label": "caught",
+              "reason": "A review comment explicitly flags that UsernameForm.authenticate calls isConditionalPasskeysEnabled() with no arguments, while only isConditionalPasskeysEnabled(UserModel user) exists, and recommends passing the current user. This directly matches the golden bug about calling ConditionalPasskeysEnabled without the required UserModel parameter and explains the build-breaking impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9",
+              "label": "missed",
+              "reason": "Golden bug is a missing null check leading to a NullPointerException. The provided comments discuss race conditions and thread lifecycle issues in tests, and a production issue where getSubGroupsCount returns null (contract violation) and should return 0L. None explicitly identify a missing null check that would cause an NPE; the null-return issue is about returning null vs 0 and client behavior, not an NPE from dereferencing a null."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d",
+              "label": "caught",
+              "reason": "A comment explicitly identifies a recursive caching issue: it says the update/invalidation logic uses the organization-aware wrapper (obtained via getById) rather than the underlying delegate model, and recommends using idpDelegate.getById instead. This matches the golden bug of using the session/wrapper instead of the delegate, leading to incorrect cache behavior (stale login cache showing hidden IDPs)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f",
+              "label": "missed",
+              "reason": "Golden bug is returning the wrong provider (default keystore instead of BouncyCastle). The comments discuss (1) nondeterministic provider selection when multiple providers have equal order and the removal of a fail-fast exception, (2) wasted ASN1 encoding work, (3) binary/source compatibility break from adding a non-default interface method, and (4) initializing a global stub crypto provider via classloader. None explicitly identifies selecting the default keystore provider instead of BouncyCastle or explains that specific impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a",
+              "label": "missed",
+              "reason": "empty"
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf",
+              "label": "missed",
+              "reason": "The golden bug is about an inconsistent feature flag causing orphaned permissions. None of the review comments mention orphaned permissions or an inconsistency in feature-flag behavior leading to leftover/orphaned permission state. The comments instead cover unrelated issues: token exchange throwing UnsupportedOperationException under v2, mixing JUnit 4/5, an unused import, a redundant builder call, and a potential NPE when a null resource is passed to findByResource."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81",
+              "label": "caught",
+              "reason": "Multiple comments explicitly identify the faulty permission check in GroupPermissionsV2.canManage(): it calls hasPermission(null, VIEW, MANAGE), so a VIEW-only all-groups permission makes canManage()/requireManage() succeed. They also explain the impact (view-only admin can create top-level groups or move groups to top level) and propose the fix (require only MANAGE and update javadoc)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b",
+              "label": "caught",
+              "reason": "One comment explicitly flags Italian text inside a Lithuanian translation file: it points to themes/.../account/messages/messages_lt.properties and says the Lithuanian totpStep1 message was replaced with an Italian sentence, explaining Lithuanian users will see Italian instructions. This matches the golden bug about Lithuanian translation files containing Italian text."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5",
+              "label": "caught",
+              "reason": "A comment explicitly matches the golden bug: it states that the null check for rawTokenId incorrectly checks grantType, allowing rawTokenId to be null. It explains the impact (encodeTokenId concatenates null into the token id, producing a malformed id and missing the intended fail-fast check) and proposes the exact fix (pass rawTokenId to Objects.requireNonNull)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b",
+              "label": "missed",
+              "reason": "The golden bug is about unsafe raw List deserialization without type safety. The supplied comments discuss test logic issues (missing completeLogin leading to null refreshToken/logout not happening) and a misspelled config alias in a copied helper. Neither comment mentions raw List deserialization, generic type safety, or deserialization-related impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd",
+              "label": "missed",
+              "reason": "Golden bug is about importing a non-existent OptimizedCursorPaginator. The provided line-level comments discuss runtime/pagination logic errors (datetime key handling, negative cursor offsets causing 500s, missing member None checks, superuser gate) but none mention an invalid import or missing symbol/module for OptimizedCursorPaginator, nor its impact (ImportError/ModuleNotFoundError)."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273",
+              "label": "caught",
+              "reason": "A comment explicitly identifies that MetricAlertDetectorHandler now has only a `pass` body, leaving required abstract methods unimplemented, causing a TypeError when instantiated and crashing detector processing. This matches the golden bug of an incomplete implementation containing only `pass` and explains the impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c",
+              "label": "caught",
+              "reason": "A comment explicitly identifies the golden bug: it points to src/sentry/api/paginator.py:877 where OptimizedCursorPaginator uses a negative cursor.offset directly as a queryset slice start. It explains the impact (Django rejects negative indexing, causing a 500 for requests like 0:-5:0 and breaking pagination/reverse pagination), which corresponds to negative offset cursor manipulation bypassing intended pagination boundaries/handling."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-3@82aa2d7c",
+              "label": "missed",
+              "reason": "not-run"
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d",
+              "label": "caught",
+              "reason": "A comment explicitly identifies a null/missing-state issue: it says OAuthLoginView.dispatch returns a generic error at the state check because the test sends a state that does not match, implying the state can be missing/invalid and alters behavior. Although it frames it as a state mismatch rather than a null dereference, it directly discusses the missing/incorrect state leading to the wrong error path, which semantically matches the golden bug about missing authentication state causing failure."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0",
+              "label": "missed",
+              "reason": "The golden bug is about a breaking change in error response format. None of the line-level comments mention an error response format change/breaking change. The comments cover issues like task deadlines causing duplicate webhooks, serializer required fields leading to 422s, timestamp unit mismatches, retry behavior changes, UI alignment, analytics recorded before feature checks, and similar, none explicitly identify an error response format breaking change or explain its impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664",
+              "label": "caught",
+              "reason": "A comment explicitly flags the exact issue: it notes inconsistent metric tag key usage \"shards\" vs \"shard\" in flusher.py and explains the impact that dashboards/queries filtering on the shard tag miss the wait_produce metric, matching the golden bug about inconsistent metric tagging with 'shard' and 'shards'."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c",
+              "label": "caught",
+              "reason": "A review comment explicitly flags that a dataclass default timestamp (queued=timezone.now()) is evaluated once at import time, causing all instances to share the same stale time unless provided, and recommends using field(default_factory=timezone.now). This directly matches the golden bug of a shared mutable/default timestamp in a dataclass and explains the impact."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca",
+              "label": "caught",
+              "reason": "The comment pinpoints that the function computes an updated config copy but returns the original/stale monitor_environment.monitor.config instead, so the update (schedule_type display name) is ignored. It explains the impact: occurrence event contexts show the raw integer schedule_type, making it unreadable for users. This matches the golden bug of using a stale config variable instead of the updated one."
+            },
+            {
+              "id": "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279",
+              "label": "caught",
+              "reason": "A comment explicitly describes queue.ShutDown being raised on submit after the shared queue pool is shut down across rebalances (queue_consumer.py:338). It explains the impact: the exception path marks offsets as completed/committable even though no worker processed the message, causing commits for unprocessed messages and silently lost results after a rebalance. This matches the golden bug about invalid queue.ShutDown exception handling."
+            }
+          ]
+        }
+      },
+      "range": {
+        "cli-claude": {
+          "metric": "caught",
+          "of": 50,
+          "repeats": 1,
+          "min": 33,
+          "mean": 33,
+          "max": 33
+        }
+      },
+      "evidenceHash": "af1c1481a80ff620e5a3858ebf7fcaf99dad849ed69dc51e7ad55d1b262fde24"
+    }
+  },
+  "perCase": {
+    "claude-graph-on": {
+      "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 10
+          },
+          "upper": {
+            "hit": 10,
+            "of": 10
+          }
+        },
+        "findings": 10,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 8
+          },
+          "upper": {
+            "hit": 8,
+            "of": 8
+          }
+        },
+        "findings": 8,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 15
+          },
+          "upper": {
+            "hit": 15,
+            "of": 15
+          }
+        },
+        "findings": 15,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 8
+          },
+          "upper": {
+            "hit": 8,
+            "of": 8
+          }
+        },
+        "findings": 8,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 19
+          },
+          "upper": {
+            "hit": 19,
+            "of": 19
+          }
+        },
+        "findings": 19,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 11
+          },
+          "upper": {
+            "hit": 11,
+            "of": 11
+          }
+        },
+        "findings": 11,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 13
+          },
+          "upper": {
+            "hit": 13,
+            "of": 13
+          }
+        },
+        "findings": 13,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 9
+          },
+          "upper": {
+            "hit": 9,
+            "of": 9
+          }
+        },
+        "findings": 9,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 12
+          },
+          "upper": {
+            "hit": 12,
+            "of": 12
+          }
+        },
+        "findings": 12,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 11
+          },
+          "upper": {
+            "hit": 11,
+            "of": 11
+          }
+        },
+        "findings": 11,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 2
+          },
+          "upper": {
+            "hit": 2,
+            "of": 2
+          }
+        },
+        "findings": 2,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 4
+          },
+          "upper": {
+            "hit": 4,
+            "of": 4
+          }
+        },
+        "findings": 4,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 17
+          },
+          "upper": {
+            "hit": 17,
+            "of": 17
+          }
+        },
+        "findings": 17,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 8
+          },
+          "upper": {
+            "hit": 8,
+            "of": 8
+          }
+        },
+        "findings": 8,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 1,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 14
+          },
+          "upper": {
+            "hit": 14,
+            "of": 14
+          }
+        },
+        "findings": 14,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      }
+    }
+  },
+  "perBug": {
+    "claude-graph-on": {
+      "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7": {},
+      "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b": {},
+      "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a": {},
+      "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5": {},
+      "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca": {},
+      "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279": {}
+    }
+  },
+  "intervals": {
+    "method": "Percentile bootstrap over clusters drawn with replacement; each metric is a ratio of sums recomputed on every resample, and a cluster keeps all its truth items, findings and repeats together. A cluster with nothing to count for a metric is left out of it. The interval describes this run and decides nothing: the trend's alarm and the acceptance rule compare two runs with a paired sign-flip test. With fewer than minClusters clusters it is null, listed under tooFewClusters.",
+    "cluster": "repoGroup",
+    "groups": {
+      "greptile/ai-code-review-evaluation__cal.com-greptile-10@93ec469b": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-11@33c9a938": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-2@40eb8226": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-3@abd5fc4f": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-4@44275b5e": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-5@ea3b55cf": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-6@413167ac": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-7@3b4f1dde": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-8@23b277e7": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__cal.com-greptile-9@41bedb6f": "calcom/cal.com",
+      "greptile/ai-code-review-evaluation__discourse-greptile-10@c37a2a71": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-1@4bc399ee": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-2@83bfeca8": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-3@10f05d03": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-4@e32a7f6e": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-5@26b3e5b6": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-6@6ae6cb4c": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-7@e7b1abe0": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-8@c2168b7b": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__discourse-greptile-9@343352b1": "discourse/discourse",
+      "greptile/ai-code-review-evaluation__grafana-greptile-10@2fa4d65b": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-1@ed8fc9dd": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-2@97b8a208": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-3@23087fd6": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-4@9c146b7f": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-5@c7de75e8": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-6@ff73de12": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-7@7ad4f99f": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-8@1c49bb7a": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__grafana-greptile-9@d0e8dc12": "grafana/grafana",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-10@9b2036d9": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-1@57543a96": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-2@e356be7d": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-3@53f77f0f": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-4@77387c5a": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-5@b9e8a6cf": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-6@8cacaa81": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-7@64b6916b": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-8@bdb6c3b5": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__keycloak-greptile-9@ab97b00b": "keycloak/keycloak",
+      "greptile/ai-code-review-evaluation__sentry-greptile-10@cfbb4273": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-1@ec55cdfd": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-2@26f5d73c": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-4@b56ee62d": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-5@89b5cfa0": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-6@a9bd3664": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-7@a9b46a2c": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-8@95dd22ca": "getsentry/sentry",
+      "greptile/ai-code-review-evaluation__sentry-greptile-9@acbcc279": "getsentry/sentry"
+    },
+    "resamples": 10000,
+    "level": 0.95,
+    "minClusters": 8,
+    "seed": "mulberry32 seeded with the first 32 bits of sha256 over the run id, the configuration and the metric name, joined by NUL",
+    "runId": "2026-10-27-55a9d696-greptile-claude",
+    "tooFewClusters": {
+      "claude-graph-on": {
+        "issueRecall.all": 0,
+        "issueRecall.criticalMajor": 0,
+        "precision.lower": 5,
+        "precision.upper": 5
+      }
+    }
+  },
+  "asset": {
+    "url": "https://github.com/openqodex/openqodex/releases/download/benchmark-data/2026-10-27-55a9d696-greptile-claude.tar.gz",
+    "sha256": "bbb6d2b317b9d98b5bbe97ddcbb79a542d2528e9b7350524c6af89a3b35c5793",
+    "bytes": 7316674,
+    "files": 597,
+    "listHash": "26fd2a155c5e8b9320dab3482480c5c39219f9393ea774581ef9dba1a5f9ee25"
+  },
+  "accepted": true,
+  "acceptedAt": "2026-11-01T07:08:41.610Z",
+  "acceptedBy": "Sid",
+  "legacy": false,
+  "privateListHash": "a9f09563038bb34c41e7c19e1f98b299d6294efef21f3fdf282cc26515e375f1"
+}

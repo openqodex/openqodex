@@ -1,0 +1,40 @@
+{
+  "guards": "reads literal annotation names and excludes comments strings and unsupported annotations",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 1,
+    "roles": [
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "role": "test"
+      }
+    ],
+    "edges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "to": "src/main/java/shop/Service.java#Service.read",
+        "tier": "certain",
+        "category": "direct-call"
+      }
+    ],
+    "notEdges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.factory"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:5",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:6",
+      "tier": "certain"
+    }
+  ]
+}

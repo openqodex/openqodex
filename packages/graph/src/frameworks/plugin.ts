@@ -47,7 +47,7 @@
 // change bumps PLUGIN_API_VERSION.
 import type { Node } from "web-tree-sitter";
 import type { ProjectModel } from "../discovery/projects.js";
-import type { Cause, Tier } from "../model/records.js";
+import type { Cause, EvidenceKind, Tier } from "../model/records.js";
 import type { FileFacts, GraphEdge, GraphNode, Lang } from "../types.js";
 import type { TreeVisitor } from "../walk.js";
 
@@ -55,7 +55,15 @@ import type { TreeVisitor } from "../walk.js";
 // 3: FrameworkPlugin.reader (appended).
 // 4: TreeVisitor.types and TreeVisitor.keep (appended): a reader names the
 // node types it is entered for and the ancestors it reads as nodes.
-export const PLUGIN_API_VERSION = 4;
+// 5: PluginOutput.calls (appended): calls the framework makes on behalf of
+// a symbol, which the build adds to the code graph's calls edges.
+export const PLUGIN_API_VERSION = 5;
+
+// The most entities and edges one plugin keeps per application (null: the
+// registrations no application reaches). Past either cap the rest are left
+// out and one unknown with cause "fan-out-capped" says how many.
+export const MAX_ENTITIES_PER_APP = 20_000;
+export const MAX_EDGES_PER_APP = 100_000;
 
 // ---------- the facts a plugin reads from one file ----------
 
@@ -345,7 +353,10 @@ export type FrameworkEdge = {
 // (`{ build: true }`: a budget or a cap a plugin counts across every
 // application, which may hide anything past the point it stopped).
 // `affects` the framework relations it can hide; empty means every one. A
-// count that cannot be known is null, never zero.
+// count that cannot be known is null, never zero. `symbol`, when set, is the
+// one function the gap is about, already linked to what runs it (a
+// middleware whose matcher is computed): the gap may hide where it runs,
+// never that it runs, so it floors that function's callers and no other's.
 export type FrameworkUnknown = {
   plugin: string;
   site: Site | null;
@@ -356,6 +367,7 @@ export type FrameworkUnknown = {
   note: string;
   count: number | null;
   exact: boolean;
+  symbol?: string;
 };
 
 // ---------- the read API a plugin resolves through ----------
@@ -366,13 +378,14 @@ export type FrameworkUnknown = {
 // class key. A module-level value that is not a definition (a router
 // built by `APIRouter()`, `express.Router()`) shows as a miss whose target
 // is the module's file, so a plugin reads its own facts in that file to
-// tell a value from a real miss.
+// tell a value from a real miss. `past`: the names of the path after the
+// one that missed, never looked up (`router.handler` misses at `router`).
 export type Lookup =
   | { kind: "symbol"; ids: string[]; tier: Tier; evidence: string; via: { file: string; line: number; spec: string | null } | null; note: string | null }
   | { kind: "module"; file: string; tier: Tier; via: { file: string; line: number; spec: string | null } | null; note: string | null }
   | { kind: "external" }
   | { kind: "gap"; cause: Cause; note: string; candidates: string[] | null }
-  | { kind: "miss"; target: string; name: string }
+  | { kind: "miss"; target: string; name: string; past?: string[] }
   | { kind: "none" }; // the name is not bound at the top level of the file
 
 // Every cross-file read a plugin makes goes through this object, so a later
@@ -408,11 +421,29 @@ export interface PluginIndex<F extends FrameworkFactBase = FrameworkFactBase> {
 
 // ---------- what resolve returns ----------
 
+// A call the framework makes on behalf of a symbol: FastAPI runs a route's
+// `Depends(get_db)` before the route on every request, so the route reaches
+// get_db as surely as if it called it. The build adds each one to the code
+// graph as a calls edge from `from` to `to` at `site`, so a caller list
+// finds it. `evidence` and `rule` are the site's, checked like any call
+// site's (model/records.ts, validateEvidence): one that fails is dropped.
+export type FrameworkCall = {
+  from: string; // symbol id
+  to: string; // symbol id
+  site: Site;
+  tier: Tier;
+  evidence: EvidenceKind;
+  via: { file: string; line: number; spec: string | null } | null;
+  note: string | null;
+  rule: string;
+};
+
 export type PluginOutput = {
   roles: RoleAssignment[];
   entities: Entity[];
   edges: FrameworkEdge[];
   unknowns: FrameworkUnknown[];
+  calls?: FrameworkCall[];
 };
 
 // ---------- what a plugin proves, and with which fixtures ----------

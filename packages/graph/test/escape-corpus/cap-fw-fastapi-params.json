@@ -1,0 +1,31 @@
+{
+  "covers": "a FastAPI dependency declared by a route handler's parameter past the parameters the plugin's reader reads (fastapi facts.ts MAX_PARAMS)",
+  "caps": [
+    "frameworks/fastapi/facts.ts#MAX_PARAMS"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": "from fastapi import Depends, FastAPI\n\napp = FastAPI()\n\ndef d():\n    return 1\n\n@app.get(\"/x\")\ndef index(p0: int = 0, p1: int = 0, p2: int = 0, p3: int = 0, p4: int = 0, p5: int = 0, p6: int = 0, p7: int = 0, p8: int = 0, p9: int = 0, p10: int = 0, p11: int = 0, p12: int = 0, p13: int = 0, p14: int = 0, p15: int = 0, p16: int = 0, p17: int = 0, p18: int = 0, p19: int = 0, p20: int = 0, p21: int = 0, p22: int = 0, p23: int = 0, p24: int = 0, p25: int = 0, p26: int = 0, p27: int = 0, p28: int = 0, p29: int = 0, p30: int = 0, p31: int = 0, p32: int = 0, p33: int = 0, p34: int = 0, p35: int = 0, p36: int = 0, p37: int = 0, p38: int = 0, p39: int = 0, p40: int = 0, p41: int = 0, p42: int = 0, p43: int = 0, p44: int = 0, p45: int = 0, p46: int = 0, p47: int = 0, p48: int = 0, p49: int = 0, p50: int = 0, p51: int = 0, p52: int = 0, p53: int = 0, p54: int = 0, p55: int = 0, p56: int = 0, p57: int = 0, p58: int = 0, p59: int = 0, p60: int = 0, p61: int = 0, p62: int = 0, p63: int = 0, x=Depends(d)):\n    return 1\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.py#d",
+      "caller": null,
+      "file": "main.py",
+      "line": 8
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#d",
+      "reason": "or a dependency list was longer than it reads",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.py:8"
+      }
+    }
+  ]
+}

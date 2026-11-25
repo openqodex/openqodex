@@ -1,4 +1,5 @@
 // Ways staged briefs could fail, written before the code:
+// 20. Many omitted hunks overflow verification; headings repeat parts or omit old lines.
 // 1. A unit receives another unit's hunks, including hunks of the same file.
 // 2. A deletion loses its removed lines or the anchors that locate them.
 // 3. Finder instructions expose scanner candidates or ask to dispose of them.
@@ -15,10 +16,14 @@
 //     or the confidence floors used by assembly.
 // 13. A scanner-first batch gets a finder id in its answer example.
 // 14. A brief still asks for a missing-test finding.
+// 15. A binary deletion has no readable lines and is never counted as covered.
+// 17. Replacement parts repeat removed rows or lose their owner.
+// 16. Reviewer briefs leave masked values unexplained or permit placeholder claims.
 import { describe, expect, it } from "vitest";
-import { buildFindBrief, buildVerifyBrief, FINDER_CONFIDENCE_FLOOR } from "./brief-staged.js";
+import { buildFindBrief, buildVerifyBrief, FINDER_CONFIDENCE_FLOOR, hunkRows } from "./brief-staged.js";
 import type { StagedBriefArgs, VerifyBatch } from "./brief-staged.js";
 import { buildReviewerBrief } from "./brief.js";
+import { readCoverage, singlePassCoverage } from "./completion.js";
 import { checkSubmission } from "./finalize.js";
 import { redactSecrets } from "./redact.js";
 import { makeChange, makeConfig, makeManifest, makeScan, SECRET, SQL_CANDIDATE } from "./test-fixtures.js";
@@ -66,6 +71,43 @@ function answer(text: string): VerifyAnswer {
   expect(json).toBeDefined();
   return JSON.parse(json!) as VerifyAnswer;
 }
+
+it("a binary deletion stays unread when its diff has no text lines", () => {
+  const diff = "diff --git a/logo.png b/logo.png\ndeleted file mode 100644\nindex 1234567..0000000\nBinary files a/logo.png and /dev/null differ\n";
+  const deleted = makeChange({
+    files: [{ path: "logo.png", status: "deleted", oldPath: null, binary: true }],
+    changedPaths: [], coverage: new Map(), diff, diffs: [{ path: "logo.png", text: diff }],
+    deletionPoints: new Map([["logo.png", [{ after: 0, lines: 0, anchors: [1] }]]]),
+  });
+  const deletedUnit: ReviewUnit = {
+    id: "u1", files: ["logo.png"], diffBytes: 0,
+    hunks: [{ id: "h1", path: "logo.png", start: 1, end: 1, deletion: true }],
+  };
+  const input = args({ change: deleted, scan: makeScan({ candidates: [] }) });
+  const finder = buildFindBrief(input, deletedUnit, "local");
+  expect(finder.text).toContain("### h1 logo.png 1-1\n\nThe file is binary and was deleted. There are no lines to read; the deletion is the change.");
+  const single = buildReviewerBrief(input);
+  expect(single.text).toContain("| deleted, binary | logo.png |");
+  expect(single.text).toContain("logo.png was deleted (cite line 1)");
+  for (const brief of [finder, single]) {
+    expect(singlePassCoverage({ change: deleted, diffFiles: brief.diffFiles, trace: [] })).toMatchObject({
+      hunks: 1, covered: 1, unread: [],
+    });
+  }
+});
+
+it("reviewer briefs leave masked values unexplained and allow placeholder claims", () => {
+  const verifier = buildVerifyBrief(args(), batch).text;
+  for (const text of [
+    buildFindBrief(args(), unit, "local").text, verifier,
+    buildReviewerBrief(args()).text,
+    buildReviewerBrief({ ...args(), whole: { hot: [], graphNote: null, inventory: [] } }).text,
+  ]) {
+    expect(text).toContain("The current folder holds a frozen copy of the code under review, with the change applied. Read it only through the tools you were given; it is the only place you can read, and you never run the repository's code.");
+    expect(text).toContain("OpenQodex replaced every value the secret scanner matched with `[redacted]`, in this copy and in the diff. Treat `[redacted]` as a real value you cannot see, never as a placeholder or a missing value; raise no finding about the masking itself.");
+  }
+  expect(verifier).toContain("A claim that a value is a placeholder, missing or redacted, where the copy reads `[redacted]`, is refuted.");
+});
 
 describe("find brief", () => {
   it("shows only this unit's hunks, including when another unit shares its file", () => {
@@ -261,12 +303,12 @@ describe("verify brief", () => {
       ...batch, candidates: [{ id: "k1", kind: "finder", candidate: { ...candidate, lens: "query" }, foundBy: ["local"] }],
     });
     expect(text).toContain("Lens: query (floor 0.85)");
-    expect(text).toContain("Findings under 0.7, or under a cited lens's floor, are not counted.");
+    expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
   });
 
   it("states the configured verifier floor instead of the default", () => {
     const { text } = buildVerifyBrief(args({ confidenceFloor: 0.85 }), batch);
-    expect(text).toContain("Findings under 0.85, or under a cited lens's floor, are not counted.");
+    expect(text).toContain("Findings at 0.85 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
     expect(text).not.toContain("Findings under 0.7");
   });
 
@@ -346,4 +388,119 @@ describe("staged brief redaction and framing", () => {
     const { text } = buildFindBrief(args({ change: makeChange({ diffs: [{ path: "app/search.py", text: diff }] }) }), unit, "local");
     expect(text).toContain("````diff\n");
   });
+});
+
+// Failure cases: the briefs omit the causal chain or advertise stale limits.
+it("asks both sessions to name each causal step and allows three claim and problem sentences", () => {
+  const finder = buildFindBrief(args(), unit, "local").text;
+  const verifier = buildVerifyBrief(args(), batch).text;
+  expect(finder).toContain("Name the code that makes it happen at each step");
+  expect(finder).toContain("a bare `pass`, an empty handler");
+  expect(finder).toContain("At most 3 sentences in `claim`");
+  expect(verifier.match(/keep the candidate's cause and consequence/g)).toHaveLength(2);
+  expect(verifier).toContain("Correct a detail only when you cite the line that refutes it");
+  expect(verifier).toContain("At most 3 sentences in `problem`");
+  expect(verifier).toContain("At most 2 sentences in `consequence`");
+  expect(buildReviewerBrief(args()).text).toContain("At most 3 sentences in `problem`");
+});
+
+// Failure case: the finder examines hunks without following their combined flow.
+it("asks the finder to follow changed operations through the whole flow across hunks", () => {
+  const text = buildFindBrief(args(), unit, "local").text;
+  expect(text).toContain("Then follow each changed condition, mutation, async completion and cleanup through the whole flow it belongs to.\nLook across the other hunks of this unit and the code around the change.");
+  const shape = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(text)![1]!);
+  expect(Object.keys(shape)).toEqual(["version", "change_id", "unit", "examined", "analysis", "candidates"]);
+});
+
+// Failure case: the verifier calibrates to findings disappearing under the floor.
+it("tells the verifier that possible issues are shown and never counted", () => {
+  expect(buildVerifyBrief(args(), batch).text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
+});
+
+it("does not repeat removed rows in later replacement parts and names their owner", () => {
+  const diff = "@@ -1,2 +1,4 @@\n-old_a\n-old_b\n+new_a\n+new_b\n+new_c\n+new_d\n";
+  const input = args({ change: makeChange({ diffs: [{ path: "app/search.py", text: diff }] }) });
+  const first = { id: "h1", path: "app/search.py", start: 1, end: 2, deletion: false, old: [1, 2] as [number, number], part: { n: 1, of: 2, whole: "app/search.py:1-4" } };
+  const second = { ...first, id: "h2", start: 3, end: 4, old: null, part: { ...first.part, n: 2 }, removedIn: 1 };
+  const a = buildFindBrief(input, { ...unit, hunks: [first] }, "local");
+  const b = buildFindBrief(input, { ...unit, hunks: [second] }, "local");
+  expect(a.text).toContain("-old_a\n-old_b");
+  expect(b.text).not.toContain("-old_a");
+  expect(b.text).toContain("removed lines of this replacement are in part 1");
+  expect(a.carried).toEqual([first]);
+  expect(b.carried).toEqual([second]);
+});
+
+it("never credits the tail of a range when its retained diff holds only the first row", () => {
+  const partial = makeChange({ diffs: [{ path: "app/search.py", text: "@@ -0,0 +1 @@\n+only_first_row\n" }] });
+  const ref = { id: "h1", path: "app/search.py", start: 1, end: 4, deletion: false, old: null };
+  const brief = buildFindBrief(args({ change: partial }), { ...unit, hunks: [ref] }, "local");
+  expect(brief.carried).toEqual([{ ...ref, end: 1 }]);
+  const coverage = readCoverage({ change: partial, obligations: [ref], briefCarried: brief.carried, trace: [] });
+  expect(coverage.unread).toEqual([ref]);
+});
+
+it("selects the cited deletion fragment rather than every fragment at its anchor", () => {
+  const input = args({ change: makeChange({ diffs: [{ path: "app/search.py", text: "@@ -1,6 +0,0 @@\n-old_1\n-old_2\n-old_3\n-old_4\n-old_5\n-old_6\n" }] }) });
+  const hunks = [1, 3, 5].map((start, i) => ({ id: `h${i + 1}`, path: "app/search.py", start: 1, end: 1, deletion: { id: "app/search.py#0", oldStart: start, oldEnd: start + 1 }, old: [start, start + 1] as [number, number], part: { n: i + 1, of: 3, whole: "app/search.py#0" } }));
+  const c = { ...candidate, line_number: 1, evidence: [{ file_path: "app/search.py", line_number: 5, quote: "old_5", removed: true as const }] };
+  const text = buildVerifyBrief(input, { ...batch, hunks, candidates: [{ id: "k1", kind: "finder", candidate: c, foundBy: [] }] }).text;
+  expect(text).toContain("-old_5\n-old_6");
+  expect(text).not.toContain("-old_1");
+  expect(text.match(/not shown; read with your tools/g)).toHaveLength(2);
+});
+
+// 18. Single-part headings and grouped verifier diffs must retain their old rendering.
+it("renders single-part hunks exactly like the original verifier hunk block", () => {
+  const hunks = [
+    { ...unit.hunks[0]!, part: { n: 1, of: 1, whole: "first" } },
+    { id: "h2", path: "app/search.py", start: 41, end: 41, deletion: false, part: { n: 1, of: 1, whole: "second" } },
+    { id: "h3", path: "app/search.py", start: 50, end: 51, deletion: { id: "app/search.py#0", oldStart: 50, oldEnd: 51 }, part: { n: 1, of: 1, whole: "third" } },
+  ];
+  // HEAD rendered the whole shown list in one hunksBlock call.
+  const original = [
+    "### h1 app/search.py 14-15", "", "```diff",
+    "diff --git a/app/search.py b/app/search.py", "--- a/app/search.py", "+++ b/app/search.py",
+    "@@ -14,1 +14,2 @@",
+    '-    cur.execute("SELECT * FROM items WHERE name = %s", (q,))',
+    '+    cur.execute(f"SELECT * FROM items WHERE name = \'{q}\'")',
+    "+    return cur.fetchall()", "```", "",
+    "### h2 app/search.py 41-41", "", "```diff",
+    "@@ -40,1 +41,1 @@", "-old_second_hunk()", "+other_unit_only()", "```", "",
+    "### h3 app/search.py 50-51 (old lines 50-51)", "",
+    "Removed lines use the old file's line numbers. Cite deletion anchor 50 or 51.", "", "```diff",
+    "@@ -50,2 +50,0 @@", "-removed_guard()", "-removed_return()", "```",
+  ].join("\n");
+  const text = buildVerifyBrief(args(), { ...batch, hunks, shown: hunks.map((h) => h.id) }).text;
+  expect(text.slice(text.indexOf("### h1"), text.indexOf("## Candidates to verify")).trim()).toBe(original);
+  expect(text.match(/^diff --git /gm)).toHaveLength(1);
+});
+
+// 19. A broad old interval must not pull pure deletions between owned replacements.
+it("excludes intervening pure deletions from a part's owned replacement rows", () => {
+  const diff = "@@ -1,7 +1,6 @@\n-old_a\n+new_a\n keep_a\n-only_deleted\n keep_b\n-old_b\n+new_b\n keep_c\n keep_d\n";
+  const c = makeChange({ diffs: [{ path: "app/search.py", text: diff }] });
+  const ref = { ...unit.hunks[0]!, start: 1, end: 6, old: [1, 5] as [number, number] };
+  const rows = hunkRows(c, ref);
+  expect(rows).toContain("-old_a");
+  expect(rows).toContain("-old_b");
+  expect(rows).not.toContain("-only_deleted");
+  expect(buildFindBrief(args({ change: c }), { ...unit, hunks: [ref] }, "local").text).not.toContain("-only_deleted");
+});
+
+it("compacts 3000 omitted single-part hunks below the verifier bound", () => {
+  const hunks = Array.from({ length: 3000 }, (_, i) => ({ id: `h${i + 1}`, path: "app/search.py", start: i * 10 + 1, end: i * 10 + 1, deletion: false, part: { n: 1, of: 1, whole: `range${i}` } }));
+  const text = buildVerifyBrief(args(), { ...batch, hunks, shown: ["h1"] }).text;
+  expect(Buffer.byteLength(text)).toBeLessThan(256 * 1024);
+  expect(text).toContain("other changed ranges in this file, not shown: 11-11, 21-21");
+  expect(text).toMatch(/and \d+ more/);
+  expect(text).not.toContain("### h2 ");
+});
+it("names a cut part once and retains old lines on an unsplit deletion", () => {
+  const cut = { ...unit.hunks[0]!, part: { n: 2, of: 5, whole: "range" } };
+  const text = buildVerifyBrief(args(), { ...batch, hunks: [cut], shown: [] }).text;
+  expect(text).toContain("part 2, lines 14 to 15, not shown; read with your tools");
+  expect(text).not.toContain("(part 2 of 5) (part 2");
+  const deletion = { ...cut, deletion: { id: "d", oldStart: 8, oldEnd: 9 }, part: { n: 1, of: 1, whole: "d" } };
+  expect(buildFindBrief(args(), { ...unit, hunks: [deletion] }, "local").text).toContain("(old lines 8-9)");
 });

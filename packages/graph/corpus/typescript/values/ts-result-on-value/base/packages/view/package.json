@@ -1,0 +1,1 @@
+{"name": "@sample/view", "version": "1.0.0", "exports": {"./internal": "./internal.js"}}

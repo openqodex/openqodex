@@ -1,0 +1,39 @@
+{
+  "guards": "binds a call on what an interface member typed by a named function type returns to the returned class's method",
+  "callers": [
+    {
+      "to": "src/store.ts#SkillStore.list",
+      "site": "src/router.ts:11",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#SkillStore.list",
+      "site": "src/router.ts:15",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/router.ts",
+      "line": 11,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/router.ts",
+      "line": 11,
+      "cause": "untyped-receiver"
+    },
+    {
+      "file": "src/router.ts",
+      "line": 11,
+      "cause": "miss"
+    },
+    {
+      "file": "src/router.ts",
+      "line": 11,
+      "cause": "unsupported-rule"
+    }
+  ]
+}

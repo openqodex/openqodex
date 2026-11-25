@@ -87,11 +87,17 @@
 //  39. A custom adapter written for wants() alone, with no paths(), makes
 //      runScanners throw or skips the scanner, now that the scan record
 //      asks each custom scanner for its file list.
-//  40. A scanner that quotes an absolute path inside its message text (not
+// Added for issue #307:
+//  40. An adapter that marks its error as a failure (a Go module that could
+//      not type-check) reads as ran because another part gave findings, so
+//      the developer is never told a changed package went unchecked; or its
+//      findings are lost.
+//  41. A scanner that quotes an absolute path inside its message text (not
 //      just filePath), such as rubocop's Lint/DuplicateMethods naming both
 //      definitions by the path it was given, carries the developer's
 //      checkout root into a saved finding (toRunDirRelative).
 
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -148,8 +154,8 @@ function config(over: Partial<Config> = {}): Config {
   };
 }
 
-function lines(...ns: number[]): Set<number> {
-  return new Set(ns);
+function lines(...ns: number[]): ReturnType<typeof makeLineSet> {
+  return makeLineSet(ns);
 }
 
 // A real resolver: nothing is installed on this imaginary machine. It
@@ -440,7 +446,7 @@ describe("suppression comments the change adds", () => {
 
   it("raises the settings candidate of a file with 200,000 changed lines on its first one (35)", async () => {
     const dir = repo({});
-    const many = new Set(Array.from({ length: 200_000 }, (_, k) => 200_000 - k));
+    const many = makeLineSet(Array.from({ length: 200_000 }, (_, k) => 200_000 - k));
     const { scan } = await runScanners({
       repoDir: dir,
       changedPaths: [".gitleaksignore"],
@@ -548,7 +554,7 @@ describe("toRunDirRelative", () => {
 });
 
 // ruff reads [tool.ruff] of pyproject.toml, and [project] requires-python
-// beside it as its target version; SQLFluff reads [tool.sqlfluff] there and
+// as its target version, with or without that table; SQLFluff reads [tool.sqlfluff] there and
 // its [sqlfluff] sections of setup.cfg, tox.ini and pep8.ini. Those files
 // belong to other tools too, so one counts as a settings file only when the
 // change alters what the scanner reads from it, by meaning: TOML as a TOML
@@ -580,6 +586,13 @@ describe("a settings file other tools share counts when what the scanner reads f
     expect(await notes("setup.cfg", base, `${base}exclude_rules CV05\n`, [3])).toEqual(["sqlfluff:settings-file"]);
     expect(await notes("tox.ini", base, null, [])).toEqual(["sqlfluff:settings-file"]);
     expect(await notes("pyproject.toml", `${PROJECT}\n[tool.ruff]\nline-length = 100\n`, `${PROJECT}\n[tool.ruff\nline-length = 100\n`, [4])).toEqual(["sqlfluff:settings-file", "ruff:settings-file"]);
+  });
+
+  // ruff 0.10 and later read requires-python of a pyproject.toml that has no
+  // [tool.ruff] table, so a change to it can silence or raise ruff findings.
+  it("raises the ruff note when requires-python changes in a pyproject.toml with no [tool.ruff] table, and none for its name", async () => {
+    expect(await notes("pyproject.toml", `${PROJECT}requires-python = ">=3.12"\n`, `${PROJECT}requires-python = ">=3.8"\n`, [3])).toEqual(["ruff:settings-file"]);
+    expect(await notes("pyproject.toml", PROJECT, '[project]\nname = "service"\n', [2])).toEqual([]);
   });
 });
 
@@ -668,5 +681,22 @@ describe("candidate order", () => {
     const unwanted = (await scanWith(legacy(false))).scan;
     expect(unwanted.selection?.find((c) => c.scanner === "custom:legacy")).toEqual({ scanner: "custom:legacy", wanted: false, paths: [], projects: [], skip: "nothing to check" });
     expect(unwanted.scanners).toEqual([expect.objectContaining({ scanner: "custom:legacy", status: "no_matching_files" })]);
+  });
+
+  it("keeps a scanner failed when it marks its error as a failure beside findings, and keeps the findings (40)", async () => {
+    const dir = repo({ "a.sh": "x\n" });
+    const partial = (failed: boolean | undefined): CustomAdapter => ({
+      source: "custom:partial",
+      skipped: null,
+      wants: () => true,
+      run: async () => ({ findings: [finding({ source: "custom:partial", filePath: "a.sh" })], error: "b: could not type-check", ...(failed === undefined ? {} : { failed }), version: "1.0.0" }),
+    });
+    const scanWith = (adapter: CustomAdapter) =>
+      runScanners({ repoDir: dir, changedPaths: ["a.sh"], coverage: new Map([["a.sh", lines(1)]]), config: config(), resolveTool: notInstalled(), only: ["custom:partial"], custom: [adapter] });
+    const failed = (await scanWith(partial(true))).scan;
+    expect(failed.scanners).toEqual([expect.objectContaining({ scanner: "custom:partial", status: "failed", reason: "b: could not type-check", rawCount: 1, keptCount: 1 })]);
+    expect(failed.candidates.map((c) => c.filePath)).toEqual(["a.sh"]);
+    const noted = (await scanWith(partial(undefined))).scan;
+    expect(noted.scanners).toEqual([expect.objectContaining({ scanner: "custom:partial", status: "ran", reason: "b: could not type-check" })]);
   });
 });

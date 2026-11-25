@@ -1,0 +1,17 @@
+{
+  "guards": "binds this.m() inside an instance field initializer to the instance method",
+  "callers": [
+    {
+      "to": "src/sandbox.ts#Sandbox.handleExec",
+      "site": "src/sandbox.ts:6",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/sandbox.ts",
+      "line": 6
+    }
+  ]
+}

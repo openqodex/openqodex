@@ -228,7 +228,7 @@ export function snapshotInventory(snap: Pick<Materialized, "tree" | "files">): L
     try {
       bytes = readFileSync(join(snap.tree, f.path));
     } catch {
-      // removed from the snapshot (too large to check for secrets)
+      // Missing or unreadable snapshot files cannot enter the graph.
       continue;
     }
     out.push({ path: f.path, blob: blobId(bytes) });

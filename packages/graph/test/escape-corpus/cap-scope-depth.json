@@ -1,0 +1,43 @@
+{
+  "covers": "a call nested in more scopes than the reader reads (extract MAX_SCOPE_DEPTH)",
+  "caps": [
+    "extract.ts#MAX_SCOPE_DEPTH"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function target(): void {}\n",
+    "src/use.ts": [
+      "import { target } from \"./b\";\n",
+      {
+        "repeat": "{",
+        "times": 260
+      },
+      "\ntarget();\n",
+      {
+        "repeat": "}",
+        "times": 260
+      },
+      "\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/b.ts#target",
+      "caller": "src/use.ts",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.ts#target",
+      "reason": "named `target` in the repository could not be bound",
+      "at": "",
+      "gap": {
+        "cause": "no-receiver-type",
+        "at": "src/use.ts:3"
+      }
+    }
+  ]
+}

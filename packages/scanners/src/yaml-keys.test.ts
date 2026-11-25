@@ -18,7 +18,8 @@
 //   6. A file the parser cannot read, or one over the size cap, hides a key
 //      instead of counting every line that holds the text.
 //   7. Hostile input (deep nesting, alias bombs, long lines) takes more than
-//      linear time or crashes the run.
+//      linear time or crashes the run. The growth checks are in
+//      test/yaml-keys-growth.test.ts, on the full tier.
 //   8. A key's line is wrong.
 import { describe, expect, it } from "vitest";
 import { MAX_KEY_BYTES, yamlKeys } from "./yaml-keys.js";
@@ -112,51 +113,5 @@ describe("YAML key reading on hostile input (7)", () => {
     it(what, () => {
       expect(fast(text)).toBeLessThan(2000);
     });
-  }
-
-  // Input that grows with its size is checked by the ratio of two sizes,
-  // which a slow runner does not change: a linear reader takes about four
-  // times as long for about four times the input, one that rescans sixteen;
-  // the bound is the middle of the two.
-  // CPU time of the fastest of three runs, after one that is not counted,
-  // on flat text. The larger size stays under MAX_KEY_BYTES, past which the
-  // raw lines are read instead and the parser goes unmeasured. The bound at
-  // 1 MB fails only a gross slowdown: a Linux runner took 2.7 s of wall time
-  // for "many keys" at 1.1 MB.
-  const MB = 1024 * 1024;
-  const timed = (made: string) => {
-    const text = Buffer.from(made, "utf8").toString("utf8");
-    yamlKeys(text);
-    const runs: number[] = [];
-    for (let r = 0; r < 3; r++) {
-      const before = process.cpuUsage();
-      yamlKeys(text);
-      const used = process.cpuUsage(before);
-      runs.push((used.user + used.system) / 1000);
-    }
-    return Math.min(...runs);
-  };
-  const lines = (size: number, line: (i: number) => string) => {
-    const out: string[] = [];
-    let length = 0;
-    for (let i = 0; length < size; i++) {
-      const l = line(i);
-      out.push(l);
-      length += l.length + 1;
-    }
-    return out.join("\n");
-  };
-  const growing: [string, (size: number) => string][] = [
-    ["one long line", (size) => `k: ${"a ".repeat(Math.ceil(size / 2))}\n`],
-    ["many keys", (size) => lines(size, (i) => `k${i}: v`)],
-  ];
-  for (const [what, make] of growing) {
-    it(`${what}, at 1 MB and four times that`, () => {
-      const small = timed(make(MB));
-      expect(MAX_KEY_BYTES).toBeGreaterThan(4 * MB - 64 * 1024);
-      const large = timed(make(4 * MB - 64 * 1024));
-      expect(large / Math.max(small, 20), `${small.toFixed(0)} ms for 1 MB, ${large.toFixed(0)} ms for 3.94 MB of CPU time`).toBeLessThan(8);
-      expect(small).toBeLessThan(8000);
-    }, 180_000);
   }
 });

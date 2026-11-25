@@ -75,7 +75,7 @@ function greptileRun({ held = false, comments = true, caseCount = 50 } = {}) {
   write(join(folder, "cases", `${first.name}.json`), specCopy(c, truthOf(c, ctx)));
   const rep = report({ findings: comments ? [finding(held ? { fix: " " } : {})] : [] });
   const dir = attemptDir(folder, jobs[0], 1);
-  write(join(dir, "sample.json"), sampleRecord({ job: jobs[0], attempt: 1, result: { code: 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" }));
+  write(join(dir, "sample.json"), sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job: jobs[0], attempt: 1, result: { code: 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" }));
   write(join(dir, "report/report.json"), rep);
   write(join(folder, "manifest.json"), manifest);
   const manifestSha256 = sha256(readFileSync(join(folder, "manifest.json")));
@@ -270,6 +270,16 @@ it("Greptile refuses a verdict that marks a not-run case caught", () => {
   expect(() => greptileBlock(folder)).toThrow(/not-run|empty case/);
 });
 
+// Failure: a judge writes an em dash in a reason, the score and the index entry copy it, and the scrub fails the gate.
+it("a judge reason with an em dash enters the block with a comma, so the index entry passes the scrub", () => {
+  const folder = greptileRun();
+  const file = boardPath(folder, "greptile", `${tool}/verdicts.json`);
+  const verdicts = read(file); verdicts[0].reason = "Golden bug is a null check \u2014 none of the comments mention it"; write(file, verdicts);
+  const label = greptileBlock(folder).perTool[tool].labels[0];
+  expect(label.reason).toBe("Golden bug is a null check, none of the comments mention it");
+  expect(JSON.stringify(greptileBlock(folder))).not.toContain("\u2014");
+});
+
 it("Greptile reads back the saved input when one tool plans both cases and another plans one", () => {
   const folder = greptileRun({ caseCount: 2 });
   const ctx = boardOptions.get(folder);
@@ -287,7 +297,7 @@ it("Greptile reads back the saved input when one tool plans both cases and anoth
   const rep = report({ findings: [finding()] });
   for (const job of jobs) {
     const dir = attemptDir(folder, job, 1);
-    write(join(dir, "sample.json"), sampleRecord({ job, attempt: 1, result: { code: 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" }));
+    write(join(dir, "sample.json"), sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, wallMs: 1 }, report: rep, startedAt: "2026-10-24T00:00:00Z" }));
     write(join(dir, "report/report.json"), rep);
   }
   const input = greptileInput(folder, "greptile", ctx);
@@ -439,6 +449,11 @@ it("a control evaluation reads through the native source without four sentences"
   expect(readBlock(folder, "martian").perTool["claude-code-control-r1"].ours.findings).toEqual({ sent: 3, matched: 3 });
 });
 
+it("a Martian block carries the core F1 range of its repeats beside perTool, not only each repeat's tool (O9)", async () => {
+  const { folder } = await martianRun({ native: "", empty: true });
+  expect(readBlock(folder, "martian").range).toEqual({ control: { metric: "f1", profile: "core", repeats: 1, min: 0, mean: 0, max: 0 } });
+});
+
 it("Martian keeps the reasons every unreviewed case was sent empty", async () => {
   const { folder } = await martianRun({ native: "", empty: true });
   const t = readBlock(folder, "martian").perTool["claude-code-control-r1"];
@@ -492,7 +507,8 @@ it("the published asset keeps the board files and leaves the Martian work folder
 
 it("the publisher still inspects packaged board input for private paths", async () => {
   const { folder } = await martianRun();
-  write(boardPath(folder, "greptile", "input.json"), { path: join(homedir(), "private") });
+  // This machine's home folder is rewritten to a placeholder at publish; another machine's is a hit.
+  write(boardPath(folder, "greptile", "input.json"), { path: "/home/someone/private" });
   await expect(packageRun(folder, options(folder))).rejects.toThrow(/hit.*files to publish/);
 });
 

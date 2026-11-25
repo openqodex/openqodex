@@ -1,0 +1,2092 @@
+{
+  "version": 1,
+  "runId": "2026-10-27-1dd1f708-planted-claude-w9b",
+  "date": "2026-10-27",
+  "startedAt": "2026-10-27T15:26:37.509Z",
+  "draft": false,
+  "suite": "planted",
+  "split": "dev",
+  "splitHash": null,
+  "mode": "review",
+  "path": "laptop",
+  "build": {
+    "commit": "1dd1f708d48b421af95727ecd1338e8edb418487",
+    "short": "1dd1f70",
+    "cliVersion": "0.15.0",
+    "dirty": false,
+    "bundleHash": "070f080791d3ea09df37be4011c6a1d97862d01e7e70775f55c5f7ea3b0859ae"
+  },
+  "reviewers": {
+    "claude": {
+      "version": "2.1.311",
+      "model": "claude-opus-5-5"
+    }
+  },
+  "configs": [
+    "claude-graph-on"
+  ],
+  "repeat": 3,
+  "web": "off",
+  "caseSetHash": "ad0e0df010b721b09e3316bae133256d33cf6bae6b67c490e41514a794c801b8",
+  "caseIds": [
+    "planted/clean-python-feature@f4a96617",
+    "planted/clean-ts-refactor@203def17",
+    "planted/demo-polyglot@8784029f",
+    "planted/django-model-view@1e2d2658",
+    "planted/django-renamed-view@88fe20f5",
+    "planted/express-admin-routes@168bf064",
+    "planted/express-route-param@f6a2194a",
+    "planted/flask-path-traversal@72a23ef7",
+    "planted/go-http-handler@2f14de78",
+    "planted/js-dynamic-dispatch-gap@525683c5",
+    "planted/kubernetes-host-access@6411d9ba",
+    "planted/nextjs-react-hooks@cf5c787f",
+    "planted/postgres-migration-locks@ffcde742",
+    "planted/python-caller-break@2689ff22",
+    "planted/rails-controller-model@71515c07",
+    "planted/suppression-comments@e47d5270",
+    "planted/terraform-open-ingress@11c4fe95",
+    "planted/ts-interface-dispatch-break@e6a6512f",
+    "planted/ts-removed-export@5e705346",
+    "planted/ts-workspace-caller-break@ee94f473",
+    "planted/workflow-untrusted-checkout@aba74846"
+  ],
+  "rulesVersion": 12,
+  "rulesHash": "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
+  "decisionsHash": null,
+  "scannersComplete": true,
+  "external": null,
+  "ended": {
+    "how": "finished",
+    "why": null
+  },
+  "release": null,
+  "scores": {
+    "claude-graph-on": {
+      "population": {
+        "planned": 63,
+        "complete": 63,
+        "incomplete": 0,
+        "failed": 0,
+        "unstarted": 0,
+        "retries": 0,
+        "retryCostUsd": 0
+      },
+      "issueRecall": {
+        "all": {
+          "hit": 150,
+          "of": 153,
+          "ci": [
+            0.9230769230769231,
+            1
+          ]
+        },
+        "criticalMajor": {
+          "hit": 132,
+          "of": 135,
+          "ci": [
+            0.9166666666666666,
+            1
+          ]
+        }
+      },
+      "precision": {
+        "lower": {
+          "hit": 254,
+          "of": 302,
+          "ci": [
+            0.7487684729064039,
+            0.911660777385159
+          ]
+        },
+        "upper": {
+          "hit": 301,
+          "of": 302,
+          "ci": [
+            0.9858490566037735,
+            1
+          ]
+        }
+      },
+      "uniqueIssuePrecision": {
+        "lower": {
+          "hit": 180,
+          "of": 228,
+          "ci": null
+        },
+        "upper": {
+          "hit": 227,
+          "of": 228,
+          "ci": null
+        }
+      },
+      "redundancy": {
+        "hit": 74,
+        "of": 302
+      },
+      "f1": 0.905396734868468,
+      "controls": {
+        "hit": 5,
+        "of": 6
+      },
+      "cleanFindingsPerCase": {
+        "findings": 1,
+        "cases": 6
+      },
+      "location": {
+        "precision": {
+          "hit": 153,
+          "of": 302
+        },
+        "recall": {
+          "hit": 153,
+          "of": 153
+        },
+        "knownNoise": 0
+      },
+      "plantedLegacy": {
+        "precision": {
+          "hit": 150,
+          "of": 198
+        },
+        "testGaps": 0
+      },
+      "severity": {
+        "exact": {
+          "hit": 91,
+          "of": 150,
+          "ci": null
+        },
+        "withinOne": {
+          "hit": 150,
+          "of": 150,
+          "ci": null
+        },
+        "oneOff": {
+          "hit": 59,
+          "of": 150,
+          "ci": null
+        },
+        "off": {
+          "hit": 0,
+          "of": 150,
+          "ci": null
+        },
+        "over": 38,
+        "under": 21,
+        "unknown": 0
+      },
+      "finder": {
+        "match": {
+          "hit": 144,
+          "of": 150,
+          "ci": null
+        },
+        "byExpected": {
+          "actionlint": {
+            "hit": 3,
+            "of": 3
+          },
+          "bandit": {
+            "hit": 6,
+            "of": 6
+          },
+          "brakeman": {
+            "hit": 6,
+            "of": 6
+          },
+          "checkov": {
+            "hit": 12,
+            "of": 12
+          },
+          "gitleaks": {
+            "hit": 3,
+            "of": 3
+          },
+          "golangci": {
+            "hit": 6,
+            "of": 6
+          },
+          "graph": {
+            "hit": 18,
+            "of": 18
+          },
+          "hadolint": {
+            "hit": 12,
+            "of": 12
+          },
+          "kube-linter": {
+            "hit": 9,
+            "of": 9
+          },
+          "osv-scanner": {
+            "hit": 3,
+            "of": 3
+          },
+          "oxlint": {
+            "hit": 3,
+            "of": 6
+          },
+          "reasoning": {
+            "hit": 57,
+            "of": 120
+          },
+          "semgrep": {
+            "hit": 27,
+            "of": 36
+          },
+          "shellcheck": {
+            "hit": 6,
+            "of": 6
+          },
+          "squawk": {
+            "hit": 6,
+            "of": 6
+          },
+          "suppression": {
+            "hit": 6,
+            "of": 6
+          },
+          "trivy": {
+            "hit": 9,
+            "of": 9
+          },
+          "zizmor": {
+            "hit": 9,
+            "of": 9
+          }
+        },
+        "byFinder": {
+          "scanner": 93,
+          "reviewer": 57
+        },
+        "scannerExpectedReviewerFound": 9,
+        "unjudged": 0,
+        "droppedCandidates": 6
+      },
+      "wallMsMean": 60177.09523809524,
+      "costUsdMean": 0.42477792380952367,
+      "costUsdTotal": 26.761009199999993
+    }
+  },
+  "perCase": {
+    "claude-graph-on": {
+      "planted/clean-python-feature@f4a96617": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 0
+          },
+          "upper": {
+            "hit": 0,
+            "of": 0
+          }
+        },
+        "findings": 0,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 3,
+          "of": 3
+        }
+      },
+      "planted/clean-ts-refactor@203def17": {
+        "issueRecall": {
+          "hit": 0,
+          "of": 0
+        },
+        "precision": {
+          "lower": {
+            "hit": 0,
+            "of": 1
+          },
+          "upper": {
+            "hit": 0,
+            "of": 1
+          }
+        },
+        "findings": 1,
+        "criticalMajor": {
+          "hit": 0,
+          "of": 0
+        },
+        "controls": {
+          "hit": 2,
+          "of": 3
+        }
+      },
+      "planted/demo-polyglot@8784029f": {
+        "issueRecall": {
+          "hit": 45,
+          "of": 45
+        },
+        "precision": {
+          "lower": {
+            "hit": 71,
+            "of": 77
+          },
+          "upper": {
+            "hit": 77,
+            "of": 77
+          }
+        },
+        "findings": 77,
+        "criticalMajor": {
+          "hit": 30,
+          "of": 30
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/django-model-view@1e2d2658": {
+        "issueRecall": {
+          "hit": 12,
+          "of": 12
+        },
+        "precision": {
+          "lower": {
+            "hit": 14,
+            "of": 14
+          },
+          "upper": {
+            "hit": 14,
+            "of": 14
+          }
+        },
+        "findings": 14,
+        "criticalMajor": {
+          "hit": 12,
+          "of": 12
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/django-renamed-view@88fe20f5": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 3,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/express-admin-routes@168bf064": {
+        "issueRecall": {
+          "hit": 6,
+          "of": 6
+        },
+        "precision": {
+          "lower": {
+            "hit": 11,
+            "of": 12
+          },
+          "upper": {
+            "hit": 12,
+            "of": 12
+          }
+        },
+        "findings": 12,
+        "criticalMajor": {
+          "hit": 6,
+          "of": 6
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/express-route-param@f6a2194a": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 3,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/flask-path-traversal@72a23ef7": {
+        "issueRecall": {
+          "hit": 6,
+          "of": 6
+        },
+        "precision": {
+          "lower": {
+            "hit": 6,
+            "of": 6
+          },
+          "upper": {
+            "hit": 6,
+            "of": 6
+          }
+        },
+        "findings": 6,
+        "criticalMajor": {
+          "hit": 6,
+          "of": 6
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/go-http-handler@2f14de78": {
+        "issueRecall": {
+          "hit": 9,
+          "of": 9
+        },
+        "precision": {
+          "lower": {
+            "hit": 12,
+            "of": 18
+          },
+          "upper": {
+            "hit": 18,
+            "of": 18
+          }
+        },
+        "findings": 18,
+        "criticalMajor": {
+          "hit": 9,
+          "of": 9
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/js-dynamic-dispatch-gap@525683c5": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 6,
+            "of": 12
+          },
+          "upper": {
+            "hit": 12,
+            "of": 12
+          }
+        },
+        "findings": 12,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/kubernetes-host-access@6411d9ba": {
+        "issueRecall": {
+          "hit": 6,
+          "of": 6
+        },
+        "precision": {
+          "lower": {
+            "hit": 9,
+            "of": 18
+          },
+          "upper": {
+            "hit": 18,
+            "of": 18
+          }
+        },
+        "findings": 18,
+        "criticalMajor": {
+          "hit": 6,
+          "of": 6
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/nextjs-react-hooks@cf5c787f": {
+        "issueRecall": {
+          "hit": 12,
+          "of": 12
+        },
+        "precision": {
+          "lower": {
+            "hit": 26,
+            "of": 27
+          },
+          "upper": {
+            "hit": 27,
+            "of": 27
+          }
+        },
+        "findings": 27,
+        "criticalMajor": {
+          "hit": 9,
+          "of": 9
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/postgres-migration-locks@ffcde742": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 6
+        },
+        "precision": {
+          "lower": {
+            "hit": 10,
+            "of": 10
+          },
+          "upper": {
+            "hit": 10,
+            "of": 10
+          }
+        },
+        "findings": 10,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 6
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/python-caller-break@2689ff22": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 3,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/rails-controller-model@71515c07": {
+        "issueRecall": {
+          "hit": 12,
+          "of": 12
+        },
+        "precision": {
+          "lower": {
+            "hit": 15,
+            "of": 16
+          },
+          "upper": {
+            "hit": 16,
+            "of": 16
+          }
+        },
+        "findings": 16,
+        "criticalMajor": {
+          "hit": 12,
+          "of": 12
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/suppression-comments@e47d5270": {
+        "issueRecall": {
+          "hit": 6,
+          "of": 6
+        },
+        "precision": {
+          "lower": {
+            "hit": 11,
+            "of": 12
+          },
+          "upper": {
+            "hit": 12,
+            "of": 12
+          }
+        },
+        "findings": 12,
+        "criticalMajor": {
+          "hit": 6,
+          "of": 6
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/terraform-open-ingress@11c4fe95": {
+        "issueRecall": {
+          "hit": 6,
+          "of": 6
+        },
+        "precision": {
+          "lower": {
+            "hit": 31,
+            "of": 42
+          },
+          "upper": {
+            "hit": 42,
+            "of": 42
+          }
+        },
+        "findings": 42,
+        "criticalMajor": {
+          "hit": 6,
+          "of": 6
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/ts-interface-dispatch-break@e6a6512f": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 3,
+            "of": 3
+          },
+          "upper": {
+            "hit": 3,
+            "of": 3
+          }
+        },
+        "findings": 3,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/ts-removed-export@5e705346": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 3,
+            "of": 5
+          },
+          "upper": {
+            "hit": 5,
+            "of": 5
+          }
+        },
+        "findings": 5,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/ts-workspace-caller-break@ee94f473": {
+        "issueRecall": {
+          "hit": 3,
+          "of": 3
+        },
+        "precision": {
+          "lower": {
+            "hit": 7,
+            "of": 7
+          },
+          "upper": {
+            "hit": 7,
+            "of": 7
+          }
+        },
+        "findings": 7,
+        "criticalMajor": {
+          "hit": 3,
+          "of": 3
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      },
+      "planted/workflow-untrusted-checkout@aba74846": {
+        "issueRecall": {
+          "hit": 6,
+          "of": 6
+        },
+        "precision": {
+          "lower": {
+            "hit": 10,
+            "of": 13
+          },
+          "upper": {
+            "hit": 13,
+            "of": 13
+          }
+        },
+        "findings": 13,
+        "criticalMajor": {
+          "hit": 6,
+          "of": 6
+        },
+        "controls": {
+          "hit": 0,
+          "of": 0
+        }
+      }
+    }
+  },
+  "perBug": {
+    "claude-graph-on": {
+      "planted/clean-python-feature@f4a96617": {},
+      "planted/clean-ts-refactor@203def17": {},
+      "planted/demo-polyglot@8784029f": {
+        "secret": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "sql-injection": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "docker-latest-base": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "minor",
+          "given": [
+            "minor",
+            "minor",
+            "minor"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "docker-apt-install": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "minor",
+          "given": [
+            "minor",
+            "minor",
+            "minor"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "docker-add": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "minor",
+          "given": [
+            "nitpick",
+            "nitpick",
+            "nitpick"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "docker-pip-cache": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "minor",
+          "given": [
+            "minor",
+            "minor",
+            "minor"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "docker-root": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "minor",
+            "minor",
+            "major"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "vulnerable-lodash": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "major",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "shell-rm-unquoted": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "major",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "shell-ls-loop": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "minor",
+          "given": [
+            "minor",
+            "minor",
+            "minor"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "workflow-injection": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "minor",
+            "minor",
+            "minor"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "migration-index-lock": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "minor",
+            "minor",
+            "minor"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "terraform-ssh-open": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "major",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "kubernetes-privileged": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "major",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "pagination-off-by-one": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "major",
+            "major"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/django-model-view@1e2d2658": {
+        "decimal-times-float": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "missing-migration": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "order-detail-any-owner": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "csrf-exempt-redeem": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "minor",
+            "major",
+            "minor"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/django-renamed-view@88fe20f5": {
+        "route-names-missing-view": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/express-admin-routes@168bf064": {
+        "delete-without-admin": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "foreach-async-not-awaited": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/express-route-param@f6a2194a": {
+        "param-name-not-in-route": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/flask-path-traversal@72a23ef7": {
+        "download-path-traversal": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "debug-on-all-interfaces": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/go-http-handler@2f14de78": {
+        "sprintf-sql": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "mutex-held-on-return": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "defer-close-before-err": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "major",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/js-dynamic-dispatch-gap@525683c5": {
+        "async-handler-sync-caller": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/kubernetes-host-access@6411d9ba": {
+        "docker-socket-mount": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "host-network": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "major",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/nextjs-react-hooks@cf5c787f": {
+        "hook-after-early-return": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "major",
+            "major"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "effect-without-deps": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "query-as-html": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "list-without-key": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "minor",
+          "given": [
+            "minor",
+            "minor",
+            "minor"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/postgres-migration-locks@ffcde742": {
+        "not-null-column-without-default": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "critical",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "index-without-concurrently": {
+          "found": [
+            false,
+            false,
+            false
+          ],
+          "severity": "major",
+          "given": [
+            null,
+            null,
+            null
+          ],
+          "finder": [
+            null,
+            null,
+            null
+          ],
+          "cause": [
+            "judged-wrong",
+            "judged-wrong",
+            "judged-wrong"
+          ],
+          "ruling": null
+        }
+      },
+      "planted/python-caller-break@2689ff22": {
+        "none-return-breaks-callers": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "major",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/rails-controller-model@71515c07": {
+        "where-interpolation": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "destroy-skips-admin": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "permit-all": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "welcome-on-every-save": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "major",
+            "major",
+            "major"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/suppression-comments@e47d5270": {
+        "nosec-shell-injection": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "suppressed-eval": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/terraform-open-ingress@11c4fe95": {
+        "ssh-open-to-internet": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "major",
+            "critical",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "database-publicly-accessible": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "minor",
+            "minor",
+            "major"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/ts-interface-dispatch-break@e6a6512f": {
+        "cache-get-throws-on-miss": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/ts-removed-export@5e705346": {
+        "removed-export-still-imported": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/ts-workspace-caller-break@ee94f473": {
+        "safegit-return-shape": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "reviewer",
+            "reviewer",
+            "reviewer"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      },
+      "planted/workflow-untrusted-checkout@aba74846": {
+        "pull-request-code-with-secrets": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "critical",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        },
+        "spoofable-dependabot-check": {
+          "found": [
+            true,
+            true,
+            true
+          ],
+          "severity": "major",
+          "given": [
+            "critical",
+            "critical",
+            "critical"
+          ],
+          "finder": [
+            "scanner",
+            "scanner",
+            "scanner"
+          ],
+          "cause": [
+            null,
+            null,
+            null
+          ],
+          "ruling": null
+        }
+      }
+    }
+  },
+  "intervals": {
+    "method": "Percentile bootstrap over clusters drawn with replacement; each metric is a ratio of sums recomputed on every resample, and a cluster keeps all its truth items, findings and repeats together. A cluster with nothing to count for a metric is left out of it. The interval describes this run and decides nothing: the trend's alarm and the acceptance rule compare two runs with a paired sign-flip test. With fewer than minClusters clusters it is null, listed under tooFewClusters.",
+    "cluster": "case",
+    "groups": null,
+    "resamples": 10000,
+    "level": 0.95,
+    "minClusters": 8,
+    "seed": "mulberry32 seeded with the first 32 bits of sha256 over the run id, the configuration and the metric name, joined by NUL",
+    "runId": "2026-10-27-1dd1f708-planted-claude-w9b",
+    "tooFewClusters": {}
+  },
+  "asset": {
+    "url": "https://github.com/openqodex/openqodex/releases/download/benchmark-data/2026-10-27-1dd1f708-planted-claude-w9b.tar.gz",
+    "sha256": "2d150e1223c0866d616f2de091cb016ef699937b46852ecdd386265902c2ce8a",
+    "bytes": 1126714,
+    "files": 720,
+    "listHash": "490ccc8ddc686656deeb5795c06cf87bd6fd1e0dee67d01126419c08dad5cb99"
+  },
+  "accepted": true,
+  "acceptedAt": "2026-10-27T17:15:32.044Z",
+  "acceptedBy": "Sid",
+  "legacy": false,
+  "privateListHash": "869e9135d1242a59100b2f6b1976310834f8921ce9b5832aa9de0f738341898b"
+}

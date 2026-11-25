@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../../index.js";
 import type { Graph } from "../../index.js";
-import { expectLinear, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
+import { expectLinear, growthTests, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
 import { MAX_SOURCE_BYTES } from "../express/js.js";
 import { readFacts } from "./facts.js";
 import { MAX_RENDER_EDGES } from "./resolve.js";
@@ -84,15 +84,20 @@ describe("the React plugin on a hostile repository", () => {
     for (const dir of [root, quarter]) if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
-  it("reads the facts of more than 1 MiB of crafted components in time that grows with them and no faster", async () => {
-    expectLinear("the React fact reader on the hostile files", await readerCpuMs("tsx", sources(hostile(1)), readFacts), await readerCpuMs("tsx", sources(files), readFacts));
-  }, 300_000);
+  growthTests("in time that grows with it", () => {
+    it("reads the facts of more than 1 MiB of crafted components in time that grows with them and no faster", async () => {
+      expectLinear("the React fact reader on the hostile files", await readerCpuMs("tsx", sources(hostile(1)), readFacts), await readerCpuMs("tsx", sources(files), readFacts));
+    }, 300_000);
 
-  it("resolves a crafted repository in time that grows with it and no faster, so a component file cannot hang the build", async () => {
+    it("resolves a crafted repository in time that grows with it and no faster, so a component file cannot hang the build", async () => {
+      expectLinear("the React plugin on the hostile repository", await pluginCpuMs(build(quarter), "react"), await pluginCpuMs(build(root), "react"));
+    }, 300_000);
+  });
+
+  it("resolves a crafted repository", () => {
     const run = graph.frameworks?.plugins.find((p) => p.id === "react");
     expect(run?.status).toBe("ok");
-    expectLinear("the React plugin on the hostile repository", await pluginCpuMs(build(quarter), "react"), await pluginCpuMs(build(root), "react"));
-  }, 300_000);
+  });
 
   it("does not read a file over the byte cap, and says so with an unknown", () => {
     const gap = graph.frameworks?.unknowns.find((u) => u.plugin === "react" && u.cause === "file-not-parsed" && u.site?.file === "src/huge.tsx");
@@ -133,7 +138,9 @@ describe("the React plugin on elements split over a hundred files", () => {
     expect(cut?.count).toBe(60_000 - MAX_RENDER_EDGES);
   });
 
-  it("finishes the split work in time that grows with the files and no faster", async () => {
-    expectLinear("the React plugin on 30 and on 120 files of elements", await pluginCpuMs(build(quarter), "react"), await pluginCpuMs(build(root), "react"));
-  }, 300_000);
+  growthTests("in time that grows with the files", () => {
+    it("finishes the split work in time that grows with the files and no faster", async () => {
+      expectLinear("the React plugin on 30 and on 120 files of elements", await pluginCpuMs(build(quarter), "react"), await pluginCpuMs(build(root), "react"));
+    }, 300_000);
+  });
 });

@@ -18,6 +18,10 @@ export function orderObservations(report: Report): ReportFinding[] {
   return orderFindings([...(report.observations ?? [])].sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1)));
 }
 
+export function orderPossible(report: Report): ReportFinding[] {
+  return orderFindings(report.possible ?? []);
+}
+
 export function observationsOmittedLine(report: Report): string | null {
   const omitted = report.observations_omitted ?? 0;
   return omitted > 0 ? `${plural(omitted, "more observation was", "more observations were")} left out.` : null;
@@ -138,6 +142,11 @@ export function location(f: { file_path: string; line_number: number; line_end: 
 
 export function candidateLocation(c: Candidate): string {
   return c.lineEnd > c.lineStart ? `${c.filePath}:${c.lineStart}-${c.lineEnd}` : `${c.filePath}:${c.lineStart}`;
+}
+
+// The written rule a finding breaks: `AGENTS.md > Data access: "quote"`.
+export function ruleLabel(rule: NonNullable<ReportFinding["rule"]>): string {
+  return `${rule.file}${rule.heading ? ` > ${rule.heading}` : ""}: "${rule.quote.replace(/\s+/g, " ").trim()}"`;
 }
 
 export function sourceLabel(f: ReportFinding): string {

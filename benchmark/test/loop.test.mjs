@@ -44,9 +44,14 @@
 //    the run lock over: the lock is live while the run.mjs it names is.
 // 9. A scripted screen stops a change as evidence: runs of the scripted
 //    model record no evidence and neither stop nor pass a change.
+// 10. run.mjs leaves its temp root (oq-bench-run-*) behind when it is
+//    stopped (issue 237): SIGTERM before or during the reviews must leave
+//    none. A forced kill cannot be caught, so every child these tests start
+//    gets a temp folder of its own under the test's, removed once the child
+//    has ended.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -109,9 +114,21 @@ function makeCheckout(dest) {
   return t.commit;
 }
 
-// One run of the checkout's run.mjs, the way the driver runs it.
+// A temp folder for one child and every process it starts (its TMPDIR),
+// under the test's own temp folder: `done` removes it once the child has
+// ended, and a child killed mid-run leaves its folders there (failure 10).
+function scratch() {
+  mkdirSync(join(root, "tmp"), { recursive: true });
+  const dir = mkdtempSync(join(root, "tmp", "child-"));
+  return { dir, env: { ...process.env, TMPDIR: dir }, done: () => rmSync(dir, { recursive: true, force: true, maxRetries: 5 }) };
+}
+
+// The arguments of one run of the checkout's run.mjs, the way the driver runs it.
+const benchArgs = (out, args) => [join(checkout, "benchmark/run.mjs"), "--reviewers", "model:scripted", "--cases", CASE, "--max-usd", "1", "--max-minutes", "30", "--review-max-usd", String(REVIEW_MAX_USD), "--max-output-tokens", String(MAX_OUTPUT_TOKENS), "--model-script", script, "--install-root", tools, "--allow-missing-scanners", "--out", out, ...args];
 function runBench(out, args) {
-  const p = spawnSync(process.execPath, [join(checkout, "benchmark/run.mjs"), "--reviewers", "model:scripted", "--cases", CASE, "--max-usd", "1", "--max-minutes", "30", "--review-max-usd", String(REVIEW_MAX_USD), "--max-output-tokens", String(MAX_OUTPUT_TOKENS), "--model-script", script, "--install-root", tools, "--allow-missing-scanners", "--out", out, ...args], { encoding: "utf8", cwd: checkout });
+  const s = scratch();
+  const p = spawnSync(process.execPath, benchArgs(out, args), { encoding: "utf8", cwd: checkout, env: s.env });
+  s.done();
   if (p.status !== 0) throw new Error(`run.mjs failed (exit ${p.status}):\n${p.stdout}\n${p.stderr}`);
   return out;
 }
@@ -156,7 +173,7 @@ async function savedSet({ runId, commit = head, changeId = null, found, repeat =
       const shown = job.case.startsWith("clean") ? (cleanFalse ? [flaw] : []) : found(c, job.repeat) ? [flaw] : [];
       const report = { findings: shown, outside_change: [], dropped: [], completion: { status: "complete", missing: [] } };
       const dir = join(out, "samples", job.case, job.config, String(job.repeat));
-      writeJson(join(dir, "sample.json"), sampleRecord({ job, attempt: 1, result: { code: 0, signal: null, wallMs: 20_000 }, report, who: null, startedAt: "t", failure: null, stopped: null }));
+      writeJson(join(dir, "sample.json"), sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, signal: null, wallMs: 20_000 }, report, who: null, startedAt: "t", failure: null, stopped: null }));
       writeJson(join(dir, "report", "report.json"), report);
       budget.noteLaunch(job.jobId);
       budget.spend(cost, job.jobId);
@@ -180,15 +197,24 @@ const stageLine = (id, { stage, look = null, done = false, spendUsd = 0, spendRu
 function loopArgs(ledger, results, args) {
   return [LOOP, ...args, "--ledger", ledger, "--results", results, "--checkout", checkout, "--model-script", script, "--install-root", tools, "--allow-missing-scanners"];
 }
-const loop = (ledger, results, args) => spawnSync(process.execPath, loopArgs(ledger, results, args), { encoding: "utf8", cwd: repoRoot });
+const loop = (ledger, results, args) => {
+  const s = scratch();
+  const r = spawnSync(process.execPath, loopArgs(ledger, results, args), { encoding: "utf8", cwd: repoRoot, env: s.env });
+  s.done();
+  return r;
+};
 const loopAsync = (ledger, results, args) =>
   new Promise((done) => {
-    const child = spawn(process.execPath, loopArgs(ledger, results, args), { cwd: repoRoot });
+    const s = scratch();
+    const child = spawn(process.execPath, loopArgs(ledger, results, args), { cwd: repoRoot, env: s.env });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
-    child.on("close", (status) => done({ status, out: out + err, stderr: err }));
+    child.on("close", (status) => {
+      s.done();
+      done({ status, out: out + err, stderr: err });
+    });
   });
 
 beforeAll(() => {
@@ -255,7 +281,7 @@ describe("the loop reads a test-split run", () => {
     expect(r.stderr).not.toMatch(/spec is needed/);
     expect(readFileSync(ledger, "utf8")).toBe(before);
     expect(existsSync(results)).toBe(false);
-  });
+  }, 300_000);
 
   it("refuses a held-out candidate the same way", () => {
     const candidate = heldOut("candidate-test-split");
@@ -270,7 +296,7 @@ describe("the loop reads a test-split run", () => {
     expect(r.stderr).not.toMatch(/spec is needed/);
     expect(readFileSync(ledger, "utf8")).toBe(before);
     expect(existsSync(results)).toBe(false);
-  });
+  }, 300_000);
 });
 
 describe("two iterations take one look number", () => {
@@ -505,5 +531,54 @@ describe("a lever is chosen after the earliest-failure signal said stop", () => 
       expect(readFileSync(ledger, "utf8")).toBe(before);
       expect(existsSync(results)).toBe(false);
     }
-  });
+  }, 300_000);
+});
+
+describe("run.mjs leaves no temp root when it is stopped (10)", () => {
+  const roots = (dir) => readdirSync(dir).filter((name) => name.startsWith("oq-bench-run-"));
+  // run.mjs started with a temp folder of its own; `until` is polled every
+  // 20 ms, and the run is sent `signal` once it holds.
+  const stopped = (out, until, signal) =>
+    new Promise((done, fail) => {
+      const s = scratch();
+      const child = spawn(process.execPath, benchArgs(out, ["--repeat", "3"]), { cwd: checkout, env: s.env, stdio: ["ignore", "pipe", "pipe"] });
+      let text = "";
+      child.stdout.on("data", (d) => (text += d));
+      child.stderr.on("data", (d) => (text += d));
+      let seen = null;
+      const poll = setInterval(() => {
+        if (seen === null && until(s.dir, out)) {
+          seen = roots(s.dir);
+          child.kill(signal);
+        }
+      }, 20);
+      child.on("error", fail);
+      child.on("close", (code, killed) => {
+        clearInterval(poll);
+        done({ s, code, killed, text, seen, left: roots(s.dir) });
+      });
+    });
+
+  it("removes its temp root on SIGTERM before the reviews start and while they run", async () => {
+    const early = await stopped(join(root, "stopped", "early"), (dir) => roots(dir).length > 0, "SIGTERM");
+    const during = await stopped(join(root, "stopped", "during"), (_, out) => existsSync(join(out, "samples")) && readdirSync(join(out, "samples"), { recursive: true }).some((f) => String(f).endsWith(".json")), "SIGTERM");
+    for (const [when, r] of [["early", early], ["during", during]]) {
+      r.s.done();
+      // The signal reached a run that had a temp root and ended it.
+      expect(r.seen, `${when}: ${r.text}`).toHaveLength(1);
+      expect(r.code, `${when}: ${r.text}`).not.toBe(0);
+      expect(r.left, `${when}: ${r.text}`).toEqual([]);
+    }
+    // Stopped while reviewing, the run halts by its own rule and says so.
+    expect(during.text).toMatch(/stopped by SIGTERM/);
+  }, 300_000);
+
+  it("leaves its temp root on a forced kill, which cannot be caught, inside the folder the test removes", async () => {
+    const r = await stopped(join(root, "stopped", "killed"), (dir) => roots(dir).length > 0, "SIGKILL");
+    expect(r.killed).toBe("SIGKILL");
+    expect(r.left).toEqual(r.seen);
+    expect(r.left).toHaveLength(1);
+    r.s.done();
+    expect(existsSync(r.s.dir)).toBe(false);
+  }, 300_000);
 });

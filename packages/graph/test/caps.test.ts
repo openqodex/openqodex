@@ -12,12 +12,17 @@
 //    the bound was enforced only when a build is published.
 // 6. One file whose parse runs away (tree-sitter on an unclosed comment)
 //    holds the build past every budget.
+// 7. A file stopped at the parse time limit makes the build partial, which
+//    floors every answer, but no reason names it, so a floor in another
+//    project says nothing of why.
 import { afterAll, describe, expect, it } from "vitest";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getChange } from "@openqodex/core";
 import { buildGraph, openStore } from "../src/index.js";
-import { LOOSE_BOUND_MS, onceOnCpu } from "../src/test-timing.js";
+import { query } from "../src/query/engine.js";
+import type { Request } from "../src/query/answer.js";
+import { growthTests, LOOSE_BOUND_MS, onceOnCpu } from "../src/test-timing.js";
 import { commitAll, makeHome, makeRepo, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -90,14 +95,43 @@ describe("the caps of a build", () => {
     expect(g.status.reasons.join(" ")).toMatch(/bound/);
   });
 
+  // The parser takes the square of this file's length (an unclosed comment
+  // full of openers), so its time cannot grow linearly: the build stops it
+  // at MAX_PARSE_MS and the whole build stays under the loose bound.
+  const runaway = () => repo({ "slow.ts": `export function f() {\n  return 1; ${"/* x ".repeat(100_000)}\n}\n`, "ok.ts": "export function ok() {}\n" });
+  const buildRunaway = (root: string) => buildGraph({ repoRoot: root, store: null, maxFileBytes: 2 * 1024 * 1024, budgetMs: 60_000 });
   it("stops one runaway parse at its time limit and records the file (6)", async () => {
-    const root = repo({ "slow.ts": `export function f() {\n  return 1; ${"/* x ".repeat(100_000)}\n}\n`, "ok.ts": "export function ok() {}\n" });
-    // The parser takes the square of this file's length (an unclosed comment
-    // full of openers), so its time cannot grow linearly: the build stops it
-    // at MAX_PARSE_MS and the whole build stays under the loose bound.
-    const { value: g, cpuMs } = await onceOnCpu(() => buildGraph({ repoRoot: root, store: null, maxFileBytes: 2 * 1024 * 1024, budgetMs: 60_000 }));
-    expect(cpuMs, `${cpuMs.toFixed(0)} ms of CPU time`).toBeLessThan(LOOSE_BOUND_MS);
+    const g = await buildRunaway(runaway());
     expect(g.status.notRead).toEqual([{ file: "slow.ts", reason: "slow-parse" }]);
     expect(g.defsByFile.has("ok.ts")).toBe(true);
+  });
+
+  // A Python docstring left open over many comment lines: its parse takes
+  // the square of its length, far past the limit.
+  it("names a file stopped at the parse time limit in the build's reasons and in a floored answer's gaps (7)", async () => {
+    const root = repo({
+      "package.json": '{"name": "web", "private": true}\n',
+      "src/a.ts": "export function target(): void {}\n",
+      "py/pyproject.toml": '[project]\nname = "py"\n',
+      "py/slow.py": `def f():\n    """${"  # a comment line\n".repeat(12_000)}`,
+    });
+    const g = await buildGraph({ repoRoot: root, store: null, budgetMs: 60_000 });
+    expect(g.status.notRead).toEqual([{ file: "py/slow.py", reason: "slow-parse" }]);
+    expect(g.status.status).toBe("partial");
+    expect(g.status.reasons.join("; ")).toMatch(/py\/slow\.py/);
+    // A target in another project: its own floor says nothing of the file, so the build's reason must.
+    const id = [...g.nodes.values()].find((n) => n.name === "target")?.id as string;
+    const a = query({ graph: g, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "callers", target: { id }, depth: 1, limit: 50 } as Request);
+    expect(a.unknown.floor).toBe(true);
+    expect(a.unknown.reasons.join("; ")).toMatch(/py\/slow\.py/);
+    expect(a.unknown.gaps).toContainEqual(expect.objectContaining({ cause: "file-not-parsed", file: "py/slow.py" }));
+  }, 60_000);
+
+  growthTests("under the loose bound", () => {
+    it("stops one runaway parse with the whole build under the loose bound (6)", async () => {
+      const root = runaway();
+      const { cpuMs } = await onceOnCpu(() => buildRunaway(root));
+      expect(cpuMs, `${cpuMs.toFixed(0)} ms of CPU time`).toBeLessThan(LOOSE_BOUND_MS);
+    });
   });
 });

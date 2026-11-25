@@ -1,0 +1,24 @@
+{
+  "covers": "a load by a computed path whose module is returned (rule H3)",
+  "files": {
+    "src/load.ts": "export function load(p: string) { return import(p); }\n",
+    "src/a.ts": "export function f() {}\n",
+    "src/use.ts": "import { load } from \"./load\";\nexport async function go() { (await load(\"./a\")).f(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/use.ts#go",
+      "file": "src/use.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "may be any module of the repository",
+      "at": "src/load.ts:1"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { RULES, RULES_VERSION, classify, regressions, ruleCodeHash, ruleSources, rulesDifferences, rulesHash, runDifferences, scannerPlaces, scoreBrief, scoreJob, scoreSample, specDifferences, summarize, summarizeJobs, value } from "../lib/score.mjs";
+import { RULES, RULES_VERSION, shownFindings, classify, regressions, ruleCodeHash, ruleSources, rulesDifferences, rulesHash, runDifferences, scannerPlaces, scoreBrief, scoreJob, scoreSample, specDifferences, summarize, summarizeJobs, value } from "../lib/score.mjs";
 import { attemptDir, executeRun, planJobs, runManifest, sampleRecord } from "../lib/runner.mjs";
 import { loadRun, renderV3, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
@@ -288,7 +288,7 @@ async function savedRun({ repeat, attempts, caseSpec = spec }) {
   await executeRun({ out, manifest: handManifest(jobs, repeat), jobs, copies: [[join(root, "hand.json"), "cases/hand.json"]], runJob: async (job) => {
     for (const a of attempts.filter((x) => x.repeat === job.repeat)) {
       const dir = attemptDir(out, job, a.attempt);
-      const rec = sampleRecord({ job, attempt: a.attempt, result: { code: a.report ? 0 : 2, signal: null, wallMs: 30_000 }, report: a.report, who: null, startedAt: "t", failure: a.report ? null : { cause: "no report.json" }, stopped: null });
+      const rec = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: a.attempt, result: { code: a.report ? 0 : 2, signal: null, wallMs: 30_000 }, report: a.report, who: null, startedAt: "t", failure: a.report ? null : { cause: "no report.json" }, stopped: null });
       write(join(dir, "sample.json"), JSON.stringify(rec));
       if (a.report) write(join(dir, "report", "report.json"), JSON.stringify(a.report));
       if (a.scan) write(join(dir, "report", "scan.json"), JSON.stringify(a.scan));
@@ -325,6 +325,10 @@ describe("a rule constant changes without a version bump, and old and new scores
     10: ["e4582b7f4f7e8ed377e132c5f2db92403faeb9e9a975ff87b15eca07de0f7ef8", "db58981fc3b76ed4693dd1dccf178df33d8df2071f16263359b4bb927f2fec3f"],
     // Version 11 merges the two version-10 rule sets.
     11: "2b889794bb039585e502a3221d25890da2d1e2adf015a4be4462973de502da3e",
+    // Possible issues are judged after observations with their own tier.
+    12: "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
+    // Issue 284: a health result on every review; an unhealthy one credits nothing and is failed.
+    13: "157a833899f0edcb185874b856d1303c0532b22c05006ea1f6e939b7047e8e91",
   };
 
   it("pins the hash of the rules block, constants and matching code included, to its version", () => {
@@ -389,7 +393,7 @@ describe("a job that never started leaves the denominator", () => {
     expect(seen).toHaveLength(8);
     expect(seen[0]).toMatchObject({ version: 3, rulesVersion: RULES_VERSION, planned: 8, ended: null });
     expect(seen[0].jobs).toEqual(jobs.map(({ jobId, caseId, config, repeat }) => ({ jobId, caseId, config, repeat })));
-    const retry = sampleRecord({ job: jobs[0], attempt: 2, result: { code: 0, signal: null, wallMs: 1 }, report: null, who: null, startedAt: "t", failure: null, stopped: null });
+    const retry = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job: jobs[0], attempt: 2, result: { code: 0, signal: null, wallMs: 1 }, report: null, who: null, startedAt: "t", failure: null, stopped: null });
     expect(retry).toMatchObject({ jobId: jobs[0].jobId, caseId: CASE_ID, firstAttempt: false });
   });
 
@@ -662,4 +666,27 @@ describe("a bug the spec expects from semgrep, found only by the reviewer, count
     const f = score.byConfig[CONFIG].finder;
     expect([f.match, f.byExpected, f.scannerExpectedReviewerFound, f.unjudged]).toEqual([{ hit: 0, of: 0 }, {}, 0, 1]);
   });
+});
+
+// Failure 45: possible items reach every judge with their own tier.
+it("lists possible items after observations with tier possible", () => {
+  const observation = finding("a.ts", 1, "style", "Observation");
+  const possible = finding("b.ts", 2, "bug", "Possible");
+  expect(shownFindings(report([SQLI], { observations: [observation], possible: [possible] })).map((f) => [f.title, f.tier])).toEqual([[SQLI.title, "finding"], ["Observation", "observation"], ["Possible", "possible"]]);
+});
+it("scores a report without possible exactly as a version 11 report", () => {
+  const old = report([SQLI]);
+  expect(scoreSample({ spec, report: old })).toEqual(scoreSample({ spec, report: { ...old, possible: [] } }));
+});
+
+it("scores outside-change items below their effective floor as possible", () => {
+  const outside = (confidence, floor) => ({ ...SQLI, origin: "agent", confidence, ...(floor === undefined ? {} : { floor }) });
+  expect(shownFindings(report([], { outside_change: [outside(0.55, 0.7), outside(0.75, 0.8), outside(0.8, 0.8), outside(0.55)] })).map((f) => f.tier)).toEqual(["finding", "finding", "possible", "possible"]);
+});
+// Failure: an under-floor outside item listed before the observations gives a bug its first hit and its severity.
+it("lists under-floor outside-change items after observations, like possible items", () => {
+  const observation = finding("a.ts", 1, "style", "Observation");
+  const outside = { ...SQLI, origin: "agent", confidence: 0.55, floor: 0.7, title: "Outside possible" };
+  const counted = { ...SQLI, origin: "agent", confidence: 0.9, title: "Outside counted" };
+  expect(shownFindings(report([], { outside_change: [outside, counted], observations: [observation] })).map((f) => [f.title, f.tier])).toEqual([["Outside counted", "finding"], ["Observation", "observation"], ["Outside possible", "possible"]]);
 });

@@ -1,0 +1,19 @@
+{
+  "guards": "finds the Hono routes of an unchanged file once a manifest change declares hono",
+  "frameworks": {
+    "plugin": "hono",
+    "apps": 1,
+    "registrations": [
+      { "site": "src/server.ts:12", "methods": ["GET"], "pattern": "/ping", "handler": "src/ping.ts#ping", "status": "bound", "mounted": true },
+      { "site": "src/server.ts:8", "methods": ["GET"], "pattern": "/api/:id", "handler": "src/ping.ts#ping", "status": "bound", "mounted": true }
+    ],
+    "edges": [
+      { "kind": "mounts", "from": "fw:hono:app:src/server.ts:10", "to": "fw:hono:router:src/server.ts:7", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:src/server.ts:12", "to": "src/ping.ts#timing", "tier": "certain" }
+    ],
+    "roles": [
+      { "target": "src/ping.ts#ping", "role": "route_handler", "detail": "hono" },
+      { "target": "src/ping.ts#timing", "role": "middleware", "detail": "hono" }
+    ]
+  }
+}

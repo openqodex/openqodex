@@ -19,12 +19,9 @@ export function filterToChangedLines(
 export function overlapsCoverage(f: StaticFinding, coverage: DiffCoverage): boolean {
   const lines = coverage.get(f.filePath);
   if (!lines || lines.size === 0) return false;
-  // Walk the changed lines, not the span: a scanner's report can carry any
-  // line number, and past 2^53 a counter over the span never advances.
-  for (const line of lines) {
-    if (f.lineStart <= line && line <= f.lineEnd) return true;
-  }
-  return false;
+  // Compare stored intervals, never walk the scanner's span: past 2^53
+  // a counter over that span would never advance.
+  return lines.overlaps(f.lineStart, f.lineEnd);
 }
 
 // Conservative fixture-path patterns. Match directory segments

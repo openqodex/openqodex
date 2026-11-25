@@ -148,30 +148,22 @@ export function noReviewerEnv(): NodeJS.ProcessEnv {
   const path = (process.env.PATH ?? "").split(delimiter).filter((d) => d !== "" && !existsSync(join(d, "claude")) && !existsSync(join(d, "codex"))).join(delimiter);
   return { PATH: path };
 }
-// The reason a case that needs the real Codex reviewer cannot run here, or
-// null when it can: installed, logged in, not offline and not in CI (CI has
-// no Codex login).
-export function codexMissing(): string | null {
-  if (offline()) return "OPENQODEX_E2E_OFFLINE=1";
-  if (process.env.CI) return "CI is set";
-  if (process.env.CODEX_SANDBOX) return "inside a Codex sandbox";
-  const status = spawnSync("codex", ["login", "status"], { encoding: "utf8", timeout: 30_000 });
-  if (status.error) return "codex is not installed";
-  if (status.status !== 0) return "codex is not logged in";
-  return null;
+// The reason a case that needs the real Claude Code or Codex reviewer
+// cannot run here, or null when it can (logins.mjs, which the model tier
+// shares).
+export { codexMissing, reviewerMissing } from "./logins.mjs";
+// The model cases run only in the model tier (pnpm gate:model), which sets
+// OPENQODEX_MODEL_TESTS=1: no other run, in CI or on a logged-in Mac, spends
+// a model's usage. Returns true when the group named is to be skipped, and
+// says why once, when the file registers its tests.
+export function modelTestsOff(name: string): boolean {
+  if (process.env.OPENQODEX_MODEL_TESTS === "1") return false;
+  process.stdout.write(`${name}: skipped, the model cases run only with OPENQODEX_MODEL_TESTS=1 (pnpm gate:model)\n`);
+  return true;
 }
-// The reason a case that needs the real Claude Code reviewer cannot run here,
-// or null when it can: installed, logged in and not offline.
-export function reviewerMissing(): string | null {
-  if (offline()) return "OPENQODEX_E2E_OFFLINE=1";
-  const status = spawnSync("claude", ["auth", "status"], { encoding: "utf8", timeout: 30_000 });
-  if (status.error) return "claude is not installed";
-  try {
-    if ((JSON.parse(status.stdout) as { loggedIn?: boolean }).loggedIn !== true) return "claude is not logged in";
-  } catch {
-    return "claude auth status printed no status";
-  }
-  return null;
+// In the model tier a reviewer that cannot run fails the run: it never skips.
+export function requireReviewer(missing: string | null): void {
+  if (missing !== null) throw new Error(`the model tier needs this reviewer: ${missing}`);
 }
 export function offline(): boolean { return process.env.OPENQODEX_E2E_OFFLINE === "1"; }
 export function skipNetwork(name: string): boolean {
@@ -203,7 +195,7 @@ export function stagedProviderEnv(driver: "claude" | "codex" = "claude", behavio
   const executable = join(provider, driver);
   // Driver environments intentionally omit fixture switches. The provider
   // owns them, so set them in the test provider before it reads its prompt.
-  const switches = ["OPENQODEX_STANDIN_FAIL_FINDER", "OPENQODEX_STANDIN_UNRESOLVED_SCANNER"].filter((key) => behavior[key] !== undefined).map((key) => `process.env[${JSON.stringify(key)}] = ${JSON.stringify(behavior[key])};`).join("\n");
+  const switches = ["OPENQODEX_STANDIN_PLANT", "OPENQODEX_STANDIN_FAIL_FINDER", "OPENQODEX_STANDIN_UNRESOLVED_SCANNER", "OPENQODEX_STANDIN_TOOL_SESSION", "OPENQODEX_STANDIN_TOOL_NAME", "OPENQODEX_STANDIN_TOOL_PATH", "OPENQODEX_STANDIN_TOOL_ERROR", "OPENQODEX_STANDIN_TOOL_CUT"].filter((key) => behavior[key] !== undefined).map((key) => `process.env[${JSON.stringify(key)}] = ${JSON.stringify(behavior[key])};`).join("\n");
   writeFileSync(executable, `#!${process.execPath}\n${switches}\n${readFileSync(source, "utf8")}`);
   chmodSync(executable, 0o755);
   for (const name of ["submission.json", "find-answers.json"]) {

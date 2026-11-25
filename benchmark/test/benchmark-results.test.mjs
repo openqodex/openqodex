@@ -9,6 +9,11 @@
 // 8. The README shows an AACR-Bench row with no board numbers and no ruled hit, or the page drops it.
 // 9. The README admits a board-scored row but drops its six board metrics.
 // 10. An accepted entry's board numbers are edited after they were recorded, and the page shows them.
+// 11. A number tuned on its own cases (tunedOn) is shown as if it were a score.
+// 12. A Greptile or Martian row shows its best repeat, or its range as a confidence interval (O9).
+// 13. Two README rows of one reviewer and model read alike when their groups differ (issue #280).
+// 14. The README chart shows a number the index does not hold, or a hand-edited chart passes --check.
+// 15. The README chart shows a run tuned on its own cases because its scoring rules are newer.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,6 +22,7 @@ import { afterAll, expect, it } from "vitest";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 import { aacrOutside } from "./outside-fixture.mjs";
 import { boardHash, groupKeys, scoreHash } from "../lib/index.mjs";
+import { rangeLine } from "../../scripts/benchmark-results.mjs";
 
 afterAll(removeTempDirs);
 const repo = fileURLToPath(new URL("../../", import.meta.url));
@@ -194,7 +200,7 @@ it("rejects an accepted entry whose board numbers were edited after they were re
   const root = fixture();
   const { runId, config } = aacrGroup(root, { boarded: true });
   const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
-  expect(pointer(root).boardHash ?? Object.values(pointer(root).groups).find((a) => a.runId === runId).boardHash).toBe(boardHash(entry));
+  expect(Object.values(pointer(root).groups).find((a) => a.runId === runId).boardHash).toBe(boardHash(entry));
   entry.outside.aacr.byConfig[config].mean.semantic.precision = 0.9;
   writeFileSync(entryFile(root, runId), JSON.stringify(entry));
   for (const args of [[], ["--check"]]) {
@@ -202,4 +208,129 @@ it("rejects an accepted entry whose board numbers were edited after they were re
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`the board numbers of ${runId} are not the ones recorded`);
   }
+});
+
+it("labels the number of an entry tuned on its own cases", () => {
+  const root = fixture();
+  const { runId } = aacrGroup(root);
+  const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
+  putRecorded(root, { ...entry, tunedOn: true });
+  const r = run(root);
+  expect(r.status, r.stderr).toBe(0);
+  expect(page(root), "a tuned number is shown without its label").toMatch("(tuned on these cases)");
+});
+
+it("a Greptile or Martian row prints the mean of its repeats with the lowest and highest, and says the range is not a confidence interval", () => {
+  const asset = { url: "https://example.invalid/run.tar.gz" };
+  const greptile = { runId: "r-greptile", asset, suite: "greptile", outside: { greptile: { range: { library: { metric: "caught", of: 50, repeats: 3, min: 28, mean: 30, max: 33 } } } } };
+  expect(rangeLine(greptile, { config: "model-gpt-6.1-sol-graph-on" })).toBe("[r-greptile](https://example.invalid/run.tar.gz), model-gpt-6.1-sol-graph-on: caught 30.0 of 50 cases on average (60.0%), from 28 to 33 across 3 repeats. The range is the lowest and highest repeat, not a confidence interval.");
+  const martian = { runId: "r-martian", asset, suite: "martian", outside: { martian: { range: { "cli-claude": { metric: "f1", profile: "core", repeats: 3, min: 0.25, mean: 0.375, max: 0.5 } } } } };
+  expect(rangeLine(martian, { config: "claude-graph-on" })).toContain("F1 37.5% on average, from 25.0% to 50.0% across 3 repeats");
+  expect(rangeLine({ ...martian, outside: undefined }, { config: "claude-graph-on" })).toBeNull();
+});
+
+it("a board score line of an entry tuned on its own cases carries the label", () => {
+  const greptile = { runId: "r-greptile", asset: { url: "https://example.invalid/run.tar.gz" }, suite: "greptile", tunedOn: true, outside: { greptile: { range: { library: { metric: "caught", of: 50, repeats: 3, min: 28, mean: 30, max: 33 } } } } };
+  expect(rangeLine(greptile, { config: "model-gpt-6.1-sol-graph-on" }), "a tuned board score is shown without its label").toContain("caught 30.0 of 50 cases on average (60.0%), from 28 to 33 (tuned on these cases) across 3 repeats");
+});
+
+it("gives every README row a label of its own when two groups share a reviewer and a model", () => {
+  const root = fixture();
+  const accepted = pointer(root);
+  const [key, { runId }] = Object.entries(accepted.groups).find(([k]) => k.startsWith("planted|") && k.includes("|review|"));
+  const entry = JSON.parse(readFileSync(entryFile(root, runId), "utf8"));
+  const { config } = groupKeys(entry).find((g) => g.key === key);
+  // Groups that differ from an accepted planted one in a single part of the key, accepted beside it.
+  const plant = (suffix, edit) => {
+    const twin = structuredClone(entry);
+    twin.runId = `${runId}-${suffix}`;
+    twin.asset.url = entry.asset.url.replace(`/${runId}.tar.gz`, `/${twin.runId}.tar.gz`);
+    edit(twin);
+    writeFileSync(entryFile(root, twin.runId), JSON.stringify(twin));
+    const twinKey = groupKeys(twin).find((g) => g.config === config).key;
+    expect(twinKey).not.toBe(key);
+    accepted.groups[twinKey] = { ...accepted.groups[key], runId: twin.runId, scoreHash: scoreHash(twin) };
+    return twin;
+  };
+  // The case of issue #280: only the scoring rules differ.
+  const rules = plant("rules", (t) => { t.rulesVersion = entry.rulesVersion + 100; });
+  // Same scoring rules, another path: the rules alone cannot tell these apart.
+  const path = plant("path", (t) => { t.path = entry.path === "server" ? "laptop" : "server"; });
+  writeFileSync(join(root, "benchmark/index/accepted.json"), JSON.stringify(accepted));
+  const r = run(root);
+  expect(r.status, r.stderr).toBe(0);
+  const rows = readFileSync(join(root, "README.md"), "utf8").split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Reviewer") && !l.startsWith("| ---"));
+  // The reviewer, model and cases cells are what a reader tells two rows apart by.
+  const labels = rows.map((l) => l.split(" | ").slice(0, 3).join(" | "));
+  expect(new Set(labels).size, `rows a reader cannot tell apart:\n${labels.join("\n")}`).toBe(labels.length);
+  expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`scoring rules ${rules.rulesVersion}`))).toBe(true);
+  expect(labels.some((l) => l.includes(`(${config})`) && l.includes(`${path.path} path`))).toBe(true);
+});
+
+it("draws the README chart from the newest accepted planted-bug review by Claude Code, and rejects a hand-edited chart", () => {
+  const root = fixture();
+  expect(run(root).status).toBe(0);
+  // The headline rule, read here from the pointer and the entries: the highest scoring rules, then the latest accepted.
+  const picked = Object.entries(pointer(root).groups)
+    .filter(([key]) => key.startsWith("planted|dev|") && key.split("|")[3] === "review" && key.split("|")[5] === "claude" && key.split("|")[7].endsWith("-graph-on"))
+    .map(([, a]) => ({ a, e: JSON.parse(readFileSync(entryFile(root, a.runId), "utf8")) }))
+    .filter(({ e }) => !e.subset && e.tunedOn !== true)
+    .sort((x, y) => y.e.rulesVersion - x.e.rulesVersion || y.a.acceptedAt.localeCompare(x.a.acceptedAt))[0];
+  const s = picked.e.scores[picked.e.configs.find((c) => c.startsWith("claude"))];
+  const shown = (r) => `${r.hit}/${r.of} (${((100 * r.hit) / r.of).toFixed(1)}%)`;
+  const want = [
+    shown(s.issueRecall.all),
+    shown(s.location.recall),
+    `${shown(s.precision.lower)} to ${shown(s.precision.upper)}`,
+    shown(s.controls),
+    `openqodex ${picked.e.build.cliVersion}, run on ${picked.e.date}, scoring rules ${picked.e.rulesVersion}`,
+  ];
+  for (const skin of ["light", "dark"]) {
+    const path = join(root, `.github/assets/benchmark-${skin}.svg`);
+    const svg = readFileSync(path, "utf8");
+    const texts = [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+    for (const value of want) expect(texts.some((t) => t.includes(value)), `${skin} chart lacks ${value}`).toBe(true);
+    // Every number the chart prints is one of those.
+    const printed = texts.flatMap((t) => t.match(/\d+\/\d+ \(\d+\.\d%\)/g) ?? []);
+    expect(printed.length).toBe(5);
+    for (const value of printed) expect(want.some((w) => w.includes(value)), `${skin} chart prints ${value}`).toBe(true);
+    writeFileSync(path, svg.replace(want[0], want[0].replace(/\((\d+)\./, (_, n) => `(${Number(n) - 1}.`)));
+    const result = run(root, "--check");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`.github/assets/benchmark-${skin}.svg:`);
+    writeFileSync(path, svg);
+  }
+  expect(run(root, "--check").status).toBe(0);
+});
+
+it("never puts a run tuned on its own cases in the README chart, even under newer scoring rules", () => {
+  const root = fixture();
+  expect(run(root).status).toBe(0);
+  const before = readFileSync(join(root, ".github/assets/benchmark-light.svg"), "utf8");
+  const accepted = pointer(root);
+  // The run the chart shows now, and a tuned twin of it, accepted beside it under newer rules with other numbers.
+  const shownId = Object.values(accepted.groups).map((a) => a.runId).find((id) => before.includes(`scoring rules ${JSON.parse(readFileSync(entryFile(root, id), "utf8")).rulesVersion},`) && id.includes("planted-claude"));
+  expect(shownId).toBeDefined();
+  const entry = JSON.parse(readFileSync(entryFile(root, shownId), "utf8"));
+  const twin = structuredClone(entry);
+  twin.runId = `${entry.runId}-tuned`;
+  twin.asset.url = entry.asset.url.replace(`/${entry.runId}.tar.gz`, `/${twin.runId}.tar.gz`);
+  twin.rulesVersion = entry.rulesVersion + 100;
+  twin.tunedOn = true;
+  const config = twin.configs.find((c) => c.startsWith("claude"));
+  twin.scores[config].issueRecall.all.hit -= 1;
+  writeFileSync(entryFile(root, twin.runId), JSON.stringify(twin));
+  const key = groupKeys(twin).find((g) => g.config === config).key;
+  const [shownKey] = Object.entries(accepted.groups).find(([, a]) => a.runId === shownId);
+  accepted.groups[key] = { ...accepted.groups[shownKey], runId: twin.runId, scoreHash: scoreHash(twin) };
+  writeFileSync(join(root, "benchmark/index/accepted.json"), JSON.stringify(accepted));
+  const r = run(root);
+  expect(r.status, r.stderr).toBe(0);
+  for (const skin of ["light", "dark"]) {
+    const svg = readFileSync(join(root, `.github/assets/benchmark-${skin}.svg`), "utf8");
+    expect(svg, `${skin} chart shows the tuned run`).not.toContain(`scoring rules ${twin.rulesVersion}`);
+  }
+  expect(readFileSync(join(root, ".github/assets/benchmark-light.svg"), "utf8")).toBe(before);
+  // The tuned run is still in the table, labelled.
+  expect(readFileSync(join(root, "README.md"), "utf8")).toContain(`scoring rules ${twin.rulesVersion}`);
 });

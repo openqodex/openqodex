@@ -11,6 +11,7 @@ import {
   lowConfidenceReason,
   observationsOmittedLine,
   orderObservations,
+  orderPossible,
   sourceLabel,
   verdictLine,
 } from "./common.js";
@@ -76,6 +77,13 @@ export function renderTerminal(report: Report, opts: { color: boolean }): string
     if (omitted) out.push(omitted);
   }
 
+  const possible = orderPossible(report);
+  if (possible.length > 0) {
+    // wording: session
+    out.push("", "Possible issues (not counted, confidence under the floor)");
+    for (const f of possible) out.push(...findingLines(f, c, true));
+  }
+
   if (report.outside_change.length > 0) {
     out.push("", "Outside the changed lines (not counted)");
     for (const f of report.outside_change) out.push(...findingLines(f, c));
@@ -99,8 +107,8 @@ export function renderTerminal(report: Report, opts: { color: boolean }): string
       out.push(`  ${display(l.file_path)}  ${display(l.title)} (confidence ${l.confidence}, floor ${l.floor})${lowConfidenceReason(l)}`);
     }
   }
-  if (report.not_reviewed_paths.length > 0) {
-    out.push("", `Not reviewed, change too large: ${display(report.not_reviewed_paths.join(", "))}`);
+  if (report.base.ref === "all" && report.not_reviewed_paths.length > 0) {
+    out.push("", `Not reviewed: ${report.not_reviewed_paths.length} ${report.not_reviewed_paths.length === 1 ? "file" : "files"}, over 5 MB, links or unreadable: ${display(report.not_reviewed_paths.join(", "))}`);
   }
   out.push("", c.dim(coverageLine(report.scanners)));
   return `${out.join("\n")}\n`;

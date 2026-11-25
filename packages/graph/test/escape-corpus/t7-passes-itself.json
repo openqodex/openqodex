@@ -1,0 +1,22 @@
+{
+  "covers": "a function that passes itself along (test 7)",
+  "files": {
+    "src/a.ts": "export function tick() { queue.push(tick); }\nconst queue: Array<() => void> = [];\nexport function drain() { for (const q of queue) q(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#tick",
+      "caller": "src/a.ts#drain",
+      "file": "src/a.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#tick",
+      "reason": "it is used as a value",
+      "at": "src/a.ts:1"
+    }
+  ]
+}

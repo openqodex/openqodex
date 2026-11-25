@@ -11,9 +11,9 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildGraph, frameworkLayer } from "../../index.js";
-import type { FrameworkLayer, Graph, Registration } from "../../index.js";
-import { cpuMs, expectLinear, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
+import { buildGraph, frameworkLayer, query } from "../../index.js";
+import type { FrameworkLayer, Graph, Registration, Request } from "../../index.js";
+import { cpuMs, expectLinear, growthTests, pluginCpuMs, readerCpuMs } from "../../test-timing.js";
 import { MAX_SOURCE_BYTES, readFacts } from "./facts.js";
 import { matches, MAX_APPS, MAX_MIDDLEWARE_CHAIN, MAX_MOUNTS, MAX_REGISTRATIONS, MAX_ROLES } from "./resolve.js";
 
@@ -70,6 +70,33 @@ describe("the FastAPI plugin on a small real application", () => {
   it("makes no route of a decorator on a registry of the repository's own, though it is called app and its method get", () => {
     expect(layer(changed).registrationsIn("app/cache.py")).toEqual([]);
     expect(layer(changed).routesReaching(sym(changed, "app/cache.py", "cached")).routes).toEqual([]);
+  });
+});
+
+describe("the FastAPI plugin's dependencies as calls, through the query answers", () => {
+  let graph: Graph;
+  let root: string;
+  const ask = (req: Record<string, unknown>) => query({ graph, generation: "g", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, ...req } as Request);
+
+  beforeAll(async () => {
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "corpus", "frameworks", "fastapi", "fastapi-depends-calls");
+    root = mkdtempSync(join(tmpdir(), "oq-fastapi-deps-"));
+    cpSync(join(corpus, "base"), root, { recursive: true });
+    commitAll(root);
+    graph = await buildGraph({ repoRoot: root, store: null });
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it("lists every route and dependency that depends on get_db as its callers, so get_db is never taken for unused", () => {
+    const a = ask({ kind: "callers", target: { name: "get_db" } });
+    const from = (a.items as { from: string; site: { evidence: string; tier: string } }[]).map((i) => `${graph.nodes.get(i.from)?.name} ${i.site.evidence} ${i.site.tier}`);
+    expect(from.sort()).toEqual(["get_current_user fastapi-depends certain", "read_item fastapi-depends certain"]);
+  });
+
+  it("lists each route's dependencies in the order FastAPI runs them", () => {
+    const a = ask({ kind: "routes", limit: 50 });
+    const deps = Object.fromEntries((a.items as { pattern: string; dependencies: { to: string }[] }[]).map((r) => [r.pattern, r.dependencies.map((d) => graph.nodes.get(d.to)?.name)]));
+    expect(deps).toEqual({ "/items/{item_id}": ["audit", "auth_user", "get_db"], "/items/me": ["audit", "auth_user", "get_current_user"], "/secure": ["audit", "get_current_user"], "/x": [] });
   });
 });
 
@@ -678,12 +705,17 @@ describe("the FastAPI plugin on a hostile repository", () => {
     unknowns: (graph.frameworks?.unknowns ?? []).filter((u) => u.plugin === "fastapi"),
   });
 
-  it("a crafted repository cannot hang or exhaust the build: reading the facts of more than 1 MiB and resolving them take time that grows with the repository and no faster", async () => {
-    expectLinear("the FastAPI fact reader on the hostile files", await readerCpuMs("python", sources(hostile(1)), readFacts), await readerCpuMs("python", sources(files), readFacts));
+  it("a crafted repository cannot hang or exhaust the build: the plugin resolves it", () => {
     const run = graph.frameworks?.plugins.find((p) => p.id === "fastapi");
     expect(run?.status, run?.reason ?? "").toBe("ok");
-    expectLinear("the FastAPI plugin on the hostile repository", await pluginCpuMs(build(quarter), "fastapi"), await pluginCpuMs(build(root), "fastapi"));
   }, 300_000);
+
+  growthTests("in time that grows with it", () => {
+    it("a crafted repository cannot hang or exhaust the build: reading the facts of more than 1 MiB and resolving them take time that grows with the repository and no faster", async () => {
+      expectLinear("the FastAPI fact reader on the hostile files", await readerCpuMs("python", sources(hostile(1)), readFacts), await readerCpuMs("python", sources(files), readFacts));
+      expectLinear("the FastAPI plugin on the hostile repository", await pluginCpuMs(build(quarter), "fastapi"), await pluginCpuMs(build(root), "fastapi"));
+    }, 300_000);
+  });
 
   it("does not read a file over the byte cap, and says so with an unknown", () => {
     const gap = mine().unknowns.find((u) => u.cause === "file-not-parsed" && u.site?.file === "hostile/huge.py");
@@ -716,14 +748,19 @@ describe("the FastAPI plugin on a hostile repository", () => {
     expect(mine().unknowns.some((u) => u.cause === "fan-out-capped" && u.note.includes("levels deep"))).toBe(true);
   });
 
-  it("matches a request path against a pattern of hundreds of path parameters in linear time, with no regular expression", async () => {
+  it("matches a request path against a pattern of hundreds of path parameters, with no regular expression", () => {
     expect(matches(HOSTILE_PATTERN, LONG_PATH)).toBe(false);
     expect(matches(`/${"{a:path}/".repeat(60)}x`, `/${"a/".repeat(60)}x`)).toBe(true);
     expect(matches(`/${"{a}".repeat(200)}`, `/${"a".repeat(250)}`)).toBe(false);
-    // The same three matches with every length a quarter, and in full.
-    const all = (q: number) => () =>
-      matches(params(300 * q), longPath(3000 * q)) || matches(`/${"{a:path}/".repeat(60 * q)}x`, `/${"a/".repeat(60 * q)}x`) || matches(`/${"{a}".repeat(200 * q)}`, `/${"a".repeat(248 * q)}`);
-    expectLinear("matching with every length a quarter and in full", await cpuMs(all(0.25)), await cpuMs(all(1)));
+  });
+
+  growthTests("in linear time", () => {
+    it("matches a request path against a pattern of hundreds of path parameters in linear time", async () => {
+      // The same three matches with every length a quarter, and in full.
+      const all = (q: number) => () =>
+        matches(params(300 * q), longPath(3000 * q)) || matches(`/${"{a:path}/".repeat(60 * q)}x`, `/${"a/".repeat(60 * q)}x`) || matches(`/${"{a}".repeat(200 * q)}`, `/${"a".repeat(248 * q)}`);
+      expectLinear("matching with every length a quarter and in full", await cpuMs(all(0.25)), await cpuMs(all(1)));
+    });
   });
 });
 
@@ -768,11 +805,16 @@ describe("the FastAPI plugin on a repository of many model classes", () => {
     for (const dir of [root, quarter]) if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
-  it("finds the models among thirty thousand classes in time that grows with the classes and no faster, reading each file's classes once rather than once per base", async () => {
+  it("finds the models among thirty thousand classes", () => {
     const run = graph.frameworks?.plugins.find((p) => p.id === "fastapi");
     expect(run?.status, run?.reason ?? "").toBe("ok");
-    expectLinear("the FastAPI plugin on 7,500 and on 30,000 chained classes", await pluginCpuMs(build(quarter), "fastapi"), await pluginCpuMs(build(root), "fastapi"));
   }, 300_000);
+
+  growthTests("in time that grows with the classes", () => {
+    it("finds the models among thirty thousand classes in time that grows with the classes and no faster, reading each file's classes once rather than once per base", async () => {
+      expectLinear("the FastAPI plugin on 7,500 and on 30,000 chained classes", await pluginCpuMs(build(quarter), "fastapi"), await pluginCpuMs(build(root), "fastapi"));
+    }, 300_000);
+  });
 
   it("marks only the classes at most eight bases from BaseModel, whatever order the classes are read in", () => {
     const models = (graph.frameworks?.roles ?? []).filter((r) => r.plugin === "fastapi" && r.role === "model").map((r) => graph.nodes.get(r.target)?.name ?? "");

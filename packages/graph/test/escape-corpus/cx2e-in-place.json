@@ -1,0 +1,34 @@
+{
+  "covers": "a require written in place and indexed marks the module (rule E2)",
+  "files": {
+    "src/m.js": "exports.a = function a() {};\nexports.b = function b() {};\n",
+    "src/use.js": "const go = require(\"./m\")[process.argv[2]];\ngo();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/m.js#a",
+      "caller": "src/use.js",
+      "file": "src/use.js",
+      "line": 2
+    },
+    {
+      "target": "src/m.js#b",
+      "caller": "src/use.js",
+      "file": "src/use.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/m.js#a",
+      "reason": "its module is used as a value at",
+      "at": "src/use.js:1"
+    },
+    {
+      "target": "src/m.js#b",
+      "reason": "its module is used as a value at",
+      "at": "src/use.js:1"
+    }
+  ]
+}

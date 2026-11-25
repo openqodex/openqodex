@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: ts namespace indexed",
+  "files": {
+    "src/a.ts": "namespace Tools { export function f() {} }\nexport function go(k: string) { (Tools as any)[k](); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/a.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

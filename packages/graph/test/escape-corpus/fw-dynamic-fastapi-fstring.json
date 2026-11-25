@@ -1,0 +1,28 @@
+{
+  "covers": "a FastAPI route whose path is an f-string: the plugin lists no route, and the handler is named only by its decorator, so a dynamic gap must floor its callers",
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": "from fastapi import FastAPI\n\napp = FastAPI()\nversion = \"v1\"\n\n@app.get(f\"/{version}/x\")\ndef index():\n    return 1\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.py#index",
+      "caller": null,
+      "file": "main.py",
+      "line": 6
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#index",
+      "reason": "is computed at run time, so the route is not listed",
+      "at": "",
+      "gap": {
+        "cause": "dynamic",
+        "at": "main.py:6"
+      }
+    }
+  ]
+}

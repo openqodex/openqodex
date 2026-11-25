@@ -1,0 +1,28 @@
+{
+  "covers": "a Go call in a region the parser could not read (a syntax error)",
+  "files": {
+    "go.mod": "module m\n\ngo 1.21\n",
+    "lib.go": "package main\n\nfunc Target3() int { return 1 }\n",
+    "bad.go": "package main\n\nfunc run() { defer Target3(; }\n"
+  },
+  "mustReach": [
+    {
+      "target": "lib.go#Target3",
+      "caller": null,
+      "file": "bad.go",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "lib.go#Target3",
+      "reason": "region of code the parser could not read (a syntax error) names `Target3`",
+      "at": "bad.go:3",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "bad.go:3"
+      }
+    }
+  ]
+}

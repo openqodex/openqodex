@@ -1,0 +1,1 @@
+box.value.close() with box typed Box<Sessions> and value typed by Box's own parameter T. The graph dropped type arguments, so the member had no type. The member must take the argument, for an interface and for a class; Box<any> gives no type and stays a gap.

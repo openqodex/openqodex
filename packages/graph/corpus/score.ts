@@ -59,10 +59,11 @@ export type Expected = {
   dispatch?: { site: string; candidates?: string[]; count?: number; omitted?: number }[];
   references?: { to: string; site: string; kind: ReferenceKind; tier: Tier }[];
   noUnknown?: { file: string; line: number; cause?: string }[]; // a site that leaves no unknown (of that cause)
+  noMiss?: string[]; // Sites that must leave no missing-definition record.
   exports?: { file: string; name: string; change: "removed" | "retargeted"; consumers: string[] }[];
   removed?: string[]; // removed and not moved
   moved?: { from: string; to: string; renamed: boolean }[];
-  unknowns?: { file: string; line: number; cause: string; scope?: "file" | "project" }[];
+  unknowns?: { file: string; line: number; cause: string; scope?: "file" | "project"; note?: string }[];
   floor?: Record<string, boolean>;
   cuts?: { by: string; omitted: number | null }[];
   external?: { min: number; sites?: string[] };
@@ -323,12 +324,12 @@ export function scoreAnswer(name: string, expected: Expected, graph: Graph, impa
   // ---------- gap disclosure ----------
   for (const u of expected.unknowns ?? []) {
     gaps.of++;
-    const near = impact.unknown.near.some((n) => n.file === u.file && n.line === u.line && n.cause === u.cause && (u.scope === undefined || n.scope === u.scope));
-    const any = graph.unknowns.some((n) => n.file === u.file && n.line === u.line && n.cause === u.cause && (u.scope === undefined || n.scope === u.scope));
+    const near = impact.unknown.near.some((n) => n.file === u.file && n.line === u.line && n.cause === u.cause && (u.scope === undefined || n.scope === u.scope) && (u.note === undefined || n.note === u.note));
+    const any = graph.unknowns.some((n) => n.file === u.file && n.line === u.line && n.cause === u.cause && (u.scope === undefined || n.scope === u.scope) && (u.note === undefined || n.note === u.note));
     if (near || any) gaps.hit++;
     else {
       const there = graph.unknowns.filter((n) => n.file === u.file && n.line === u.line).map((n) => `${n.cause}/${n.scope}`);
-      failures.push(`unknown not disclosed: ${u.file}:${u.line} ${u.cause}${there.length > 0 ? ` (found ${there.join(", ")})` : ""}`);
+      failures.push(`unknown not disclosed: ${u.file}:${u.line} ${u.cause}${u.note === undefined ? "" : ` with note ${JSON.stringify(u.note)}`}${there.length > 0 ? ` (found ${there.join(", ")})` : ""}`);
     }
   }
   for (const [spec, want] of Object.entries(expected.floor ?? {})) {
@@ -350,6 +351,12 @@ export function scoreAnswer(name: string, expected: Expected, graph: Graph, impa
   }
 
   // ---------- negative controls ----------
+  for (const site of expected.noMiss ?? []) {
+    controls.of++;
+    const miss = graph.misses.find((m) => siteOf(m.site) === site);
+    if (!miss) controls.hit++;
+    else failures.push(`${site} is a miss against ${miss.target}#${miss.name}`);
+  }
   for (const site of expected.notBroken ?? []) {
     controls.of++;
     const asConsumer = impact.exports.flatMap((e) => e.consumers.filter((c) => c.now === "broken" && `${c.file}:${c.line}` === site).map(() => `${e.file} ${e.name}`));

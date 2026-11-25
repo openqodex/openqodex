@@ -8,6 +8,7 @@
 // fail: a server run of cargo-deny writes in the preinstalled Cargo home
 // (its lock file, its last-use record, unpacked crates), or, with a Cargo
 // home of its own, cannot read the crates the preinstalled one holds.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -94,7 +95,7 @@ async function scanChanged(scanner: BuiltinScanner, files: Record<string, string
     writeFileSync(join(repo, name), body);
   }
   const paths = Object.keys(files);
-  const coverage = new Map(paths.map((p) => [p, new Set(changed[p] ?? [])]));
+  const coverage = new Map(paths.map((p) => [p, makeLineSet(changed[p] ?? [])]));
   return runScanners({ repoDir: repo, changedPaths: paths, coverage, config: parseConfig("").config, resolveTool: installedOnly(), only: [scanner] });
 }
 
@@ -290,7 +291,7 @@ describe("Kubernetes and Rust scanner subprocesses", () => {
     const result = await runScanners({
       repoDir: repo,
       changedPaths: paths,
-      coverage: new Map(paths.map((p) => [p, new Set(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))])),
+      coverage: new Map(paths.map((p) => [p, makeLineSet(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))])),
       config: parseConfig("").config,
       resolveTool: installedOnly(),
       only: ["cargo-deny"],

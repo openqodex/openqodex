@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: function constructor prop",
+  "files": {
+    "public/app.js": "function f() {}\n(function () {}).constructor(\"f()\")();\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/app.js#f",
+      "caller": null,
+      "file": "public/app.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

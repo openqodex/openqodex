@@ -1,0 +1,40 @@
+{
+  "covers": "a caller in a file over the build's size bound (build DEFAULT_MAX_FILE_BYTES, the default of maxFileBytes)",
+  "caps": [
+    "build.ts#DEFAULT_MAX_FILE_BYTES"
+  ],
+  "build": {
+    "maxFileBytes": 200
+  },
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.ts": "export function target(): void {}\n",
+    "src/b.ts": [
+      "import { target } from \"./a\";\ntarget();\n",
+      {
+        "repeat": "// padding past the size bound\n",
+        "times": 20
+      }
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#target",
+      "caller": "src/b.ts",
+      "file": "src/b.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#target",
+      "reason": "1 file of its project was not read",
+      "at": "",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "src/b.ts"
+      }
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+name: Nightly full gate
+
+# The full gate on main, every night at 02:00 IST (20:30 UTC), and by hand
+# with the Run workflow button (workflow_dispatch). It is ci.yml called with
+# the input full set to true: the Linux gate with the end-to-end tests and
+# the golden run, the macOS gate and the scanner-only benchmark. Pull
+# requests, the merge queue and pushes to main run the fast gate only, so a
+# break only the full gate catches shows here first.
+# After the gate, on main only, the report job keeps one issue in step with
+# the result (scripts/nightly-issue.mjs): any result but success (a failure,
+# or a gate that did not finish: cancelled, abandoned) opens the issue
+# "Nightly full gate fails on main", or comments on the open one, with each
+# job that did not pass, its failing tests and the run link; the next green
+# run closes it. A job GitHub never gives a runner ends cancelled after
+# about 15 minutes, with the note "The job was not acquired by Runner of
+# type hosted even after multiple attempts" (the macOS job of run
+# 44563238218); the issue quotes that note, and rerunning the failed jobs
+# is the fix. That job alone can write issues. A run started by hand on another branch tests that branch
+# and touches no issue.
+# The release does not read this workflow's runs: it runs the same full gate
+# on the commit it publishes (release.yml).
+
+on:
+  schedule:
+    - cron: "30 20 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Full gate
+    # ci.yml's queue-tested job asks for actions: read, so the call grants
+    # it; on this run that job is skipped.
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      full: true
+
+  report:
+    name: Open or close the nightly issue
+    needs: gate
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # checks: read lets the report quote GitHub's note on a job that never
+    # got a runner (the check run's annotations).
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Open, comment on or close the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.gate.result }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: node scripts/nightly-issue.mjs

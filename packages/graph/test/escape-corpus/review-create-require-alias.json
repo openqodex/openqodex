@@ -1,0 +1,23 @@
+{
+  "covers": "a `require` made by an aliased `createRequire` import and given to another name is still a loader",
+  "files": {
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.mjs": "import { createRequire as cr } from \"node:module\";\nconst require = cr(\"/repo/src/use.mjs\");\nconst load = require;\nconst key = \"f\";\nload(\"./a.cjs\")[key]();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.mjs",
+      "file": "src/use.mjs",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

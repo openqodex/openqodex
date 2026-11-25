@@ -16,8 +16,10 @@ import type {
   Category,
   Change,
   Config,
+  InstructionFile,
   Report,
   ReportFinding,
+  RuleCitation,
   RunManifest,
   ScannerSource,
   ScanResult,
@@ -29,6 +31,7 @@ import { OpenQodexError } from "./types.js";
 // The lowest confidence a finding may have unless the caller sets its own
 // floor (checkSubmission's confidenceFloor); a lens's higher floor still wins.
 export const GLOBAL_CONFIDENCE_FLOOR = 0.7;
+export const POSSIBLE_CONFIDENCE_FLOOR = 0.5;
 
 const severity = z.enum(["critical", "major", "minor", "nitpick", "info"]);
 const category = z.enum(["bug", "security", "performance", "maintainability", "style"]);
@@ -164,9 +167,7 @@ function touchesChange(f: AgentFinding, change: Change): string | null {
   if (!change.files.some((file) => file.path === f.file_path)) return "the file is not in this change";
   const lines = change.coverage.get(f.file_path);
   const end = f.line_end ?? f.line_number;
-  if (lines) {
-    for (const n of lines) if (f.line_number <= n && n <= end) return null;
-  }
+  if (lines?.overlaps(f.line_number, end)) return null;
   // A deletion has no line of its own: the lines just above and just below it
   // in the new file, those that exist, stand for it.
   for (const p of change.deletionPoints.get(f.file_path) ?? []) {
@@ -212,27 +213,98 @@ function checkInRepo(sub: AgentSubmission, lines: Map<string, number>, clean: (t
   });
 }
 
-// What makes two findings the same finding, for dedup here and for merging
-// two reviewers' findings: the file, the range, the category, and the
-// candidate, or the source when no candidate is cited, or the title when
-// neither is.
+// What makes two findings the same finding, for merging two reviewers'
+// findings, and for dedup here beside sameDefect: the file, the range, the
+// category, and the candidate, or the source when no candidate is cited, or
+// the title when neither is.
 export function findingKey(f: Pick<ReportFinding, "file_path" | "line_number" | "line_end" | "category" | "candidate" | "source" | "title">): string {
   const what = f.candidate ? `candidate\0${f.candidate}` : f.source ? `source\0${f.source}` : `title\0${f.title}`;
   return [f.file_path, f.line_number, f.line_end, f.category, what].join("\0");
 }
 
-// Removes only true duplicates: same file, range and category, and the same
-// candidate, or the same source when no candidate is cited, or the same title
-// when neither is. Keeps the higher severity, then the first.
-function dedup(findings: ReportFinding[]): ReportFinding[] {
-  const kept = new Map<string, ReportFinding>();
+// One defect two finders titled differently (issue 315): neither cites a
+// candidate, both cite the same source or none, and they share the file and
+// the category on overlapping lines. The title does not count. Lines that
+// only share a file, or a different source, keep two findings apart; two
+// real defects of one category on the same lines merge, the accepted cost.
+export function sameDefect(a: ReportFinding, b: ReportFinding): boolean {
+  return a.candidate === null && b.candidate === null && a.source === b.source && a.file_path === b.file_path
+    && a.category === b.category && a.line_number <= b.line_end && b.line_number <= a.line_end;
+}
+
+// One finding for one defect: the text of the one that says more, the lines
+// of both, and the higher severity of the two.
+function merged(a: ReportFinding, b: ReportFinding): ReportFinding {
+  const says = (f: ReportFinding) => f.description.length + (f.suggested_change?.length ?? 0);
+  const text = says(b) > says(a) ? b : a;
+  return {
+    ...text,
+    severity: severityRank(b.severity) > severityRank(a.severity) ? b.severity : a.severity,
+    line_number: Math.min(a.line_number, b.line_number),
+    line_end: Math.max(a.line_end, b.line_end),
+  };
+}
+
+// Never one defect, so only the same finding (findingKey) matches: for two
+// findings the staged verifier did not link (duplicate_of), and for a
+// possible issue beside a counted finding the threshold hides.
+const keptApart = (): boolean => false;
+
+// Removes only duplicates, in two steps. First the same finding
+// (findingKey): one defect merges, and one citing a candidate keeps the
+// higher severity, then the first. Then one defect (sameDefect), only for two
+// findings that are each other's one overlap: a broad finding over two
+// findings on lines apart is three defects, all kept, whatever the order.
+// `parts` learns the two findings behind each merged one.
+function dedup(findings: ReportFinding[], same = sameDefect, parts?: Map<ReportFinding, ReportFinding[]>): ReportFinding[] {
+  const byKey = new Map<string, ReportFinding>();
   for (const f of findings) {
     const key = findingKey(f);
-    const prev = kept.get(key);
-    if (!prev || severityRank(f.severity) > severityRank(prev.severity)) kept.set(key, f);
+    const prev = byKey.get(key);
+    byKey.set(key, !prev ? f : same(prev, f) ? merged(prev, f) : severityRank(f.severity) > severityRank(prev.severity) ? f : prev);
   }
-  return [...kept.values()];
+  const kept = [...byKey.values()];
+  if (same === keptApart) return kept;
+  const overlaps = kept.map((a) => kept.filter((b) => b !== a && same(a, b)));
+  const gone = new Set<ReportFinding>();
+  const out: ReportFinding[] = [];
+  kept.forEach((a, i) => {
+    if (gone.has(a)) return;
+    const twin = overlaps[i]!.length === 1 ? overlaps[i]![0]! : null;
+    if (twin && overlaps[kept.indexOf(twin)]!.length === 1) {
+      gone.add(twin);
+      const m = merged(a, twin);
+      parts?.set(m, [a, twin]);
+      out.push(m);
+    } else out.push(a);
+  });
+  return out;
 }
+
+// The possible issues no counted finding already reports: one with the key
+// of a counted finding, or one that is one defect with a counted finding
+// when each is the other's one overlap, so a broad finding never takes two
+// possible issues. A caller passes only the counted findings the report
+// shows when it matches by one defect, so a possible issue never leaves for
+// a finding the threshold hides. A possible issue merged from two (`parts`)
+// leaves only when one counted finding overlaps either part and it overlaps
+// both, so the one the counted finding never touched is not lost with it.
+export function uncounted(possible: ReportFinding[], counted: ReportFinding[], same = sameDefect, parts?: Pick<ReadonlyMap<ReportFinding, ReportFinding[]>, "get">): ReportFinding[] {
+  const keys = new Set(counted.map(findingKey));
+  return possible.filter((p) => {
+    if (keys.has(findingKey(p))) return false;
+    const two = parts?.get(p) ?? [p];
+    const near = counted.filter((c) => two.some((q) => same(c, q)));
+    return near.length !== 1 || !two.every((q) => same(near[0]!, q)) || possible.filter((q) => same(near[0]!, q)).length !== 1;
+  });
+}
+
+// The two possible issues behind each merged one a checked report lists,
+// keyed by the report's own objects, so a later match by one defect (a
+// second reviewer's findings, in possibleAfterSecond) passes them to
+// uncounted too.
+const possibleParts = new WeakMap<ReportFinding, ReportFinding[]>();
+export const mergedParts: Pick<ReadonlyMap<ReportFinding, ReportFinding[]>, "get"> = possibleParts;
 
 // One redaction pass over every string value in a finished report, run after
 // the coverage decisions so they still match on the raw paths.
@@ -294,6 +366,7 @@ export function finalizeReview(args: {
   const floors = new Map(manifest.lenses.map((l) => [l.name, l.confidenceFloor]));
 
   const findings: ReportFinding[] = [];
+  const possible: ReportFinding[] = [];
   const outside: ReportFinding[] = outsideFromScan(scan);
   const lowConfidence: Report["low_confidence"] = [];
   const raised = new Set<string>();
@@ -303,7 +376,7 @@ export function finalizeReview(args: {
     if (disabled(f.source, config)) continue;
     const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
     const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
-    if (f.confidence < floor) {
+    if (f.confidence < floor && f.confidence < POSSIBLE_CONFIDENCE_FLOOR) {
       lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor });
       continue;
     }
@@ -323,7 +396,12 @@ export function finalizeReview(args: {
       candidate: f.candidate ?? null,
       notes: [...(outsideReason ? [outsideReason] : []), ...fixedNotes(scan.candidates.find((c) => c.id === f.candidate))],
     };
-    (outsideReason ? outside : findings).push(entry);
+    if (outsideReason && f.confidence < floor) {
+      entry.floor = floor;
+      // wording: session
+      entry.notes.push("confidence under the floor, not counted");
+    }
+    (outsideReason ? outside : f.confidence < floor ? possible : findings).push(entry);
   }
 
   const droppedIds = new Map((sub.dropped ?? []).map((d) => [d.candidate, d.reason]));
@@ -336,6 +414,16 @@ export function finalizeReview(args: {
   const deduped = dedup(findings);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
+  // The exact key of a finding as submitted, never of a merged one: a merged
+  // finding's lines are new, so its key is no finder's finding.
+  const parts = new Map<ReportFinding, ReportFinding[]>();
+  const keptPossible = uncounted(dedup(uncounted(possible, findings, keptApart), sameDefect, parts), kept, sameDefect, parts).filter((f) => {
+    if (shown(f, config, own)) return true;
+    const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
+    const floor = Math.max(GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
+    lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence!, floor });
+    return false;
+  });
   const verdict = verdictFor(config.blockOnSeverity, [
     ...kept.map((f) => f.severity),
     ...notReviewed.map((c) => c.reviewSeverity),
@@ -353,6 +441,7 @@ export function finalizeReview(args: {
     block_on_severity: config.blockOnSeverity,
     summary: summaryWithReviewer(sub),
     findings: kept,
+    possible: keptPossible,
     below_threshold: deduped.length - kept.length,
     outside_change: outside,
     low_confidence: lowConfidence,
@@ -381,7 +470,85 @@ const findingV2Schema = z.object({
   suggested_change: z.string().nullable().optional(),
   source: z.string().nullable().optional(),
   candidate: z.string().nullable().optional(),
+  rule: z.object({ file: z.string().min(1), heading: z.string().min(1).nullable().default(null), quote: z.string().min(1) }).nullable().optional(),
 });
+
+// Why a finding's rule citation does not hold against the instruction files
+// the review supplied, or null when it does: the file must be one of them
+// (a leading "./" aside), its quote must be at least three words, in that
+// file's text as whole words and, when a heading is given, in that
+// heading's section. Whitespace is normalised, curly quotes are made
+// straight, emphasis and backticks are taken out, and "> " quote marks are
+// taken off the lines of the quote and of the file, so a rule copied across
+// a line break, from a blockquote or without its markdown still matches.
+const spaced = (text: string) => text.replace(/\s+/g, " ").trim();
+const unquoted = (quote: string) => quote.replace(/^[ \t]*>[ \t]?/gm, "");
+const straight = (text: string) => text.replace(/[\u2018\u2019\u201a\u201b]/g, "'").replace(/[\u201c\u201d\u201e\u201f]/g, '"');
+const ruleText = (text: string) => spaced(straight(unquoted(text)).replace(/[*_`]/g, ""));
+const rulePath = (file: string) => file.replace(/^\.\//, "");
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+// Whether `quote` is in `text` neither starting nor ending inside a word.
+function hasWords(text: string, quote: string): boolean {
+  for (let at = text.indexOf(quote); at !== -1; at = text.indexOf(quote, at + 1)) {
+    const opens = !(WORD_CHAR.test(text[at - 1] ?? "") && WORD_CHAR.test(quote[0]!));
+    const closes = !(WORD_CHAR.test(text[at + quote.length] ?? "") && WORD_CHAR.test(quote[quote.length - 1]!));
+    if (opens && closes) return true;
+  }
+  return false;
+}
+function ruleProblem(rule: { file: string; heading?: string | null; quote: string }, files: readonly InstructionFile[]): string | null {
+  const file = files.find((f) => f.path === rulePath(rule.file));
+  if (!file) return `its rule cites ${rule.file}, which is not an instruction file of this review`;
+  const quote = ruleText(rule.quote);
+  if (quote.split(" ").filter(Boolean).length < 3) return "its rule quote is too short to identify a rule";
+  if (!hasWords(ruleText(file.text), quote)) return `its rule quote is not in ${rule.file}`;
+  if (!rule.heading) return null;
+  const sections = ruleSections(file.text, rule.heading);
+  if (sections.length === 0) return `its rule heading is not in ${rule.file}`;
+  if (!sections.some((section) => hasWords(ruleText(section), quote))) return `its rule quote is not under its heading in ${rule.file}`;
+  return null;
+}
+
+// The text of each section `heading` names. A markdown heading (`#` to
+// `######`, or a line underlined with `=` or `-`, levels 1 and 2) whose text
+// is the heading, or starts with it as a rule id followed by a colon, dot or
+// dash, as "R-7" starts "R-7: No raw SQL", runs to the next heading of the same or a higher level. A
+// rule label, a list item or a bold line whose text starts with the heading, runs to the next label at its indent or less, or
+// the next heading. Titles are compared in any case, without a trailing
+// colon, and with curly quotes made straight. Lines inside code fences are
+// never headings or labels.
+function ruleSections(text: string, heading: string): string[] {
+  const plain = (title: string) => spaced(straight(title).replace(/[*_`]/g, "")).replace(/\s*:$/, "").toLowerCase();
+  const want = plain(heading.replace(/^#+\s*/, ""));
+  const lines = text.split(/\r?\n/);
+  let fence: string | null = null;
+  const marks = lines.map((line, i) => {
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence !== null) { if (open && open[0] === fence[0] && open.length >= fence.length) fence = null; return null; }
+    if (open) { fence = open; return null; }
+    const h = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    if (h) return { level: h[1]!.length, indent: 0, title: plain(h[2]!) };
+    const underline = /^ {0,3}(=+|-+)[ \t]*$/.exec(lines[i + 1] ?? "")?.[1];
+    if (underline && /^ {0,3}\S/.test(line) && !/^[ \t]*(?:[-*+]|\d+[.)])[ \t]+/.test(line)) return { level: underline[0] === "=" ? 1 : 2, indent: 0, title: plain(line) };
+    const label = /^([ \t]*)(?:(?:[-*+]|\d+[.)])[ \t]+|(?=\*\*|__))(.*)$/.exec(line);
+    return label ? { level: 7, indent: label[1]!.length, title: plain(label[2]!) } : null;
+  });
+  const sections: string[] = [];
+  marks.forEach((mark, i) => {
+    if (!mark) return;
+    const rest = mark.title.slice(want.length);
+    const named = want !== "" && mark.title.startsWith(want) && (mark.level < 7 ? rest === "" || /^\s*(?::|[.\-\u2013\u2014](?![\p{L}\p{N}]))/u.test(rest) : !WORD_CHAR.test(rest.slice(0, 1)));
+    if (!named) return;
+    let end = i + 1;
+    while (end < lines.length) {
+      const next = marks[end];
+      if (next && (mark.level < 7 ? next.level <= mark.level : next.level < 7 || next.indent <= mark.indent)) break;
+      end++;
+    }
+    sections.push(lines.slice(i, end).join("\n"));
+  });
+  return sections;
+}
 
 const submissionV2Schema = z.object({
   version: z.literal(2),
@@ -392,7 +559,7 @@ const submissionV2Schema = z.object({
 });
 
 export const MAX_SENTENCE_WORDS = 20;
-const MAX_SENTENCES = 2;
+export const FIELD_SENTENCE_LIMITS = { problem: 3, consequence: 2, fix: 2 } as const;
 const EM_DASH = String.fromCharCode(0x2014);
 // Every C0 and C1 control character, line breaks and tabs included: a prose
 // field is one line of plain text.
@@ -404,7 +571,10 @@ const BUILTIN_SCANNERS = ["semgrep", "gitleaks", "sqllint", "osv-scanner", "acti
 export function sentences(text: string): string[] {
   return text
     .trim()
-    .split(/(?<=[.!?])\s+(?=\S)/)
+    // A full stop ends a sentence before any text. A bang or a question mark ends one only before a
+    // capital, a digit, a quote, a backtick or a bracket: Ruby names such as destroy! and admin? sit
+    // mid-sentence before a lowercase word.
+    .split(/(?:(?<=\.)\s+(?=\S)|(?<=[!?])\s+(?=[\p{Lu}\p{N}"'`([]))/u)
     .map((s) => s.trim())
     .filter((s) => s !== "");
 }
@@ -477,6 +647,13 @@ export function checkSubmission(args: {
   // states (buildReviewerBrief's confidenceFloor); GLOBAL_CONFIDENCE_FLOOR
   // when left out. A lens's higher floor still wins.
   confidenceFloor?: number;
+  // The instruction files the brief quoted: a finding's rule must quote one.
+  instructionFiles?: readonly InstructionFile[];
+  // Set by the staged review. Its verifier rules which findings are one
+  // defect (duplicate_of), and two it did not link stay apart here, whatever
+  // their lines: merging them could move a counted finding into the
+  // observations.
+  verified?: boolean;
 }): SubmissionCheck {
   const { change, scan, manifest, config } = args;
   const clean = (text: string) => redactByFingerprint(text, scan.secretFingerprints);
@@ -503,7 +680,7 @@ export function checkSubmission(args: {
     const at = `findings[${i}] ("${f.title}")`;
     if (f.line_end !== undefined && f.line_end < f.line_number) errors.push(`${at}.line_end: it is before line_number`);
     errors.push(...proseErrors(`${at}.title`, f.title, banned, null));
-    for (const field of ["problem", "consequence", "fix"] as const) errors.push(...proseErrors(`${at}.${field}`, f[field], banned, MAX_SENTENCES));
+    for (const field of ["problem", "consequence", "fix"] as const) errors.push(...proseErrors(`${at}.${field}`, f[field], banned, FIELD_SENTENCE_LIMITS[field]));
     const src = f.source ?? null;
     if (src !== null && !tokens.has(src) && !(src.startsWith("lens:") && lenses.has(src.slice("lens:".length)))) {
       errors.push(`${at}.source: "${src}" is neither a candidate token in this review nor a listed pattern; use one of those or null`);
@@ -531,7 +708,7 @@ export function checkSubmission(args: {
     const at = `dropped[${j}] (${d.candidate})`;
     if (!byId.has(d.candidate)) errors.push(`${at}: "${d.candidate}" is not a candidate in this review`);
     else dispose(d.candidate);
-    errors.push(...proseErrors(`${at}.reason`, d.reason, null, MAX_SENTENCES));
+    errors.push(...proseErrors(`${at}.reason`, d.reason, null, 2));
     const count = args.lineCount(d.file_path);
     if (count === null) errors.push(`${at}: ${d.file_path} is not a file in the code under review; cite the line that shows why`);
     else if (d.line_number > count) errors.push(`${at}: it cites line ${d.line_number} of ${d.file_path}, which has ${count} lines`);
@@ -547,17 +724,27 @@ export function checkSubmission(args: {
 
   const floors = new Map(manifest.lenses.map((l) => [l.name, l.confidenceFloor]));
   const findings: ReportFinding[] = [];
+  const possible: ReportFinding[] = [];
   const lowConfidence: Report["low_confidence"] = [];
   for (const f of sub.findings) {
     const source = f.source ?? null;
     if (disabled(source, config)) continue;
     const lensFloor = source?.startsWith("lens:") ? floors.get(source.slice("lens:".length)) : undefined;
     const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
-    if (f.confidence < floor) {
+    if (f.confidence < floor && f.confidence < POSSIBLE_CONFIDENCE_FLOOR) {
       lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence, floor });
       continue;
     }
-    findings.push({
+    let rule: RuleCitation | null = null;
+    const problem = f.rule ? ruleProblem(f.rule, args.instructionFiles ?? []) : null;
+    // A finding stands on its own evidence: a citation that does not hold is
+    // dropped, never the finding, and a note on the finding says why.
+    if (f.rule && problem === null) {
+      const path = rulePath(f.rule.file);
+      const source = (args.instructionFiles ?? []).find((file) => file.path === path)?.source;
+      rule = { file: path, heading: f.rule.heading ?? null, quote: unquoted(f.rule.quote).trim(), ...(source ? { source } : {}) };
+    }
+    (f.confidence < floor ? possible : findings).push({
       origin: "agent",
       severity: f.severity,
       category: f.category,
@@ -570,16 +757,27 @@ export function checkSubmission(args: {
       suggested_change: f.suggested_change ?? null,
       source,
       candidate: f.candidate ?? null,
-      notes: fixedNotes(byId.get(f.candidate ?? "")),
+      notes: [...fixedNotes(byId.get(f.candidate ?? "")), ...(problem !== null ? [`Rule citation dropped: ${problem}`] : [])],
       problem: f.problem,
       consequence: f.consequence,
       fix: f.fix,
+      ...(rule ? { rule } : {}),
     });
   }
   const droppedBy = new Map(sub.dropped.map((d) => [d.candidate, d]));
-  const deduped = dedup(findings);
+  const same = args.verified ? keptApart : sameDefect;
+  const deduped = dedup(findings, same);
   const own = ownIds(scan);
   const kept = deduped.filter((f) => shown(f, config, own));
+  // The exact key of a finding as submitted, as in finalizeReview.
+  const parts = new Map<ReportFinding, ReportFinding[]>();
+  const keptPossible = uncounted(dedup(uncounted(possible, findings, keptApart), same, parts), kept, same, parts).filter((f) => {
+    if (shown(f, config, own)) return true;
+    const lensFloor = f.source?.startsWith("lens:") ? floors.get(f.source.slice("lens:".length)) : undefined;
+    const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lensFloor ?? 0);
+    lowConfidence.push({ title: f.title, file_path: f.file_path, confidence: f.confidence!, floor });
+    return false;
+  });
   const report: Report = {
     version: 1,
     kind: "review",
@@ -591,6 +789,7 @@ export function checkSubmission(args: {
     block_on_severity: config.blockOnSeverity,
     summary: sub.summary,
     findings: kept,
+    possible: keptPossible,
     below_threshold: deduped.length - kept.length,
     outside_change: outsideFromScan(scan),
     low_confidence: lowConfidence,
@@ -605,7 +804,12 @@ export function checkSubmission(args: {
     not_reviewed_paths: change.notReviewed,
     stats: change.stats,
   };
-  return { ok: true, report: redactAll(report, clean), required: live.length, disposed };
+  const out = redactAll(report, clean);
+  keptPossible.forEach((f, i) => {
+    const two = parts.get(f);
+    if (two) possibleParts.set(out.possible[i]!, redactAll(two, clean));
+  });
+  return { ok: true, report: out, required: live.length, disposed };
 }
 
 // What each scanner's findings are about, for a scan-only report.
@@ -682,6 +886,7 @@ export function scanReport(args: { change: Change; scan: ScanResult; config: Con
     findings,
     below_threshold: live.length - findings.length,
     outside_change: outsideFromScan(scan),
+    possible: [],
     low_confidence: [],
     not_reviewed: [],
     dropped: [],

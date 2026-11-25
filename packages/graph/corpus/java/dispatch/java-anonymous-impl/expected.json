@@ -1,0 +1,233 @@
+{
+  "guards": "Body fields hide captured locals. Outside bases block enclosing calls and static imports. Super skips interfaces.",
+  "callers": [
+    {
+      "to": "src/main/java/j3/Host.java#Task.run",
+      "site": "src/main/java/j3/Host.java:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.accept",
+      "site": "src/main/java/j3/Host.java:8",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.$1.helper",
+      "site": "src/main/java/j3/Host.java:12",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.$1.helper",
+      "site": "src/main/java/j3/Host.java:13",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.$1.shared",
+      "site": "src/main/java/j3/Host.java:14",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.enclosing",
+      "site": "src/main/java/j3/Host.java:15",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.shared",
+      "site": "src/main/java/j3/Host.java:16",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.$1.run",
+      "site": "src/main/java/j3/Host.java:6",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#Other.go",
+      "site": "src/main/java/j3/Fields.java:11",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#OtherResult.done",
+      "site": "src/main/java/j3/Fields.java:11",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#Other.go",
+      "site": "src/main/java/j3/Fields.java:15",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#OtherResult.done",
+      "site": "src/main/java/j3/Fields.java:15",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#Repo.go",
+      "site": "src/main/java/j3/Fields.java:16",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#RepoResult.done",
+      "site": "src/main/java/j3/Fields.java:16",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#Repo.go",
+      "site": "src/main/java/j3/Fields.java:20",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#RepoResult.done",
+      "site": "src/main/java/j3/Fields.java:20",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/NamedJobs.java#LocalJobs.refresh",
+      "site": "src/main/java/j3/NamedJobs.java:12",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/main/java/j3/Host.java:6",
+      "candidates": [
+        "src/main/java/j3/Host.java#Host.$1.run"
+      ]
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/j3/Host.java#Host.shared",
+      "site": "src/main/java/j3/Host.java:14"
+    },
+    {
+      "to": "src/main/java/j3/Host.java#Host.$1.shared",
+      "site": "src/main/java/j3/Host.java:16"
+    },
+    {
+      "to": "src/main/java/j3/Outside.java#Outside.start",
+      "site": "src/main/java/j3/Outside.java:7"
+    },
+    {
+      "to": "src/main/java/j3/Outside.java#Outside.cancel",
+      "site": "src/main/java/j3/Outside.java:10"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#Repo.go",
+      "site": "src/main/java/j3/Fields.java:11"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#RepoResult.done",
+      "site": "src/main/java/j3/Fields.java:11"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#Repo.go",
+      "site": "src/main/java/j3/Fields.java:15"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#RepoResult.done",
+      "site": "src/main/java/j3/Fields.java:15"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#Other.go",
+      "site": "src/main/java/j3/Fields.java:16"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#OtherResult.done",
+      "site": "src/main/java/j3/Fields.java:16"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#Other.go",
+      "site": "src/main/java/j3/Fields.java:20"
+    },
+    {
+      "to": "src/main/java/j3/Fields.java#OtherResult.done",
+      "site": "src/main/java/j3/Fields.java:20"
+    },
+    {
+      "to": "src/main/java/j3/SuperCall.java#Printable.toString",
+      "site": "src/main/java/j3/SuperCall.java:6",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/j3/NamedJobs.java#NamedJobs.refresh",
+      "site": "src/main/java/j3/NamedJobs.java:5"
+    },
+    {
+      "to": "src/main/java/pkg/Util.java#Util.helper",
+      "site": "src/main/java/j3/StaticCalls.java:4"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/main/java/j3/Host.java",
+      "line": 12
+    },
+    {
+      "file": "src/main/java/j3/Host.java",
+      "line": 13
+    },
+    {
+      "file": "src/main/java/j3/Host.java",
+      "line": 14
+    },
+    {
+      "file": "src/main/java/j3/Host.java",
+      "line": 15
+    },
+    {
+      "file": "src/main/java/j3/Host.java",
+      "line": 16
+    },
+    {
+      "file": "src/main/java/j3/NamedJobs.java",
+      "line": 12
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/main/java/j3/Outside.java",
+      "line": 7,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/j3/Outside.java",
+      "line": 10,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/j3/SuperCall.java",
+      "line": 6,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/j3/NamedJobs.java",
+      "line": 5,
+      "cause": "no-receiver-type",
+      "note": "An outside base may declare this method."
+    },
+    {
+      "file": "src/main/java/j3/StaticCalls.java",
+      "line": 4,
+      "cause": "no-receiver-type",
+      "note": "An outside base may declare this method."
+    }
+  ]
+}

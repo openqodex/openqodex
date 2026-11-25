@@ -38,12 +38,28 @@
 // 17. A relative or empty PATH entry (".", "", "bin") reaches the reviewer or
 //     the probe, so a program committed in the snapshot runs in place of a
 //     system one (a `cat` that prints the inside file and skips the rest).
+// 20. An earlier error hides the usage limit Codex ended the turn with.
+// 19. A usage limit reads as any other error, so the developer cannot tell
+//     from the receipt that waiting or another reviewer would work.
+// 18. On Windows the path (named `Path` there), the home folder or what
+//     starts a program is dropped, or the path is split on ":" and loses
+//     every entry.
+// 21. A list entry's model or effort is set and the Codex process is
+//     started without `-m` or `model_reasoning_effort`, so Codex's default
+//     model reviews; or they are unset and a flag is passed anyway, so the
+//     default changes under a developer who chose nothing.
+// 22. A model this Codex login cannot use reads as any other error, so a
+//     project's reviewer list never moves on to its next entry.
+// 23. The login's model list (`codex debug models`) is misread: a hidden
+//     model counts as missing, the top model is not the first listed one by
+//     priority, or output that is not the list reads as an empty list, so
+//     every model would be passed over.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { CODEX_TESTED, PROBE_REFUSED, codexArgs, codexDriver, codexEnv, codexVersion, olderThanTested, probeSandbox, probeVerdict } from "@openqodex/review";
+import { CODEX_TESTED, PROBE_REFUSED, cannotServe, codexArgs, codexCatalog, codexDriver, codexEnv, codexVersion, olderThanTested, probeSandbox, probeVerdict } from "@openqodex/review";
 import { DEPTH_ENV, findOnPath } from "@openqodex/review";
 import { openqodexHomeDir } from "../src/launcher.js";
 import { removeTempDirs, tempDir } from "../../../tests/temp-dirs.mjs";
@@ -73,6 +89,7 @@ function standIn(body: string, code: number | null = 0): string {
       "process.stdin.on('data', (c) => (prompt += c));",
       "process.stdin.on('end', () => {",
       "  appendFileSync(__filename + '.prompts', JSON.stringify(prompt) + '\\n');",
+      "  appendFileSync(__filename + '.argv', JSON.stringify(process.argv.slice(2)) + '\\n');",
       "  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
       "  appendFileSync(__filename + '.pids', `${process.pid} ${child.pid} `);",
       `  process.stdout.write(${body}, () => { ${code === null ? "setInterval(() => {}, 1000);" : `process.exit(${code});`} });`,
@@ -93,6 +110,7 @@ const alive = (pid: number) => {
   }
 };
 const pidsOf = (bin: string) => (existsSync(`${bin}.pids`) ? readFileSync(`${bin}.pids`, "utf8").trim().split(" ").map(Number) : []);
+const argvOf = (bin: string) => readFileSync(`${bin}.argv`, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
 const promptsOf = (bin: string) => readFileSync(`${bin}.prompts`, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string);
 const snap = () => realpathSync(tempDir("oq-codex-snap-"));
 const settle = () => new Promise((done) => setTimeout(done, 200));
@@ -129,6 +147,43 @@ describe("the Codex stream reader, on a recorded run", () => {
     const { turn } = await runOnce(bin);
     expect(turn.finalText).toBe("");
     expect(turn.failure).toMatch(/stopped with an error \(stream disconnected/);
+  });
+
+  it("20. a usage limit after an earlier error is the one the receipt shows", async () => {
+    const early = JSON.stringify({ type: "error", message: "Reconnecting... 1/5 (stream disconnected before completion)" });
+    const limit = JSON.stringify({ type: "turn.failed", error: { message: "You've hit your usage limit. Try again at 3:05 PM." } });
+    const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"')), early, limit, ""].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.failure).toBe("the reviewer hit its usage or plan limit (You've hit your usage limit. Try again at 3:05 PM.)");
+  });
+
+  it("19. a turn that failed on a usage limit says so, with Codex's own words", async () => {
+    const failed = JSON.stringify({ type: "turn.failed", error: { message: "You've hit your usage limit. Try again at 3:05 PM.\nUpgrade to Pro" } });
+    const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"')), failed, ""].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.finalText).toBe("");
+    expect(turn.failure).toBe("the reviewer hit its usage or plan limit (You've hit your usage limit. Try again at 3:05 PM. Upgrade to Pro)");
+  });
+
+  it("22. a model this login cannot use is a failure the next list entry may take over, with Codex's own words", async () => {
+    const said = "The 'gpt-gone' model is not supported when using Codex with a ChatGPT account.";
+    // A reconnect notice first: the later model error wins over it.
+    const error = JSON.stringify({ type: "error", message: "Reconnecting... 1/5 (stream disconnected before completion)" });
+    const failed = JSON.stringify({ type: "turn.failed", error: { message: said } });
+    const bin = standIn(text([...lines.filter((l) => !l.includes('"turn.completed"') && !l.includes('"agent_message"')), error, failed, ""].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.finalText).toBe("");
+    expect(turn.failure).toBe(`the reviewer's model cannot serve this review: it does not exist or this login has no access to it (${said})`);
+    expect(cannotServe(turn.failure)).toBe(true);
+  });
+
+  it("23. an overload Codex retried and recovered from is no failure: the completed turn's answer stands, so no list entry takes over", async () => {
+    const overloaded = JSON.stringify({ type: "error", message: "We're currently experiencing high demand, which may cause temporary errors. Reconnecting... 1/5" });
+    const at = lines.findIndex((l) => l.includes('"turn.completed"'));
+    const bin = standIn(text([...lines.slice(0, at), overloaded, ...lines.slice(at)].join("\n")));
+    const { turn } = await runOnce(bin);
+    expect(turn.failure).toBeNull();
+    expect(JSON.parse(turn.finalText)).toMatchObject({ searched: true });
   });
 
   it("3. a stream that ends with no terminal event is no answer", async () => {
@@ -193,8 +248,55 @@ describe("the Codex command line and environment", () => {
     }
   });
 
+  it("21. reviewer_model and reviewer_effort reach every Codex process of a session as -m and model_reasoning_effort, and nothing is passed without them", async () => {
+    const tuned = standIn(text(RECORDED));
+    const session = codexDriver.start({ snapshotDir: snap(), deadline: Date.now() + 30_000, bin: tuned, web: false, model: "gpt-test-model", effort: "medium" });
+    await session.send("THE BRIEF");
+    await session.send("THE CORRECTION");
+    await session.close();
+    const runs = argvOf(tuned);
+    expect(runs).toHaveLength(2);
+    for (const argv of runs) {
+      expect(argv[0]).toBe("exec");
+      expect(argv[argv.indexOf("-m") + 1]).toBe("gpt-test-model");
+      expect(argv).toContain('model_reasoning_effort="medium"');
+      expect(argv[argv.indexOf('model_reasoning_effort="medium"') - 1]).toBe("-c");
+      expect(argv).toContain("--ignore-user-config");
+      expect(argv.at(-1)).toBe("-");
+    }
+    const plain = standIn(text(RECORDED));
+    await runOnce(plain);
+    for (const argv of argvOf(plain)) {
+      expect(argv).not.toContain("-m");
+      expect(argv).not.toContain("--model");
+      expect(argv.join(" ")).not.toMatch(/model_reasoning_effort/);
+      expect(argv).toContain("--ignore-user-config");
+    }
+  });
+
+  it("23. the login's model list holds every model, hidden ones too, and its top is the first listed by priority", () => {
+    const out = JSON.stringify({ models: [
+      { slug: "gpt-old", visibility: "list", priority: 9 },
+      { slug: "gpt-hidden", visibility: "hide", priority: 0 },
+      { slug: "gpt-top", visibility: "list", priority: 1 },
+    ] });
+    expect(codexCatalog(out)).toEqual({ models: ["gpt-old", "gpt-hidden", "gpt-top"], top: "gpt-top" });
+    expect(codexCatalog("Usage: codex debug [COMMAND]")).toBeNull();
+    expect(codexCatalog(JSON.stringify({ models: [] }))).toBeNull();
+    expect(codexCatalog(JSON.stringify({ other: 1 }))).toBeNull();
+  });
+
   it("17. relative and empty PATH entries never reach the reviewer", () => {
     expect(codexEnv({ PATH: [".", "", "/usr/bin", "bin", "./x", "/bin"].join(":") }).PATH).toBe("/usr/bin:/bin");
+  });
+
+  it("18. on Windows the path, the home folder and what starts a program reach Codex, under any case, with only absolute path entries", () => {
+    const windows = { Path: ["C:\\Windows\\system32", ".", "", "bin", "C:relative", "C:\\Program Files\\nodejs", "\\\\server\\tools"].join(";"), USERPROFILE: "C:\\Users\\u", APPDATA: "C:\\Users\\u\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local", SystemRoot: "C:\\Windows", PATHEXT: ".COM;.EXE;.CMD", ComSpec: "C:\\Windows\\system32\\cmd.exe", GITHUB_TOKEN: "t", OPENAI_API_KEY: "k" };
+    const { GITHUB_TOKEN: _token, OPENAI_API_KEY: _key, ...kept } = windows;
+    expect(codexEnv(windows, "win32")).toStrictEqual({ ...kept, Path: "C:\\Windows\\system32;C:\\Program Files\\nodejs;\\\\server\\tools", [DEPTH_ENV]: "1" });
+    // Elsewhere a name keeps its case and the Windows variables stay out.
+    expect(codexEnv(windows, "linux")).toEqual({ [DEPTH_ENV]: "1" });
+    expect(codexEnv({ PATH: "/usr/bin:C:\\x", Path: "/bin" }, "darwin")).toEqual({ PATH: "/usr/bin", [DEPTH_ENV]: "1" });
   });
 
   it("9. the environment keeps what Codex needs and drops tokens and session ties", () => {

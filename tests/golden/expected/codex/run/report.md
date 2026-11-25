@@ -231,6 +231,29 @@ Counts: 27 findings \(14 major, 13 minor\), 0 scanner candidates dropped
 - **Files the reviewer opened:** not recorded by Codex
 - **Reads outside the snapshot:** not recorded by Codex
 - **Changed ranges given to the reviewer:** 18 of 18
+
+.github/workflows/ci.yml: 16-17 brief
+
+Dockerfile: 1 brief, 3 brief, 5-7 brief, 9-10 \(deletion Dockerfile\#0, old lines 10-10\) brief
+
+app/config.py: 1-3 brief
+
+app/search.py: 1-17 brief
+
+app/server.py: 5-6 brief, 8 brief, 23 brief
+
+db/migrations/002\_index\_item\_names.sql: 1-2 brief
+
+deploy/deployment.yaml: 41-43 brief
+
+infra/main.tf: 27-28 brief
+
+package-lock.json: 11 brief, 15-17 brief
+
+package.json: 7 brief
+
+scripts/deploy.sh: 7 brief, 11 brief
+
 Scanners: 15 scanners ran, 5 had nothing to check
 
 Reviewer: codex 0.160.0, <SECONDS> s, 13 turns, 12 correction rounds, 13,000 tokens in, 6,500 out

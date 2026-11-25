@@ -56,7 +56,7 @@ import { AACR_BOARD, AACR_K, AACR_READER, boardFolder, instanceIdOf, isTestGap, 
 import { parseCaseId } from "../../lib/cases.mjs";
 import { benchCache } from "../../lib/board-files.mjs";
 import { cacheRoot, licenceExclusion } from "../../lib/licence.mjs";
-import { normPath, population, shownFindings } from "../../lib/score.mjs";
+import { normPath, reviewPopulation, shownFindings } from "../../lib/score.mjs";
 import { checkPinned, rawPath, readSuite } from "../../lib/suites.mjs";
 import { loadRun } from "../../score.mjs";
 import { nativeReviewBody } from "../../lib/claude-control.mjs";
@@ -80,8 +80,8 @@ export function commentOf(f) {
   return { path: normPath(f.file_path), start_line: start, end_line: end, content: parts.length > 0 ? parts.join("\n") : "A finding with no text.", tier: f.tier ?? "finding" };
 }
 
-// What happened to a planned review's first attempt, as our scorer reads it.
-const statusOf = (first) => (first === null ? "unstarted" : nativeReviewBody(first.row) !== null ? first.row.status : first.report === null ? "failed" : first.report.completion?.status === "complete" ? "complete" : "incomplete");
+// What happened to a planned review's first attempt, as our scorer reads it; an unhealthy one failed.
+const statusOf = (job) => (job.first === null ? "unstarted" : !job.health.ok ? "failed" : nativeReviewBody(job.first.row) !== null ? job.first.row.status : job.first.report === null ? "failed" : job.first.report.completion?.status === "complete" ? "complete" : "incomplete");
 
 /**
  * Converts the run in `folder`: writes <folder>/outside/aacr/ and returns
@@ -117,7 +117,7 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
   if (problems.length > 0) throw new Error(`${folder} is not converted for AACR-Bench:\n${[...new Set(problems)].join("\n")}`);
 
   // The population our scorer counts: each planned review by its first attempt.
-  const pop = population(manifest, run.attempts);
+  const pop = reviewPopulation(manifest, run.attempts);
   if (pop.problems.length > 0) throw new Error(`${folder}: the run's samples do not match its plan:\n${pop.problems.join("\n")}`);
   const { jobs } = pop;
   const instances = new Map();
@@ -137,11 +137,14 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
   const forBoard = (report) => shownFindings(report).filter((f) => !excludeTestGaps || !isTestGap(f));
   for (const job of jobs) {
     const first = job.first;
-    const shown = forBoard(first?.report ?? null);
-    const native = nativeReviewBody(first?.row);
+    // An unhealthy review sends the judge nothing.
+    const usable = first === null || job.health.ok;
+    const shown = usable ? forBoard(first?.report ?? null) : [];
+    const saved = nativeReviewBody(first?.row);
+    const native = saved !== null && !usable ? "" : saved;
     const comments = native !== null ? native.trim() ? [{ path: null, start_line: null, end_line: null, content: native }] : [] : shown.map(commentOf);
     commentCounts.set(job, comments.length);
-    if (native !== null && first.row.status === "failed") failures.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, failure: first.row.failure ?? null });
+    if (native !== null && statusOf(job) === "failed") failures.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, failure: first.row.failure ?? job.health.reason ?? null });
     comments.forEach((c, index) => {
       if (c.start_line === null) withoutLine.push({ caseId: job.caseId, config: job.config, repeat: job.repeat, index });
     });
@@ -151,7 +154,7 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
     files.set(file, {
       review: { comments, summary: { input_tokens: usage?.input_tokens ?? null, output_tokens: usage?.output_tokens ?? null } },
       duration_seconds: typeof first?.row?.wallMs === "number" ? first.row.wallMs / 1000 : null,
-      openqodex: { tool: toolName(job.config, job.repeat), caseId: job.caseId, case: job.case, config: job.config, repeat: job.repeat, attempt: 1, status: statusOf(first), findings: comments.length, observations: comments.filter((c) => c.tier === "observation").length },
+      openqodex: { tool: toolName(job.config, job.repeat), caseId: job.caseId, case: job.case, config: job.config, repeat: job.repeat, attempt: 1, status: statusOf(job), findings: comments.length, observations: comments.filter((c) => c.tier === "observation").length },
     });
   }
   const folders = [...new Set(jobs.map((j) => `${j.config}\0${j.repeat}`))]
@@ -159,8 +162,8 @@ export function convertRun(folder, { excludeTestGaps = BOARDS.boards.aacr.exclud
       const [config, repeat] = [k.split("\0")[0], Number(k.split("\0")[1])];
       const mine = jobs.filter((j) => j.config === config && j.repeat === repeat);
       const statuses = {};
-      for (const j of mine) statuses[statusOf(j.first)] = (statuses[statusOf(j.first)] ?? 0) + 1;
-      return { config, repeat, tool: toolName(config, repeat), dir: `${config}/r${repeat}`, files: mine.length, comments: mine.reduce((n, j) => n + commentCounts.get(j), 0), leftOutTestGaps: mine.reduce((n, j) => n + shownFindings(j.first?.report ?? null).length - forBoard(j.first?.report ?? null).length, 0), statuses };
+      for (const j of mine) statuses[statusOf(j)] = (statuses[statusOf(j)] ?? 0) + 1;
+      return { config, repeat, tool: toolName(config, repeat), dir: `${config}/r${repeat}`, files: mine.length, comments: mine.reduce((n, j) => n + commentCounts.get(j), 0), leftOutTestGaps: mine.reduce((n, j) => n + (j.first === null || j.health.ok ? shownFindings(j.first?.report ?? null).length - forBoard(j.first?.report ?? null).length : 0), 0), statuses };
     })
     .sort((a, b) => (a.config < b.config ? -1 : a.config > b.config ? 1 : a.repeat - b.repeat));
   const all = [...instances.values()];

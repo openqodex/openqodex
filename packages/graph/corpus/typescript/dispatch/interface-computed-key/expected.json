@@ -1,0 +1,41 @@
+{
+  "guards": "keeps the gap of a call through an interface when an object literal with a computed key that holds code may fill it",
+  "callers": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/mem.ts#MemStore.get",
+      "site": "src/use.ts:6",
+      "tier": "possible",
+      "kind": "dispatches_to",
+      "note": "every method of Store by name"
+    },
+    {
+      "to": "src/store.ts#Lone.find",
+      "site": "src/use.ts:13",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 6,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/use.ts",
+      "line": 13,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "floor": {
+    "src/mem.ts#MemStore.get": true
+  }
+}

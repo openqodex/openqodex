@@ -11,7 +11,7 @@ import { launcherFormatStale, launcherPath, launcherRunner } from "../launcher.j
 import { AGENTS } from "./detect.js";
 import { readText } from "./files.js";
 import { Guard } from "./guarded-fs.js";
-import { claudeHome, codexHome } from "./homes.js";
+import { claudeHome, codexHome, gooseHome } from "./homes.js";
 import { ownedFile, planInstall, type Ctx } from "./plan.js";
 import { loadRecord, type InstallRecord } from "./record.js";
 import { clineCliData, targetsFor, type Target } from "./targets.js";
@@ -55,7 +55,7 @@ export function staleOwned(home: string, oqHome: string): Stale {
   // Each target with the guard init would write it through: the home's own
   // folders for the home's files, and for a repository's rule the guard of
   // that repository, which refuses a link the repository holds.
-  const roots = [home, claudeHome(home), codexHome(home), oqHome];
+  const roots = [home, claudeHome(home), codexHome(home), gooseHome(home), oqHome];
   const planned: { target: Target; guard: Guard; repo: string | null }[] = [];
   const homeOnly = new Guard({ repoRoot: null, gitFolders: [], roots });
   for (const agent of AGENTS) {

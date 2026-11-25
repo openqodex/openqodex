@@ -1,0 +1,26 @@
+{
+  "covers": "a test that reaches `Function` through `.constructor` may pass a function to product code, so the scope is all",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/run.ts": "export function run(cb: () => void): void {\n  cb();\n}\n",
+    "src/f.ts": "export function f(): void {}\n",
+    "src/f.test.ts": "import \"./f\";\nimport { run } from \"./run\";\nconst F = run.constructor;\nF(\"x\")();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/f.ts#f",
+      "caller": "src/run.ts#run",
+      "file": "src/run.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/f.ts#f",
+      "reason": "reads `.constructor`",
+      "at": "src/f.test.ts:3",
+      "scope": "all"
+    }
+  ]
+}

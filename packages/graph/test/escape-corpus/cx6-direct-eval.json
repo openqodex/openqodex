@@ -1,0 +1,22 @@
+{
+  "covers": "a direct eval in the function's file (rule H1)",
+  "files": {
+    "src/a.ts": "function f() {}\nexport function go(s: string) { eval(s); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/a.ts#go",
+      "file": "src/a.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "runs code by a name built at run time",
+      "at": "src/a.ts:2"
+    }
+  ]
+}

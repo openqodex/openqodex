@@ -1,0 +1,19 @@
+{
+  "covers": "a `__filename` the file imports is no proof of the file's own place: `createRequire(__filename)` loads any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/lib/paths.mjs": "import { fileURLToPath } from \"node:url\";\nexport const __filename = fileURLToPath(import.meta.url);\n",
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nimport { __filename } from \"./lib/paths.mjs\";\nconst require = createRequire(__filename);\nconst k = \"f\";\nrequire(\"./a.cjs\")[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

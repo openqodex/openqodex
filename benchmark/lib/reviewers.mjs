@@ -15,7 +15,7 @@
 // 5. The Codex model is guessed, or taken from a variable Codex never reads:
 //    it is read from the header Codex prints, or recorded as unknown.
 import { execFile, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -104,6 +104,29 @@ export function codexEnv(env = process.env) {
   const out = {};
   for (const [k, v] of Object.entries(env)) if (v !== undefined && (CODEX_ALWAYS.includes(k) || k.startsWith("LC_"))) out[k] = v;
   return out;
+}
+
+/**
+ * Whether a laptop review bills per call, for the wave cap (lib/wave.mjs).
+ * Claude Code does when its environment holds an Anthropic key or token;
+ * without one it runs on the subscription. Codex gets no key from the
+ * environment (codexEnv), so it bills per call unless its own login file
+ * says a ChatGPT login. A login that cannot be read counts as billed.
+ */
+export function laptopMetered(name, env = process.env) {
+  if (name === "claude" || name === "control") {
+    const e = claudeEnv(env);
+    return Boolean(e.ANTHROPIC_API_KEY || e.ANTHROPIC_AUTH_TOKEN);
+  }
+  if (name === "codex") {
+    try {
+      const auth = JSON.parse(readFileSync(join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "auth.json"), "utf8"));
+      return !(auth.auth_mode === "chatgpt" && !auth.OPENAI_API_KEY);
+    } catch {
+      return true;
+    }
+  }
+  return true;
 }
 
 // Codex's model comes from its own output: the reviewer runs with

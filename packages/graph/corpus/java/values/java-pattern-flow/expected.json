@@ -1,0 +1,534 @@
+{
+  "guards": "Pattern variables bind only in their supported branches and after negated guards that exit.",
+  "callers": [
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:8",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:14",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:24",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:35",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:38",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:43",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:50",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:54",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:59",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:66",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:71",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:76",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:84",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:89",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:95",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.ok",
+      "site": "src/main/java/flow/Host.java:84",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:123",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:143",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:160",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:157",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:159",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:191",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:12"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:16"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:20"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:26"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:28"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:32"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:39"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:44"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:46"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:61"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:68"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:72"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:79"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:81"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:91"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:100"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:101"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:105"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:106"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:110"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:111"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:115"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:119"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:130"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:153"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:114"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:118"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:171"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:175"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:179"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:183"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:187"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 12,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 16,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 20,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 26,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 28,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 32,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 39,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 44,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 46,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 61,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 68,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 72,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 79,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 81,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 91,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 100,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 101,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 105,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 106,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 110,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 111,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 115,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 119,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 130,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 153,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 114,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 118,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 171,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 175,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 179,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 183,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 187,
+      "cause": "no-receiver-type"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 8
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 14
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 24
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 35
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 38
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 43
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 50
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 54
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 59
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 66
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 71
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 76
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 84
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 89
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 95
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 123
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 143
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 157
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 158
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 159
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 160
+    },
+    {
+      "file": "src/main/java/flow/Host.java",
+      "line": 191
+    }
+  ],
+  "allRead": true,
+  "references": [
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:157",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/flow/Bar.java#Bar.go",
+      "site": "src/main/java/flow/Host.java:158",
+      "kind": "uses_value",
+      "tier": "certain"
+    }
+  ]
+}

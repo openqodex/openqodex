@@ -12,7 +12,7 @@
 import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { parseConfig } from "@openqodex/core";
+import { LineSet, parseConfig } from "@openqodex/core";
 import type { BuiltinScanner, ScannerSource } from "@openqodex/core";
 import { ADAPTERS, IN_PROCESS } from "../adapters/index.js";
 import { runScanners } from "../run.js";
@@ -62,6 +62,8 @@ export async function preinstallScanners(opts: PreinstallOptions): Promise<Prein
   const table = loadToolchain();
   const cache = mkdtempSync(join(tmpdir(), "openqodex-preinstall-"));
   const place: InstallPlace = { root, cache, owner: root };
+  // The runtime probes run in the download cache, never in the OpenQodex home.
+  const probeHome = join(cache, "runtime-probe");
   const failures = new Map<ScannerSource, string>();
   try {
     await Promise.all(
@@ -71,7 +73,7 @@ export async function preinstallScanners(opts: PreinstallOptions): Promise<Prein
           if (isInstalled(root, scanner, table.tools[scanner]!)) return;
           opts.onProgress?.(`installing ${scanner} ${table.tools[scanner]!.version}`);
           try {
-            await installTool(scanner, { table, place });
+            await installTool(scanner, { table, place, probeHome });
           } catch (error) {
             failures.set(scanner, error instanceof Error ? error.message : String(error));
           }
@@ -95,14 +97,21 @@ export async function checkScanners(opts: {
 }): Promise<PreinstallResult> {
   const root = resolve(opts.installRoot);
   const tools: PreinstallTool[] = [];
-  // One at a time: a check case is a real scan, and several heavy scanners
-  // at once could pass their timeouts on a small build machine.
-  for (const scanner of required(opts.require)) tools.push(await checkOne(scanner, root, opts));
+  // The runtime probes run in a temporary folder of this check's own,
+  // removed at the end: a check writes nothing in the OpenQodex home.
+  const probeHome = mkdtempSync(join(tmpdir(), "openqodex-probe-"));
+  try {
+    // One at a time: a check case is a real scan, and several heavy scanners
+    // at once could pass their timeouts on a small build machine.
+    for (const scanner of required(opts.require)) tools.push(await checkOne(scanner, root, probeHome, opts));
+  } finally {
+    rmSync(probeHome, { recursive: true, force: true });
+  }
   const missing = tools.filter((t) => !t.ok).map((t) => `${t.scanner}: ${t.detail}`);
   return { ok: missing.length === 0, missing, tools };
 }
 
-async function checkOne(scanner: ScannerSource, root: string, opts: { onProgress?: (line: string) => void; installFailures?: Map<ScannerSource, string> }): Promise<PreinstallTool> {
+async function checkOne(scanner: ScannerSource, root: string, probeHome: string, opts: { onProgress?: (line: string) => void; installFailures?: Map<ScannerSource, string> }): Promise<PreinstallTool> {
   if (scanner.startsWith("custom:")) {
     return { scanner, version: null, ok: false, detail: "a custom scanner is never preinstalled: it runs only after `openqodex trust` approves it in its repository" };
   }
@@ -112,7 +121,7 @@ async function checkOne(scanner: ScannerSource, root: string, opts: { onProgress
   const recipe = table.tools[scanner];
   if (!recipe) return { scanner, version: null, ok: false, detail: "no install recipe; this build cannot run it" };
   const version = recipe.version;
-  const runtime = await missingRuntime(recipe);
+  const runtime = await missingRuntime(recipe, probeHome);
   if (runtime) return { scanner, version, ok: false, detail: runtime };
   if (!isInstalled(root, scanner, recipe)) {
     const why = opts.installFailures?.get(scanner) ?? unsupportedReason(table, recipe) ?? `not installed at ${version}`;
@@ -152,7 +161,7 @@ async function runCheckCase(c: CheckCase, root: string): Promise<{ ok: boolean; 
       writeFileSync(join(repo, name), body);
     }
     const paths = Object.keys(files);
-    const coverage = new Map(paths.map((p) => [p, new Set(files[p]!.split("\n").map((_, i) => i + 1))]));
+    const coverage = new Map(paths.map((p) => [p, new LineSet().addRange(1, files[p]!.split("\n").length)]));
     const { scan } = await runScanners({
       repoDir: repo,
       changedPaths: paths,

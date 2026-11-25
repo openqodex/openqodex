@@ -1,0 +1,24 @@
+{
+  "covers": "a local export alias used as a value (flaw 3)",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/barrel.ts": "import { f } from \"./a\";\nexport { f as g };\n",
+    "src/use.ts": "import { g } from \"./barrel\";\nrun(g);\nfunction run(cb: () => void) { cb(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/use.ts#run",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "it is used as a value",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

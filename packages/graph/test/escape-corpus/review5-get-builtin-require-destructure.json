@@ -1,0 +1,18 @@
+{
+  "covers": "`getBuiltinModule` destructured from `require(\"node:process\")` reaches Node's module library: any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.cjs": "const { getBuiltinModule } = require(\"node:process\");\nconst { createRequire: c } = getBuiltinModule(\"node:module\");\nconst load = c(__dirname + \"/lib/x.js\");\nconst k = \"f\";\nload(\"./a.cjs\")[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

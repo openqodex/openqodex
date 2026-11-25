@@ -1,0 +1,10 @@
+{
+  "name": "result-on-value",
+  "private": true,
+  "dependencies": {
+    "outside-sdk": "1.0.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}

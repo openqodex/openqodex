@@ -1,0 +1,43 @@
+{
+  "covers": "a FastAPI dependency past the items the plugin's reader keeps from one list; the dependency is named only in that list (fastapi py.ts MAX_LIST_ITEMS)",
+  "caps": [
+    "frameworks/fastapi/py.ts#MAX_LIST_ITEMS"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": [
+      "from fastapi import Depends, FastAPI\n\napp = FastAPI()\n\n",
+      {
+        "repeat": "def d{{i}}():\n    return 1\n\n",
+        "times": 65
+      },
+      "@app.get(\"/x\", dependencies=[",
+      {
+        "repeat": "Depends(d{{i}}), ",
+        "times": 65
+      },
+      "])\ndef index():\n    return 1\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "main.py#d65",
+      "caller": null,
+      "file": "main.py",
+      "line": 200
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#d65",
+      "reason": "or a dependency list was longer than it reads",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.py:200"
+      }
+    }
+  ]
+}

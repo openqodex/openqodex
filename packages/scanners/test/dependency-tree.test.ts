@@ -2,6 +2,7 @@
 // scanner guard; unreadable or budget-skipped lockfiles inherit a sibling's
 // path; tree reads exceed the budget or stop changed-file reads; argument
 // escaping leaks into the selected repository paths.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -49,7 +50,7 @@ function put(repoDir: string, rel: string, content = lock) {
 function advisories(repoDir: string, paths: string[], lines: Map<string, string[]>) {
   const recorded = JSON.parse(readFileSync(new URL("./fixtures/osv-lodash-2.6.0.json", import.meta.url), "utf8"));
   const json = JSON.stringify({ ...recorded, results: paths.map((rel) => ({ ...recorded.results[0], source: { path: join(repoDir, rel) } })) });
-  return parseOsvScannerJson(json, lines, { repoDir, coverage: new Map([["package-lock.json", new Set([2])]]) });
+  return parseOsvScannerJson(json, lines, { repoDir, coverage: new Map([["package-lock.json", makeLineSet([2])]]) });
 }
 
 it("retains the identity of an oversized nested lockfile beside a changed root lockfile", async () => {
@@ -64,7 +65,7 @@ it("retains the identity of an oversized nested lockfile beside a changed root l
   const nestedFindings = found.filter((f) => f.filePath === nested);
   expect(nestedFindings.length).toBeGreaterThan(0);
   expect(nestedFindings.every((f) => f.lineStart === 1 && f.lineEnd === 1)).toBe(true);
-  const coverage = new Map([["package-lock.json", new Set([2])]]);
+  const coverage = new Map([["package-lock.json", makeLineSet([2])]]);
   expect(found.filter((f) => overlapsCoverage(f, coverage)).every((f) => f.filePath === "package-lock.json")).toBe(true);
   expect(nestedFindings.some((f) => overlapsCoverage(f, coverage))).toBe(false);
 });

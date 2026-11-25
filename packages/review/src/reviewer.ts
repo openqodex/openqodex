@@ -11,7 +11,7 @@
 //          of every response.
 // Nothing a reviewer says about itself is proof: what was read, what was
 // shown and what was used come from the brain's own records.
-import type { Category, Config, ContextItem, Coverage, Disagreement, ModelCompletionRecord, RunManifest, RunTimings, ScanResult, Severity } from "@openqodex/core";
+import type { Category, Config, ContextItem, Coverage, Disagreement, ModelCompletionRecord, RuleCitation, RunManifest, RunTimings, ScanResult, Severity } from "@openqodex/core";
 import type { ReviewerDriver, Turn } from "./agents/driver.js";
 import type { CorrectionRound } from "./conversation.js";
 import type { ReviewScope } from "./incremental.js";
@@ -107,7 +107,7 @@ export type Reviewer = AgentReviewer | ModelReviewer;
 
 // A driver's session behind the agent reviewer shape: the session starts
 // here, and every call goes to it unchanged.
-export function agentReviewer(driver: ReviewerDriver, opts: { snapshotDir: string; deadline: number; bin: string; web: boolean }): AgentReviewer {
+export function agentReviewer(driver: ReviewerDriver, opts: Parameters<ReviewerDriver["start"]>[0]): AgentReviewer {
   const session = driver.start(opts);
   const kill = session.kill?.bind(session);
   return {
@@ -155,7 +155,7 @@ export type Budget = { authorize(call: AuthorizeRequest): Promise<boolean>; dead
 // `instructions`: the repository owners' own rules for the review, as the
 // host keeps them: the brief quotes them under the owners' heading with the
 // framing the laptop gives .openqodex/custom-instructions.md, so they can
-// widen what is flagged and never switch a check off; over 32 KB the call
+// widen what is flagged and never switch a check off; over 128 KB the call
 // throws, never cut. Advisory context belongs in `context`.
 // `previousReviewedSha`: the head of the last review; when the clone proves
 // it an ancestor of the head, only what changed since is the review's
@@ -218,6 +218,11 @@ export type ResultFinding = {
   foundBy: string[];
   source: string | null;
   candidate: string | null;
+  // The lines in other files the finding's evidence rests on; absent when
+  // all of it is in the finding's own file.
+  evidence?: { file: string; line: number }[];
+  // A finding that breaks a written rule of a supplied instruction file.
+  rule?: RuleCitation;
 };
 
 // What the reviewer did with one scanner candidate: raised it in a finding,
@@ -265,6 +270,7 @@ export type ReviewResult = {
   reason?: string;
   scope: ReviewScope | null;
   findings: ResultFinding[];
+  possible: ResultFinding[];
   dispositions: Disposition[];
   summary: string | null;
   coverage: Coverage | null;

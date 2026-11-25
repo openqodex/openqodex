@@ -1,0 +1,19 @@
+{
+  "covers": "`import.meta.url` is the module's own place, a string: the file stays readable",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/b.ts": "import { f } from \"./a\";\nexport const here = new URL(\".\", import.meta.url).pathname;\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/b.ts",
+      "file": "src/b.ts",
+      "line": 3
+    }
+  ],
+  "whole": [
+    "src/a.ts#f"
+  ],
+  "floored": []
+}

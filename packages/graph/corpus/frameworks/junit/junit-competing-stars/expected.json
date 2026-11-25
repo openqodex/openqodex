@@ -1,0 +1,62 @@
+{
+  "guards": "keeps a likely JUnit role beside unresolved external stars but rejects a competing repository type",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 1,
+    "unknowns": [
+      {
+        "file": "src/test/java/shop/RepositoryTest.java",
+        "line": 5,
+        "cause": "ambiguous"
+      }
+    ],
+    "roles": [
+      {
+        "target": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "role": "test",
+        "tier": "likely",
+        "note": "Unresolved star imports may also supply Test: org.junit.jupiter.params.provider.*, org.mockito.*."
+      }
+    ],
+    "edges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/ServiceTest.java#ServiceTest.reads",
+        "to": "src/main/java/shop/Service.java#Service.read",
+        "tier": "certain",
+        "category": "direct-call"
+      }
+    ],
+    "notUnknowns": [
+      {
+        "file": "src/test/java/shop/ServiceTest.java",
+        "line": 6,
+        "cause": "ambiguous"
+      }
+    ],
+    "notEdges": [
+      {
+        "kind": "tests",
+        "from": "src/test/java/shop/RepositoryTest.java#RepositoryTest.reads"
+      }
+    ],
+    "notRoles": [
+      {
+        "target": "src/test/java/shop/RepositoryTest.java#RepositoryTest.reads",
+        "role": "test"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/ServiceTest.java:6",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/shop/Service.java#Service.read",
+      "site": "src/test/java/shop/RepositoryTest.java:5",
+      "tier": "certain"
+    }
+  ]
+}

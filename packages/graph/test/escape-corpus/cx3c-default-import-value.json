@@ -1,0 +1,23 @@
+{
+  "covers": "a default import passed as a value (flaw 3)",
+  "files": {
+    "src/a.ts": "function f() {}\nexport default f;\n",
+    "src/use.ts": "import d from \"./a\";\nrun(d);\nfunction run(cb: () => void) { cb(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/use.ts#run",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "it is used as a value",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

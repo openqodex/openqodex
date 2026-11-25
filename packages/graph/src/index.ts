@@ -1,7 +1,8 @@
 export * from "./types.js";
 export { buildGraph, extractFacts, langOf, factsKey, isManifest, DEFAULT_BUDGET_MS, DEFAULT_MAX_FILES, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_HEAP_MB } from "./build.js";
 export type { BuildArgs } from "./build.js";
-export { detectImpact, emptyImpact, floorReasons, hotSymbols, isTestPath, toImpactUnknown } from "./impact.js";
+export { detectImpact, emptyImpact, floorOf, floorReasons, hotSymbols, isTestPath, toImpactUnknown } from "./impact.js";
+export type { Floor } from "./impact.js";
 export { renderImpactBlock, symbolKey } from "./render.js";
 export { CERTAIN_KINDS, MODEL_VERSION, API_VERSION, validateEvidence } from "./model/records.js";
 export type { Cause, Cut, Evidence, EvidenceKind, Tier, Unknown } from "./model/records.js";
@@ -14,7 +15,9 @@ export type { GraphStore, GenerationManifest, Lease, OpenGeneration } from "./st
 export { BUILD_ID_PATTERN, DEFAULT_MAX_CACHE_MB } from "./store/types.js";
 export { FIVE_SECONDS_MS, DEFAULT_RATES } from "./runtime/predict.js";
 export { query, querySliced, OPERATIONS, SLICE_CHECKS, parseTarget, prepareIndexes, resolveTarget, edgeId } from "./query/engine.js";
-export type { Answer, Candidate, ChangesExtra, ErrorCode, Extra, Item, Operation, Request, Session, Target } from "./query/engine.js";
+export type { Answer, Candidate, ChangesExtra, ErrorCode, Extra, FloorGroup, Item, Operation, Request, Session, Target } from "./query/engine.js";
+export { CONTEXT_NOTE, MAX_CONTEXT, shapeAnswer } from "./query/context.js";
+export type { AnswerContext, Shape, Shaped, Snippet } from "./query/context.js";
 export { graphOf } from "./session.js";
 export { BUILD_ALL_MS, laterEdits, pinGeneration, pinWorkTree } from "./query/open.js";
 export type { GraphSettings, PinArgs, Pinned, PinnedOrError, Reference } from "./query/open.js";
@@ -25,6 +28,6 @@ export { PLUGINS, pluginsKey } from "./frameworks/registry.js";
 export { frameworkLayer, REACH_DEPTH } from "./frameworks/layer.js";
 export type { FrameworkLayer, RouteReach, TestLink } from "./frameworks/layer.js";
 export type { FrameworkData, PluginRun } from "./frameworks/stage.js";
-export { blobId } from "./capture/inventory.js";
+export { blobId, unreadNote } from "./capture/inventory.js";
 export type { ListedFile } from "./capture/inventory.js";
 export { showBlob } from "./capture/git.js";

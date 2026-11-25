@@ -554,3 +554,23 @@ describe("16. finalize trusts a run's files only as this machine recorded them",
     expect(run?.scan_sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+// Failure case: a possible issue has a receipt number that findings cannot resolve.
+it("findings resolves possible issues after observations without changing all", async () => {
+  const dir = repo();
+  const answer: Answer = (brief) => {
+    const turn = three(brief);
+    const value = JSON.parse(turn.finalText!);
+    value.findings.push(finding({ confidence: 0.55, severity: "minor", category: "bug", title: "Possible operation" }));
+    return { ...turn, finalText: JSON.stringify(value) };
+  };
+  expect(await review(dir, fake([answer]))).toBe(0);
+  expect(out).toContain("4. Minor bug: Possible operation");
+  out = "";
+  expect(await findings(["4", "--cwd", dir])).toBe(0);
+  expect(out).toContain("4. Minor bug: Possible operation");
+  expect(out).toContain("Possible issues");
+  out = "";
+  expect(await findings(["all", "--cwd", dir])).toBe(0);
+  expect(out).not.toContain("Possible operation");
+});

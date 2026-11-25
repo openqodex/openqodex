@@ -29,7 +29,7 @@ function savedRun(spec = null) {
     const dir = attemptDir(folder, jobs[0], 1);
     mkdirSync(join(dir, "report"), { recursive: true });
     write(join(dir, "report/report.json"), report);
-    write(join(dir, "sample.json"), sampleRecord({ job: jobs[0], attempt: 1, result: { code: 0, wallMs: 1 }, report, startedAt: "2026-10-14T00:00:00Z" }));
+    write(join(dir, "sample.json"), sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job: jobs[0], attempt: 1, result: { code: 0, wallMs: 1 }, report, startedAt: "2026-10-14T00:00:00Z" }));
   }
   return folder;
 }

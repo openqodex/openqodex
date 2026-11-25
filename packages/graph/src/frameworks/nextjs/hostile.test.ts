@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../../index.js";
 import type { Graph } from "../../index.js";
-import { expectLinear, pluginCpuMs } from "../../test-timing.js";
+import { expectLinear, growthTests, pluginCpuMs } from "../../test-timing.js";
 import { MAX_SOURCE_BYTES } from "../express/js.js";
 import { MAX_PATTERN_SEGMENTS, MAX_REGISTRATIONS } from "./resolve.js";
 
@@ -62,11 +62,16 @@ describe("the Next.js plugin on a hostile repository", () => {
     for (const dir of [root, quarter]) if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
   });
 
-  it("resolves a crafted file tree in time that grows with it and no faster, so a route tree cannot hang the build", async () => {
+  it("resolves a crafted file tree", () => {
     const run = graph.frameworks?.plugins.find((p) => p.id === "nextjs");
     expect(run?.status).toBe("ok");
-    expectLinear("the Next.js plugin on 375 and on 1,500 route files", await pluginCpuMs(build(quarter), "nextjs"), await pluginCpuMs(build(root), "nextjs"));
   }, 300_000);
+
+  growthTests("in time that grows with it", () => {
+    it("resolves a crafted file tree in time that grows with it and no faster, so a route tree cannot hang the build", async () => {
+      expectLinear("the Next.js plugin on 375 and on 1,500 route files", await pluginCpuMs(build(quarter), "nextjs"), await pluginCpuMs(build(root), "nextjs"));
+    }, 300_000);
+  });
 
   it("stops at the build's registration budget, though no file holds more than seven routes, and says how many were left out", () => {
     const regs = (graph.frameworks?.entities ?? []).filter((e) => e.kind === "registration" && e.plugin === "nextjs");

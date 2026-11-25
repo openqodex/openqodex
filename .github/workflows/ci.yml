@@ -1,32 +1,30 @@
 name: CI
 
-# Where each check runs (decided 2026-10-12, narrowed 2026-10-23):
-# - An ordinary pull request and its merge queue run get the fast gate: the
-#   Linux gate without the end-to-end tests and the golden run. Each queued
-#   pull request is tested merged with main and with every pull request
-#   ahead of it in the queue. A pull request whose run fails leaves the
-#   queue, and main does not change.
-# - The full gate runs where a release is at stake: the Linux gate with the
-#   end-to-end tests and the golden run, the macOS gate and the scanner-only
-#   benchmark. It runs for the "Version packages" pull request (the
-#   changesets branch changeset-release/main, from this repository), both on
-#   the pull request and in the merge queue, so the queue merges it only on
-#   a green full gate; on a pull request with the label full-ci; and on each
-#   push to main, on the commit that landed.
-# - The version pull request's own pull_request run waits for a maintainer's
-#   approval, because a bot pushes that branch with the repository's token
-#   (the run ends as action_required until someone clicks approve). The
-#   queue run needs no click: it recognises the pull request by the branch
-#   name in the queue's merge commit message, "Merge pull request #N from
-#   <owner>/changeset-release/main".
-# - The cost of the narrowing: a break that only the full gate catches lands
-#   on main and shows on main's own run. It is fixed there before the version
-#   pull request, whose full gate must be green before a release.
-# The ruleset on main requires the three checks by these job names, so the
-# names do not change. A job skipped by its condition counts as passed: that
-# is how a fast-gate run passes with the Linux gate alone.
-# scripts/gate.sh runs the full gate's steps (.github/actions/gate) on one
-# machine; the benchmark job runs in CI only.
+# Where each check runs (decided 2026-10-12, narrowed 2026-10-23, the full
+# gate moved out of the merge path 2026-11-19):
+# - An ordinary pull request, its merge queue run and each push to main get
+#   the fast gate: the Linux gate without the end-to-end tests and the
+#   golden run. Each queued pull request is tested merged with main and with
+#   every pull request ahead of it in the queue. A pull request whose run
+#   fails leaves the queue, and main does not change.
+# - A push to main skips the gate when this workflow's merge queue run on the
+#   same commit passed: the queue pushes the very commit it tested, so the
+#   tree, this file and the gate are the same. A direct push, or a lookup
+#   that fails, runs the gate.
+# - The full gate (the Linux gate with the end-to-end tests and the golden
+#   run, the macOS gate and the scanner-only benchmark) runs in three cases:
+#   the nightly run on main and its button (.github/workflows/nightly.yml);
+#   the release, on the commit it publishes (.github/workflows/release.yml);
+#   a pull request with the label full-ci. The first two call this workflow
+#   with the input full set to true.
+# - The cost: a break that only the full gate catches lands on main and shows
+#   in the nightly run, which opens an issue. The release refuses to publish
+#   a commit whose own full gate did not pass.
+# The ruleset on main requires the three gate checks by these job names, so
+# the names do not change. A job skipped by its condition counts as passed:
+# that is how a fast-gate run passes with the Linux gate alone.
+# scripts/gate.sh runs the fast gate's steps (.github/actions/gate) on one
+# machine, and the full gate's with --full; the benchmark job runs in CI only.
 
 on:
   pull_request:
@@ -36,13 +34,45 @@ on:
     types: [checks_requested]
   push:
     branches: [main]
+  workflow_call:
+    inputs:
+      full:
+        description: true runs the full gate
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
+  # On a push to main, whether this workflow's merge queue run on the same
+  # commit passed. It prints tested=true only on a run it found; a failed
+  # lookup prints false, and the gate runs.
+  queue-tested:
+    name: Merge queue tested this commit
+    if: ${{ github.event_name == 'push' && inputs.full != true }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      tested: ${{ steps.find.outputs.tested }}
+    steps:
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          found=$(gh run list --workflow ci.yml --event merge_group --commit "$GITHUB_SHA" --status success --json headSha --jq "map(select(.headSha == \"$GITHUB_SHA\")) | length" || echo 0)
+          if [ "$found" -gt 0 ] 2>/dev/null; then tested=true; else tested=false; fi
+          echo "The merge queue's passed runs on $GITHUB_SHA: $found, so tested=$tested"
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+
   gate:
     name: Gate (ubuntu-latest)
+    needs: queue-tested
+    # Runs on every event but a push the merge queue tested; !cancelled()
+    # keeps it running when queue-tested is skipped or failed.
+    if: ${{ !cancelled() && needs.queue-tested.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,11 +82,11 @@ jobs:
         with:
           # The full gate's condition. The two jobs below carry the same
           # expression: a job's if cannot read a shared value.
-          full: ${{ github.event_name == 'push' || (github.event_name == 'merge_group' && contains(github.event.merge_group.head_commit.message, '/changeset-release/main')) || (github.event_name == 'pull_request' && ((github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) || contains(github.event.pull_request.labels.*.name, 'full-ci'))) }}
+          full: ${{ inputs.full == true || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
 
   gate-macos:
     name: Gate (macos-latest)
-    if: ${{ github.event_name == 'push' || (github.event_name == 'merge_group' && contains(github.event.merge_group.head_commit.message, '/changeset-release/main')) || (github.event_name == 'pull_request' && ((github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) || contains(github.event.pull_request.labels.*.name, 'full-ci'))) }}
+    if: ${{ inputs.full == true || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,7 +103,7 @@ jobs:
   # scripts/gate.sh does not run it: it needs Ruby and Go.
   bench-scan:
     name: Scanner-only benchmark
-    if: ${{ github.event_name == 'push' || (github.event_name == 'merge_group' && contains(github.event.merge_group.head_commit.message, '/changeset-release/main')) || (github.event_name == 'pull_request' && ((github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) || contains(github.event.pull_request.labels.*.name, 'full-ci'))) }}
+    if: ${{ inputs.full == true || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -89,23 +119,18 @@ jobs:
       # The commit the run builds is the commit an accepted index entry
       # names (benchmark/build-cli.mjs records it, trend.mjs --accept copies
       # it), so it must stay in main's history:
-      # - In the merge queue, github.sha is the merged result the queue
-      #   tests: main with this pull request and those ahead of it. This
-      #   answers issue 159: the queue scans what would land, with the
-      #   harness that would land. When the queue lands it, main moves to
-      #   that commit. A run whose pull request left the queue names a
-      #   commit main never gets, so it is not a run to accept.
+      # - In the nightly run, its button and the release, github.sha is a
+      #   commit on main: main's head when the run started, or the commit
+      #   the release publishes.
       # - On a pull request with the label full-ci, the pull request's own
       #   head, not the merge commit GitHub makes: the queue merges with a
       #   merge commit, so the head stays in main's history, and GitHub's
       #   merge commit is not kept once the pull request closes. This is the
       #   run to accept when a pull request moves the score. A branch older
       #   than the harness runs the old harness here; merge main into it.
-      # - On a push to main, the commit that landed.
-      # Since 2026-10-23 the queue runs this job only for the version pull
-      # request (an ordinary pull request's queue run is the fast gate), so
-      # for every other change the first bullet describes the run on main
-      # after the merge.
+      # Since 2026-11-19 neither the merge queue nor a push to main runs this
+      # job; before, the queue ran it for the version pull request (issue
+      # 159) and every push to main did.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}

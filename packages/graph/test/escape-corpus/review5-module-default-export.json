@@ -1,0 +1,20 @@
+{
+  "covers": "Node's module library given on as a default export (`export default nm`) is a loader in the importer, even read there by a computed key: any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/m.mjs": "import nm from \"node:module\";\nexport default nm;\n",
+    "src/use.mjs": "import nm from \"./m.mjs\";\nconst name = \"create\" + \"Require\";\nconst load = nm[name](new URL(\"./lib/\", import.meta.url));\nconst k = \"f\";\nload(\"./a.cjs\")[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

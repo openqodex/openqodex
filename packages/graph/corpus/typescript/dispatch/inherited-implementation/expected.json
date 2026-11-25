@@ -28,7 +28,7 @@
       ]
     }
   ],
-  "unknowns": [
+  "noUnknown": [
     {
       "file": "src/run.ts",
       "line": 4,

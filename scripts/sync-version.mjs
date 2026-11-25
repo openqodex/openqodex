@@ -56,6 +56,17 @@ for (const rel of [
   }
 }
 
+// The first release that reads a key, until that release is cut
+// (packages/core/src/reviewers.ts): the version changesets chose, once.
+{
+  const rel = "packages/core/src/reviewers.ts";
+  const file = join(root, rel);
+  const before = readFileSync(file, "utf8");
+  const after = before.replace(/= "\d+\.\d+\.\d+"; \/\/ release: next/g, `= "${version}";`);
+  if (after !== before) writeFileSync(file, after);
+  console.log(`${after === before ? "unchanged" : "updated"}: ${rel}`);
+}
+
 // The release notices of changes this release carries.
 {
   const rel = "packages/cli/src/notices.ts";

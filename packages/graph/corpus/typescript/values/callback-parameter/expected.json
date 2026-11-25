@@ -1,0 +1,33 @@
+{
+  "guards": "binds a call on a callback parameter of a typed array's map, and on a loop variable over a method's declared array result, to the element class's method",
+  "callers": [
+    {
+      "to": "src/server.ts#Server.listTools",
+      "site": "src/convert.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/server.ts#Server.listTools",
+      "site": "src/convert.ts:8",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/server.ts#Server.listTools",
+      "site": "src/convert.ts:12",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/convert.ts",
+      "line": 4
+    },
+    {
+      "file": "src/convert.ts",
+      "line": 8
+    }
+  ]
+}

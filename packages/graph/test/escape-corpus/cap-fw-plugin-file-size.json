@@ -1,0 +1,37 @@
+{
+  "covers": "a Next.js route handler in a file over the size the framework plugins read, which the graph itself reads (express/js.ts MAX_SOURCE_BYTES, shared by the Next.js plugin)",
+  "caps": [
+    "frameworks/express/js.ts#MAX_SOURCE_BYTES"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"next\": \"^14.0.0\", \"react\": \"^18.0.0\"}}",
+    "app/api/big/route.ts": [
+      "export async function GET() {\n  return new Response(\"ok\");\n}\n",
+      {
+        "repeat": "// padding past the size bound the framework plugin reads\n",
+        "times": 5000
+      }
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "app/api/big/route.ts#GET",
+      "caller": null,
+      "file": "app/api/big/route.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/api/big/route.ts#GET",
+      "reason": "over the 262144-byte cap of the Next.js plugin",
+      "at": "",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "app/api/big/route.ts:1"
+      }
+    }
+  ]
+}

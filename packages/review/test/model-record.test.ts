@@ -16,7 +16,8 @@
 //     its record is lost.
 //  7. The result's markdown, SARIF or JSON lose the model record or print the
 //     agent's reviewer line.
-import { modelCoverage } from "@openqodex/core";
+import { makeLineSet } from "../../../tests/line-set.mjs";
+import { singlePassModelCoverage } from "@openqodex/core";
 import type { Change, Report } from "@openqodex/core";
 import { describe, expect, it } from "vitest";
 import { modelRecord, modelReport, reviewRender } from "../src/model-record.js";
@@ -30,7 +31,7 @@ const change = {
   id: "c".repeat(64),
   files: [{ path: "app/a.py", status: "modified", oldPath: null, binary: false }],
   changedPaths: ["app/a.py"],
-  coverage: new Map([["app/a.py", new Set([3, 4, 5])]]),
+  coverage: new Map([["app/a.py", makeLineSet([3, 4, 5])]]),
   deletionPoints: new Map(),
 } as unknown as Change;
 
@@ -50,7 +51,7 @@ function evidence(over: Partial<ModelReviewEvidence> = {}): ModelReviewEvidence 
     changeId: change.id,
     snapshot: { tree: null, before: "h", after: "h" },
     candidates: { total: 0, disposed: 0 },
-    coverage: modelCoverage({ change, briefSent: true, briefFiles: new Set(), toolLog: toolLog.map((t) => ({ ...t, in_scope: t.inScope })) }),
+    coverage: singlePassModelCoverage({ change, briefSent: true, diffFiles: new Set(), toolLog: toolLog.map((t) => ({ ...t, in_scope: t.inScope })) }),
     briefSent: true,
     toolLog,
     attempts: [call(1), call(2)],
@@ -77,7 +78,7 @@ const report = {
   findings: [],
   below_threshold: 0,
   outside_change: [],
-  low_confidence: [],
+  possible: [], low_confidence: [],
   not_reviewed: [],
   dropped: [],
   scanners: [],
@@ -97,7 +98,7 @@ describe("the model record from the brain's evidence", () => {
   it("1. a read served but never sent is not shown, and the record says so", () => {
     const r = modelRecord(evidence({ toolLog: [read({ delivered: false })] }));
     expect(r.status).toBe("incomplete");
-    expect(r.missing).toContain("1 changed range was not sent to the reviewer: app/a.py:3-5");
+    expect(r.missing).toEqual(["1 changed range was not examined", "app/a.py:3-5"]);
   });
 
   it("2, 3. a refused second call: incomplete, the first call's usage kept, the refused one unauthorized with no usage", () => {
@@ -116,10 +117,11 @@ describe("the model record from the brain's evidence", () => {
     expect(r.missing).toContain("the reviewer failed: socket hang up");
   });
 
-  it("4. a tool the brain did not define and a path outside the snapshot are named", () => {
+  it("4. refused tools and outside paths make the model record incomplete", () => {
     const r = modelRecord(evidence({ toolLog: [read(), read({ tool: "bash", path: null, range: null, inside: null, ok: false, delivered: true, reason: "not a tool" }), read({ path: "/etc/passwd", range: null, inside: false, ok: false, reason: "outside the snapshot" })] }));
-    expect(r.missing).toContain("the reviewer returned a tool call the brain did not define: bash");
-    expect(r.missing).toContain("the reviewer tried to read outside the snapshot: /etc/passwd");
+    expect(r.status).toBe("complete");
+    expect(r.missing).toEqual([]);
+    expect(r.refused).toEqual(["bash", "/etc/passwd"]);
   });
 
   it("5. a secret in a tool call's path or reason is redacted in the record", () => {

@@ -1,0 +1,33 @@
+{
+  "guards": "never binds this in an object method or a function expression inside a class method to the class, and keeps an arrow's this bound",
+  "callers": [
+    {
+      "to": "src/a.ts#A.x",
+      "site": "src/a.ts:5",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notCertain": [
+    {
+      "to": "src/a.ts#A.x",
+      "site": "src/a.ts:3"
+    },
+    {
+      "to": "src/a.ts#A.x",
+      "site": "src/a.ts:4"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/a.ts",
+      "line": 3,
+      "cause": "no-receiver-type"
+    },
+    {
+      "file": "src/a.ts",
+      "line": 4,
+      "cause": "no-receiver-type"
+    }
+  ]
+}

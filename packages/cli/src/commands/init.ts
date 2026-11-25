@@ -12,21 +12,22 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
-import { CONFIG_MAX_BYTES, DEFAULT_CONFIG_YAML, readRepoFile, FOLDER_CONFIG, INSTRUCTIONS_FILE, STATE_DIR, loadConfig, repoStat } from "@openqodex/core";
+import { CONFIG_MAX_BYTES, DEFAULT_CONFIG_YAML, REVIEWERS_SINCE, entryLabel, readRepoFile, FOLDER_CONFIG, INSTRUCTIONS_FILE, STATE_DIR, loadConfig, repoStat } from "@openqodex/core";
 import type { BuiltinScanner } from "@openqodex/core";
 import { AGENT_NAMES, AGENTS, detectAgents, type AgentId } from "../agents/detect.js";
-import { readText } from "../agents/files.js";
+import { readText, sha256 } from "../agents/files.js";
 import { Guard } from "../agents/guarded-fs.js";
-import { claudeHome, codexHome } from "../agents/homes.js";
+import { claudeHome, codexHome, gooseHome } from "../agents/homes.js";
 import { excludeLine, gitDirs, gitPath, inWorkTree, planExclude, planUnexclude, repoRootOf } from "../agents/git.js";
-import { planInstall, planMcpOff, planUninstall, type Action, type Ctx } from "../agents/plan.js";
+import { planInstall, planMcpOff, planUninstall, setUpAt, type Action, type Ctx } from "../agents/plan.js";
 import { withBoundary } from "../agents/lock.js";
 import { loadRecord, saveRecord, serialize, type InstallRecord } from "../agents/record.js";
 import { commitLines, INSTRUCTIONS_LINE, planRepoFiles, planRepoFilesRemoval, ROOT_CONFIG_NOTE } from "../agents/repo-folder.js";
 import { clineCliData, targetsFor, teamSection, teamTargets, type Scope, type Target } from "../agents/targets.js";
 import { runningContract } from "../contract.js";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
-import { hostAgent } from "@openqodex/review";
+import { claudeDriver, codexDriver, hostAgent } from "@openqodex/review";
+import { defaultReviewerList, insertReviewerList } from "../reviewers/list.js";
 import { launcherPath, launcherRunner, launcherUsers, oldLocks, openqodexHomeDir, planRuntime, planRuntimeRemoval, pruneRuntimes, removeOldLocks, staleRuntimes } from "../launcher.js";
 import { planGitHook, planGitHookRemoval, setHookChoice } from "./hook.js";
 import { instructionCandidates, mergeInstructionChoice, writeInstructionChoice } from "../instructions.js";
@@ -40,7 +41,7 @@ type HookChoice = "pre-push" | "none";
 type Flags = { agents: AgentId[]; project: boolean; yes: boolean; uninstall: boolean; dryRun: boolean; hook: HookChoice | null; noRepo: boolean; noReview: boolean; mcp: boolean | null };
 
 const USAGE =
-  "usage: openqodex init [--agent <claude-code|cursor|codex|cline|all>]... [--project] [--hook <pre-push|none>] [--no-repo] [--mcp | --no-mcp] [--no-review] [--yes] [--uninstall] [--dry-run]";
+  "usage: openqodex init [--agent <claude-code|cursor|codex|cline|goose|all>]... [--project] [--hook <pre-push|none>] [--no-repo] [--mcp | --no-mcp] [--no-review] [--yes] [--uninstall] [--dry-run]";
 
 // The one question init asks, after the whole plan.
 const WRITE_QUESTION = "Write these files?";
@@ -67,7 +68,7 @@ function parseFlags(args: string[]): Flags | string {
       const value = arg === "--agent" ? args[++i] : arg.slice("--agent=".length);
       if (value === "all") flags.agents.push(...AGENTS);
       else if ((AGENTS as readonly string[]).includes(value)) flags.agents.push(value as AgentId);
-      else return `unknown agent: ${value ?? "(missing)"}. Choose claude-code, cursor, codex, cline or all.`;
+      else return `unknown agent: ${value ?? "(missing)"}. Choose claude-code, cursor, codex, cline, goose or all.`;
     } else return `unknown argument: ${arg}`;
   }
   flags.agents = AGENTS.filter((a) => flags.agents.includes(a));
@@ -248,8 +249,41 @@ type Setup = {
   guard: Guard;
 };
 
+// On uninstall: the files this run would remove that an agent staying set up
+// also writes (in project scope Codex and Cursor share the skill), each with
+// the agents that keep it. An agent counts as set up when a target of its
+// own, at a path no agent being removed writes and the guard allows, is on
+// disk (setUpAt). Read from disk, never from the record, so it holds on a
+// machine with no record.
+function stillUsed(s: Setup, targets: Target[], args: { runner: string; launcher: string; clineCli: boolean }): Map<string, AgentId[]> {
+  const removed = new Set(targets.filter((t) => t.kind === "file").map((t) => t.path));
+  const touched = new Set(targets.map((t) => t.path));
+  const kept = new Map<string, AgentId[]>();
+  for (const agent of AGENTS) {
+    if (s.agents.includes(agent)) continue;
+    const own = targetsFor({ agent, scope: s.scope, home: s.home, repoRoot: s.repoRoot, version: s.version, ...args }).targets;
+    const shared = own.filter((t) => t.kind === "file" && removed.has(t.path));
+    if (shared.length === 0 || !own.some((t) => !touched.has(t.path) && guarded(s, t) && setUpAt(t))) continue;
+    for (const t of shared) kept.set(t.path, [...(kept.get(t.path) ?? []), agent]);
+  }
+  return kept;
+}
+
+// Whether init could have written `t`: a path the guard refuses (a link the
+// repository holds on the way, or outside every folder init writes) holds
+// nothing of ours, so setUpAt never reads through it. The last name is not
+// followed, so a link there still counts as there.
+function guarded(s: Setup, t: Target): boolean {
+  try {
+    s.guard.check(t.path, false);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // `mcpOn`: whether this run registers the code graph's MCP server.
-function collectTargets(s: Setup, mcpOn: boolean): { targets: Target[]; notes: string[] } {
+function collectTargets(s: Setup, mcpOn: boolean): { targets: Target[]; notes: string[]; kept: Map<string, AgentId[]> } {
   const launcher = launcherPath(s.oqHome);
   const runner = s.flags.project ? `npx -y openqodex@${s.version}` : launcherRunner(launcher);
   // A removal plans the Cline CLI's MCP file whatever is there now, so one
@@ -271,13 +305,16 @@ function collectTargets(s: Setup, mcpOn: boolean): { targets: Target[]; notes: s
       targets.push(t);
     }
   }
-  return { targets, notes };
+  const kept = s.flags.uninstall ? stillUsed(s, targets, { runner, launcher, clineCli }) : new Map<string, AgentId[]>();
+  return { targets, notes, kept };
 }
 
 // Plans one agent's targets. A file that cannot be read, or a path through
 // a link the repository holds, stops that agent with the reason. With
 // `mcpOn` false, the MCP server registrations init recorded are removed.
-async function planAgents(s: Setup, record: InstallRecord, targets: Target[], mcpOn: boolean): Promise<Action[]> {
+// `kept`: the shared files an agent staying set up still uses (stillUsed),
+// left in place and in the record.
+async function planAgents(s: Setup, record: InstallRecord, targets: Target[], mcpOn: boolean, kept: Map<string, AgentId[]>): Promise<Action[]> {
   const ctx: Ctx = { record, scope: s.scope, repoRoot: s.repoRoot, guard: s.guard };
   const excludeFile = s.repoRoot !== null && !s.flags.project ? await gitPath(s.repoRoot, "info/exclude") : null;
   const actions: Action[] = [];
@@ -286,7 +323,10 @@ async function planAgents(s: Setup, record: InstallRecord, targets: Target[], mc
     const planned: Action[] = [];
     try {
       for (const t of mine) {
-        if (s.flags.uninstall) {
+        const users = s.flags.uninstall && t.kind === "file" ? kept.get(t.path) : undefined;
+        if (users !== undefined) {
+          planned.push({ verb: "keep", path: t.path, agent, note: `${t.label}: ${users.map((a) => AGENT_NAMES[a]).join(" and ")} is still set up and uses it; left in place` });
+        } else if (s.flags.uninstall) {
           const a = planUninstall(t, ctx);
           if (a) planned.push(a);
         } else if (!mcpOn && isMcp(t)) {
@@ -366,9 +406,12 @@ async function runLocked(s: Setup): Promise<Outcome> {
   const record = loadRecord(s.oqHome);
   const recordBefore = serialize(record);
   const mcp = mcpChoiceFor(s, record);
-  const { targets, notes } = collectTargets(s, mcp.on);
+  const { targets, notes, kept } = collectTargets(s, mcp.on);
   if (!s.flags.uninstall && s.agents.includes("cursor") && s.repoRoot !== null) {
     notes.push("Cursor has no global instruction file: its rule in this repo carries the review instructions");
+  }
+  if (!s.flags.uninstall && s.agents.includes("goose")) {
+    notes.push("Goose push hook: not written, because OpenQodex has not been tested with Goose's hooks. The hints ask Goose to review before a push, and the git pre-push hook checks every push where init adds it");
   }
   const actions: Action[] = [];
   const runtimeActions = new Set<Action>();
@@ -378,7 +421,7 @@ async function runLocked(s: Setup): Promise<Outcome> {
   const teamActions: Action[] = [];
   let failed = false;
 
-  const agentActions = await planAgents(s, record, targets, mcp.on);
+  const agentActions = await planAgents(s, record, targets, mcp.on, kept);
   let rootConfig = false;
   let hookChoice: HookChoice | null = null;
   // The git pre-push hook action, when the plan holds one.
@@ -412,6 +455,7 @@ async function runLocked(s: Setup): Promise<Outcome> {
       rootConfig = repo.rootConfig;
       team.push(...repo.actions);
       await planConventionChoice(s, team);
+      await planReviewerList(s, team, record);
       const hook = hookChoiceFor(s, record);
       hookChoice = hook.hook;
       if (!s.flags.dryRun) setHookChoice(record, s.repoRoot, hookChoice);
@@ -642,6 +686,55 @@ async function planConventionChoice(s: Setup, actions: Action[]): Promise<void> 
   }
 }
 
+// The project's reviewer list, when its config has none (review.reviewers
+// absent; an empty list is the team's choice and stays): the agent running
+// init first, then the other one when it can start here (defaultReviewerList).
+// It asks nothing, so the agent and --yes path writes it too. It is written
+// after whatever else the plan writes to the file, read back from disk, so a
+// convention choice and the file's own comments stay; init's record of a
+// file it created follows the new bytes, so uninstall still knows it.
+async function planReviewerList(s: Setup, actions: Action[], record: InstallRecord): Promise<void> {
+  if (s.repoRoot === null) return;
+  const repoRoot = s.repoRoot;
+  let loadedPath: string | null;
+  try {
+    loadedPath = loadConfig(repoRoot, undefined, { runtimeVersion: s.version }).path;
+  } catch {
+    // A config that does not load, or needs a newer openqodex, is left as it
+    // is; review names the problem.
+    return;
+  }
+  const path = loadedPath ?? join(repoRoot, STATE_DIR, FOLDER_CONFIG);
+  const before = readRepoFile(repoRoot, path, CONFIG_MAX_BYTES);
+  if (insertReviewerList(before ?? DEFAULT_CONFIG_YAML, []) === null) return;
+  const planned = actions.find((a) => a.path === path && a.apply !== undefined);
+  if (before === null && planned === undefined) return;
+  const { entries, ready } = await defaultReviewerList([claudeDriver, codexDriver], repoRoot);
+  if (entries.length === 0) {
+    out("Reviewer list: none written, since neither Claude Code nor Codex can start here; a review tries the agent it runs from, then Claude Code, then Codex. Set review.reviewers in .openqodex/config.yaml to choose.");
+    return;
+  }
+  out(`Reviewer list for ${shown(s, path)}, tried top to bottom, shared by the whole team: ${entries.map((e, i) => `${i + 1}. ${entryLabel(e)} (${ready[i] ? "can start here" : "cannot start here yet"})`).join("; ")}. An entry that cannot start on a teammate's machine is passed over with its reason.`);
+  const write = (): void => {
+    const now = readRepoFile(repoRoot, path, CONFIG_MAX_BYTES);
+    if (now === null) return;
+    const next = insertReviewerList(now, entries);
+    // A file the list would push past the size a review reads is left as it is.
+    if (next === null || Buffer.byteLength(next.text, "utf8") > CONFIG_MAX_BYTES) return;
+    s.guard.write(path, next.text, { keepMode: true });
+    const owned = record.files.find((f) => f.path === path);
+    if (owned !== undefined && owned.sha256 === sha256(now)) owned.sha256 = sha256(next.text);
+    if (next.oldMin !== null) out(`${shown(s, path)} says min_version: ${next.oldMin}; openqodex older than ${REVIEWERS_SINCE} ignores the reviewer list, so raise min_version to ${REVIEWERS_SINCE} if teammates may run one.`);
+  };
+  if (planned !== undefined) {
+    const apply = planned.apply!;
+    planned.apply = async () => { await apply(); write(); };
+    planned.note += "; with the reviewer list";
+  } else {
+    actions.push({ verb: "update", path, note: "the reviewer list, tried top to bottom", guard: { path, before }, apply: write });
+  }
+}
+
 // A path as the closing lines show it: inside the repo relative to it,
 // inside the home folder from ~, anything else as it is.
 function shown(s: Setup, path: string): string {
@@ -738,7 +831,7 @@ export async function run(args: string[]): Promise<number> {
     runner: flags.project ? `npx -y openqodex@${__OPENQODEX_VERSION__}` : launcherRunner(launcherPath(openqodexHomeDir())),
     gitFolders,
     // Every folder this run may write, each opened once, here.
-    guard: new Guard({ repoRoot, gitFolders, roots: [home, claudeHome(home), codexHome(home), openqodexHomeDir()] }),
+    guard: new Guard({ repoRoot, gitFolders, roots: [home, claudeHome(home), codexHome(home), gooseHome(home), openqodexHomeDir()] }),
   };
   try {
     // A dry run writes nothing and takes no lock. Otherwise everything runs

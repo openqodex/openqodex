@@ -1,0 +1,13 @@
+{
+  "covers": "computed keys on values typed as strings, numbers, booleans, bigints and symbols run no getter: the getter stays whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/cart.ts": "export class Cart {\n  get total(): number {\n    return 1;\n  }\n  run(): void {}\n}\n",
+    "src/rows.ts": "export function pick(s: string, n: number, b: boolean, big: bigint, sym: symbol, k: number, j: string): unknown {\n  return [s[k].length, n[k], Number(j[k]), b[k], big[k], sym[k]];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/cart.ts#Cart.total"
+  ],
+  "floored": []
+}

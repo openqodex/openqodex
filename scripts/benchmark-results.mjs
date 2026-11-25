@@ -1,10 +1,13 @@
-// Publishes accepted benchmark numbers from the committed index only.
-// --check writes nothing and names the first differing line in each file.
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+// Publishes accepted benchmark numbers from the committed index only: the
+// full results page, the README block and the README chart (one SVG per
+// GitHub theme). --check writes nothing and names the first differing line
+// in each file.
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { acceptedProblems, entryProblems, groupKeys, listEntries } from "../benchmark/lib/index.mjs";
 import { SUITES } from "../benchmark/lib/suites.mjs";
+import { boardConfigOf } from "../benchmark/lib/martian-board.mjs";
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const START = "<!-- benchmark-results:start -->";
@@ -36,11 +39,41 @@ const boardCells = (numbers) => [numbers?.semantic?.precision, numbers?.semantic
 const boardHead = ["Semantic precision", "Semantic recall", "Semantic F1", "Noise rate", "Line precision", "Line recall"];
 const readable = ({ e, g, s }) => !SUITES[e.suite]?.board || Boolean(board(e, g)) || s.issueRecall.all.hit > 0;
 const recall = (s, interval = false) => (unruled(s) ? "not yet ruled" : ratio(s.issueRecall.all, interval));
+// A number whose reviewer was tuned on the very cases it scored says so beside it.
+const tuned = (e, text) => (e.tunedOn === true ? `${text} (tuned on these cases)` : text);
 const suiteLabel = (e) => `${suiteName(e.suite)}, ${e.split} split${e.subset ? `, ${e.subset} subset` : ""}`;
-const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, `rules ${e.rulesVersion}`, ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : [])].join(", ");
+// The scoring rules a run was scored under; an entry from before the rules had versions is legacy.
+const rulesLabel = (e) => `scoring rules ${e.rulesVersion ?? "legacy"}`;
+// A README row names its scoring rules, so two runs that differ only there read apart (issue #280).
+// Rows that still read alike also name the rest of their group key: mode, path, split hash and purpose.
+const casesCells = (rows) => {
+  const short = ({ e }) => `${suiteLabel(e)}, ${rulesLabel(e)}`;
+  const seen = (r) => [reviewer(r.g), r.g.config, modelName(r.e, r.g), short(r)].join("\n");
+  const count = new Map();
+  for (const r of rows) count.set(seen(r), (count.get(seen(r)) ?? 0) + 1);
+  return new Map(rows.map((r) => [r, count.get(seen(r)) > 1
+    ? `${short(r)}, ${r.e.mode} mode, ${r.e.path} path${r.e.splitHash ? `, split hash ${r.e.splitHash.slice(0, 12)}` : ""}${r.e.purpose ? `, ${r.e.purpose} purpose` : ""}`
+    : short(r)]));
+};
+const groupLabel = (e, g) => [g.config, `${e.split} split`, ...(e.subset ? [`${e.subset} subset`] : []), `${e.mode} mode`, `${e.path} path`, rulesLabel(e), ...(e.splitHash ? [`split hash ${e.splitHash.slice(0, 12)}`] : []), ...(e.purpose ? [`${e.purpose} purpose`] : [])].join(", ");
+// A Greptile or Martian row's repeat range: the mean, never the best repeat, with the lowest and highest.
+const repeatRange = (e, g) => e.outside?.[SUITES[e.suite]?.board]?.range?.[boardConfigOf(g.config)];
+export function rangeLine(e, g) {
+  const r = repeatRange(e, g);
+  if (!r) return null;
+  const text = r.metric === "caught"
+    ? `caught ${r.mean.toFixed(1)} of ${r.of} cases on average (${percent(r.mean / r.of)}), from ${r.min} to ${r.max}`
+    : `F1 ${percent(r.mean)} on average, from ${percent(r.min)} to ${percent(r.max)}`;
+  return `${runLink(e)}, ${g.config}: ${tuned(e, text)} across ${r.repeats} repeats. The range is the lowest and highest repeat, not a confidence interval.`;
+}
 const precisionRange = (s) => (s.precision.lower.of === 0 ? "not measured" : `${ratio(s.precision.lower)} to ${ratio(s.precision.upper)}`);
 
-export function renderResults(index) {
+// The openqodex version a run reviewed with, and the day it ran.
+const cliVersion = (e) => e.build?.cliVersion ?? "not recorded";
+const runDate = (e) => e.date ?? "not recorded";
+
+// Every entry and the accepted row of each group, after the index checks.
+function acceptedRows(index) {
   const entries = listEntries(join(index, "runs")).map(({ entry }) => entry);
   const byId = new Map(entries.map((e) => [e.runId, e]));
   const pointer = JSON.parse(readFileSync(join(index, "accepted.json"), "utf8"));
@@ -51,6 +84,82 @@ export function renderResults(index) {
     const g = groupKeys(e).find((g) => g.key === key);
     return { e, g, s: e.scores[g.config], accepted };
   });
+  return { entries, rows };
+}
+
+// The run the README chart and its caption show: among the accepted planted-bug
+// reviews by Claude Code on the whole dev split, with the graph on and not tuned
+// on these cases, the highest scoring rules version; on a tie, the latest accepted.
+export function headlineRow(rows) {
+  const candidates = rows.filter(({ e, g }) => e.suite === "planted" && e.mode === "review" && g.reviewer === "claude" &&
+    e.split === "dev" && !e.subset && e.tunedOn !== true && g.config.endsWith("-graph-on"));
+  candidates.sort((a, b) => (b.e.rulesVersion ?? -1) - (a.e.rulesVersion ?? -1) || b.accepted.acceptedAt.localeCompare(a.accepted.acceptedAt));
+  if (candidates.length === 0) throw new Error("no accepted planted-bug review by Claude Code for the README chart");
+  return candidates[0];
+}
+
+// The chart's four measures, each a share for its bar (a range for precision) and its text.
+const share = (r) => (r && r.of > 0 ? r.hit / r.of : 0);
+function chartBars({ s }) {
+  return [
+    { label: "Issue recall", from: 0, to: unruled(s) ? 0 : share(s.issueRecall.all), text: recall(s) },
+    { label: "Location recall", from: 0, to: share(s.location?.recall), text: ratio(s.location?.recall) },
+    { label: "Precision", from: share(s.precision.lower), to: share(s.precision.upper), text: precisionRange(s) },
+    { label: "Clean rate", from: 0, to: share(s.controls), text: ratio(s.controls) },
+  ];
+}
+const xml = (text) => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+// One skin per GitHub theme. The page shows the one that matches the reader's.
+const SKINS = {
+  light: { surface: "#ffffff", border: "#d0d7de", text: "#1f2328", muted: "#59636e", track: "#eaeef2", bar: "#0969da", range: "#9cc5f5" },
+  dark: { surface: "#0d1117", border: "#3d444d", text: "#f0f6fc", muted: "#9198a1", track: "#262c36", bar: "#4493f8", range: "#1d4b8a" },
+};
+export function chartTitle(row) {
+  const { e, g } = row;
+  return `${suiteName(e.suite)}: ${reviewer(g)} review with ${modelName(e, g)}`;
+}
+export function chartSubtitle(row) {
+  const { e } = row;
+  return `openqodex ${cliVersion(e)}, run on ${runDate(e)}, ${rulesLabel(e)}, ${e.repeat} repeats of each case`;
+}
+export function chartAlt(row) {
+  return `${chartTitle(row)}. ${chartBars(row).map((b) => `${b.label} ${b.text}`).join(", ")}.`;
+}
+export function renderChart(index, skin) {
+  const c = SKINS[skin];
+  if (!c) throw new Error(`unknown chart skin ${skin}`);
+  const row = headlineRow(acceptedRows(index).rows);
+  const [width, left, barX, barW, valueX, top, step] = [960, 32, 210, 400, 630, 112, 44];
+  const bars = chartBars(row);
+  const height = top + bars.length * step + 44;
+  const font = `font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"`;
+  const body = bars.map((b, i) => {
+    const y = top + i * step;
+    const x0 = barX + barW * b.from;
+    const solid = b.from > 0 ? `<rect x="${barX}" y="${y - 7}" width="${(barW * b.from).toFixed(1)}" height="14" rx="4" fill="${c.bar}"/>` : "";
+    const span = b.to > b.from ? `<rect x="${x0.toFixed(1)}" y="${y - 7}" width="${(barW * (b.to - b.from)).toFixed(1)}" height="14" rx="4" fill="${b.from > 0 ? c.range : c.bar}"/>` : "";
+    return [
+      `<text x="${left}" y="${y + 5}" font-size="15" fill="${c.text}">${xml(b.label)}</text>`,
+      `<rect x="${barX}" y="${y - 7}" width="${barW}" height="14" rx="4" fill="${c.track}"/>`,
+      span, solid,
+      `<text x="${valueX}" y="${y + 5}" font-size="15" fill="${c.text}">${xml(b.text)}</text>`,
+    ].filter(Boolean).join("\n  ");
+  });
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="title" ${font}>`,
+    `  <title id="title">${xml(chartAlt(row))}</title>`,
+    `  <rect x="0.5" y="0.5" width="${width - 1}" height="${height - 1}" rx="12" fill="${c.surface}" stroke="${c.border}"/>`,
+    `  <text x="${left}" y="44" font-size="20" font-weight="600" fill="${c.text}">${xml(chartTitle(row))}</text>`,
+    `  <text x="${left}" y="72" font-size="14" fill="${c.muted}">${xml(chartSubtitle(row))}</text>`,
+    ...body.map((b) => `  ${b}`),
+    `  <text x="${left}" y="${height - 22}" font-size="13" fill="${c.muted}">Precision: the bar is full colour up to the lower bound and pale up to the upper bound.</text>`,
+    "</svg>",
+    "",
+  ].join("\n");
+}
+
+export function renderResults(index) {
+  const { entries, rows } = acceptedRows(index);
   const page = ["# Benchmark results", "", "Generated by `node scripts/benchmark-results.mjs` from `benchmark/index`. Do not edit this page by hand.", "", "## How to read this", "",
     "- A group is one configuration on one set of cases under one version of the scoring rules. Each row is the run a person accepted for its group.",
     "- Library is the Node library's reviewChange function. It reviews with the model in the row, as a server would.",
@@ -76,10 +185,10 @@ export function renderResults(index) {
   for (const suite of suites) {
     const selected = rows.filter(({ e }) => e.suite === suite);
     page.push(`## ${suiteName(suite)}`, "",
-      table(["Reviewer", "Model", "Group", "Repeats", "Issue recall", "Location recall", "Precision lower bound", "Precision upper bound", "Clean rate", "Cost per review", "Time per review", "Run", "Accepted date"], selected.map(({ e, g, s, accepted }) => [
+      table(["Reviewer", "Model", "Group", "Repeats", "Issue recall", "Location recall", "Precision lower bound", "Precision upper bound", "Clean rate", "Cost per review", "Time per review", "openqodex", "Run date", "Run", "Accepted date"], selected.map(({ e, g, s, accepted }) => [
         reviewer(g), modelName(e, g), groupLabel(e, g),
-        e.repeat, recall(s, true), ratio(s.location?.recall), ratio(s.precision.lower), ratio(s.precision.upper), ratio(s.controls), cost(s),
-        typeof s.wallMsMean === "number" ? `${(s.wallMsMean / 1000).toFixed(1)} s` : "not measured", runLink(e), accepted.acceptedAt.slice(0, 10),
+        e.repeat, tuned(e, recall(s, true)), ratio(s.location?.recall), ratio(s.precision.lower), ratio(s.precision.upper), ratio(s.controls), cost(s),
+        typeof s.wallMsMean === "number" ? `${(s.wallMsMean / 1000).toFixed(1)} s` : "not measured", cliVersion(e), runDate(e), runLink(e), accepted.acceptedAt.slice(0, 10),
       ])), "");
     for (const { e, g, s } of selected) {
       // Published A/A twins use the parent's run id with the -aa suffix.
@@ -92,6 +201,8 @@ export function renderResults(index) {
           `The difference is ${noise} issues across ${e.repeat} repeats, or ${(noise / e.repeat).toFixed(2)} per repeat.`, "");
       }
     }
+    const ranged = selected.map(({ e, g }) => rangeLine(e, g)).filter(Boolean);
+    if (ranged.length > 0) page.push("### Board scores", "", ...ranged.flatMap((line) => [line, ""]));
     if (suite === "aacr") {
       page.push("### Board scores", "");
       for (const { e, g } of selected) {
@@ -106,19 +217,32 @@ export function renderResults(index) {
   const shown = rows.filter(readable);
   const plain = shown.filter(({ e, g }) => !board(e, g));
   const boarded = shown.filter(({ e, g }) => board(e, g));
+  const cases = casesCells(shown);
+  const top = headlineRow(rows);
+  const asset = (skin) => `https://raw.githubusercontent.com/openqodex/openqodex/main/.github/assets/benchmark-${skin}.svg`;
   const headline = [START, "## Benchmark", "",
-    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review"], plain.map(({ e, g, s }) => [
-      `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), recall(s), precisionRange(s), ratio(s.controls), cost(s),
+    "<picture>",
+    `  <source media="(prefers-color-scheme: dark)" srcset="${asset("dark")}">`,
+    `  <img alt="${xml(chartAlt(top))}" src="${asset("light")}" width="960">`,
+    "</picture>",
+    "",
+    `The chart shows one accepted run: ${reviewer(top.g)} with ${modelName(top.e, top.g)} on openqodex ${cliVersion(top.e)}, run on ${runDate(top.e)}. ` +
+      `Each number adds up ${top.e.repeat} repeats of every case, and repeats of one case can give different results. ` +
+      "The table shows selected accepted runs. [The full results](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md) list every accepted run.",
+    "",
+    ...(plain.length ? [table(["Reviewer", "Model", "Cases", "Issue recall", "Precision", "Clean rate", "Cost per review", "openqodex", "Run date"], plain.map((r) => [
+      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), precisionRange(r.s), ratio(r.s.controls), cost(r.s), cliVersion(r.e), runDate(r.e),
     ])), ""] : []),
-    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review"], boarded.map(({ e, g, s }) => [
-      `${reviewer(g)} (${g.config})`, modelName(e, g), suiteLabel(e), recall(s), ...boardCells(board(e, g)), cost(s),
+    ...(boarded.length ? ["AACR-Bench is a set of real pull requests. Its own evaluator gives the board numbers below.", "", table(["Reviewer", "Model", "Cases", "Issue recall", ...boardHead, "Cost per review", "openqodex", "Run date"], boarded.map((r) => [
+      `${reviewer(r.g)} (${r.g.config})`, modelName(r.e, r.g), cases.get(r), tuned(r.e, recall(r.s)), ...boardCells(board(r.e, r.g)), cost(r.s), cliVersion(r.e), runDate(r.e),
     ])), ""] : []),
     "[Full results and how to read them](https://github.com/openqodex/openqodex/blob/main/docs/benchmark-results.md)", END].join("\n");
   return { page: page.join("\n"), headline };
 }
 
 export function generateResults({ root = repo, check = false } = {}) {
-  const { page, headline } = renderResults(join(root, "benchmark/index"));
+  const index = join(root, "benchmark/index");
+  const { page, headline } = renderResults(index);
   const readmePath = join(root, "README.md");
   const readme = readFileSync(readmePath, "utf8");
   const start = readme.indexOf(START);
@@ -126,9 +250,13 @@ export function generateResults({ root = repo, check = false } = {}) {
   if (start < 0 || end < start || readme.indexOf(START, start + START.length) !== -1 || readme.indexOf(END, end + END.length) !== -1) throw new Error("README.md needs one ordered pair of benchmark-results markers");
   const expectedReadme = readme.slice(0, start) + headline + readme.slice(end + END.length);
   let differs = false;
-  for (const [name, expected] of [["docs/benchmark-results.md", page], ["README.md", expectedReadme]]) {
+  const charts = ["light", "dark"].map((skin) => [`.github/assets/benchmark-${skin}.svg`, renderChart(index, skin)]);
+  for (const [name, expected] of [["docs/benchmark-results.md", page], ["README.md", expectedReadme], ...charts]) {
     const path = join(root, name);
-    if (!check) writeFileSync(path, expected);
+    if (!check) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, expected);
+    }
     else {
       const actual = existsSync(path) ? readFileSync(path, "utf8") : "";
       if (actual === expected) continue;

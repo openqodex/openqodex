@@ -2798,6 +2798,7 @@
  ],
  "below_threshold": 0,
  "outside_change": [],
+ "possible": [],
  "low_confidence": [],
  "not_reviewed": [],
  "dropped": [],

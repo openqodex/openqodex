@@ -1,1 +1,8 @@
-Host defines m and returns `new Runnable() { void m() {...} public void run() { this.m(); } }`. Inside the anonymous class, `this` is the anonymous object, so the call runs the anonymous class's own m. The change edits Host.m. A graph that takes `this` for the enclosing class lists task as a caller of Host.m, a call that never happens. Host.m must get no caller from the anonymous body, the call must be a disclosed unknown, and Host.m's caller list must be a floor because that call shares its name.
+Host defines m and returns an anonymous Runnable with its own m.
+The anonymous body's `this.m()` binds to that body's method at certain.
+It must not reach Host.m or leave an unknown.
+
+A named class has the same certainty for its own fixed zero-argument method, even with an outside base.
+A varargs overload must not displace that fixed member.
+The varargs-only control stays likely because an outside base may supply a better overload.
+A subclass also selects the inherited fixed zero-argument member before a varargs overload.

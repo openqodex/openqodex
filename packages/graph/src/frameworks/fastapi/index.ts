@@ -14,12 +14,18 @@ import { analyse, PLUGIN, RULE_VERSION } from "./resolve.js";
 
 // 5: every kept string follows the one rule of shared/kept.ts.
 // 6: a test client keeps its base URL, and a request is joined to its path.
-export const VERSION = 6;
+// 7: each dependency is a call from every route handler it runs for and
+// from a dependency that declares it (fact "deps"), with evidence
+// fastapi-depends.
+// 8: an expression the reader cut at a cap says so, and a function whose
+// only dependencies are past the parameter cap keeps its deps fact.
+export const VERSION = 8;
 const SUPPORTED = "FastAPI 0.100 and later";
 
 const app = "fastapi-app";
 const meta = "fastapi-metadata-edit";
 const not = "fastapi-not-fastapi";
+const depends = "fastapi-depends-calls";
 
 export const fastapi: FrameworkPlugin<FastApiFact> = {
   id: PLUGIN,
@@ -54,9 +60,9 @@ export const fastapi: FrameworkPlugin<FastApiFact> = {
       {
         id: "fastapi-dependency",
         version: RULE_VERSION,
-        description: "The dependencies that run before a route's handler, in order: the application's, each include's and router's own, the decorator's, then the handler's parameters declared with Depends or Security.",
+        description: "The dependencies that run before a route's handler, in order: the application's, each include's and router's own, the decorator's, then the handler's parameters declared with Depends or Security. Each is also a call from the handler, and a dependency's own Depends parameters are calls from it.",
         emits: ["applies_middleware", "middleware"],
-        fixtures: { positive: [app], aliased: { none: "Depends is matched by its qualified name through the same import rule as FastAPI and APIRouter, whose aliased case covers it" }, unrelatedSameName: [not], dynamic: { none: "a dependency names a function, not a path; a computed one is an unknown of cause dynamic" }, metadataEdit: [meta] },
+        fixtures: { positive: [app, depends], aliased: { none: "Depends is matched by its qualified name through the same import rule as FastAPI and APIRouter, whose aliased case covers it" }, unrelatedSameName: [not, depends], dynamic: { none: "a dependency names a function, not a path; a computed one is an unknown of cause dynamic" }, metadataEdit: [meta] },
       },
       {
         id: "fastapi-pydantic-model",

@@ -7,11 +7,15 @@ import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
 import { benchRoot } from "../lib/cases.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
+import { newWave } from "../lib/wave.mjs";
 
 afterAll(removeTempDirs);
 
-const run = (out, args) => spawnSync(process.execPath, [join(benchRoot, "run.mjs"), "--out", out, ...args], { encoding: "utf8" });
-const review = ["--max-usd", "1", "--max-minutes", "1"];
+// A review run that pays a model names a wave (lib/wave.mjs): one of this file's own.
+const waveRoot = tempDir("oq-run-date-wave-");
+newWave("run-date", { root: waveRoot });
+const run = (out, args) => spawnSync(process.execPath, [join(benchRoot, "run.mjs"), "--out", out, ...args], { encoding: "utf8", env: { ...process.env, OPENQODEX_BENCH_WAVES: join(waveRoot, "index/waves") } });
+const review = ["--max-usd", "1", "--max-minutes", "1", "--wave", "run-date"];
 
 it.each([review, ["--mode", "scan"]].map((args) => ({ args })))("refuses another day's output date before a run starts with $args", ({ args }) => {
   const date = new Date().toISOString().slice(0, 10);

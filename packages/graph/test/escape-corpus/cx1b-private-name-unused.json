@@ -1,0 +1,18 @@
+{
+  "covers": "a named function expression whose own name is never read is answered whole (flaw 1, the other side)",
+  "files": {
+    "src/b.ts": "export const k = function k2() { return 1; };\nk();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/b.ts#k",
+      "caller": "src/b.ts",
+      "file": "src/b.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "src/b.ts#k"
+  ],
+  "floored": []
+}

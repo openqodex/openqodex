@@ -1,0 +1,41 @@
+{
+  "guards": "binds a call through a class field or a parameter typed by an interface certain to the interface member, possible to its implementation, and leaves no unknown row at the same site once every class of that shape is listed",
+  "callers": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/service.ts:6",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/mem-store.ts#MemStore.get",
+      "site": "src/service.ts:6",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/service.ts:11",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/mem-store.ts#MemStore.get",
+      "site": "src/service.ts:11",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/service.ts",
+      "line": 6,
+      "cause": "unsupported-rule"
+    },
+    {
+      "file": "src/service.ts",
+      "line": 11,
+      "cause": "unsupported-rule"
+    }
+  ]
+}

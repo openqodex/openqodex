@@ -6,6 +6,9 @@
 - Scanners: 15 scanners ran, 5 had nothing to check
 - Block threshold: warn only, nothing blocks the push
 
+The current folder holds a frozen copy of the code under review, with the change applied. Read it only through the tools you were given; it is the only place you can read, and you never run the repository's code.
+OpenQodex replaced every value the secret scanner matched with `[redacted]`, in this copy and in the diff. Treat `[redacted]` as a real value you cannot see, never as a placeholder or a missing value; raise no finding about the masking itself.
+
 ## Your unit
 
 Unit: u1
@@ -66,7 +69,7 @@ index df70b04..bdc39d6 100644
 +RUN pip install -r requirements.txt
 ```
 
-### h5 Dockerfile 9-10
+### h5 Dockerfile 9-10 (old lines 10-10)
 
 Removed lines use the old file's line numbers. Cite deletion anchor 9 or 10.
 
@@ -246,7 +249,7 @@ index c4ee6c8..1baa846 100755
 
 Built on this machine from 4 files of 4 eligible files in <SECONDS> s, fresh from cached facts; 6 call sites in the repository could not be bound.
 
-How to read this block. A change in behaviour to a touched symbol (its signature, return shape, errors, side effects or ordering) can break a caller outside the diff. Open the call sites that matter for this change and read them. Raise a finding only when a caller actually breaks, and anchor it on the changed line that breaks it. "certain" means an import, a definition in the same scope or a known receiver type proves the call, and every step it rests on is proved. "likely" means a stated convention picked the one target; its note says which, and it is a lead to check, not a fact. "possible" means the call may run this code and nothing proves it does: a call through an interface or a base type that one of several implementations or overrides answers, or a function used as a value that a callee, an alias, a table or a returned value may call. A possible caller is a lead to check, never proof that the code runs, and never proof that nothing else does. A caller list marked as a floor may be short: the graph could not bind some calls (a value of unknown type, a callback, a computed member), a call may reach the symbol only possibly, or some files were not read. Zero callers on a floor never means unused. Everything this block leaves out is in `.openqodex-review/graph/`, inside the folder you read: `index.md` lists the files, `callers/<key>.json` holds every caller of a symbol with its tier, `implementers/<key>.json` what implements or overrides it, `references/<key>.json` where it is used as a value or a type, `unknowns.json` what the graph could not see. Reading them does not count as reading the changed lines.
+How to read this block. A change in behaviour to a touched symbol (its signature, return shape, errors, side effects or ordering) can break a caller outside the diff. Open the call sites that matter for this change and read them. Raise a finding only when a caller actually breaks, and anchor it on the changed line that breaks it. "certain" means an import, a definition in the same scope or a known receiver type proves the call, and every step it rests on is proved. "likely" means a stated convention picked the one target; its note says which, and it is a lead to check, not a fact. "possible" means the call may run this code and nothing proves it does: a call through an interface or a base type that one of several implementations or overrides answers, or a function used as a value that a callee, an alias, a table or a returned value may call. A possible caller is a lead to check, never proof that the code runs, and never proof that nothing else does. A caller list marked as a floor may be short: the graph could not bind some calls (a value of unknown type, a callback, a computed member), a call may reach the symbol only possibly, or some files were not read. Zero callers on a floor never means unused. Everything this block leaves out is in `.openqodex-review/graph/`, inside the folder you read: `index.md` lists the files, `callers/<key>.json` holds each caller the graph found for a symbol, with its tier, `implementers/<key>.json` what implements or overrides it, `references/<key>.json` where it is used as a value or a type, `unknowns.json` what the graph could not see. Reading them does not count as reading the changed lines.
 
 Risk: low (2 symbols touched, 0 callers in 0 files)
 
@@ -1422,6 +1425,8 @@ Pass: local
 ## How to work
 
 For each hunk, write what changed and what it could break before anything else.
+Then follow each changed condition, mutation, async completion and cleanup through the whole flow it belongs to.
+Look across the other hunks of this unit and the code around the change.
 Before judging a changed call, contract, default or fallback, read the other side in the other file.
 Use "Code around the change" first, then your tools. Name the question you are answering before each read.
 Raise every defect you can show with a line of code at confidence 0.5 or higher.
@@ -1591,13 +1596,17 @@ Fields:
 - `file_path` and `line_number`: the file and line showing the problem.
 - `line_end`: optional end of the range, at least `line_number`.
 - `title`: a short noun phrase naming the problem.
-- `claim`: what is wrong and why it matters, in one or two sentences.
+- `claim`: what is wrong and why it matters. Name the code that makes it happen at each step, from the changed line to the effect.
+  When the evidence line itself is the defect, quote its words (a bare `pass`, an empty handler).
 - `evidence`: one to three citations. Each has `file_path`, `line_number` and `quote`.
 - `quote`: the line's text, copied exactly without the diff marker. Set `removed: true` when the change removed it.
 - `lens`: the listed pattern's name when it led to the candidate. Otherwise omit it or set null.
 
 Writing rules, checked by a script that sends back every broken rule:
-- At most 20 words per sentence. Use at most two sentences in each of: `changed`, `could_break`, `claim`.
+- At most 20 words per sentence.
+- At most 2 sentences in `changed`.
+- At most 2 sentences in `could_break`.
+- At most 3 sentences in `claim`.
 - Plain text on one line: no line break, no em dash.
 - Never name a scanner or a rule id in `title`, `claim`. The report shows the source separately.
 - Use the active voice and name the actor. Say one fact per sentence. Use the same word for the same thing every time.

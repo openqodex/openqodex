@@ -1,0 +1,32 @@
+{
+  "covers": "an Express route on a router mounted deeper than the plugin follows (express MAX_MOUNT_DEPTH)",
+  "caps": [
+    "frameworks/express/resolve.ts#MAX_MOUNT_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"express\": \"^4.18.0\"}}",
+    "src/h.ts": "export function h(req: unknown, res: unknown): void {}\n",
+    "src/app.ts": "import express, { Router } from \"express\";\nimport { h } from \"./h\";\nexport const app = express();\nconst r1 = Router();\nconst r2 = Router();\nconst r3 = Router();\nconst r4 = Router();\nconst r5 = Router();\nconst r6 = Router();\nconst r7 = Router();\nconst r8 = Router();\nconst r9 = Router();\nconst r10 = Router();\nr10.get(\"/x\", h);\nr9.use(\"/a\", r10);\nr8.use(\"/a\", r9);\nr7.use(\"/a\", r8);\nr6.use(\"/a\", r7);\nr5.use(\"/a\", r6);\nr4.use(\"/a\", r5);\nr3.use(\"/a\", r4);\nr2.use(\"/a\", r3);\nr1.use(\"/a\", r2);\napp.use(\"/a\", r1);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 14
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h",
+      "reason": "routers mounted more than 8 levels deep were not followed",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/h.ts"
+      }
+    }
+  ]
+}

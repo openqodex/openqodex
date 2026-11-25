@@ -1,0 +1,42 @@
+{
+  "covers": "a Django urls module that assigns more names than the fact reader keeps, so its imports are not taken as Django's (django MAX_ASSIGNED)",
+  "caps": [
+    "frameworks/django/facts.ts#MAX_ASSIGNED"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "django\n",
+    "manage.py": "import django\n",
+    "proj/__init__.py": "",
+    "proj/views.py": "def deep(request):\n    return None\n",
+    "proj/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = []\n",
+    "proj/urls.py": [
+      "from django.urls import path\nfrom proj import views\n\n",
+      {
+        "repeat": "x{{i}} = 0\n",
+        "times": 2001
+      },
+      "urlpatterns = [path(\"deep/\", views.deep)]\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "proj/views.py#deep",
+      "caller": null,
+      "file": "proj/urls.py",
+      "line": 2005
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "proj/views.py#deep",
+      "reason": "the module assigns more than 2000 names, so none of its imports is taken as proof of Django's API",
+      "at": "proj/urls.py:1",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "proj/urls.py:1"
+      }
+    }
+  ]
+}

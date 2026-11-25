@@ -1,0 +1,79 @@
+{
+  "covers": "gaps of the net/http plugin past the unknowns it lists in one build (go-http MAX_UNKNOWNS)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_UNKNOWNS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc h(w n.ResponseWriter, r *n.Request) {}\n\nfunc rega() {\n",
+      {
+        "repeat": "\tx.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "b.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regb() {\n",
+      {
+        "repeat": "\tx.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "c.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regc() {\n",
+      {
+        "repeat": "\tx.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "d.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regd() {\n",
+      {
+        "repeat": "\tx.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "e.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc rege() {\n",
+      {
+        "repeat": "\tx.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "f.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regf() {\n",
+      {
+        "repeat": "\tx.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm := n.NewServeMux()\n\tm.HandleFunc(\"/y\", deep)\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped listing unknowns after 10000",
+      "at": "f.go:1671",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "f.go:1671"
+      }
+    }
+  ]
+}

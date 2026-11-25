@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildGraph } from "../../index.js";
 import type { Graph } from "../../index.js";
-import { expectLinear, pluginCpuMs } from "../../test-timing.js";
+import { expectLinear, growthTests, pluginCpuMs } from "../../test-timing.js";
 import { MAX_ROLES } from "./resolve.js";
 
 function repo(files: Record<string, string>): string {
@@ -85,7 +85,9 @@ describe("the React plugin on tens of thousands of components", () => {
     expect(cut?.count).toBe(12 * 1900 - MAX_ROLES);
   });
 
-  it("finds each component's definition in constant time, so thousands of components in one file stay linear", async () => {
-    expectLinear("the React plugin on files of 475 and of 1,900 components", await pluginCpuMs(build(quarter), "react"), await pluginCpuMs(build(root), "react"));
-  }, 300_000);
+  growthTests("in constant time", () => {
+    it("finds each component's definition in constant time, so thousands of components in one file stay linear", async () => {
+      expectLinear("the React plugin on files of 475 and of 1,900 components", await pluginCpuMs(build(quarter), "react"), await pluginCpuMs(build(root), "react"));
+    }, 300_000);
+  });
 });

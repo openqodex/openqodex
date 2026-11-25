@@ -20,8 +20,9 @@
 // 13. A push event scans an empty change: no base reaches the scan.
 //  9. In a pull request the head's config hides findings (disabled_rules,
 //     scanners.disable, severity_threshold): the config must come from the
-//     base branch, and a failed fetch, a missing file or an odd branch name
-//     falls back to the built-in defaults, never to the head's file.
+//     event's base commit, and a failed fetch, a missing file or a base that
+//     is not a commit id falls back to the built-in defaults, never to the
+//     head's file.
 // 10. A wrong config-from or block-on-severity input is taken silently.
 // 11. A pull request adds a custom scanner that then runs in CI.
 // 14. The scanner cache is keyed on the openqodex version, so every release
@@ -35,7 +36,7 @@
 // tests/e2e/action-review.test.ts.
 import { stagedAnswer } from "../../review/test/staged-fake.js";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
@@ -132,8 +133,10 @@ function runStep(dir: string, env: Record<string, string>, before: string[] = []
       "#!/bin/sh",
       'shift; shift',
       'if [ -n "$OQ_CALLS" ]; then echo "$1 key=${ANTHROPIC_API_KEY:+set}" >> "$OQ_CALLS"; fi',
+      'if [ -n "$OQ_ARGS" ]; then printf "%s\\n" "$*" >> "$OQ_ARGS"; fi',
       'if [ -n "$OQ_FOLDERS" ]; then pwd -P >> "$OQ_FOLDERS"; fi',
       'if [ -n "$OQ_PATHS" ]; then printf "%s\\n" "$PATH" >> "$OQ_PATHS"; fi',
+      'if [ "$1" = "doctor" ] && [ -n "$OQ_DOCTOR_JSON_FAILS" ]; then case " $* " in *" --json "*) exit 2 ;; esac; fi',
       'if [ "$1" = "doctor" ]; then shift; set -- doctor $(for a in "$@"; do [ "$a" = "--install" ] || printf "%s\\n" "$a"; done); fi',
       'if [ "$1" = "scan" ] && [ -z "$OQ_ALL_SCANNERS" ]; then shift; set -- scan --no-install --only sqllint "$@"; fi',
       'if [ "$1" = "scan" ] && [ -n "$OQ_ALL_SCANNERS" ]; then shift; set -- scan --no-install "$@"; fi',
@@ -158,7 +161,6 @@ function runStep(dir: string, env: Record<string, string>, before: string[] = []
       OPENQODEX_HOME: tempDir("oq-action-home-"),
       OPENQODEX_VERSION: "0.0.0",
       BASE_SHA: "",
-      BASE_REF: "",
       PUSH_BEFORE: "",
       DEFAULT_BRANCH: "",
       BLOCK_ON_SEVERITY: "",
@@ -251,25 +253,37 @@ describe("the scan step, run", () => {
 
   it("9. in a pull request the base branch's config decides, unless config-from is head", () => {
     const { dir, base } = pullRequest("review:\n  severity_threshold: info\n", HIDE);
-    const pr = { EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main", BLOCK_ON_SEVERITY: "info" };
+    const pr = { EVENT_NAME: "pull_request", BASE_SHA: base, BLOCK_ON_SEVERITY: "info" };
     const fromBase = runStep(dir, pr);
     expect(fromBase.status).toBe(0);
     expect(fromBase.outputs).toContain("status=blocked");
     expect(runStep(dir, { ...pr, CONFIG_FROM: "head" }).outputs).toContain("status=passed");
   });
 
-  it("9. a base with no config, a failed fetch or an odd branch name gives the built-in defaults, never the head's file", () => {
+  it("9. a base with no config, a failed fetch or a base that is not a commit id gives the built-in defaults, never the head's file", () => {
     const { dir, base } = pullRequest(null, HIDE);
-    const pr = { EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main", BLOCK_ON_SEVERITY: "info" };
+    const pr = { EVENT_NAME: "pull_request", BASE_SHA: base, BLOCK_ON_SEVERITY: "info" };
     expect(runStep(dir, pr).outputs).toContain("status=blocked");
-    const missing = runStep(dir, { ...pr, BASE_REF: "no-such-branch" });
-    expect(missing.outputs).toContain("status=blocked");
-    expect(missing.stdout).toContain("::warning title=OpenQodex config::could not fetch the base branch");
-    for (const odd of ["-x", "main;rm", "a b", "$(id)"]) {
-      const r = runStep(dir, { ...pr, BASE_REF: odd });
-      expect(r.outputs, odd).toContain("status=blocked");
-      expect(r.stdout, odd).toContain("not a plain branch name");
+    // A base commit that cannot be fetched is no base for the scan either:
+    // a tool failure, never the head's file (which would pass).
+    const missing = runStep(dir, { ...pr, BASE_SHA: "f".repeat(40) });
+    expect(missing.outputs).not.toContain("status=passed");
+    expect(missing.stdout).toContain("::warning title=OpenQodex config::could not fetch the base commit");
+    // No commit id: no base for the change and no settings commit.
+    for (const odd of ["", "-x", "main;rm", "$(id)"]) {
+      const r = runStep(dir, { ...pr, BASE_SHA: odd });
+      expect(r.stdout, odd).toContain("::warning title=OpenQodex config::this event gives no base commit, so OpenQodex uses the built-in defaults");
     }
+  }, 30_000);
+
+  it("9, R36. the config comes from the event's base commit, never the base branch's tip, though the branch moved since", () => {
+    const { dir, base } = pullRequest("review:\n  severity_threshold: info\n", null);
+    // The base branch moves on after the event: its tip hides the finding.
+    const origin = spawnSync("git", ["config", "remote.origin.url"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+    writeFileSync(join(origin, ".openqodex/config.yaml"), HIDE);
+    spawnSync("git", ["-c", "user.name=T", "-c", "user.email=t@openqodex.invalid", "-c", "commit.gpgsign=false", "commit", "-qam", "Hide"], { cwd: origin });
+    const r = runStep(dir, { EVENT_NAME: "pull_request", BASE_SHA: base, BLOCK_ON_SEVERITY: "info" });
+    expect(r.outputs).toContain("status=blocked");
   }, 30_000);
 
   it("10, R13. a wrong config-from, block-on-severity, review or claude-code-version fails the step with one line", () => {
@@ -305,7 +319,7 @@ describe("the scan step, run", () => {
         if (planted === ".openqodex") rmSync(join(d, ".openqodex"), { recursive: true });
         symlinkSync(elsewhere, join(d, planted));
       });
-      const pr = { EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main", BLOCK_ON_SEVERITY: "info" };
+      const pr = { EVENT_NAME: "pull_request", BASE_SHA: base, BLOCK_ON_SEVERITY: "info" };
       for (const review of ["off", "required"]) {
         const r = runStep(dir, { ...pr, REVIEW: review, ...noClaude() });
         expect(r.outputs, `${planted} review ${review}`).toContain("status=blocked");
@@ -334,7 +348,7 @@ describe("the scan step, run", () => {
     };
     for (const [planted, plant] of Object.entries(links)) {
       const { dir, base } = pullRequest(null, null, plant);
-      for (const event of [{ EVENT_NAME: "push", PUSH_BEFORE: base }, { EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main", CONFIG_FROM: "head" }]) {
+      for (const event of [{ EVENT_NAME: "push", PUSH_BEFORE: base }, { EVENT_NAME: "pull_request", BASE_SHA: base, CONFIG_FROM: "head" }]) {
         const what = `${planted} on ${event.EVENT_NAME}`;
         const r = runStep(dir, { ...event, BLOCK_ON_SEVERITY: "info" });
         expect(r.outputs, what).toContain("status=blocked");
@@ -358,7 +372,7 @@ describe("the scan step, run", () => {
       writeFileSync(join(d, "db/x.sql"), "SELECT 1;\n");
       symlinkSync(join(outside, "rules.md"), join(d, "rules.md"));
     });
-    for (const event of [{ EVENT_NAME: "push", PUSH_BEFORE: base }, { EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main", CONFIG_FROM: "head" }]) {
+    for (const event of [{ EVENT_NAME: "push", PUSH_BEFORE: base }, { EVENT_NAME: "pull_request", BASE_SHA: base, CONFIG_FROM: "head" }]) {
       const r = runStep(dir, { ...event, REVIEW: "required", OQ_ONLY_SQLLINT: "1" }, [provider]);
       expect(r.status, r.stderr).toBe(0);
       expect(outputOf(r.outputs, "review-status"), r.summary).toBe("complete");
@@ -375,7 +389,7 @@ describe("the scan step, run", () => {
     const custom = `scanners:\n  custom:\n    - source: https://github.com/example/planted\n      run: touch ${marker} {report} {target}\n`;
     const { dir, base } = pullRequest(null, custom);
     for (const from of ["base", "head"]) {
-      const r = runStep(dir, { EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main", CONFIG_FROM: from, OQ_ALL_SCANNERS: "1" });
+      const r = runStep(dir, { EVENT_NAME: "pull_request", BASE_SHA: base, CONFIG_FROM: from, OQ_ALL_SCANNERS: "1" });
       expect(r.outputs, from).toMatch(/status=(passed|blocked)/);
       expect(existsSync(marker), from).toBe(false);
     }
@@ -411,6 +425,29 @@ describe("the scan step, run", () => {
 // PATH without any folder that holds a `claude` program, so the review mode
 // must install Claude Code; npm pointed at a closed local port, so that
 // install fails at once and offline, with the real npm.
+// A PATH with neither Claude Code nor Codex on it, for a list's reviewers.
+// A folder that holds codex beside node (a package manager's bin folder) is
+// left out, and the programs the script needs from it are linked instead.
+function noAgents(): Record<string, string> {
+  const env = noClaude();
+  const dirs = env.PATH!.split(delimiter);
+  const links = tempDir("oq-no-agents-");
+  for (const name of ["node", "npm", "npx", "git"]) {
+    const from = dirs.find((d) => existsSync(join(d, "codex")) && existsSync(join(d, name)) && !dirs.slice(0, dirs.indexOf(d)).some((e) => existsSync(join(e, name))));
+    if (from !== undefined) symlinkSync(join(from, name), join(links, name));
+  }
+  return { ...env, PATH: [links, ...dirs.filter((d) => !existsSync(join(d, "codex")))].join(delimiter) };
+}
+
+// A folder outside any checkout holding a stand-in `name` that prints `says`
+// for every command: enough for the Action to find and link it.
+function standInAgent(name: string, says: string): string {
+  const dir = tempDir("oq-agent-");
+  writeFileSync(join(dir, name), `#!/bin/sh\necho "${says}"\nexit 1\n`);
+  chmodSync(join(dir, name), 0o755);
+  return dir;
+}
+
 function noClaude(): Record<string, string> {
   const path = (process.env.PATH ?? "").split(delimiter).filter((d) => d !== "" && !existsSync(join(d, "claude"))).join(delimiter);
   return { PATH: path, npm_config_registry: "http://127.0.0.1:9/", npm_config_fetch_retries: "0", npm_config_cache: tempDir("oq-npm-cache-") };
@@ -438,7 +475,7 @@ describe("the review mode, without a reviewer", () => {
     const { dir, base } = pullRequest(null, null);
     for (const review of ["auto", "required"]) {
       const calls = callsFile();
-      const r = runStep(dir, { OQ_CALLS: calls, ANTHROPIC_API_KEY: KEY, REVIEW: review, EVENT_NAME: "pull_request_target", BASE_SHA: base, BASE_REF: "main", ...noClaude() });
+      const r = runStep(dir, { OQ_CALLS: calls, ANTHROPIC_API_KEY: KEY, REVIEW: review, EVENT_NAME: "pull_request_target", BASE_SHA: base, ...noClaude() });
       expect(r.stdout.split("\n")[0], review).toMatch(/^OpenQodex scanners only/);
       expect(readFileSync(calls, "utf8"), review).toBe("doctor key=\nscan key=\n");
       expect(outputOf(r.outputs, "review-status"), review).toBe("off");
@@ -451,12 +488,13 @@ describe("the review mode, without a reviewer", () => {
   it("R8, R11, R4, R5. Claude Code fails to install: the reason, the scanner findings instead, and a blocking finding fails the job; the key reaches nothing and is written nowhere", () => {
     const { dir, base } = pullRequest(null, null);
     const calls = callsFile();
-    const pr = { OQ_CALLS: calls, ANTHROPIC_API_KEY: KEY, EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main", ...noClaude() };
+    const pr = { OQ_CALLS: calls, ANTHROPIC_API_KEY: KEY, EVENT_NAME: "pull_request", BASE_SHA: base, ...noClaude() };
     const r = runStep(dir, { ...pr, BLOCK_ON_SEVERITY: "info" });
     expect(r.status).toBe(0);
     expect(r.stdout.split("\n")[0]).toMatch(/^OpenQodex review: this job runs the full review of the change, with Claude Code \d+\.\d+\.\d+ as the reviewer, on the repository's Anthropic API key\./);
-    // doctor and the fallback scan ran without the key; no review started.
-    expect(readFileSync(calls, "utf8")).toBe("doctor key=\nscan key=\n");
+    // doctor (the list, then the install) and the fallback scan ran without
+    // the key; no review started.
+    expect(readFileSync(calls, "utf8")).toBe("doctor key=\ndoctor key=\nscan key=\n");
     expect(outputOf(r.outputs, "review-status")).toBe("unavailable");
     expect(outputOf(r.outputs, "reviewed")).toBe("false");
     expect(r.stdout).toMatch(/::warning title=OpenQodex review did not complete::Claude Code \d+\.\d+\.\d+ could not be installed from npm/);
@@ -478,6 +516,81 @@ describe("the review mode, without a reviewer", () => {
       for (const f of allFiles(run.temp)) expect(readFileSync(f, "latin1"), f).not.toContain(KEY);
     }
   }, 60_000);
+
+  it("R36. the review step reads the reviewer list from the base commit, or from the pull request's head with config-from: head", () => {
+    const { dir, base } = pullRequest("version: 1\nreview:\n  reviewers:\n    - tool: codex\n      model: gpt-x\n    - tool: claude\n", "version: 1\nreview:\n  reviewers:\n    - tool: claude\n");
+    const pr = { ANTHROPIC_API_KEY: KEY, EVENT_NAME: "pull_request", BASE_SHA: base, ...noAgents() };
+    expect(runStep(dir, pr).stdout.split("\n")[0]).toMatch(/with the config's reviewer list \(codex claude\), each entry tried in order\./);
+    expect(runStep(dir, { ...pr, CONFIG_FROM: "head" }).stdout.split("\n")[0]).toMatch(/with Claude Code \d+\.\d+\.\d+ as the reviewer/);
+    // The plan step names no reviewer: the step that reviews reads the list itself.
+    expect(outputOf(runStep(dir, { ...pr, OPENQODEX_STEP: "plan" }).outputs, "reviewers")).toBeUndefined();
+  }, 60_000);
+
+  // A repository whose checked-out commit holds `config`: on a push, the
+  // settings commit.
+  const listedRepo = (config: string): string => {
+    const { dir, git } = gitRepo();
+    mkdirSync(join(dir, ".openqodex"));
+    writeFileSync(join(dir, ".openqodex/config.yaml"), config);
+    git("add", "-A");
+    git("commit", "-qm", "Config");
+    return dir;
+  };
+  const CODEX_ONLY = "version: 1\nreview:\n  reviewers:\n    - tool: codex\n";
+
+  it("R37. a list of Codex alone, on a runner with no codex or a logged-out one, runs the scanners only, says why in the log and the summary, and installs no Claude Code", () => {
+    const calls = callsFile();
+    const r = runStep(listedRepo(CODEX_ONLY), { OQ_CALLS: calls, ...noAgents() });
+    expect(r.stdout.split("\n")[0]).toMatch(/^OpenQodex scanners only/);
+    const why = "The config's reviewer list names Codex only, and this runner has no codex on its PATH, so this job runs the scanners only.";
+    expect(r.stdout.split("\n")[1]).toBe(why);
+    expect(r.summary).toContain(why);
+    expect(r.stdout).not.toContain("Installing Claude Code");
+    expect(readFileSync(calls, "utf8")).toBe("doctor key=\ndoctor key=\nscan key=\n");
+    expect(outputOf(r.outputs, "review-status")).toBe("off");
+    // A codex that is not logged in is not a reviewer that can run.
+    const env = noAgents();
+    const out = runStep(listedRepo(CODEX_ONLY), { ...env, PATH: `${standInAgent("codex", "Not logged in")}${delimiter}${env.PATH}` });
+    expect(out.stdout.split("\n")[1]).toBe("The config's reviewer list names Codex only, and this runner's codex is not logged in, so this job runs the scanners only.");
+    expect(outputOf(out.outputs, "review-status")).toBe("off");
+  }, 60_000);
+
+  it("R36, R38. with a list the review gets no --reviewer claude and Codex from the runner; without one it gets --reviewer claude, as before; when doctor cannot say, none is forced", () => {
+    const codex = tempDir("oq-agent-");
+    writeFileSync(join(codex, "codex"), "#!/bin/sh\necho \"codex-cli 0.160.0\"\nexit 0\n");
+    chmodSync(join(codex, "codex"), 0o755);
+    const env = noAgents();
+    const args = callsFile();
+    const listedPaths = join(tempDir("oq-paths-"), "paths");
+    const listed = runStep(listedRepo(CODEX_ONLY), { ...env, OQ_ARGS: args, OQ_PATHS: listedPaths, OQ_ONLY_SQLLINT: "1", PATH: `${codex}${delimiter}${env.PATH}` });
+    // The review's PATH holds the runner's codex.
+    const reviewLinks = readFileSync(listedPaths, "utf8").trim().split("\n").at(-1)!.split(delimiter)[0]!;
+    expect(realpathSync(join(reviewLinks, "codex"))).toBe(realpathSync(join(codex, "codex")));
+    expect(listed.stdout.split("\n")[0]).toMatch(/^OpenQodex review: this job runs the full review of the change, with the config's reviewer list \(codex\), each entry tried in order\./);
+    expect(listed.stdout).not.toContain("Installing Claude Code");
+    const review = readFileSync(args, "utf8").split("\n").find((l) => l.startsWith("review "))!;
+    expect(review).toContain("--reviewer-web off");
+    expect(review).not.toContain("--reviewer claude");
+
+    const version = action.inputs["claude-code-version"]!.default!;
+    const claude = standInAgent("claude", `${version} (Claude Code)`);
+    const plain = callsFile();
+    const before = runStep(gitRepo().dir, { ...env, OQ_ARGS: plain, OQ_ONLY_SQLLINT: "1", ANTHROPIC_API_KEY: KEY, PATH: `${claude}${delimiter}${env.PATH}` });
+    expect(before.stdout.split("\n")[0]).toMatch(/with Claude Code \d+\.\d+\.\d+ as the reviewer, on the repository's Anthropic API key\./);
+    const old = readFileSync(plain, "utf8").split("\n").find((l) => l.startsWith("review "))!;
+    expect(old).toContain("--reviewer-web off");
+    expect(old).toContain("--reviewer claude");
+
+    // doctor gave no list (it failed, or the pinned openqodex predates lists):
+    // the review's own config decides, and Codex is not handed over.
+    const unsure = callsFile();
+    const paths = join(tempDir("oq-paths-"), "paths");
+    runStep(listedRepo(CODEX_ONLY), { ...env, OQ_ARGS: unsure, OQ_PATHS: paths, OQ_ONLY_SQLLINT: "1", OQ_DOCTOR_JSON_FAILS: "1", ANTHROPIC_API_KEY: KEY, PATH: `${claude}${delimiter}${codex}${delimiter}${env.PATH}` });
+    const forced = readFileSync(unsure, "utf8").split("\n").find((l) => l.startsWith("review "))!;
+    expect(forced).not.toContain("--reviewer claude");
+    const links = readFileSync(paths, "utf8").trim().split("\n").at(-1)!.split(delimiter)[0]!;
+    expect(existsSync(join(links, "codex"))).toBe(false);
+  }, 90_000);
 
   it("R17. a claude program the checkout holds is never run, even first on PATH", () => {
     const marker = join(tempDir("oq-claude-ran-"), "ran");
@@ -549,7 +662,8 @@ describe("the review mode, without a reviewer", () => {
     expect(tokens).not.toContain(chosen);
     // Every program got the folder of links and the system folders, never the workflow's PATH.
     const got = readFileSync(paths, "utf8").trim().split("\n");
-    expect(got.length).toBe(2);
+    // doctor for the reviewer list, doctor --install, scan.
+    expect(got.length).toBe(3);
     for (const p of got) {
       const [links, ...rest] = p.split(delimiter);
       expect(rest.join(delimiter)).toBe("/usr/bin:/bin:/usr/sbin:/sbin");
@@ -602,12 +716,12 @@ describe("the review mode, without a reviewer", () => {
     // The project .npmrc outranks the user config: npm in the checkout would use the pull request's cache.
     const env = noClaude();
     delete env.npm_config_cache;
-    const r = runStep(dir, { ...env, npm_config_userconfig: userConfig, OQ_FOLDERS: folders, REVIEW: "required", EVENT_NAME: "pull_request", BASE_SHA: base, BASE_REF: "main" });
+    const r = runStep(dir, { ...env, npm_config_userconfig: userConfig, OQ_FOLDERS: folders, REVIEW: "required", EVENT_NAME: "pull_request", BASE_SHA: base });
     expect(outputOf(r.outputs, "review-status")).toBe("unavailable");
     expect(existsSync(marker)).toBe(false);
     const checkout = spawnSync("pwd", ["-P"], { cwd: dir, encoding: "utf8" }).stdout.trim();
     const ran = readFileSync(folders, "utf8").trim().split("\n");
-    expect(ran.length).toBe(2);
+    expect(ran.length).toBe(3);
     for (const folder of ran) expect(folder === checkout || folder.startsWith(`${checkout}/`), folder).toBe(false);
   });
 

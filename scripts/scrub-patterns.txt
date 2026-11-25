@@ -1,5 +1,5 @@
 # One case-insensitive regular expression per line. Lines starting with # are ignored.
-# A second, private list is read from .private/scrub-patterns.txt when that file exists.
+# A second, private list is read from the path in OPENQODEX_PRIVATE_SCRUB_LIST when that variable is set.
 bugsnag
 posthog
 —

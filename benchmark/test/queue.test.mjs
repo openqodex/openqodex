@@ -132,7 +132,7 @@ async function savedRun({ name = "run", repeat, reports }) {
   await executeRun({ out, manifest, jobs, copies: [[join(root, "files.json"), "cases/files.json"]], runJob: async (job) => {
     const dir = attemptDir(out, job, 1);
     const r = reports[job.repeat - 1];
-    write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: 1, result: { code: 0, signal: null, wallMs: 1000 }, report: r, who: null, startedAt: "t", failure: null, stopped: null })));
+    write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 0, signal: null, wallMs: 1000 }, report: r, who: null, startedAt: "t", failure: null, stopped: null })));
     write(join(dir, "report", "report.json"), JSON.stringify(r));
     write(join(dir, "report", "brief.md"), BRIEF);
   } });

@@ -54,6 +54,7 @@ import { delimiter, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BIN, cli, inTerminal, sandbox, snapshot, type Sandbox } from "./init-helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
+import { parseMcpFile, tomlConflict } from "../src/agents/mcp.js";
 
 // Every folder the shared helpers made for this file goes when it ends (tests/temp-guard.ts).
 afterAll(removeTempDirs);
@@ -109,51 +110,70 @@ const clineData = (s: Sandbox): string => join(s.home, ".cline", "data");
 const clineFile = (s: Sandbox): string => join(clineData(s), "settings", "cline_mcp_settings.json");
 const QUIET = ["--hook", "none", "--no-repo"];
 
-describe("1, 2 and 10. each agent's MCP file on a fresh home, byte for byte", () => {
+describe("1, 3, 7 and 10. every agent on a fresh home whose path holds a double quote and a space, byte for byte", () => {
+  // One install the cases below read, then a second init, then uninstall, last.
+  let s: Sandbox;
+  let first: ReturnType<typeof cli>;
+  beforeAll(() => {
+    // Not a backslash: Node refuses to start a script whose path holds one
+    // (ERR_INVALID_MODULE_SPECIFIER), so no launcher can live there.
+    s = sandbox({}, 'oq "q ');
+    expect(launcher(s)).toContain('"');
+    mkdirSync(clineData(s), { recursive: true });
+    first = cli(s, ["init", "--yes", "--agent", "all"]);
+    expect(first.status, first.stderr).toBe(0);
+  });
+
   it("1 and 2. Claude Code: ~/.claude.json in the home folder, a stdio entry running the launcher by its path", () => {
-    const s = sandbox();
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code", ...QUIET]);
-    expect(r.status, r.stderr).toBe(0);
     expect(read(join(s.home, ".claude.json"))).toBe(jsonFile({ openqodex: stdio(launcher(s), ["mcp"]) }));
     expect(statSync(join(s.home, ".claude.json")).mode & 0o777).toBe(0o600);
     expect(existsSync(join(s.home, ".claude", ".claude.json"))).toBe(false);
     // An agent reads its MCP servers when it starts.
-    expect(r.stdout).toContain("Restart Claude Code to load the code graph's MCP server.");
-  });
-
-  it("2. Claude Code with CLAUDE_CONFIG_DIR: .claude.json in that folder, nothing in the home folder", () => {
-    const s = sandbox();
-    const config = join(s.root, "claude config");
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code", ...QUIET], { env: { CLAUDE_CONFIG_DIR: config } });
-    expect(r.status, r.stderr).toBe(0);
-    expect(read(join(config, ".claude.json"))).toBe(jsonFile({ openqodex: stdio(launcher(s), ["mcp"]) }));
-    expect(existsSync(join(s.home, ".claude.json"))).toBe(false);
+    expect(first.stdout).toMatch(/^Restart [^\n]*Claude Code[^\n]* to load the code graph's MCP server\.$/m);
   });
 
   it("1. Cursor: ~/.cursor/mcp.json", () => {
-    const s = sandbox();
-    const r = cli(s, ["init", "--yes", "--agent", "cursor", ...QUIET]);
-    expect(r.status, r.stderr).toBe(0);
     expect(read(join(s.home, ".cursor", "mcp.json"))).toBe(jsonFile({ openqodex: stdio(launcher(s), ["mcp"]) }));
   });
 
-  it("1. Codex: a marked block in $CODEX_HOME/config.toml that a TOML parser reads as the server", () => {
-    const s = sandbox();
-    const codexHome = join(s.root, "codex home");
-    for (const [extra, file] of [[{}, join(s.home, ".codex", "config.toml")], [{ CODEX_HOME: codexHome }, join(codexHome, "config.toml")]] as const) {
-      const r = cli(s, ["init", "--yes", "--agent", "codex", ...QUIET], { env: extra });
-      expect(r.status, r.stderr).toBe(0);
-      expect(read(file)).toBe(tomlBlock(launcher(s), ["mcp"]));
-      expect(parseToml(file)).toEqual({ mcp_servers: { openqodex: { command: launcher(s), args: ["mcp"] } } });
-    }
+  it("1. Codex: a marked block in ~/.codex/config.toml that a TOML parser reads as the server", () => {
+    const file = join(s.home, ".codex", "config.toml");
+    expect(read(file)).toBe(tomlBlock(launcher(s), ["mcp"]));
+    expect(parseToml(file)).toEqual({ mcp_servers: { openqodex: { command: launcher(s), args: ["mcp"] } } });
   });
 
   it("10. Cline: with the Cline CLI's data folder, its cline_mcp_settings.json gets the entry", () => {
-    const s = sandbox();
-    mkdirSync(clineData(s), { recursive: true });
-    const r = cli(s, ["init", "--yes", "--agent", "cline", ...QUIET]);
-    expect(r.status, r.stderr).toBe(0);
     expect(read(clineFile(s))).toBe(jsonFile({ openqodex: { command: launcher(s), args: ["mcp"] } }));
+  });
+
+  it("3. a second init rewrites no MCP file and adds no entry", () => {
+    const before = snapshot(s);
+    const again = cli(s, ["init", "--yes", "--agent", "all"]);
+    expect(again.status, again.stderr).toBe(0);
+    expect(again.stdout).toContain("Nothing to change");
+    expect(snapshot(s)).toEqual(before);
+  });
+
+  it("7. uninstall removes every MCP file init created and leaves no file in the home folder", () => {
+    for (const f of [join(s.home, ".claude.json"), join(s.home, ".cursor", "mcp.json"), join(s.home, ".codex", "config.toml"), clineFile(s)]) expect(existsSync(f), f).toBe(true);
+    const r = cli(s, ["init", "--uninstall", "--yes"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(homeFiles(s)).toEqual([]);
+  });
+});
+
+describe("1, 2 and 10. agent folders named by the environment, and Cline without its CLI", () => {
+  it("2. with CLAUDE_CONFIG_DIR and CODEX_HOME set: .claude.json in Claude Code's folder, the block in Codex's, nothing in the home folder's", () => {
+    const s = sandbox();
+    const config = join(s.root, "claude config");
+    const codexHome = join(s.root, "codex home");
+    const r = cli(s, ["init", "--yes", "--agent", "claude-code", "--agent", "codex", ...QUIET], { env: { CLAUDE_CONFIG_DIR: config, CODEX_HOME: codexHome } });
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(join(config, ".claude.json"))).toBe(jsonFile({ openqodex: stdio(launcher(s), ["mcp"]) }));
+    expect(existsSync(join(s.home, ".claude.json"))).toBe(false);
+    expect(read(join(codexHome, "config.toml"))).toBe(tomlBlock(launcher(s), ["mcp"]));
+    expect(parseToml(join(codexHome, "config.toml"))).toEqual({ mcp_servers: { openqodex: { command: launcher(s), args: ["mcp"] } } });
+    expect(existsSync(join(s.home, ".codex", "config.toml"))).toBe(false);
   });
 
   it("10. Cline: without the CLI's data folder, no MCP file and a note with the command; the ~/.cline init made for the skill does not change a second run", () => {
@@ -169,35 +189,6 @@ describe("1, 2 and 10. each agent's MCP file on a fresh home, byte for byte", ()
     expect(second.status, second.stderr).toBe(0);
     expect(second.stdout).toContain("Nothing to change");
     expect(snapshot(s)).toEqual(before);
-  });
-
-  // Not a backslash: Node refuses to start a script whose path holds one
-  // (ERR_INVALID_MODULE_SPECIFIER), so no launcher can live there.
-  it("1. a home path holding a double quote survives in the JSON and in the TOML", () => {
-    const s = sandbox({}, 'oq "q ');
-    expect(launcher(s)).toContain('"');
-    const r = cli(s, ["init", "--yes", "--agent", "claude-code", "--agent", "codex", ...QUIET]);
-    expect(r.status, r.stderr).toBe(0);
-    const claude = JSON.parse(read(join(s.home, ".claude.json"))) as { mcpServers: { openqodex: { command: string } } };
-    expect(claude.mcpServers.openqodex.command).toBe(launcher(s));
-    expect(parseToml(join(s.home, ".codex", "config.toml"))).toEqual({ mcp_servers: { openqodex: { command: launcher(s), args: ["mcp"] } } });
-  });
-});
-
-describe("3 and 7. a second init, then uninstall, on a home with every agent", () => {
-  let s: Sandbox;
-  beforeAll(() => {
-    s = sandbox();
-    mkdirSync(clineData(s), { recursive: true });
-    const r = cli(s, ["init", "--yes", "--agent", "all"]);
-    expect(r.status, r.stderr).toBe(0);
-  });
-
-  it("7. uninstall removes every MCP file init created and leaves no file in the home folder", () => {
-    for (const f of [join(s.home, ".claude.json"), join(s.home, ".cursor", "mcp.json"), join(s.home, ".codex", "config.toml"), clineFile(s)]) expect(existsSync(f), f).toBe(true);
-    const r = cli(s, ["init", "--uninstall", "--yes"]);
-    expect(r.status, r.stderr).toBe(0);
-    expect(homeFiles(s)).toEqual([]);
   });
 });
 
@@ -259,17 +250,29 @@ describe("4 and 7. files the developer already has", () => {
 
 describe("5. a file init cannot read as an MCP file", () => {
   it("is refused and left byte-identical, the other agent is installed, and init exits 2", () => {
-    for (const text of ["{ not json,\n", '{"mcpServers": []}\n', "[]\n"]) {
-      const s = sandbox();
-      const file = join(s.home, ".claude.json");
-      write(file, text);
-      const r = cli(s, ["init", "--yes", "--agent", "claude-code", "--agent", "cursor", ...QUIET]);
-      expect(r.status, text).toBe(2);
-      expect(r.stdout).toMatch(/refuse .*\.claude\.json/);
-      expect(read(file)).toBe(text);
-      expect(existsSync(join(s.home, ".cursor", "mcp.json"))).toBe(true);
-    }
-  }, 120_000);
+    const s = sandbox();
+    const file = join(s.home, ".claude.json");
+    const text = "{ not json,\n";
+    write(file, text);
+    const r = cli(s, ["init", "--yes", "--agent", "claude-code", "--agent", "cursor", ...QUIET]);
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(/refuse .*\.claude\.json/);
+    expect(read(file)).toBe(text);
+    expect(existsSync(join(s.home, ".cursor", "mcp.json"))).toBe(true);
+  });
+
+  // The reader the run above refuses by: a reason for a file it must leave
+  // alone, an object for one it may merge into.
+  it.each([
+    ["text that is not JSON", "{ not json,\n", true],
+    ["an mcpServers that is an array", '{"mcpServers": []}\n', true],
+    ["a file that is an array", "[]\n", true],
+    ["a file that is a string", '"x"\n', true],
+    ["an object with no mcpServers", '{"other": true}\n', false],
+    ["an object whose mcpServers is an object", '{"mcpServers": {"db": {}}}\n', false],
+  ])("%s: refused is %s", (_name, text, refused) => {
+    expect(typeof parseMcpFile(text) === "string").toBe(refused);
+  });
 });
 
 describe("6. a server named openqodex that init did not write", () => {
@@ -286,75 +289,56 @@ describe("6. a server named openqodex that init did not write", () => {
     expect(read(file)).toBe(original);
   });
 
-  it("in Codex's config.toml, in any spelling of the key, no block is appended and the file stays as it was", () => {
-    const spellings = [
-      '[mcp_servers.openqodex]\ncommand = "mine"\n',
-      '[ "mcp_servers" . \'openqodex\' ]\ncommand = "mine"\n',
-      '[mcp_servers.openqodex.env]\nA = "1"\n',
-      '[mcp_servers]\nopenqodex = { command = "mine" }\n',
-      '[mcp_servers]\nopenqodex.command = "mine"\n',
-      'mcp_servers.openqodex.command = "mine"\n',
-      'mcp_servers = { openqodex = { command = "mine" } }\n',
-      // An inline table cannot be extended by a [mcp_servers.openqodex] table.
-      'mcp_servers = { db = { command = "db-mcp" } }\n',
-    ];
-    for (const text of spellings) {
-      const s = sandbox();
-      const file = join(s.home, ".codex", "config.toml");
-      write(file, text);
-      const r = cli(s, ["init", "--yes", "--agent", "codex", ...QUIET]);
-      expect(r.status, `${text}\n${r.stderr}`).toBe(0);
-      expect(r.stdout, text).toMatch(/keep .*config\.toml/);
-      expect(read(file), text).toBe(text);
-    }
-  }, 180_000);
-
-  it("14. in Codex's config.toml, a quoted, escaped, spaced or array-of-tables key: no block is appended and the file stays as it was", () => {
-    const spellings = [
-      '[mcp_servers."openqodex"]\ncommand = "mine"\n',
-      "[mcp_servers.'openqodex']\ncommand = \"mine\"\n",
-      '[mcp_servers."open\\u0071odex"]\ncommand = "mine"\n',
-      '[mcp_servers."open\\U00000071odex"]\ncommand = "mine"\n',
-      'mcp_servers."openqodex".command = "mine"\n',
-      '"mcp_servers" . openqodex . command = "mine"\n',
-      '[[mcp_servers.openqodex]]\ncommand = "mine"\n',
-    ];
-    for (const text of spellings) {
-      const s = sandbox();
-      const file = join(s.home, ".codex", "config.toml");
-      write(file, text);
-      const r = cli(s, ["init", "--yes", "--agent", "codex", ...QUIET]);
-      expect(r.status, `${text}\n${r.stderr}`).toBe(0);
-      expect(r.stdout, text).toMatch(/keep .*config\.toml.*already defines a server named openqodex/);
-      expect(read(file), text).toBe(text);
-    }
-  }, 180_000);
-
-  it("14. text that only looks like the server inside a string is not a definition: the block is appended and the file still parses", () => {
-    const texts = [
-      'motto = "see # [mcp_servers.openqodex]"\n',
-      'notes = """\n[mcp_servers.openqodex]\ncommand = "x"\n"""\n',
-    ];
-    for (const text of texts) {
-      const s = sandbox();
-      const file = join(s.home, ".codex", "config.toml");
-      write(file, text);
-      const r = cli(s, ["init", "--yes", "--agent", "codex", ...QUIET]);
-      expect(r.status, `${text}\n${r.stderr}`).toBe(0);
-      expect(read(file), text).toBe(`${text}${tomlBlock(launcher(s), ["mcp"])}`);
-      expect((parseToml(file).mcp_servers as Record<string, unknown>).openqodex, text).toEqual({ command: launcher(s), args: ["mcp"] });
-    }
-  });
-
-  it("14. a config.toml that is not TOML is left untouched, and the plan says it could not be read as TOML", () => {
+  it("14. in Codex's config.toml, a server defined under a quoted key: no block is appended, init says why, and the file stays as it was", () => {
     const s = sandbox();
     const file = join(s.home, ".codex", "config.toml");
-    const text = 'model = "o3\n[mcp_servers.db]\n';
+    const text = '[mcp_servers."openqodex"]\ncommand = "mine"\n';
     write(file, text);
     const r = cli(s, ["init", "--yes", "--agent", "codex", ...QUIET]);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toMatch(/keep .*config\.toml.*could not be read as TOML/);
+    expect(r.stdout).toMatch(/keep .*config\.toml.*already defines a server named openqodex/);
     expect(read(file)).toBe(text);
+  });
+
+  it("14. text that only looks like the server inside a string is not a definition: the block is appended and the file still parses", () => {
+    const s = sandbox();
+    const file = join(s.home, ".codex", "config.toml");
+    const text = 'notes = """\n[mcp_servers.openqodex]\ncommand = "x"\n"""\n';
+    write(file, text);
+    const r = cli(s, ["init", "--yes", "--agent", "codex", ...QUIET]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(read(file)).toBe(`${text}${tomlBlock(launcher(s), ["mcp"])}`);
+    expect((parseToml(file).mcp_servers as Record<string, unknown>).openqodex).toEqual({ command: launcher(s), args: ["mcp"] });
+  });
+
+  // What rules out appending the block, as init decides it before each of
+  // the two runs above: a definition of the server in any spelling, an
+  // mcp_servers no table can add to, a file that is not TOML; and text that
+  // only looks like one, which rules out nothing.
+  const DEFINES = /already defines a server named openqodex/;
+  it.each([
+    ["6. a table", '[mcp_servers.openqodex]\ncommand = "mine"\n', DEFINES],
+    ["6. a table with quotes and spaces around the dot", '[ "mcp_servers" . \'openqodex\' ]\ncommand = "mine"\n', DEFINES],
+    ["6. a table under the server", '[mcp_servers.openqodex.env]\nA = "1"\n', DEFINES],
+    ["6. an inline table under [mcp_servers]", '[mcp_servers]\nopenqodex = { command = "mine" }\n', DEFINES],
+    ["6. a dotted key under [mcp_servers]", '[mcp_servers]\nopenqodex.command = "mine"\n', DEFINES],
+    ["6. a dotted key at the root", 'mcp_servers.openqodex.command = "mine"\n', DEFINES],
+    ["6. an inline table at the root", 'mcp_servers = { openqodex = { command = "mine" } }\n', DEFINES],
+    ["6. an mcp_servers inline table without the server", 'mcp_servers = { db = { command = "db-mcp" } }\n', /inline table/],
+    ["14. a double-quoted key", '[mcp_servers."openqodex"]\ncommand = "mine"\n', DEFINES],
+    ["14. a single-quoted key", "[mcp_servers.'openqodex']\ncommand = \"mine\"\n", DEFINES],
+    ["14. a key with a \\u escape", '[mcp_servers."open\\u0071odex"]\ncommand = "mine"\n', DEFINES],
+    ["14. a key with a \\U escape", '[mcp_servers."open\\U00000071odex"]\ncommand = "mine"\n', DEFINES],
+    ["14. a quoted dotted key", 'mcp_servers."openqodex".command = "mine"\n', DEFINES],
+    ["14. a dotted key with spaces", '"mcp_servers" . openqodex . command = "mine"\n', DEFINES],
+    ["14. an array of tables", '[[mcp_servers.openqodex]]\ncommand = "mine"\n', DEFINES],
+    ["14. a file that is not TOML", 'model = "o3\n[mcp_servers.db]\n', /could not be read as TOML/],
+    ["14. the header inside a basic string", 'motto = "see # [mcp_servers.openqodex]"\n', null],
+    ["14. the header inside a multi-line string", 'notes = """\n[mcp_servers.openqodex]\ncommand = "x"\n"""\n', null],
+  ])("%s", (_name, text, why) => {
+    const conflict = tomlConflict(text);
+    if (why === null) expect(conflict).toBeNull();
+    else expect(conflict).toMatch(why);
   });
 });
 
@@ -407,27 +391,18 @@ describe("9. --project", () => {
   });
 });
 
-describe("11. the Claude Code permission rules for the graph", () => {
-  it("permissions.allow holds the graph command line and no rule for an MCP server", () => {
-    const s = sandbox();
-    expect(cli(s, ["init", "--yes", "--agent", "claude-code", ...QUIET]).status).toBe(0);
-    const allow = (JSON.parse(read(join(s.home, ".claude", "settings.json"))) as { permissions: { allow: string[] } }).permissions.allow;
-    expect(allow.filter((r) => / graph\b|^mcp__/.test(r))).toEqual([`Bash(${launcher(s).includes(" ") ? `'${launcher(s)}'` : launcher(s)} graph *)`]);
-  });
-});
-
-describe("13. no rule for the tools of a server named openqodex", () => {
+describe("11 and 13. the graph rule, and no rule for the tools of a server named openqodex", () => {
   const settings = (s: Sandbox): string => join(s.home, ".claude", "settings.json");
   const rules = (s: Sandbox): string[] => (JSON.parse(read(settings(s))) as { permissions: { allow: string[] } }).permissions.allow;
-  const graphRule = (s: Sandbox): string => `Bash(${launcher(s).includes(" ") ? `'${launcher(s)}'` : launcher(s)} graph *)`;
+  // Every sandbox path holds a space, so the launcher is written in single quotes.
+  const graphRule = (s: Sandbox): string => `Bash('${launcher(s)}' graph *)`;
 
-  it("13. the user-scope server is OpenQodex's and a project's .mcp.json names another server openqodex: no mcp__openqodex rule", () => {
+  it("11 and 13. permissions.allow holds the graph command line and no rule for an MCP server, though a project's .mcp.json names another server openqodex", () => {
     const s = sandbox({ ".mcp.json": jsonFile({ openqodex: { command: "someone-else" } }) });
     const r = cli(s, ["init", "--yes", "--agent", "claude-code", ...QUIET]);
     expect(r.status, r.stderr).toBe(0);
     expect((JSON.parse(read(join(s.home, ".claude.json"))) as { mcpServers: Record<string, unknown> }).mcpServers.openqodex).toEqual(stdio(launcher(s), ["mcp"]));
-    expect(rules(s).filter((x) => x.startsWith("mcp__"))).toEqual([]);
-    expect(rules(s)).toContain(graphRule(s));
+    expect(rules(s).filter((x) => / graph\b|^mcp__/.test(x))).toEqual([graphRule(s)]);
   });
 
   it("13. the mcp__openqodex rule an earlier build recorded is removed by the next init", () => {

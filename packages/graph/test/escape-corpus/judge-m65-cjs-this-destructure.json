@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: cjs this destructure",
+  "files": {
+    "src/a.js": "exports.f = function () {};\nconst { f: g } = this;\ng();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": null,
+      "file": "src/a.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

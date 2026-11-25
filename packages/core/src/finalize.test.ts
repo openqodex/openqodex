@@ -30,8 +30,23 @@
 //     under review.severity_threshold and leaves the report: in a scan, where
 //     it counts as minor, or raised by the reviewer at a low severity in
 //     either submission version.
+// 16. Two finders describe one defect with different titles, with no
+//     candidate cited, on overlapping lines of one file in one category: it
+//     shows twice, as two findings or as a finding and a possible issue; or
+//     the merge keeps the lower severity or the thinner text; or findings on
+//     lines that do not overlap, or from different sources, are merged; or a
+//     possible issue is dropped for a counted finding the threshold hides,
+//     so the defect shows nowhere; or a broad finding absorbs two findings
+//     on lines apart from each other, or a counted finding takes two
+//     possible issues, so a distinct defect is lost; or the merged finding
+//     loses the lines of the one it absorbed; or a possible issue leaves
+//     for the key of a hidden merged finding no finder submitted, or two
+//     possible issues merged into one leave for a counted finding that
+//     overlaps only one of them, or for one of several counted findings
+//     that overlap its parts.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
-import { checkSubmission, finalizeReview, scanReport, SETTINGS_RULE, SUPPRESSION_RULE } from "./finalize.js";
+import { checkSubmission, finalizeReview, proseErrors, scanReport, sentences, SETTINGS_RULE, SUPPRESSION_RULE } from "./finalize.js";
 import {
   KEY_CANDIDATE,
   LINT_CANDIDATE,
@@ -145,12 +160,11 @@ describe("finalizeReview: citations", () => {
 });
 
 describe("finalizeReview: filters", () => {
-  it("moves a finding under 0.7 to low_confidence", () => {
+  it("shows a finding under 0.7 as possible", () => {
     const report = run(makeSubmission({ findings: [finding({ confidence: 0.65 })] }));
     expect(report.findings).toEqual([]);
-    expect(report.low_confidence).toEqual([
-      { title: "SQL built from request input", file_path: "app/search.py", confidence: 0.65, floor: 0.7 },
-    ]);
+    expect(report.possible).toEqual([expect.objectContaining({ confidence: 0.65, description: expect.any(String) })]);
+    expect(report.low_confidence).toEqual([]);
   });
 
   it("applies a lens floor above 0.7", () => {
@@ -158,7 +172,7 @@ describe("finalizeReview: filters", () => {
       makeSubmission({ findings: [finding({ source: "lens:sql-string-concatenation", candidate: null, confidence: 0.72 })] }),
     );
     expect(report.findings).toEqual([]);
-    expect(report.low_confidence[0]?.floor).toBe(0.75);
+    expect(report.possible[0]?.confidence).toBe(0.72);
   });
 
   it("moves a finding on a file outside the change to outside_change and does not count it", () => {
@@ -322,9 +336,12 @@ describe("finalizeReview: review round 1", () => {
     expect(viaDropped).not.toContain(SECRET);
   });
 
-  it("R2: redacts every string in the report, file paths and scanner reasons included", () => {
+  it("R2: redacts possible paths and text alongside hidden entries and scanner reasons", () => {
     const change = makeChange();
     const scan = makeScan();
+    change.coverage.set(`possible/${SECRET}.py`, makeLineSet([14]));
+    change.changedPaths.push(`possible/${SECRET}.py`);
+    change.files.push({ path: `possible/${SECRET}.py`, status: "modified", oldPath: null, binary: false });
     const leakyScan = {
       ...scan,
       scanners: scan.scanners.map((s) => (s.scanner === "brakeman" ? { ...s, reason: `failed near ${SECRET}` } : s)),
@@ -337,12 +354,15 @@ describe("finalizeReview: review round 1", () => {
       submission: makeSubmission({
         findings: [
           finding({ source: null, candidate: null, file_path: `debug/${SECRET}.py` }),
-          finding({ source: null, candidate: null, file_path: `low/${SECRET}.py`, confidence: 0.5 }),
+          finding({ source: null, candidate: null, file_path: `low/${SECRET}.py`, confidence: 0.45 }),
+          finding({ source: null, candidate: null, file_path: `possible/${SECRET}.py`, description: `Exposes ${SECRET}`, confidence: 0.55 }),
         ],
       }),
     });
     expect(report.outside_change).toHaveLength(1);
     expect(report.low_confidence).toHaveLength(1);
+    expect(report.possible).toHaveLength(1);
+    expect(report.possible[0]!.description).not.toContain(SECRET);
     expect(JSON.stringify(report)).not.toContain(SECRET);
     const scanOnly = scanReport({ change, scan: leakyScan, config: makeConfig() });
     expect(JSON.stringify(scanOnly)).not.toContain(SECRET);
@@ -534,5 +554,117 @@ describe("dependency information", () => {
     const notes = fixedIn === undefined ? [] : fixedIn.length ? ["Scanner: fixed in 4.17.21"] : ["Scanner: no fixed version published"];
     expect(legacy.findings[0].notes).toEqual(notes);
     expect(modern.report.findings[0].notes).toEqual(notes);
+  });
+});
+
+// Failure: a Ruby bang or predicate method name followed by a word (destroy!, admin?) was counted as a
+// sentence end, so a three-sentence problem naming such calls failed the sentence limit on every
+// correction round and the review went incomplete (planted rails-controller-model, wave 9 candidate).
+describe("sentence counting around code names", () => {
+  it("does not count a bang or predicate method followed by a lowercase word as a sentence end", () => {
+    const problem = "The destroy action looks up the user by params[:id] without scoping it to the caller. The before_action on line 2 excludes destroy from require_admin. Only authenticate! runs, and it checks admin? on the record.";
+    expect(sentences(problem)).toHaveLength(3);
+    expect(proseErrors("problem", problem, null, 3)).toEqual([]);
+  });
+  it("still ends a sentence at a bang or question mark followed by a capital, a digit, a quote or a backtick", () => {
+    expect(sentences("The action calls destroy! The caller is unscoped. Is it guarded? `authenticate!` runs first. Why? 2 reasons.")).toHaveLength(6);
+  });
+});
+
+describe("one defect under two titles is shown once (16)", () => {
+  function run2(version: number, entries: Record<string, unknown>[], config: Partial<Config> = {}) {
+    const change = makeChange();
+    const args = { change, scan: makeScan({ candidates: [] }), manifest: makeManifest(change), config: makeConfig(config) };
+    const findings = entries.map((entry) => ({ ...finding({ source: null, candidate: null, category: "bug", file_path: "app/settings.py" }), ...entry }));
+    if (version === 1) return finalizeReview({ ...args, submission: makeSubmission({ findings, dropped: [] }) });
+    const v2 = findings.map(({ description, suggested_change: _s, ...rest }) => ({ ...rest, problem: description, consequence: "The request fails.", fix: "Open a new pool first." }));
+    const checked = checkSubmission({ ...args, lineCount: () => 100, submission: { version: 2, change_id: change.id, summary: "Checked.", findings: v2, dropped: [] } });
+    if (!checked.ok) throw new Error(checked.errors.join("\n"));
+    return checked.report;
+  }
+  const thin = { title: "Pool closed too early", description: "The pool closes.", severity: "minor", line_number: 1, line_end: 3 };
+  const rich = { title: "put runs after the pool shut down", description: "The pool closes before the last put, so put raises ShutDown.", severity: "major", line_number: 2, line_end: 2 };
+
+  it.each([1, 2])("version %i merges two counted findings on overlapping lines, keeping the higher severity, the richer text and both ranges", (version) => {
+    for (const entries of [[thin, rich], [rich, thin]]) {
+      const report = run2(version, entries);
+      expect(report.findings.map((f) => [f.severity, f.title, f.line_number, f.line_end])).toEqual([["major", rich.title, 1, 3]]);
+    }
+    const report = run2(version, [{ ...thin, severity: "critical" }, rich]);
+    expect(report.findings.map((f) => [f.severity, f.title])).toEqual([["critical", rich.title]]);
+  });
+
+  it.each([1, 2])("version %i drops a possible issue on lines a counted finding of its category covers", (version) => {
+    const report = run2(version, [{ ...rich, confidence: 0.9 }, { ...thin, confidence: 0.55 }]);
+    expect(report.findings.map((f) => f.title)).toEqual([rich.title]);
+    expect(report.possible).toEqual([]);
+  });
+
+  it.each([1, 2])("version %i shows a possible issue whose counted twin the severity threshold hides", (version) => {
+    const report = run2(version, [{ ...thin, confidence: 0.9 }, { ...rich, confidence: 0.55 }], { severityThreshold: "major" });
+    expect(report.findings).toEqual([]);
+    expect(report.below_threshold).toBe(1);
+    expect(report.possible.map((f) => f.title)).toEqual([rich.title]);
+  });
+
+  it.each([1, 2])("version %i keeps a broad finding and two findings it overlaps on lines apart from each other", (version) => {
+    const broad = { ...rich, line_number: 1, line_end: 3, description: "The pool closes before the last put, so put raises ShutDown, and the caller retries forever." };
+    const first = { ...thin, line_end: 1 };
+    const third = { ...thin, title: "Lock never released", line_number: 3, line_end: 3 };
+    for (const entries of [[broad, first, third], [first, third, broad]]) {
+      expect(run2(version, entries).findings.map((f) => f.title).sort()).toEqual([broad.title, first.title, third.title].sort());
+    }
+    const report = run2(version, [{ ...broad, confidence: 0.9 }, { ...first, confidence: 0.55 }, { ...third, confidence: 0.55 }]);
+    expect(report.findings.map((f) => f.title)).toEqual([broad.title]);
+    expect(report.possible.map((f) => f.title)).toEqual([first.title, third.title]);
+  });
+
+  it.each([1, 2])("version %i keeps a possible issue that has only the key of a hidden merged finding", (version) => {
+    const first = { ...thin, line_end: 2, description: "The pool closes before the last put, so put raises ShutDown, and the caller retries.", confidence: 0.9 };
+    const second = { ...thin, title: "Pool shut twice", line_number: 2, line_end: 3, confidence: 0.9 };
+    const report = run2(version, [first, second, { ...rich, title: first.title, line_number: 1, line_end: 3, confidence: 0.55 }], { severityThreshold: "major" });
+    expect(report.findings).toEqual([]);
+    expect(report.below_threshold).toBe(1);
+    expect(report.possible.map((f) => [f.title, f.line_number, f.line_end])).toEqual([[first.title, 1, 3]]);
+  });
+
+  it.each([1, 2])("version %i keeps two possible issues merged into one when the counted finding overlaps only one of them", (version) => {
+    const counted = { ...rich, line_number: 1, line_end: 1, confidence: 0.9 };
+    const near = { ...rich, title: "Pool closed too soon", line_number: 1, line_end: 2, confidence: 0.55 };
+    const far = { ...rich, title: "Last put lost", line_number: 2, line_end: 3, description: "The last put is lost when the pool shuts, so the job never finishes.", confidence: 0.55 };
+    const report = run2(version, [counted, near, far]);
+    expect(report.findings.map((f) => f.title)).toEqual([counted.title]);
+    expect(report.possible.map((f) => [f.title, f.line_number, f.line_end])).toEqual([[far.title, 1, 3]]);
+    const both = run2(version, [{ ...counted, line_end: 2 }, { ...near, line_number: 1 }, { ...far, line_number: 1, line_end: 2 }]);
+    expect(both.possible).toEqual([]);
+  });
+
+  // Every way counted findings can overlap two possible issues merged into
+  // one (parts a and b). Shown counted findings, then [title, lines] of each
+  // possible issue the report keeps. "overlaps one part" and "overlaps both
+  // parts, alone" are the test above.
+  const a = { ...rich, title: "Pool closed too soon", confidence: 0.55 };
+  const b = { ...rich, title: "Last put lost", description: "The last put is lost when the pool shuts, so the job never finishes.", confidence: 0.55 };
+  const at = (title: string, line_number: number, line_end: number) => ({ ...rich, title, line_number, line_end, confidence: 0.9 });
+  it.each([1, 2])("version %i keeps or drops a merged possible issue by every way counted findings overlap its parts", (version) => {
+    const cases: [string, Record<string, unknown>[], [string, number, number][]][] = [
+      ["no counted finding overlaps either part", [{ ...a, line_number: 1, line_end: 2 }, { ...b, line_number: 2, line_end: 3 }], [[b.title, 1, 3]]],
+      ["two counted findings each overlap one part", [at("First", 1, 1), at("Third", 3, 3), { ...a, line_number: 1, line_end: 2 }, { ...b, line_number: 2, line_end: 3 }], [[b.title, 1, 3]]],
+      ["one counted finding overlaps both parts and another overlaps one", [at("Second", 2, 2), at("Third", 3, 3), { ...a, line_number: 1, line_end: 2 }, { ...b, line_number: 2, line_end: 3 }], [[b.title, 1, 3]]],
+      ["two counted findings each overlap both parts", [at("First", 1, 1), at("Third", 3, 3), { ...a, line_number: 1, line_end: 3 }, { ...b, line_number: 1, line_end: 3 }], [[b.title, 1, 3]]],
+      ["the counted finding over both parts also overlaps another possible issue", [at("Broad", 1, 3), { ...a, line_number: 1, line_end: 1 }, { ...b, line_number: 1, line_end: 2 }, { ...a, title: "Lock never released", line_number: 3, line_end: 3 }], [[b.title, 1, 2], ["Lock never released", 3, 3]]],
+    ];
+    for (const [name, entries, kept] of cases) {
+      const report = run2(version, entries);
+      expect([name, report.possible.map((f) => [f.title, f.line_number, f.line_end])]).toEqual([name, kept]);
+    }
+  });
+
+  it.each([1, 2])("version %i keeps findings on lines that do not overlap, and findings from different sources", (version) => {
+    const apart = run2(version, [{ ...thin, line_end: 1 }, { ...rich, line_number: 3, line_end: 3 }]);
+    expect(apart.findings.map((f) => f.title)).toEqual([thin.title, rich.title]);
+    const lens = `lens:${makeManifest(makeChange()).lenses[0]!.name}`;
+    const sources = run2(version, [thin, { ...rich, source: lens }]);
+    expect(sources.findings.map((f) => f.title)).toEqual([thin.title, rich.title]);
   });
 });

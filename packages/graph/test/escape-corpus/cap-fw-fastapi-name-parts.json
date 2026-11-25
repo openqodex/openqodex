@@ -1,0 +1,31 @@
+{
+  "covers": "a FastAPI dependency named by a dotted name longer than the plugin's reader reads (fastapi py.ts MAX_NAME_PARTS)",
+  "caps": [
+    "frameworks/fastapi/py.ts#MAX_NAME_PARTS"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": "from fastapi import Depends, FastAPI\n\napp = FastAPI()\n\nclass C1:\n    class C2:\n        class C3:\n            class C4:\n                class C5:\n                    class C6:\n                        class C7:\n                            class C8:\n                                class C9:\n                                    class C10:\n                                        class C11:\n                                            class C12:\n                                                class C13:\n                                                    class C14:\n                                                        class C15:\n                                                            class C16:\n                                                                class C17:\n                                                                    def d():\n                                                                        return 1\n\n@app.get(\"/x\", dependencies=[Depends(C1.C2.C3.C4.C5.C6.C7.C8.C9.C10.C11.C12.C13.C14.C15.C16.C17.d)])\ndef index():\n    return 1\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.py#C17.d",
+      "caller": null,
+      "file": "main.py",
+      "line": 25
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#C17.d",
+      "reason": "longer or deeper than the plugin reads",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.py:25"
+      }
+    }
+  ]
+}

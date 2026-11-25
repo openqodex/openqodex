@@ -26,9 +26,29 @@
 //  8. A primary whose answer never passes, then a second reviewer that
 //     completes: the candidates the second disposed of are still listed as
 //     unchecked, beside its own drops.
+// Added after the code review of cross-file evidence:
+//  9. The second reviewer rates a shared finding higher, and the merged
+//     finding loses the evidence in other files the staged primary kept.
+// Added after the code review of pull request 350:
+// 10. The second reviewer rates a shared finding higher, and the merged
+//     finding loses the rule citation the primary's finding carried.
+// Added for issue 315:
+// 11. The two reviewers title one defect differently, on overlapping lines,
+//     and it is listed twice, or the primary's possible issue stays beside
+//     the second reviewer's counted finding; or findings on lines that do
+//     not overlap merge; or a second finding with the exact key of one
+//     primary finding joins an earlier primary finding that only overlaps;
+//     or two second findings on one broad primary finding collapse into it,
+//     losing a distinct bug; or a primary possible issue leaves for a second
+//     finding that is the same finding as a primary one, which the primary
+//     review already ruled on; or one broad second finding takes two
+//     possible issues on lines apart from each other; or one second
+//     finding takes two primary possible issues finalize merged into one
+//     when it overlaps only one of them.
 import { DEFAULT_CONFIG } from "@openqodex/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { reviewChange } from "../src/review-change.js";
+import { mergeFindings, possibleAfterSecond } from "../src/second.js";
 import type { AuthorizeRequest, ReviewChangeOptions } from "../src/reviewer.js";
 import { fixtureModel } from "./fixture-model.js";
 import type { Finding, FixtureOptions } from "./fixture-model.js";
@@ -51,7 +71,7 @@ const SUBTRACTION: Finding = {
   candidate: null,
 };
 
-async function run(second: FixtureOptions, refuseAt?: number, big = false, first: FixtureOptions = { findings: [SUBTRACTION] }) {
+async function run(second: FixtureOptions | null, refuseAt?: number, big = false, first: FixtureOptions = { findings: [SUBTRACTION] }) {
   const repo = changeRepo({ big });
   const primary = fixtureModel(first);
   const other = fixtureModel({ model: "second-model", ...second });
@@ -62,7 +82,7 @@ async function run(second: FixtureOptions, refuseAt?: number, big = false, first
     installRoot: tempDir("oq-second-install-"),
     tools: { web: false, shell: false },
     scanners: "preinstalled",
-    secondReviewer: other,
+    ...(second ? { secondReviewer: other } : {}),
     budget: {
       deadlineMs: 120_000,
       authorize: async (call) => {
@@ -175,4 +195,104 @@ describe("a second reviewer through reviewChange", () => {
     expect(json.not_reviewed).toEqual([]);
     expect(result.render.markdown()).not.toContain("Unchecked scanner candidates");
   });
+});
+
+// Failure case: second-reviewer possible items join the primary result.
+it("returns primary possible items with full text and does not merge second-reviewer possible items", async () => {
+  const { result } = await run({ findings: [{ ...SUBTRACTION, confidence: 0.55, title: "Second possible" }] }, undefined, false, { findings: [{ ...SUBTRACTION, confidence: 0.55 }] });
+  expect(result.findings).toEqual([]);
+  expect(result.possible).toEqual([expect.objectContaining({ title: "Subtraction in add", confidence: 0.55, problem: SUBTRACTION.problem, foundBy: ["fixture-model"] })]);
+  expect(JSON.parse(result.render.json()).possible.map((f: { title: string }) => f.title)).toEqual(["Subtraction in add"]);
+});
+
+// A counted second-reviewer finding must own the primary possible item's key.
+it("drops a primary possible item when the second reviewer counts the same defect", async () => {
+  const { result } = await run({ findings: [{ ...SUBTRACTION, confidence: 0.8 }] }, undefined, false, { findings: [{ ...SUBTRACTION, confidence: 0.6 }] });
+  expect(result.findings).toEqual([expect.objectContaining({ title: SUBTRACTION.title, confidence: 0.8 })]);
+  expect(result.possible).toEqual([]);
+  const report = JSON.parse(result.render.json());
+  expect(report.findings).toHaveLength(1);
+  expect(report.possible).toEqual([]);
+});
+
+// Saved possible items and library results must name the same primary reviewer.
+it.each([false, true])("keeps possible attribution equal in the report and result, second reviewer: %s", async (second) => {
+  const { result } = await run(second ? { findings: [] } : null, undefined, false, { findings: [{ ...SUBTRACTION, confidence: 0.6 }] });
+  expect(result.status).not.toBe("incomplete");
+  const report = JSON.parse(result.render.json());
+  expect(report.possible).toHaveLength(1);
+  expect(report.possible[0].found_by).toEqual(["fixture-model"]);
+  expect(result.possible).toHaveLength(1);
+  expect(result.possible[0]!.foundBy).toEqual(report.possible[0].found_by);
+});
+
+it("9. keeps the primary's evidence in other files when the second reviewer rates the finding higher", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 2, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const evidence = [{ file_path: "src/caller.ts", line_number: 5 }];
+  const merged = mergeFindings({ name: "primary", findings: [{ ...finding, evidence }] }, { name: "second", findings: [{ ...finding, severity: "major" }] });
+  expect(merged.findings).toEqual([expect.objectContaining({ severity: "major", evidence })]);
+  expect(merged.foundBy).toEqual([["primary", "second"]]);
+});
+
+it("10. keeps the primary's rule citation when the second reviewer rates the finding higher", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 2, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const rule = { file: "AGENTS.md", heading: "Math", quote: "Every subtraction checks for underflow", source: "b".repeat(40) };
+  const merged = mergeFindings({ name: "primary", findings: [{ ...finding, rule }] }, { name: "second", findings: [{ ...finding, severity: "major" }] });
+  expect(merged.findings).toEqual([expect.objectContaining({ severity: "major", rule })]);
+  expect(merged.foundBy).toEqual([["primary", "second"]]);
+});
+
+it("11. merges one defect the two reviewers title differently on overlapping lines, and keeps lines apart that do not overlap", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 3, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const merged = mergeFindings({ name: "primary", findings: [finding] }, { name: "second", findings: [{ ...finding, line_number: 3, title: "add returns a minus b", severity: "major" }, { ...finding, line_number: 5, line_end: 5, title: "Unused import" }] });
+  expect(merged.findings.map((f) => [f.title, f.severity])).toEqual([["add returns a minus b", "major"], ["Unused import", "minor"]]);
+  expect(merged.foundBy).toEqual([["primary", "second"], ["second"]]);
+});
+
+it("11. drops a primary possible item when the second reviewer counts the same defect under another title", async () => {
+  const { result } = await run({ findings: [{ ...SUBTRACTION, confidence: 0.8, title: "add returns a minus b" }] }, undefined, false, { findings: [{ ...SUBTRACTION, confidence: 0.6 }] });
+  expect(result.findings).toEqual([expect.objectContaining({ title: "add returns a minus b", confidence: 0.8 })]);
+  expect(result.possible).toEqual([]);
+  expect(JSON.parse(result.render.json()).possible).toEqual([]);
+});
+
+it("11. joins a second finding to the primary finding with its exact key before one that only overlaps", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 3, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const exact = { ...finding, line_number: 3, title: "add returns a minus b", source: "lens:math" };
+  const overlapping = { ...finding, source: "lens:math" };
+  const merged = mergeFindings({ name: "primary", findings: [overlapping, exact] }, { name: "second", findings: [{ ...exact, severity: "major" }] });
+  expect(merged.findings.map((f) => [f.title, f.severity])).toEqual([[SUBTRACTION.title, "minor"], ["add returns a minus b", "major"]]);
+  expect(merged.foundBy).toEqual([["primary"], ["primary", "second"]]);
+});
+
+it("11. keeps two second findings apart from one broad primary finding they both overlap", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 1, line_end: 10, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const merged = mergeFindings({ name: "primary", findings: [finding] }, { name: "second", findings: [{ ...finding, line_number: 2, line_end: 2, title: "add returns a minus b" }, { ...finding, line_number: 8, line_end: 8, title: "Off by one in the loop" }] });
+  expect(merged.findings.map((f) => f.title)).toEqual([SUBTRACTION.title, "add returns a minus b", "Off by one in the loop"]);
+  expect(merged.foundBy).toEqual([["primary"], ["second"], ["second"]]);
+});
+
+it("11. keeps a primary possible issue beside a second finding that is the same finding as a primary one", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 2, line_end: 3, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const possible = { ...finding, line_number: 3, title: "Overflow on large input", confidence: 0.6 };
+  const exact = mergeFindings({ name: "primary", findings: [finding] }, { name: "second", findings: [finding] });
+  expect(possibleAfterSecond([possible], exact).map((f) => f.title)).toEqual(["Overflow on large input"]);
+  const alone = mergeFindings({ name: "primary", findings: [] }, { name: "second", findings: [finding] });
+  expect(possibleAfterSecond([possible], alone)).toEqual([]);
+});
+
+it("11. keeps two merged primary possible issues when a second finding overlaps only one of them", async () => {
+  const sql = { ...SUBTRACTION, file_path: "db/x.sql", confidence: 0.55, problem: "The function runs as its owner.", consequence: "Any caller gets admin rights.", fix: "Mark it SECURITY INVOKER." };
+  const near = { ...sql, line_number: 1, line_end: 2, title: "Function runs as owner" };
+  const far = { ...sql, line_number: 2, line_end: 2, title: "Body returns a constant", problem: "The body returns 1 whatever the tables hold, so the hygiene check never reports a problem." };
+  const { result } = await run({ findings: [{ ...sql, line_number: 1, confidence: 0.8, title: "No search_path set" }] }, undefined, false, { findings: [SUBTRACTION, near, far] });
+  expect(result.findings.map((f) => f.title).sort()).toEqual(["No search_path set", SUBTRACTION.title]);
+  expect(result.possible.map((f) => [f.title, f.lineStart, f.lineEnd])).toEqual([[far.title, 1, 2]]);
+});
+
+it("11. keeps two primary possible issues that one broad second finding overlaps", () => {
+  const finding = { origin: "agent" as const, severity: "minor" as const, category: "bug" as const, confidence: 0.9, file_path: "src/math.ts", line_number: 1, line_end: 10, title: SUBTRACTION.title, description: "d", suggested_change: null, source: null, candidate: null, notes: [] };
+  const possible = [{ ...finding, line_number: 2, line_end: 2, title: "Overflow on large input", confidence: 0.6 }, { ...finding, line_number: 8, line_end: 8, title: "Off by one in the loop", confidence: 0.6 }];
+  const alone = mergeFindings({ name: "primary", findings: [] }, { name: "second", findings: [finding] });
+  expect(possibleAfterSecond(possible, alone).map((f) => f.title)).toEqual(["Overflow on large input", "Off by one in the loop"]);
 });

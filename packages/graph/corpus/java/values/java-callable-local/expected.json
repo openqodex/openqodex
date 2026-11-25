@@ -1,0 +1,140 @@
+{
+  "guards": "binds callable locals through their receivers and drops aliases after reassignment or argument passing",
+  "callers": [
+    {
+      "to": "src/main/java/callable/Host.java#Host.refresh",
+      "site": "src/main/java/callable/Host.java:15",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/callable/Factory.java#Factory.make",
+      "site": "src/main/java/callable/Host.java:20",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.overloaded@9",
+      "site": "src/main/java/callable/Host.java:25",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.overloaded@10",
+      "site": "src/main/java/callable/Host.java:25",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.submit",
+      "site": "src/main/java/callable/Host.java:38",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "references": [
+    {
+      "to": "src/main/java/callable/Host.java#Host.refresh",
+      "site": "src/main/java/callable/Host.java:14",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.refresh",
+      "site": "src/main/java/callable/Host.java:29",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.refresh",
+      "site": "src/main/java/callable/Host.java:37",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/callable/Factory.java#Factory.make",
+      "site": "src/main/java/callable/Host.java:19",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.overloaded@9",
+      "site": "src/main/java/callable/Host.java:24",
+      "kind": "uses_value",
+      "tier": "possible"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.overloaded@10",
+      "site": "src/main/java/callable/Host.java:24",
+      "kind": "uses_value",
+      "tier": "possible"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.replacement",
+      "site": "src/main/java/callable/Host.java:31",
+      "kind": "uses_value",
+      "tier": "certain"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/main/java/callable/Host.java#Host.refresh",
+      "site": "src/main/java/callable/Host.java:33",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.replacement",
+      "site": "src/main/java/callable/Host.java:33",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.refresh",
+      "site": "src/main/java/callable/Host.java:38",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.refresh",
+      "site": "src/main/java/callable/Host.java:42",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.run",
+      "site": "src/main/java/callable/Host.java:15"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.run",
+      "site": "src/main/java/callable/Host.java:33"
+    },
+    {
+      "to": "src/main/java/callable/Host.java#Host.run",
+      "site": "src/main/java/callable/Host.java:42"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/main/java/callable/Host.java",
+      "line": 15
+    },
+    {
+      "file": "src/main/java/callable/Host.java",
+      "line": 20
+    },
+    {
+      "file": "src/main/java/callable/Host.java",
+      "line": 25
+    },
+    {
+      "file": "src/main/java/callable/Host.java",
+      "line": 33
+    },
+    {
+      "file": "src/main/java/callable/Host.java",
+      "line": 38
+    },
+    {
+      "file": "src/main/java/callable/Host.java",
+      "line": 42
+    }
+  ],
+  "allRead": true
+}

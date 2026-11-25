@@ -1,0 +1,40 @@
+{
+  "guards": "resolves a member of a returned callable by type without invoking the returned function",
+  "callers": [
+    {
+      "to": "src/handler.ts#makeHandler",
+      "site": "src/run.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/handler.ts#Handler.cancel",
+      "site": "src/run.ts:5",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "references": [
+    {
+      "to": "src/handler.ts#onEvent",
+      "site": "src/handler.ts:10",
+      "tier": "certain",
+      "kind": "uses_value"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/handler.ts#onEvent",
+      "site": "src/run.ts:5",
+      "kind": "may_invoke"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/run.ts",
+      "line": 5,
+      "cause": "unsupported-rule",
+      "scope": "file"
+    }
+  ]
+}

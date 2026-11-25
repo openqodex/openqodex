@@ -1,0 +1,41 @@
+{
+  "covers": "a call of a name re-exported through more modules than the graph follows (resolve MAX_DEPTH)",
+  "caps": [
+    "resolve.ts#MAX_DEPTH"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/m0.ts": "export { deep } from \"./m1\";\n",
+    "src/m1.ts": "export { deep } from \"./m2\";\n",
+    "src/m2.ts": "export { deep } from \"./m3\";\n",
+    "src/m3.ts": "export { deep } from \"./m4\";\n",
+    "src/m4.ts": "export { deep } from \"./m5\";\n",
+    "src/m5.ts": "export { deep } from \"./m6\";\n",
+    "src/m6.ts": "export { deep } from \"./m7\";\n",
+    "src/m7.ts": "export { deep } from \"./m8\";\n",
+    "src/m8.ts": "export { deep } from \"./m9\";\n",
+    "src/m9.ts": "export { deep } from \"./m10\";\n",
+    "src/m10.ts": "export function deep(): void {}\n",
+    "src/use.ts": "import { deep } from \"./m0\";\ndeep();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/m10.ts#deep",
+      "caller": "src/use.ts",
+      "file": "src/use.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/m10.ts#deep",
+      "reason": "1 call named `deep` in the repository could not be bound",
+      "at": "",
+      "gap": {
+        "cause": "export-chain-too-deep",
+        "at": "src/use.ts:2"
+      }
+    }
+  ]
+}

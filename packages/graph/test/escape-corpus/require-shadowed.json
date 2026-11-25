@@ -1,0 +1,20 @@
+{
+  "covers": "a parameter, a const and a destructured name called `require` hold what was given to them, so reading one is no load",
+  "files": {
+    "src/a.ts": "export function f() {}\nexport function g() {}\n",
+    "src/use.ts": "import { f } from \"./a\";\nexport function pick(require: string[]): string[] {\n  return [...new Set(require)];\n}\nexport function local(): string[] {\n  const require = [\"x\"];\n  return require.slice();\n}\nexport function parts(opts: { require: string[] }): string[] {\n  const { require } = opts;\n  return require;\n}\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/use.ts",
+      "file": "src/use.ts",
+      "line": 13
+    }
+  ],
+  "whole": [
+    "src/a.ts#f",
+    "src/a.ts#g"
+  ],
+  "floored": []
+}

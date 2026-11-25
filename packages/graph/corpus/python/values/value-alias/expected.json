@@ -1,9 +1,33 @@
 {
-  "guards": "follows a Python name assigned a function once to its call as a possible caller, and leaves no unknown at the call",
+  "guards": "keeps Python callable aliases when nested functions assign their own locals with the same names",
   "callers": [
     {
       "to": "pkg/steps.py#helper",
       "site": "pkg/run.py:6",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "pkg/steps.py#helper",
+      "site": "pkg/run.py:20",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "pkg/steps.py#helper",
+      "site": "pkg/run.py:31",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "pkg/run.py#other",
+      "site": "pkg/run.py:18",
+      "tier": "possible",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "pkg/run.py#other",
+      "site": "pkg/run.py:28",
       "tier": "possible",
       "kind": "may_invoke"
     }
@@ -14,15 +38,77 @@
       "site": "pkg/run.py:5",
       "kind": "uses_value",
       "tier": "certain"
+    },
+    {
+      "to": "pkg/steps.py#helper",
+      "site": "pkg/run.py:14",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "pkg/steps.py#helper",
+      "site": "pkg/run.py:23",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "pkg/run.py#other",
+      "site": "pkg/run.py:17",
+      "kind": "uses_value",
+      "tier": "certain"
+    },
+    {
+      "to": "pkg/run.py#other",
+      "site": "pkg/run.py:27",
+      "kind": "uses_value",
+      "tier": "certain"
     }
   ],
   "noUnknown": [
     {
       "file": "pkg/run.py",
       "line": 6
+    },
+    {
+      "file": "pkg/run.py",
+      "line": 20
+    },
+    {
+      "file": "pkg/run.py",
+      "line": 31
+    },
+    {
+      "file": "pkg/run.py",
+      "line": 18
+    },
+    {
+      "file": "pkg/run.py",
+      "line": 28
     }
   ],
   "floor": {
     "pkg/steps.py#helper": true
-  }
+  },
+  "notReached": [
+    {
+      "to": "pkg/run.py#other",
+      "site": "pkg/run.py:20",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "pkg/run.py#other",
+      "site": "pkg/run.py:31",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "pkg/steps.py#helper",
+      "site": "pkg/run.py:18",
+      "kind": "may_invoke"
+    },
+    {
+      "to": "pkg/steps.py#helper",
+      "site": "pkg/run.py:28",
+      "kind": "may_invoke"
+    }
+  ]
 }

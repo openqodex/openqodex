@@ -42,5 +42,7 @@ it("keeps a path outside the checkout that starts with the checkout's own path",
   expect(raw).toContain(outside);
   expect(summary?.status).toBe("failed");
   expect(summary?.reason).toContain(outside);
-  expect(summary?.reason).not.toContain("<checkout>");
+  // ruff 0.17 also names the checkout's own ruff.toml, which is redacted;
+  // the outside path must not be redacted as if it were inside.
+  expect(summary?.reason).not.toContain("<checkout>-other");
 });

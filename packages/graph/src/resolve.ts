@@ -24,9 +24,10 @@ import type { ProjectModel } from "./discovery/projects.js";
 import { governingTsconfig, isGoStdlib, isNodeBuiltin, isPyStdlib, isRubyStdlib, linkageOf, metadataUnknown, nodeProjectOf, normalisePy, packageName, pathLinkOff } from "./discovery/projects.js";
 import type { Cause, Cut, EvidenceKind, Shape, Tier, Via } from "./model/records.js";
 import { weakest } from "./model/records.js";
+import { NEXT, gap } from "./gap.js";
 import type { Lookup as PluginLookup } from "./frameworks/plugin.js";
-import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, Family, FileFacts, GraphEdge, GraphNode, GraphSite, InvocationSummary, Miss, TypeRef, UnknownSite, ValueRef } from "./types.js";
-import { CALLER_KINDS, familyOf } from "./types.js";
+import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, EscapeFact, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, ImportFact, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
+import { CALLER_KINDS, MAX_TYPE_DEPTH, ambientOf, familyOf } from "./types.js";
 
 const MAX_DEPTH = 8; // re-export and base-class chains
 // Files the walk of `export *` may open in one world. Each file is walked
@@ -41,6 +42,9 @@ export const HUB_FILES = 8; // a name defined in more files never binds without 
 // A call through an interface or a base type keeps at most this many
 // implementations or overrides as possible targets; the rest is a gap.
 export const DISPATCH_CAP = 32;
+// A call through a TypeScript interface keeps at most this many classes
+// that match the interface by shape alone; the rest is a gap.
+export const SHAPE_CAP = 20;
 // 8: dispatch through interfaces and base types, language lookup orders
 // (Python C3, Go embedding depth, Ruby mixins), value and type uses,
 // may_invoke, overrides and implements. 9: a dynamic-base gap on each class
@@ -53,7 +57,45 @@ export const DISPATCH_CAP = 32;
 // 15: qualified names before external star imports, star imports of a
 // class, the java.lang classes. 16: source sets by source root first, no
 // import from the default package.
-export const RESOLVER_VERSION = 16;
+// 18: TypeScript member types read structurally (interface properties, object
+// types written in place and aliased, intersections, destructured names,
+// type arguments), results inferred from a function's body, the receiver
+// as written on a gap.
+// 19: an element of a call's result declared as an array or a set
+// (TypeRef.item). 20: a file's project is the nearest root of its own
+// language family (projectFolder). 21: a callback's parameter typed by the
+// function type the called definition declares (TypeRef.callback).
+// 22: a member of a generic alias of an object type takes the argument
+// its use gives. 24: a member a Pick or an Omit leaves out is no member of
+// the type. 25: a file that imports one module on several lines keeps an
+// import site for each. 26: a call through a TypeScript interface reaches
+// the classes that match it by shape (by-shape). 27: a TypeScript call on
+// what a package returned is external at any depth, unless the repository
+// subclasses, implements or augments a package's type with that method.
+// 28: a method called on a local copied from a property typed by
+// a class, an interface or an object type binds on the local's type, never
+// as a value alias of the property; one whose named type the graph cannot
+// read keeps its may_invoke edge beside the call's own binding; a local
+// given a member (TypeRef.member) dispatches as a field does. 29: a
+// TypeScript file that imports a type and has no edge to it leaves an
+// unknown whose candidates are the type's definitions.
+// 30: a value given members in place (`f.get = g`, Object.assign) and a
+// literal with a computed key keep an interface call's gap (LiteralFact).
+// 31: the escape paths of each function (Resolved.escapes): its uses as a
+// value, its own body included, the modules that escape and what they
+// offer, the places a name built at run time may reach it, and the value
+// uses no rule binds; an unbound call that cannot run a plain function is
+// marked (UnknownSite.notPlain). 32: the opaque files (Escapes.opaque).
+// 33: what each opaque file reaches, and the scripts (Escapes.scripts).
+// 34: a free name its project declares as plain data vouches for itself.
+// 35: a module that offers a name the graph cannot follow to one
+// definition reaches whole every module it forwards names from.
+// 36: a module whose walk of `export *` the step budget cut reaches the
+// names its stars may bring, past the names it gives itself; a file with an
+// `import` or `export` statement is no script; escape analysis walks
+// `export *` on a budget of its own and stops at the build's deadline
+// (Resolved.escapesCut).
+export const RESOLVER_VERSION = 37;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -98,8 +140,10 @@ const BUILTINS: Record<Family, ReadonlySet<string>> = {
 // Built-in types whose methods are the language's: a call on a value of
 // one is external, never a gap of the repository.
 const BUILTIN_TYPES: Record<Family, ReadonlySet<string>> = {
+  // Partial, Required, Readonly, Pick and Omit are not here: a value of one
+  // has the members of a type of the repository.
   js: new Set(
-    "string number boolean bigint symbol never void undefined null String Number Boolean BigInt Symbol Object Array ReadonlyArray Map ReadonlyMap Set ReadonlySet WeakMap WeakSet Promise PromiseLike Date RegExp Error TypeError RangeError Function Record Partial Required Readonly Pick Omit Iterable IterableIterator AsyncIterable AsyncIterableIterator Iterator Generator AsyncGenerator ArrayBuffer SharedArrayBuffer DataView Uint8Array Int8Array Uint16Array Int16Array Uint32Array Int32Array Float32Array Float64Array BigInt64Array BigUint64Array Buffer URL URLSearchParams AbortController AbortSignal TextEncoder TextDecoder".split(" "),
+    "string number boolean bigint symbol never void undefined null String Number Boolean BigInt Symbol Object Array ReadonlyArray Map ReadonlyMap Set ReadonlySet WeakMap WeakSet Promise PromiseLike Date RegExp Error TypeError RangeError Function Record Iterable IterableIterator AsyncIterable AsyncIterableIterator Iterator Generator AsyncGenerator ArrayBuffer SharedArrayBuffer DataView Uint8Array Int8Array Uint16Array Int16Array Uint32Array Int32Array Float32Array Float64Array BigInt64Array BigUint64Array Buffer URL URLSearchParams AbortController AbortSignal TextEncoder TextDecoder".split(" "),
   ),
   python: new Set("str int float bool bytes bytearray list dict set frozenset tuple complex List Dict Set FrozenSet Tuple Sequence Mapping MutableMapping MutableSequence Iterable Iterator".split(" ")),
   go: new Set("string int int8 int16 int32 int64 uint uint8 uint16 uint32 uint64 uintptr float32 float64 complex64 complex128 byte rune bool error".split(" ")),
@@ -135,7 +179,8 @@ const LOOKUP_CUT = {
 
 // A branch of an `export *` set the graph could not follow: what it was
 // and why. It may bring the name too.
-type Unfollowed = { spec: string; cause: Cause; note: string };
+// `file`: the repository module of an `export *` whose lookup gave up.
+type Unfollowed = { spec: string; cause: Cause; note: string; file?: string };
 
 // A step through a module: the outer binding (the import the call read)
 // keeps its kind and line; the tier is the weaker of the two and the notes
@@ -143,7 +188,23 @@ type Unfollowed = { spec: string; cause: Cause; note: string };
 function chain(outer: Ev | null, inner: Ev): Ev {
   if (outer === null) return inner;
   const notes = [outer.note, inner.note].filter((n): n is string => n !== null && n !== "");
-  return { kind: outer.kind, tier: weakest(outer.tier, inner.tier), via: outer.via ?? inner.via, note: notes.length > 0 ? [...new Set(notes)].join(" ") : null, rule: outer.rule };
+  // A receiver typed through a result read from a function's body says so,
+  // whichever step it was.
+  const kind = inner.kind === "receiver-inferred" ? inner.kind : outer.kind;
+  return { kind, tier: weakest(outer.tier, inner.tier), via: outer.via ?? inner.via, note: notes.length > 0 ? [...new Set(notes)].join(" ") : null, rule: outer.rule };
+}
+
+// A result read from what a function's body returns. A method may be
+// overridden by one that returns another type, so its body proves less.
+function inferredEv(def: { kind: string; static?: boolean }): Ev {
+  const overridable = def.kind === "method" && def.static !== true;
+  return {
+    kind: "receiver-inferred",
+    tier: overridable ? "likely" : "certain",
+    via: null,
+    note: overridable ? "the type is what the method's body returns, and an override may return another" : null,
+    rule: "inferred-result",
+  };
 }
 
 // What a module specifier names.
@@ -154,15 +215,22 @@ type Mod =
   | null; // a path specifier that names nothing here: a miss
 
 // What a name or an expression stands for.
+// `unfollowed` on a sym: the repository modules of `export *` branches
+// that may also bring the name and whose lookup gave up (too deep), so
+// escape analysis visits them whole (`offers`, issue 448).
 type Value =
-  | { v: "sym"; ids: string[]; ev: Ev }
+  | { v: "sym"; ids: string[]; ev: Ev; unfollowed?: string[] }
   | { v: "mod"; file: string; ev: Ev }
   | { v: "pkg"; dir: string; ev: Ev }
   | { v: "pyns"; dir: string; ev: Ev } // a Python namespace package: a folder without __init__.py
   | { v: "pymod"; from: string; dotted: string } // Python `import a.b`: a dotted module path
   | { v: "ext" }
   | { v: "gap"; cause: Cause; note: string; candidates: string[] | null }
-  | { v: "miss"; target: string; name: string; ev: Ev };
+  // `held`: the module gives the name out as a value that is no definition
+  // (`export const router = Router()`, `export { router }`), so the name is
+  // there, though the graph does not follow the value; it is the local name
+  // of that value, one binding under every name it is given out as.
+  | { v: "miss"; target: string; name: string; ev: Ev; held?: string };
 
 type Def = DefFact & { id: string; file: string; family: Family };
 
@@ -175,6 +243,9 @@ export type ResolveInput = {
   known: ReadonlySet<string>; // every path import resolution may land on: eligible files and removed ones
   model: ProjectModel;
   goModules: [string, string][]; // module path, folder ("" for the root)
+  // The global names each declaration file (`.d.ts`, read beside the
+  // source files) declares as plain data.
+  declared?: { file: string; names: string[] }[];
   // Checked between files while calls are resolved: true stops; the files
   // left are listed in `budgetFiles`.
   stop?: () => boolean;
@@ -193,6 +264,10 @@ export type Resolved = {
   unresolvedSites: number;
   externalSites: number;
   budgetFiles: string[]; // files whose calls were not resolved: the budget ran out
+  escapes: Escapes;
+  // The budget ran out before escape analysis finished (or began): its
+  // escapes are not whole, so the build is partial and every list a floor.
+  escapesCut: boolean;
 };
 
 // One call site or import binding, resolved with a record of the exports it
@@ -246,6 +321,55 @@ function join(...parts: string[]): string {
   return j === "." ? "" : j;
 }
 
+// A set of names that shares its nodes with the set it was made from (a
+// hash trie): a set one name larger copies a few nodes of 32 slots, never
+// every name. A slot holds one name or a node of the next level; a node
+// past the hash's 32 bits is a list of the names whose hashes are equal.
+type NameSet = readonly (NameSet | string | undefined)[];
+const NAME_LEVELS = 7;
+function nameHash(name: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+function hasName(set: NameSet, name: string): boolean {
+  const h = nameHash(name);
+  let node = set;
+  for (let level = 0; level < NAME_LEVELS; level++) {
+    const slot = node[(h >>> (5 * level)) & 31];
+    if (typeof slot !== "object") return slot === name;
+    node = slot;
+  }
+  return node.includes(name);
+}
+function withName(set: NameSet | undefined, name: string, h = nameHash(name), level = 0): NameSet {
+  if (level === NAME_LEVELS) return set?.includes(name) ? set : [...(set ?? []), name];
+  const i = (h >>> (5 * level)) & 31;
+  const slot = set?.[i];
+  let next: NameSet | string = name;
+  if (slot === name) return set as NameSet;
+  if (typeof slot === "string") next = withName(withName(undefined, slot, nameHash(slot), level + 1), name, h, level + 1);
+  else if (slot !== undefined) {
+    next = withName(slot, name, h, level + 1);
+    if (next === slot) return set as NameSet;
+  }
+  const copy = set ? set.slice() : [];
+  copy[i] = next;
+  return copy;
+}
+const NO_NAMES: NameSet = [];
+// The work the export walk spends comparing skipped names: each name it
+// lists and each step it takes instead. Tests read it to hold that work to
+// the size of the input, which a clock on a busy runner cannot.
+export const walkWork = { steps: 0 };
+function* namesIn(set: NameSet): Generator<string> {
+  for (const slot of set) {
+    walkWork.steps++;
+    if (typeof slot === "string") yield slot;
+    else if (slot !== undefined) yield* namesIn(slot);
+  }
+}
+
 const JS_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 
 export function resolveGraph(input: ResolveInput): Resolved {
@@ -273,6 +397,7 @@ export function createWorld(input: ResolveInput): World {
   // project and source set), and the nested types of each file by simple name.
   const javaTypes = new Map<string, Map<string, string[]>>();
   const javaNested = new Map<string, Map<string, string[]>>();
+  const javaLocalClasses = new Set<string>();
   const filesByName = new Map<string, Set<string>>(); // family:name to defining files
 
   const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
@@ -358,8 +483,10 @@ export function createWorld(input: ResolveInput): World {
           classes.set(key, info);
         }
         if (family === "java") {
+          const ownerKey = d.owner === null ? null : classKey("java", path, d.owner);
+          if (ownerKey !== null && (!classes.has(ownerKey) || javaLocalClasses.has(ownerKey) || classes.get(ownerKey)?.ids.some((o) => defById.get(o)?.anonymous))) javaLocalClasses.add(key);
           if (d.owner === null) push(nameIndex(javaTypes, javaPkgOf(path)), d.name, id);
-          else push(nameIndex(javaNested, path), d.name, id);
+          else if (!javaLocalClasses.has(key) && !d.anonymous) push(nameIndex(javaNested, path), d.name, id);
         }
         info.ids.push(id);
         info.files.add(path);
@@ -946,22 +1073,27 @@ export function createWorld(input: ResolveInput): World {
       if (family === "js") {
         // The export table: exported declarations, `export { a as b }`,
         // `export default`, CommonJS assignments, then re-exports. A private
-        // top-level definition is never an export.
-        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1);
+        // top-level definition is never an export. A local value that is no
+        // definition (`export const router = Router()`, `export { router }`)
+        // is a held miss in this file, so a framework reader reads its own
+        // facts there, and it shadows any `export *` that offers the name.
+        const held = (local: string): Value => ({ v: "miss", target: file, name, ev: SAME_SCOPE, held: local });
+        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? held(f.defaultExport);
         const top = topByFile.get(file)?.get(name)?.filter((id) => defById.get(id)?.exported);
         if (top && top.length > 0) return { v: "sym", ids: top, ev: SAME_SCOPE };
-        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1);
+        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? held(e.local);
+        if (f.exportedVariables?.includes(name)) return held(name);
         // Every `export *` that offers the name: one definition binds; two
         // different ones are ambiguous (JavaScript exports neither). A star
         // the graph cannot follow (a module that is not there, a package
         // outside the repository, a gap) may bring the name too, so nothing
-        // it competes with is certain.
+        // it competes with is certain. `export *` never gives out `default`.
         const starHits: { v: Value; spec: string }[] = [];
         const unfollowed: Unfollowed[] = [];
         for (const imp of f.imports) {
           if (!imp.reexport) continue;
           const named = imp.names.find((n) => n.local === name);
-          if (!named && !imp.star) continue;
+          if (!named && (!imp.star || name === "default")) continue;
           const mod = jsSpec(file, imp.line, imp.spec);
           if (named) {
             if (mod === null) return { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -975,8 +1107,8 @@ export function createWorld(input: ResolveInput): World {
           else {
             const hit = withEv(index.exports(mod.file, name, depth + 1), mod.ev);
             if (hit === null) unfollowed.push({ spec: imp.spec, cause: "miss", note: `export * from ${imp.spec} could not be read` });
-            else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note });
-            else if (hit.v !== "miss") starHits.push({ v: hit, spec: imp.spec });
+            else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note, file: mod.file });
+            else if (hit.v !== "miss" || hit.held) starHits.push({ v: hit, spec: imp.spec });
           }
         }
         return starValue(file, name, starHits, unfollowed) ?? noStarHit(unfollowed) ?? { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1019,7 +1151,12 @@ export function createWorld(input: ResolveInput): World {
   function onlyPossible(v: Value, open: Unfollowed[]): Value {
     if (open.length === 0 || v.v !== "sym") return v;
     const why = `${open.map((u) => u.note).join("; ")}, so the name may come from there instead.`;
-    return { ...v, ev: { ...v.ev, tier: weakest(v.ev.tier, "possible"), note: [v.ev.note, why].filter(Boolean).join(" ") } };
+    return withOpen({ ...v, ev: { ...v.ev, tier: weakest(v.ev.tier, "possible"), note: [v.ev.note, why].filter(Boolean).join(" ") } }, open);
+  }
+  // A sym with the repository modules of the branches its lookup left open.
+  function withOpen<V extends Extract<Value, { v: "sym" }>>(v: V, open: Unfollowed[]): V {
+    const files = open.flatMap((u) => (u.file !== undefined ? [u.file] : []));
+    return files.length === 0 ? v : { ...v, unfollowed: [...(v.unfollowed ?? []), ...files] };
   }
 
   // No branch brought the name: the first branch that could not be
@@ -1036,21 +1173,26 @@ export function createWorld(input: ResolveInput): World {
   // ambiguous: every candidate at the possible tier, with a note.
   function starValue(file: string, name: string, hits: { v: Value; spec: string }[], open: Unfollowed[]): Value | null {
     if (hits.length === 0) return null;
-    const keyOf = (v: Value): string | null => (v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : null);
+    const keyOf = (v: Value): string | null =>
+      v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : v.v === "miss" && v.held ? `value:${v.target}\0${v.held}` : null;
     const distinct = new Map<string, { v: Value; spec: string }>();
     for (const h of hits) {
       const k = keyOf(h.v);
       if (k === null) return (hits[0] as { v: Value }).v; // a gap or a namespace: the first decides, as before
       if (!distinct.has(k)) distinct.set(k, h);
     }
+    // The branches each hit's own lookup left open stay open in the value
+    // made of them, from every hit, not only the first or the distinct ones.
+    const carried = [...new Set(hits.flatMap(({ v }) => (v.v === "sym" ? (v.unfollowed ?? []) : [])))];
+    const kept = carried.length > 0 ? { unfollowed: carried } : {};
     const first = hits[0] as { v: Value };
-    if (distinct.size === 1) return onlyPossible(first.v, open);
+    if (distinct.size === 1) return onlyPossible(first.v.v === "sym" ? { ...first.v, ...kept } : first.v, open);
     const syms = [...distinct.values()].filter((h): h is { v: Extract<Value, { v: "sym" }>; spec: string } => h.v.v === "sym");
     const unopened = open.length > 0 ? ` ${open.map((u) => u.note).join("; ")}.` : "";
     const note = `${file} re-exports ${name} through export * from ${distinct.size} modules (${[...distinct.values()].map((h) => h.spec).join(", ")}); JavaScript exports neither, and a bundler may pick one.${unopened}`;
     if (syms.length < 2) return { v: "gap", cause: "ambiguous", note, candidates: [...distinct.keys()] };
     const base = syms[0]?.v.ev as Ev;
-    return { v: "sym", ids: syms.flatMap((h) => h.v.ids), ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } };
+    return withOpen({ v: "sym", ids: syms.flatMap((h) => h.v.ids), ...kept, ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } }, open);
   }
 
   // A value reached through a module step keeps that step's evidence.
@@ -1064,6 +1206,9 @@ export function createWorld(input: ResolveInput): World {
   // types nested in it, and as the last part a member of the type (every
   // overload, static or not). Package-private types count: the package and
   // an importer of the file both read them through here.
+  const javaNamedClass = (info: ClassInfo | undefined): ClassInfo | undefined =>
+    info?.ids.some((id) => defById.get(id)?.anonymous) ? undefined : info;
+
   const javaExport = (file: string, dotted: string): Value => {
     const parts = dotted.split(".");
     const top = topByFile.get(file)?.get(parts[0] as string)?.filter((id) => defById.get(id)?.kind === "class");
@@ -1072,7 +1217,7 @@ export function createWorld(input: ResolveInput): World {
     let ids = top;
     for (let i = 1; i < parts.length; i++) {
       const p = parts[i] as string;
-      const nested = classes.get(`${key}.${p}`);
+      const nested = javaNamedClass(classes.get(`${key}.${p}`));
       if (nested) {
         key = `${key}.${p}`;
         ids = nested.ids;
@@ -1120,7 +1265,7 @@ export function createWorld(input: ResolveInput): World {
       const k = queue[i] as string;
       if (seen.has(k)) continue;
       seen.add(k);
-      const hit = classes.get(`${k}.${name}`);
+      const hit = javaNamedClass(classes.get(`${k}.${name}`));
       if (hit) return hit;
       queue.push(...basesOf(k).keys);
     }
@@ -1133,11 +1278,17 @@ export function createWorld(input: ResolveInput): World {
   // dotted path of the type the name is read in, when known; without it,
   // a nested type of the file binds only when it is the one of its name.
   const javaLocal = (file: string, name: string, depth: number, nesting: string | null): Value | null => {
-    const asType = (ids: string[] | undefined): Value | null => (ids && ids.length > 0 ? { v: "sym", ids, ev: SAME_SCOPE } : null);
+    const asType = (ids: string[] | undefined): Value | null => {
+      const named = ids?.filter((id) => !defById.get(id)?.anonymous);
+      return named && named.length > 0 ? { v: "sym", ids: named, ev: SAME_SCOPE } : null;
+    };
     for (const key of javaScopes(file, nesting)) {
-      const inner = classes.get(`${key}.${name}`) ?? javaInheritedNested(key, name);
+      const inner = javaNamedClass(classes.get(`${key}.${name}`)) ?? javaInheritedNested(key, name);
       if (inner) return asType(inner.ids);
-      if (key.endsWith(`::${name}`) || key.endsWith(`.${name}`)) return asType(classes.get(key)?.ids);
+      if (key.endsWith(`::${name}`) || key.endsWith(`.${name}`)) {
+        const own = asType(classes.get(key)?.ids);
+        if (own) return own;
+      }
     }
     const top = asType(topByFile.get(file)?.get(name)?.filter((id) => defById.get(id)?.kind === "class"));
     if (top) return top;
@@ -1155,7 +1306,7 @@ export function createWorld(input: ResolveInput): World {
       if (star.type) {
         const cls = bindingValue(file, "java", name, star.type, depth);
         const key = cls?.v === "sym" && cls.ids.length === 1 ? classOfId.get(cls.ids[0] as string) : undefined;
-        const inner = key ? classes.get(`${key}.${name}`) : undefined;
+        const inner = key ? javaNamedClass(classes.get(`${key}.${name}`)) : undefined;
         if (inner && cls?.v === "sym") return { v: "sym", ids: inner.ids, ev: cls.ev };
         continue;
       }
@@ -1287,14 +1438,9 @@ export function createWorld(input: ResolveInput): World {
   // The class a type name in `file` stands for, with the evidence of that
   // name's binding. A function's name stands for its declared result type
   // at the position the call took. `ext`: the type comes from a dependency.
-  type TypeHit = { key: string; ev: Ev } | "ext" | null;
-  const typeKey = (file: string, family: Family, t: TypeRef, depth = 0, asType = false, nesting: string | null = null): TypeHit => {
-    if (t.elem || depth > MAX_DEPTH) return null;
-    if (family === "java") return javaTypeKey(file, t, depth, asType, nesting);
-    if (family === "ruby") {
-      const key = rbConst(t.name, t.qualifier);
-      return key ? { key, ev: rbConstEv(key, file) } : null;
-    }
+  type TypeArgs = { types: TypeRef[]; file: string; nesting: string | null };
+  type TypeHit = { key: string; ev: Ev; args?: TypeArgs } | "ext" | null;
+  const typeValue = (file: string, t: TypeRef): Value | null => {
     // The head name, through the scoped import that binds it where the type was read.
     const head = (name: string) => (t.bound ? boundValue(file, name, t.bound) : resolveLocal(file, name));
     let v: Value | null;
@@ -1304,16 +1450,37 @@ export function createWorld(input: ResolveInput): World {
       for (const p of parts.slice(1)) v = attr(v, p);
       v = v && v.v !== "sym" ? attr(v, t.name) : null;
     } else v = head(t.name);
+    return v;
+  };
+  const typeKey = (file: string, family: Family, t: TypeRef, depth = 0, asType = false, nesting: string | null = null): TypeHit => {
+    // A member path, an intersection or an object type written in place: read structurally.
+    if (family === "js" && (t.path || t.parts || t.fields) && !t.elem && depth <= MAX_TYPE_DEPTH) return asType ? null : toHit({ file, family, t, ev: null }, depth);
+    if (t.elem || t.param !== undefined || depth > MAX_TYPE_DEPTH) return null;
+    if (t.promise) return "ext";
+    if (t.result !== undefined) return asType ? null : resultType(file, family, t, depth, nesting);
+    if (family === "java") return javaTypeKey(file, t, asType, nesting);
+    if (family === "ruby") {
+      const key = rbConst(t.name, t.qualifier);
+      return key ? { key, ev: rbConstEv(key, file) } : null;
+    }
+    const v = typeValue(file, t);
     if (v?.v === "ext") return "ext";
     if (v?.v !== "sym" || v.ids.length !== 1) return null;
     const cls = classOfId.get(v.ids[0] as string);
+    // A TypeScript alias of a named type (`type AnyBox = Box<unknown>`, `type
+    // Client = Pick<Api, "list">`) is that type wherever a member is looked up.
+    const named = cls && family === "js" && !asType ? namedAlias(cls) : null;
+    if (named) {
+      const inner = typeKey(named.file, named.family, named.t, depth + 1);
+      return inner === null || inner === "ext" ? inner : { ...inner, ev: chain(v.ev, inner.ev) };
+    }
     if (cls) return { key: cls, ev: v.ev };
     if (asType) return null;
     const def = defById.get(v.ids[0] as string);
     const result = def?.results?.[t.result ?? 0];
     if (!def || !result) return null;
     const inner = typeKey(def.file, def.family, { ...result, result: undefined }, depth + 1);
-    return inner === null || inner === "ext" ? inner : { key: inner.key, ev: chain(v.ev, inner.ev) };
+    return inner === null || inner === "ext" ? inner : { ...inner, ev: chain(v.ev, inner.ev) };
   };
 
   // A dotted Java type name (`Repo`, `Outer.Inner`, `a.b.Repo`): its head
@@ -1322,6 +1489,12 @@ export function createWorld(input: ResolveInput): World {
   // declared dependency group is external.
   const QUALIFIED: Ev = { kind: "same-scope", tier: "certain", via: null, note: null, rule: "java-qualified-name" };
   const javaTypeValue = (file: string, parts: readonly string[], nesting: string | null): Value | null => {
+    // Scoped local names are qualified by the extractor, never by source text.
+    const localKey = classKey("java", file, parts.join("."));
+    if (javaLocalClasses.has(localKey)) {
+      const local = javaNamedClass(classes.get(localKey));
+      return local ? { v: "sym", ids: local.ids, ev: SAME_SCOPE } : null;
+    }
     let v = javaLocal(file, parts[0] as string, 0, nesting);
     let i = 1;
     // A qualified name tries the declared packages first: an external or a
@@ -1343,38 +1516,28 @@ export function createWorld(input: ResolveInput): World {
     for (; i < parts.length; i++) {
       if (v.v !== "sym") return v;
       const key: string | undefined = v.ids.length === 1 ? classOfId.get(v.ids[0] as string) : undefined;
-      const nested: ClassInfo | undefined = key ? classes.get(`${key}.${parts[i]}`) : undefined;
+      const nested: ClassInfo | undefined = key ? javaNamedClass(classes.get(`${key}.${parts[i]}`)) : undefined;
       if (!nested) return null;
       v = { v: "sym", ids: nested.ids, ev: v.ev };
     }
     return v;
   };
-  const javaTypeKey = (file: string, t: TypeRef, depth: number, asType: boolean, nesting: string | null): TypeHit => {
-    if (t.result !== undefined) return asType ? null : javaResultType(file, t, depth, nesting);
+  const javaTypeKey = (file: string, t: TypeRef, asType: boolean, nesting: string | null): TypeHit => {
+    // Enum fields carry the exact body type, which source code cannot name.
+    if (!asType && t.qualifier !== null) {
+      const key = classKey("java", file, `${t.qualifier}.${t.name}`);
+      if (classes.get(key)?.ids.some((id) => defById.get(id)?.anonymous)) return { key, ev: SAME_SCOPE };
+    }
     const v = javaTypeValue(file, t.qualifier ? [...t.qualifier.split("."), t.name] : [t.name], nesting);
     if (v?.v === "ext") return "ext";
     if (v?.v !== "sym" || v.ids.length !== 1) return null;
     const cls = classOfId.get(v.ids[0] as string);
-    return cls ? { key: cls, ev: v.ev } : null;
+    return cls ? { key: cls, ev: v.ev, args: t.args ? { types: t.args, file, nesting } : undefined } : null;
   };
-  // What a Java method call returns, by the member's declared result:
-  // `make()` on the enclosing types, `T.make()` on the type T, or
-  // `x.make()` on a value of the type `on` (its instance side). Every
-  // member the call may bind must name the same class.
-  const javaResultType = (file: string, t: TypeRef, depth: number, nesting: string | null): TypeHit => {
+  type ResultTarget = { ids: string[]; ev: Ev } | "ext" | null;
+  const javaResultTarget = (file: string, t: TypeRef, nesting: string | null): ResultTarget => {
     let found: { ids: string[]; ev: Ev } | null = null;
-    if (t.on) {
-      // A method of a class outside the graph returns what the graph does not know.
-      const on = typeKey(file, "java", t.on, depth + 1, false, nesting);
-      if (on === null || on === "ext") return null;
-      const hit = methodOn(on.key, t.name, "i", 0);
-      if (!hit || !("ids" in hit)) return null;
-      // Members with a declared result: an abstract one beside an
-      // implementation of its parameter count names the same thing.
-      const ids = hit.ids.filter((id) => defById.get(id)?.results?.[t.result ?? 0]);
-      if (ids.length === 0) return null;
-      found = { ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
-    } else if (t.qualifier === null) {
+    if (t.qualifier === null) {
       for (const key of javaScopes(file, nesting)) {
         for (const side of ["i", "s"] as const) {
           const hit = methodOn(key, t.name, side, 0);
@@ -1392,16 +1555,216 @@ export function createWorld(input: ResolveInput): World {
       const hit = key ? methodOn(key, t.name, "s", 0) : null;
       if (v?.v === "sym" && hit && "ids" in hit) found = { ids: hit.ids, ev: hit.ev ? chain(v.ev, hit.ev) : v.ev };
     }
+    return found;
+  };
+  // The named type a TypeScript alias stands for, when it is one: not an
+  // object type, an intersection or an untyped one, which are read apart.
+  const namedAlias = (key: string): { file: string; family: Family; t: TypeRef } | null => {
+    const info = classes.get(key);
+    if (info?.family !== "js" || info.ids.length !== 1) return null;
+    const def = defById.get(info.ids[0] as string);
+    const t = def?.kind === "type" ? def.alias : undefined;
+    if (!def || !t || t.parts || t.fields || t.path || t.elem || t.name === "{}" || (t.qualifier === null && JS_UNTYPED.has(t.name))) return null;
+    return { file: def.file, family: def.family, t };
+  };
+  // What a call of a definition returns, and where that type was written:
+  // its own declared or inferred result, or for a property typed by a named
+  // function type, that type's.
+  const resultsOf = (def: Def): { file: string; family: Family; owner: string | null; results: (TypeRef | null)[] } | null => {
+    if (def.results) return { file: def.file, family: def.family, owner: def.owner, results: def.results };
+    if (!def.signature) return null;
+    let v = typeValue(def.file, def.signature);
+    for (let hops = 0; v?.v === "sym" && v.ids.length === 1 && hops < MAX_DEPTH; hops++) {
+      const target = defById.get(v.ids[0] as string);
+      if (target?.kind !== "type") return null;
+      if (target.results) return { file: target.file, family: target.family, owner: target.owner, results: target.results };
+      // `type A = B`: the function type B names.
+      if (!target.alias || target.alias.parts || target.alias.fields) return null;
+      v = typeValue(target.file, target.alias);
+    }
+    return null;
+  };
+  // Whether a definition a value names holds a function: true for one
+  // that is not a property typed by a name, and for a property whose named
+  // type leads to a function type; false when it leads to a class, an
+  // interface or an object type; null when the graph cannot tell.
+  const holdsFunction = (id: string): boolean | null => {
+    const def = defById.get(id);
+    if (!def?.signature) return true;
+    let v = typeValue(def.file, def.signature);
+    for (let hops = 0; hops < MAX_DEPTH; hops++) {
+      const target = v?.v === "sym" && v.ids.length === 1 ? defById.get(v.ids[0] as string) : undefined;
+      if (!target) return null;
+      if (target.kind !== "type" || target.iface) return false;
+      if (target.results) return true;
+      if (!target.alias || target.alias.parts) return null;
+      if (target.alias.fields) return false;
+      v = typeValue(target.file, target.alias);
+    }
+    return null;
+  };
+  // What `t` reads on a called definition: its declared result, or with
+  // `callback` the declared type of a parameter of a function it takes.
+  const declaredOn = (def: Def, t: TypeRef): { from: { file: string; family: Family; owner: string | null }; result: TypeRef | null | undefined } | null => {
+    if (!t.callback) {
+      const from = resultsOf(def);
+      return from ? { from, result: from.results[t.result ?? 0] } : null;
+    }
+    const { arg, param } = t.callback;
+    return { from: def, result: def.callbacks?.find((c) => c.arg === arg)?.params[param] };
+  };
+  // A function declared inside a function, by its index in the file's definitions.
+  const localTarget = (file: string, index: number): ResultTarget => {
+    const id = defIdsOf(file)[index];
+    return id === undefined ? null : { ids: [id], ev: SAME_SCOPE };
+  };
+  const namedResultTarget = (file: string, t: TypeRef): ResultTarget => {
+    const v = typeValue(file, t);
+    if (v?.v === "ext") return "ext";
+    return v?.v === "sym" && v.ids.length === 1 ? { ids: v.ids, ev: v.ev } : null;
+  };
+  const resultTargets: Record<Family, (file: string, t: TypeRef, nesting: string | null) => ResultTarget> = {
+    java: javaResultTarget,
+    js: namedResultTarget,
+    go: namedResultTarget,
+    python: namedResultTarget,
+    ruby: namedResultTarget,
+  };
+
+  // Each argument resolves in the context of its own declaration.
+  const sameTypeArguments = (a: TypeArgs | undefined, b: TypeArgs | undefined, depth: number): boolean => {
+    if (!a || !b) return a === b;
+    if (depth > MAX_TYPE_DEPTH || a.types.length !== b.types.length) return false;
+    return a.types.every((type, i) => {
+      const left = typeKey(a.file, "java", type, depth + 1, false, a.nesting);
+      const right = typeKey(b.file, "java", b.types[i] as TypeRef, depth + 1, false, b.nesting);
+      if (left === "ext" || right === "ext") return left === right;
+      if (left === null || right === null) return false;
+      return left.key === right.key && sameTypeArguments(left.args, right.args, depth + 1);
+    });
+  };
+
+  // Whether a class is a subtype of a type outside the graph: it, or a
+  // class or interface above it, extends or implements one, or names a
+  // base with an expression.
+  const subtypeMemo = new Map<string, boolean>();
+  const subtypeOfOutside = (key: string, depth = 0): boolean => {
+    const kept = subtypeMemo.get(key);
+    if (kept !== undefined) return kept;
+    subtypeMemo.set(key, false);
+    const info = classes.get(key);
+    const b = basesOf(key);
+    let out =
+      b.outside ||
+      (info?.bases.some((r) => {
+        if (r.rel !== "implements") return false;
+        const k = typeKey(info.file, info.family, r, 0, false, info.nesting);
+        return k === null || k === "ext";
+      }) ??
+        false);
+    if (!out && depth <= MAX_DEPTH) out = b.keys.some((k) => k !== key && subtypeOfOutside(k, depth + 1));
+    subtypeMemo.set(key, out);
+    return out;
+  };
+  // The method names by which a value a package's own function or method
+  // hands back may run the repository's code: the methods of a class or a
+  // module-level object that is a subtype of a type outside the graph (a
+  // subclass of the package's class, an implementation of its interface),
+  // and the members an interface in `declare module` or `declare global`
+  // adds to a package's type. A call of another name on such a value runs
+  // the package's code.
+  let packageMemberNames: Set<string> | null = null;
+  const packageMemberNamed = (name: string): boolean => {
+    if (packageMemberNames === null) {
+      packageMemberNames = new Set();
+      for (const [k, info] of classes) {
+        if (info.family !== "js") continue;
+        const augments = info.ids.some((id) => defById.get(id)?.augments === true);
+        if (!augments && !(classLike(k) && subtypeOfOutside(k))) continue;
+        for (const n of methodsOn.i.get(k)?.keys() ?? []) packageMemberNames.add(n);
+      }
+    }
+    return packageMemberNames.has(name);
+  };
+  // Whether `t` is what a package's own function or method returned: a call
+  // of a name a package exports, or of a method on a value of a package's type.
+  const packageResult = (file: string, family: Family, t: TypeRef, depth: number): boolean => {
+    if (family !== "js" || t.result === undefined || t.callback || t.localDef !== undefined || depth > MAX_TYPE_DEPTH) return false;
+    if (t.on) return typeKey(file, family, t.on, depth + 1) === "ext";
+    return namedResultTarget(file, t) === "ext";
+  };
+
+  // Every candidate must declare the same result type. Receiver lookup follows the family's method rules.
+  const resultType = (file: string, family: Family, t: TypeRef, depth: number, nesting: string | null): TypeHit => {
+    let found: ResultTarget;
+    let receiver: TypeHit = null;
+    if (t.on) {
+      // A receiver typed by an intersection (`Pick<T, K>` is one): the side that declares the method.
+      const on = (family === "js" ? intersectionCall({ file, family, t: t.on, ev: null }, t.name) : null) ?? typeKey(file, family, t.on, depth + 1, false, nesting);
+      // An external receiver has no readable method declaration. In
+      // TypeScript what its method returns is the package's too, unless the
+      // receiver is itself what a package returned and the repository adds
+      // a method of that name to a package's type, which may be what runs.
+      if (on === "ext" && family === "js") return packageResult(file, family, t.on, depth) && packageMemberNamed(t.name) ? null : "ext";
+      if (on === null || on === "ext") return null;
+      receiver = on;
+      const hit = methodOn(on.key, t.name, "i", 0);
+      if (!hit || !("ids" in hit)) return null;
+      const ids = hit.ids.filter((id) => {
+        const def = defById.get(id);
+        return def ? declaredOn(def, t)?.result : undefined;
+      });
+      if (ids.length === 0) return null;
+      found = { ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
+    } else {
+      found = t.localDef !== undefined ? localTarget(file, t.localDef) : resultTargets[family](file, t, nesting);
+      // A function outside the repository may hand its callback a value of the repository.
+      if (found === "ext") return t.callback ? null : "ext";
+      // A constructor or a Go type conversion names its class directly.
+      const key = found?.ids.length === 1 ? classOfId.get(found.ids[0] as string) : undefined;
+      if (key && found && !t.item && !t.callback) return { key, ev: found.ev };
+    }
     if (!found) return null;
     let out: TypeHit = null;
     for (const id of found.ids) {
       const def = defById.get(id);
-      const result = def?.results?.[t.result ?? 0];
-      if (!def || !result) return null;
-      const inner = typeKey(def.file, def.family, { ...result, result: undefined }, depth + 1, false, def.owner);
+      const declared = def ? declaredOn(def, t) : null;
+      const from = declared?.from;
+      const result = declared?.result;
+      if (!def || !from || !result) return null;
+      // An element of the result: only of one declared as an array or a set,
+      // and never through a Promise, where `Promise<T[]>` and `Promise<T>[]`
+      // read the same.
+      if (t.item && (!result.elem || result.promise)) return null;
+      let inner: TypeHit;
+      if (def.family === "java" && result.param !== undefined) {
+        // Arguments belong to the receiver's file, which may differ from the method's file.
+        if (!receiver || receiver.key !== classKey("java", def.file, def.owner ?? "")) return null;
+        const args = receiver.args;
+        const arg = args?.types[result.param];
+        if (!args || !arg || result.elem) return null;
+        inner = typeKey(args.file, "java", arg, depth + 1, false, args.nesting);
+      } else if (result.result !== undefined) {
+        // A result read from a returned call is that call's result, never a
+        // name: awaited when the caller or the body awaits it.
+        inner = result.promise && !t.awaited
+          ? "ext"
+          : typeKey(from.file, from.family, { ...result, promise: undefined, inferred: undefined, ...(result.awaited || t.awaited ? { awaited: true } : {}) }, depth + 1, false, from.owner);
+      } else {
+        // Only an awaited call exposes the value inside a declared Promise.
+        inner = result.promise && !t.awaited
+          ? "ext"
+          : typeKey(from.file, from.family, { ...result, result: undefined, promise: undefined, ...(t.item ? { elem: false } : {}) }, depth + 1, false, from.owner);
+      }
       if (inner === null) return null;
       if (out !== null && (inner === "ext" ? out !== "ext" : out === "ext" || out.key !== inner.key)) return null;
-      out = inner === "ext" ? inner : { key: inner.key, ev: chain(found.ev, inner.ev) };
+      // Candidates that disagree on type arguments keep the class and lose the arguments.
+      const agreed: boolean = out === null || out === "ext" || inner === "ext" || sameTypeArguments(out.args, inner.args, depth + 1);
+      if (inner === "ext") out = inner;
+      else {
+        const ev = chain(found.ev, inner.ev);
+        out = { key: inner.key, ev: result.inferred ? chain(ev, inferredEv(def)) : ev, ...(agreed && inner.args ? { args: inner.args } : {}) };
+      }
     }
     return out;
   };
@@ -1513,7 +1876,7 @@ export function createWorld(input: ResolveInput): World {
   // A member found by a lookup: its definitions and the evidence of the
   // steps to the class that defines it; a gap when the language's order
   // cannot pick one; null when no class on the way defines it.
-  type Lookup = { ids: string[]; ev: Ev | null } | { gap: Cause; note: string } | null;
+  type Lookup = { ids: string[]; ev: Ev | null; zero?: { id: string; ev: Ev | null }[] } | { gap: Cause; note: string } | null;
   const ownMethods = (key: string, name: string, side: Side): string[] | undefined => methodsOn[side].get(key)?.get(name);
   const shortKey = (key: string) => key.slice(key.lastIndexOf("::") + 2) || key;
   const stepped = (base: Ev, hit: Lookup): Lookup => (hit && "ids" in hit ? { ids: hit.ids, ev: throughBase(base, hit.ev) } : hit);
@@ -1568,6 +1931,34 @@ export function createWorld(input: ResolveInput): World {
     return null;
   }
 
+  // Public instance methods on Java interfaces can hide inherited defaults.
+  const javaInterfaceMethodOwner = (id: string): string | null => {
+    const d = defById.get(id);
+    if (!d || d.family !== "java" || d.kind !== "method" || !d.exported || d.static || d.ctor) return null;
+    const key = classKey("java", d.file, d.owner ?? "");
+    return isIface(key) ? key : null;
+  };
+  // A public instance method with a body on a Java interface is a default.
+  const javaDefaultOwner = (id: string): string | null => defById.get(id)?.abstract ? null : javaInterfaceMethodOwner(id);
+  const javaInterfaceAncestorsMemo = new Map<string, Set<string>>();
+  const javaInterfaceAncestors = (key: string): Set<string> => {
+    const kept = javaInterfaceAncestorsMemo.get(key);
+    if (kept) return kept;
+    const seen = new Set([key]);
+    const stack = [key];
+    while (stack.length > 0 && seen.size < 10_000) {
+      if (seen.size % 1024 === 0) checkBudget();
+      for (const base of basesOf(stack.pop() as string).keys) {
+        if (seen.has(base) || !isIface(base)) continue;
+        seen.add(base);
+        stack.push(base);
+      }
+    }
+    seen.delete(key);
+    javaInterfaceAncestorsMemo.set(key, seen);
+    return seen;
+  };
+
   // Java: every member of the name along the superclass chain, then along
   // the interfaces (an interface's own bases are interfaces), each class
   // visited once. A Java class inherits every overload it does not hide, so
@@ -1598,7 +1989,7 @@ export function createWorld(input: ResolveInput): World {
           continue;
         }
         const at: { key: string; ev: Ev | null } = { key: b.keys[slot.i] as string, ev: step(cur.ev, b.evs[slot.i] as Ev) };
-        if (isInterface || b.rels[slot.i] === "implements") ifaces.push(at);
+        if (isInterface || isIface(at.key) || b.rels[slot.i] === "implements") ifaces.push(at);
         else next ??= at;
       }
       cur = next;
@@ -1614,14 +2005,28 @@ export function createWorld(input: ResolveInput): World {
       }
     }
     if (hits.length === 0) return null;
-    const ids = [...new Set(hits.flatMap((h) => h.ids))];
-    const evs = hits.map((h) => h.ev).filter((e): e is Ev => e !== null);
+    // Only zero-parameter signatures can be proved equal without parameter types.
+    const declarations = hits.flatMap((h) => h.ids.flatMap((id) => {
+      const owner = javaInterfaceMethodOwner(id);
+      return owner === null ? [] : [{ id, owner, count: defById.get(id)?.params?.length ?? 0 }];
+    }));
+    const defaults = declarations.filter((d) => d.count === 0 && javaDefaultOwner(d.id) !== null);
+    const hidden = new Set(defaults.filter((a) => declarations.some((b) =>
+      a.owner !== b.owner && a.count === b.count && javaInterfaceAncestors(b.owner).has(a.owner) && !javaInterfaceAncestors(a.owner).has(b.owner),
+    )).map((d) => d.id));
+    const kept = hits.map((h) => ({ ...h, ids: h.ids.filter((id) => !hidden.has(id)) })).filter((h) => h.ids.length > 0);
+    const ids = [...new Set(kept.flatMap((h) => h.ids))];
+    const evs = kept.map((h) => h.ev).filter((e): e is Ev => e !== null);
     let ev: Ev | null = null;
     for (const e of evs) ev = ev === null ? e : chain(ev, e);
-    // A superclass outside the graph may declare an overload that fits the
-    // call better than any member found: no member is certain then.
+    // An outside superclass may declare a better overload for a call with arguments.
     if (outside !== null) ev = pastOutside(outside, name, ev);
-    return { ids, ev };
+    // Fixed zero-argument members keep only evidence from the path before their declaration.
+    const zero = kept.flatMap((h) => h.ids.filter((id) => {
+      const d = defById.get(id);
+      return d?.params?.length === 0 && !d.varargs && !d.ctor;
+    }).map((id) => ({ id, ev: h.ev })));
+    return { ids, ev, zero };
   }
 
   // Python: the C3 linearisation of the class over its bases in the graph,
@@ -1861,7 +2266,8 @@ export function createWorld(input: ResolveInput): World {
     if (kept !== undefined) return kept;
     if (depth > MAX_DEPTH) return null;
     const info = classes.get(key);
-    let out: Set<string> | null = new Set(methodsOn.i.get(key)?.keys() ?? []);
+    // A TypeScript member marked `?` is no part of the contract.
+    let out: Set<string> | null = new Set([...(methodsOn.i.get(key) ?? [])].filter(([, ids]) => !ids.every((id) => defById.get(id)?.optional === true)).map(([n]) => n));
     for (const b of info?.bases ?? []) {
       const k = typeKey(info?.file ?? "", info?.family ?? "go", b);
       if (k !== null && k !== "ext" && k.key !== key) {
@@ -1914,6 +2320,123 @@ export function createWorld(input: ResolveInput): World {
       out = typesNamed(info.family, first as string).filter((k) => k !== key && rest.every((n) => memberNames(k).has(n)));
     }
     methodSetMemo.set(key, out);
+    return out;
+  };
+
+  // TypeScript is structural: a class or a module-level object whose own
+  // and inherited members cover every required member of an interface, by
+  // name, may stand wherever the interface is asked for without declaring
+  // it. These are the ones that do not reach the interface through
+  // `implements` or `extends`; null when the interface's members are not
+  // all known (it extends a type outside the graph).
+  const classLike = (k: string): boolean => {
+    const ids = classes.get(k)?.ids ?? [];
+    return ids.length > 0 && ids.every((id) => defById.get(id)?.kind === "class" || defById.get(id)?.kind === "module");
+  };
+  const belowMemo = new Map<string, Set<string>>();
+  const declaredBelow = (key: string): Set<string> => {
+    let below = belowMemo.get(key);
+    if (below) return below;
+    below = new Set<string>();
+    const queue = subsOf(key).map((x) => x.key);
+    for (let i = 0; i < queue.length && below.size < 100_000; i++) {
+      const k = queue[i] as string;
+      if (below.has(k)) continue;
+      below.add(k);
+      for (const x of subsOf(k)) if (!below.has(x.key)) queue.push(x.key);
+    }
+    belowMemo.set(key, below);
+    return below;
+  };
+  const shapeMemo = new Map<string, string[] | null>();
+  const shapeMatches = (key: string): string[] | null => {
+    const kept = shapeMemo.get(key);
+    if (kept !== undefined) return kept;
+    let out: string[] | null = null;
+    const names = classes.get(key)?.family === "js" && isIface(key) ? contractNames(key) : null;
+    if (names) {
+      const below = declaredBelow(key);
+      const [first, ...rest] = [...names];
+      out = typesNamed("js", first as string).filter((k) => k !== key && classLike(k) && !below.has(k) && rest.every((n) => memberNames(k).has(n)));
+    }
+    shapeMemo.set(key, out);
+    return out;
+  };
+  // The object literals and the values given members in place that may
+  // hold code, by each member name they write, then those with members
+  // whose names are not read (`unread`), and the files that hold more than
+  // are recorded.
+  type Literal = { file: string; line: number; keys: Set<string>; open: boolean; unread: number; by: string | undefined };
+  let literalIndex: { byName: Map<string, Literal[]>; unread: Literal[]; cut: string[] } | null = null;
+  const literalsNamed = (name: string) => {
+    if (literalIndex === null) {
+      const byName = new Map<string, Literal[]>();
+      const unread: Literal[] = [];
+      const cut: string[] = [];
+      for (const [file, f] of facts) {
+        if (f.literalsCut) cut.push(file);
+        for (const l of f.literals ?? []) {
+          const entry = { file, line: l.line, keys: new Set(l.keys), open: l.open === true, unread: l.unread ?? 0, by: l.by };
+          for (const k of entry.keys) push(byName, k, entry);
+          if (entry.unread > 0) unread.push(entry);
+        }
+      }
+      cut.sort();
+      literalIndex = { byName, unread, cut };
+    }
+    return { literals: [...(literalIndex.byName.get(name) ?? []), ...literalIndex.unread.filter((l) => !l.keys.has(name))], cut: literalIndex.cut };
+  };
+  // What a call of `name` through the interface may run in the classes
+  // that match it by shape: each class, in path and line order, with the
+  // methods its own lookup finds. `open` says why a value that is not
+  // listed may answer the call too, so the call keeps its gap: a class that
+  // has the member and extends a class outside the graph, which may give it
+  // the rest, or an object literal or a value given members in place
+  // (`f.get = g`, Object.assign) that has the member and every other
+  // method of the interface, spreads another object into itself, or has a
+  // computed key (it is no definition of the graph, so what it runs cannot
+  // be listed). Null
+  // when the interface's members are not all known.
+  type Shaped = { classes: { key: string; ids: string[] }[]; open: string | null };
+  const shapeTargetMemo = new Map<string, Shaped | null>();
+  const shapeTargets = (key: string, name: string, skip: ReadonlySet<string>): Shaped | null => {
+    const memoKey = `${key}\u0000${name}`;
+    const kept = shapeTargetMemo.get(memoKey);
+    if (kept !== undefined) return kept;
+    const matched = shapeMatches(key);
+    const names = matched === null ? null : contractNames(key);
+    let out: Shaped | null = null;
+    if (matched !== null && names !== null) {
+      const at = (k: string) => {
+        const id = classes.get(k)?.ids[0];
+        return { file: classes.get(k)?.file ?? k, line: (id ? defById.get(id)?.line : 0) ?? 0 };
+      };
+      const found: { key: string; ids: string[] }[] = [];
+      for (const k of matched) {
+        const hit = methodOn(k, name, "i", 0);
+        const ids = hit && "ids" in hit ? hit.ids.filter((id) => !skip.has(id) && defById.get(id)?.abstract !== true) : [];
+        if (ids.length > 0) found.push({ key: k, ids });
+      }
+      found.sort((a, b) => at(a.key).file.localeCompare(at(b.key).file) || at(a.key).line - at(b.key).line || a.key.localeCompare(b.key));
+      const iface = shortKey(key);
+      const listed = new Set(matched);
+      const below = declaredBelow(key);
+      const outsideClass = typesNamed("js", name).find((k) => k !== key && classLike(k) && !below.has(k) && !listed.has(k) && outsideBase(k));
+      const { literals, cut } = literalsNamed(name);
+      // A literal may fill the interface when it has the member called, or
+      // spreads, and its unread members may be the methods it lacks.
+      const literal = literals.find((l) => (l.open && l.keys.has(name)) || [...names].filter((n) => !l.keys.has(n)).length <= l.unread);
+      let open: string | null = null;
+      if (outsideClass !== undefined) open = `${shortKey(outsideClass)} has ${name} and extends a class outside the graph, which may give it the other methods of ${iface}, so it is not listed`;
+      else if (literal !== undefined) {
+        const what = literal.by === undefined ? `the object literal at ${literal.file}:${literal.line}` : `\`${literal.by}\` at ${literal.file}:${literal.line}, given members in place,`;
+        const has = !literal.keys.has(name) ? `has a key the graph cannot read, which may be ${name}` : literal.open ? `has ${name} and may have more members` : `has ${name} and${literal.unread > 0 ? ", by name or by a key the graph cannot read," : ""} every other method of ${iface}`;
+        open = `${what} ${has}, so it may be a ${iface}; a value written in place is no definition of the graph, so what it runs is not listed`;
+      }
+      else if (cut.length > 0) open = `${cut[0] as string} holds more object literals than the graph records, so one of them may be a ${iface}`;
+      out = { classes: found, open };
+    }
+    shapeTargetMemo.set(memoKey, out);
     return out;
   };
 
@@ -2018,7 +2541,7 @@ export function createWorld(input: ResolveInput): World {
     | { unknown: Cause; shape: Shape; note?: string; candidates?: string[] | null; scope?: "file" | "project" };
 
   const receiverKind = (t: TypeRef, path: string[]): EvidenceKind => {
-    if (path.length > 0) return "receiver-field";
+    if (path.length > 0 || t.member) return "receiver-field";
     if (t.declared) return "receiver-annotation";
     if (t.result !== undefined) return "receiver-result";
     return "receiver-constructor";
@@ -2060,6 +2583,236 @@ export function createWorld(input: ResolveInput): World {
     }
     return k;
   };
+
+  // ---------- TypeScript member types, read structurally ----------
+  // A TypeScript type as written, in the file it was read in, with the
+  // evidence of the steps that reached it: an object type written in place,
+  // an intersection or a member path have no class key of their own, so a
+  // member of one is read from the type itself.
+  // `bound`: the type arguments, and the file they were written in, of the
+  // use of an alias with type parameters that `t` is the object type of.
+  type Struct = { file: string; family: Family; t: TypeRef; ev: Ev | null; inherited?: boolean; bound?: { file: string; args: TypeRef[] } };
+  const evOf = (a: Ev | null, b: Ev | null): Ev | null => (a === null ? b : b === null ? a : chain(a, b));
+  const inPlace = (t: TypeRef): boolean => t.name === "{}" && t.qualifier === null && t.result === undefined && !t.path;
+  const structural = (t: TypeRef): boolean => t.path !== undefined || t.parts !== undefined || inPlace(t);
+  // One structural lookup, from its first call to its last, whatever path it
+  // takes through types, aliases, bases and results: one budget of steps and
+  // one set of the member lookups it is inside of. Types of an untrusted
+  // repository may refer to themselves in any way (`interface I extends A`
+  // with `type A = I`), so a lookup that meets one again, or uses up the
+  // budget, is not known: null, never a loop.
+  const STRUCT_STEPS = 1024;
+  let walk: { left: number; open: Set<string> } | null = null;
+  const guarded = <A extends unknown[], R>(f: (...args: A) => R, spent: R) => (...args: A): R => {
+    const outer = walk === null;
+    if (outer) walk = { left: STRUCT_STEPS, open: new Set() };
+    try {
+      return (walk as { left: number }).left-- > 0 ? f(...args) : spent;
+    } finally {
+      if (outer) walk = null;
+    }
+  };
+  // A type alias of the repository (`type X = Y`): what it stands for.
+  const aliasOf = (key: string): Struct | null => {
+    const info = classes.get(key);
+    if (info?.family !== "js" || info.ids.length !== 1) return null;
+    const def = defById.get(info.ids[0] as string);
+    return def?.kind === "type" && def.alias ? { file: def.file, family: def.family, t: def.alias, ev: null } : null;
+  };
+  // The declared type of member `name` of class `key`, as written: on the
+  // class, through the alias it is, or on a base.
+  const fieldRef = guarded((key: string, name: string, depth: number = 0): Struct | "ext" | null => {
+    const open = (walk as { open: Set<string> }).open;
+    const tag = `${key}\u0000${name}`;
+    if (depth > MAX_DEPTH || open.has(tag)) return null;
+    open.add(tag);
+    try {
+      return fieldRefIn(key, name, depth);
+    } finally {
+      open.delete(tag);
+    }
+  }, null);
+  const fieldRefIn = (key: string, name: string, depth: number): Struct | "ext" | null => {
+    const info = classes.get(key);
+    const t = info?.fields.get(name);
+    if (info && t) return { file: info.file, family: info.family, t, ev: null };
+    const alias = aliasOf(key);
+    if (alias) return stepStruct(alias, name, depth + 1);
+    const b = basesOf(key);
+    for (let i = 0; i < b.keys.length; i++) {
+      const hit = fieldRef(b.keys[i] as string, name, depth + 1);
+      if (hit === "ext") return hit;
+      if (hit) return { ...hit, ev: throughBase(b.evs[i] as Ev, hit.ev), inherited: true };
+    }
+    return null;
+  };
+  // The one function a call's result names, and that result's type, when
+  // it is read structurally (an object literal the body returns).
+  const resultOf = guarded((s: Struct, depth: number): Struct | "ext" | null => {
+    const t = s.t;
+    let found: { ids: string[]; ev: Ev } | "ext" | null;
+    if (t.on) {
+      const on = typeKey(s.file, s.family, t.on, depth + 1);
+      if (on === "ext") return packageResult(s.file, s.family, t.on, depth) && packageMemberNamed(t.name) ? null : "ext";
+      if (on === null) return null;
+      const hit = methodOn(on.key, t.name, "i", 0);
+      if (!hit || !("ids" in hit)) return null;
+      found = { ids: hit.ids, ev: hit.ev ? chain(on.ev, hit.ev) : on.ev };
+    } else found = t.localDef !== undefined ? localTarget(s.file, t.localDef) : namedResultTarget(s.file, t);
+    if (found === null || found === "ext" || found.ids.length !== 1) return found === "ext" ? found : null;
+    const def = defById.get(found.ids[0] as string);
+    const from = def ? resultsOf(def) : null;
+    const result = from?.results[t.result ?? 0];
+    if (!def || !from || !result) return null;
+    if (result.promise && !t.awaited) return "ext";
+    const ev = result.inferred ? chain(found.ev, inferredEv(def)) : found.ev;
+    const read: TypeRef = { ...result, promise: undefined, inferred: undefined, ...(result.result !== undefined && (result.awaited || t.awaited) ? { awaited: true } : {}) };
+    return { file: from.file, family: from.family, t: read, ev: evOf(s.ev, ev) };
+  }, null);
+  // The type itself once its member path is walked, its result read and
+  // its alias followed; null or "ext" when a step is not known.
+  const normalize = guarded((start: Struct, depth: number): Struct | "ext" | null => {
+    let s = start;
+    for (let steps = 0; steps <= MAX_TYPE_DEPTH; steps++) {
+      const t = s.t;
+      if (t.path) {
+        let head: Struct | "ext" | null = { ...s, t: { ...t, path: undefined } };
+        for (const p of t.path) {
+          head = stepStruct(head, p, depth + 1);
+          if (head === null || head === "ext") return head;
+        }
+        s = head;
+        continue;
+      }
+      if (t.result !== undefined) {
+        const r = resultOf(s, depth + 1);
+        if (r === "ext") return r;
+        if (r && structural(r.t)) {
+          s = r;
+          continue;
+        }
+        return s;
+      }
+      if (t.parts || inPlace(t) || t.elem || t.promise) return s;
+      const k = typeKey(s.file, s.family, t, depth + 1);
+      const alias = k !== null && k !== "ext" ? aliasOf(k.key) : null;
+      if (!alias || k === null || k === "ext") return s;
+      const generic = t.args && Object.values(alias.t.fields ?? {}).some((f) => f.kind === "param");
+      s = { ...alias, ev: evOf(s.ev, k.ev), ...(generic && t.args ? { bound: { file: s.file, args: t.args } } : {}) };
+    }
+    return null;
+  }, null);
+  // Whether a `Pick` or an `Omit` keeps member `name`: "no" when the type
+  // has no such member, "unknown" when keys it does not write out may name it.
+  const kept = (t: TypeRef, name: string): "yes" | "no" | "unknown" => {
+    if (t.only) return t.only.includes(name) ? "yes" : t.open ? "unknown" : "no";
+    return t.omit?.includes(name) ? "no" : "yes";
+  };
+  // Whether one side of an intersection declares `name`: as a field (its
+  // type), as a method, not at all, or "unknown" when that cannot be told.
+  const declares = guarded((side: Struct, name: string, depth: number): Struct | "method" | null | "unknown" => {
+    if (depth > MAX_TYPE_DEPTH) return "unknown";
+    const n = normalize(side, depth);
+    if (n === null || n === "ext") return "unknown";
+    if (n.t.parts) {
+      const k = kept(n.t, name);
+      if (k !== "yes") return k === "no" ? null : "unknown";
+      let one: Struct | "method" | null = null;
+      for (const p of n.t.parts) {
+        const d = declares({ ...n, t: p }, name, depth + 1);
+        if (d === "unknown" || (d !== null && one !== null)) return "unknown";
+        if (d !== null) one = d;
+      }
+      return one;
+    }
+    if (inPlace(n.t)) {
+      if (!n.t.fields) return "unknown";
+      const f = n.t.fields[name];
+      return f ? (memberOf(n, f) ?? "unknown") : null;
+    }
+    const k = typeKey(n.file, n.family, n.t, depth + 1);
+    if (k === null || k === "ext") return "unknown";
+    const f = fieldRef(k.key, name);
+    if (f === "ext") return "unknown";
+    if (f) return { ...f, ev: evOf(evOf(n.ev, k.ev), f.ev) };
+    const m = methodOn(k.key, name, "i", 0);
+    if (m && "gap" in m) return "unknown";
+    if (m) return "method";
+    return outsideBase(k.key) || (classes.get(k.key)?.dynamic.length ?? 0) > 0 ? "unknown" : null;
+  }, "unknown");
+  // A member of an object type written in place: its type, or for one typed
+  // by the alias's parameter, the argument the alias's use gives (null
+  // without one).
+  const memberOf = (n: Struct, f: TypeRef): Struct | null => {
+    if (f.kind !== "param") return { ...n, t: f, bound: undefined };
+    const arg = f.param === undefined ? undefined : n.bound?.args[f.param];
+    return arg && n.bound ? { file: n.bound.file, family: n.family, t: arg, ev: n.ev } : null;
+  };
+  // The type of member `name` of a value of type `s`.
+  const stepStruct = guarded((s: Struct, name: string, depth: number = 0): Struct | "ext" | null => {
+    if (depth > MAX_TYPE_DEPTH) return null;
+    const n = normalize(s, depth);
+    if (n === null || n === "ext") return n;
+    const t = n.t;
+    if (t.promise) return "ext";
+    if (t.elem) return null;
+    if (t.parts) {
+      // Bound only when exactly one side declares the member, as a field.
+      const d = declares(n, name, depth + 1);
+      return d === "unknown" || d === "method" ? null : d;
+    }
+    if (inPlace(t)) {
+      const f = t.fields?.[name];
+      return f ? memberOf(n, f) : null;
+    }
+    const k = typeKey(n.file, n.family, t, depth + 1);
+    if (k === null || k === "ext") return k;
+    const f = fieldRef(k.key, name);
+    if (f === null || f === "ext") return f;
+    const ev = evOf(evOf(n.ev, k.ev), f.ev);
+    // A member typed by the type's own parameter takes the argument the value's type gives.
+    if (f.t.kind === "param" && f.t.param !== undefined && !f.inherited) {
+      const arg = t.args?.[f.t.param];
+      return arg ? { file: n.file, family: n.family, t: arg, ev } : null;
+    }
+    return { ...f, ev, inherited: undefined };
+  }, null);
+  // The class a structural type comes to, for a call on it.
+  const toHit = guarded((s: Struct, depth: number): TypeHit => {
+    const n = normalize(s, depth);
+    if (n === null || n === "ext") return n;
+    if (structural(n.t)) return null;
+    const k = typeKey(n.file, n.family, n.t, depth + 1);
+    return k === null || k === "ext" || n.ev === null ? k : { ...k, ev: chain(n.ev, k.ev) };
+  }, null);
+  // Why a method called on an intersection is not bound.
+  const intersectionNote = (t: TypeRef): string =>
+    t.parts?.length === 1 ? "a Pick or an Omit that does not show it keeps this member" : "an intersection whose sides do not show which one alone declares the method";
+  // A method called on an intersection: the one side that declares it. A
+  // `Pick` or an `Omit` is an intersection of one side: that side, for a
+  // member it keeps (a property typed by a function too).
+  const intersectionCall = guarded((s: Struct, name: string): TypeHit => {
+    const n = normalize(s, 0);
+    if (n === null || n === "ext" || !n.t.parts || kept(n.t, name) !== "yes") return null;
+    // A side that is an intersection itself is read for the member, never as a class.
+    const sideHit = (side: Struct): TypeHit => {
+      const inner = normalize(side, 1);
+      return inner !== null && inner !== "ext" && inner.t.parts ? intersectionCall(inner, name) : toHit(side, 1);
+    };
+    if (n.t.parts.length === 1) return sideHit({ ...n, t: n.t.parts[0] as TypeRef });
+    let one: TypeHit = null;
+    let declared = false;
+    for (const p of n.t.parts) {
+      const side = { ...n, t: p };
+      const d = declares(side, name, 1);
+      if (d === "unknown" || (d !== null && declared) || (d !== null && d !== "method")) return null;
+      if (d === "method") {
+        declared = true;
+        one = sideHit(side);
+      }
+    }
+    return one;
+  }, null);
 
   const rbGlobal = (name: string): Outcome => {
     const ids = rbTop.get(name);
@@ -2105,6 +2858,7 @@ export function createWorld(input: ResolveInput): World {
   const javaOn = (key: string, name: string, side: Side, ev: Ev, arity: number | undefined, both = false, value = both): Outcome => {
     const sides: Side[] = both ? ["i", "s"] : [side];
     const ids: string[] = [];
+    const zeroEvidence = new Map<string, Ev | null>();
     let inner: Ev | null = null;
     for (const at of sides) {
       const hit = index.members(key, name, at);
@@ -2112,12 +2866,13 @@ export function createWorld(input: ResolveInput): World {
       if (!hit) continue;
       // A constructor is no member: only javaCtor reads it.
       for (const id of hit.ids) if (!ids.includes(id) && defById.get(id)?.ctor !== true) ids.push(id);
+      for (const zero of hit.zero ?? []) if (!zeroEvidence.has(zero.id)) zeroEvidence.set(zero.id, zero.ev);
       if (hit.ev) inner = inner ? chain(inner, hit.ev) : hit.ev;
     }
     if (ids.length === 0) return { miss: { target: key, name }, ev, cause: outsideBase(key) ? "no-receiver-type" : "miss" };
-    // An abstract member found beside a member with a body and the same
-    // parameter count on another class is the one that body overrides: it
-    // never runs. Both on one class are two overloads.
+    // A nearer class body suppresses an abstract member with the same parameter count.
+    // Interface defaults prove this only for zero-parameter methods.
+    // Two members on one class remain overloads.
     const classOf = (id: string) => {
       const d = defById.get(id);
       return d ? classKey("java", d.file, d.owner ?? "") : id;
@@ -2125,8 +2880,27 @@ export function createWorld(input: ResolveInput): World {
     // The lookup lists members nearest to the receiver first.
     const live = ids.filter((id, i) => {
       if (defById.get(id)?.abstract !== true) return true;
-      return !ids.some((b, j) => j < i && defById.get(b)?.abstract !== true && javaCount(b) === javaCount(id) && classOf(b) !== classOf(id));
+      return !ids.some((b, j) => j < i && defById.get(b)?.abstract !== true
+        && (javaCount(id) === 0 || javaDefaultOwner(b) === null)
+        && javaCount(b) === javaCount(id) && classOf(b) !== classOf(id));
     });
+    // The nearest fixed zero-argument member wins over varargs, including inherited members.
+    // Bases passed before that member still contribute their evidence.
+    if (arity === 0) {
+      const fixed = live.find((id) => javaCount(id) === 0 && !defById.get(id)?.varargs);
+      if (fixed) {
+        // Unrelated defaults remain possible. A class member still wins first.
+        const candidates = javaDefaultOwner(fixed) === null ? [fixed] : live.filter((id) =>
+          javaCount(id) === 0 && !defById.get(id)?.varargs && javaDefaultOwner(id) !== null,
+        );
+        let evidence = ev;
+        for (const id of candidates) {
+          const step = zeroEvidence.get(id);
+          if (step) evidence = chain(evidence, step);
+        }
+        return javaOverloads(candidates, name, arity, evidence, value);
+      }
+    }
     return javaOverloads(live, name, arity, inner ? chain(ev, inner) : ev, value);
   };
   // `new T(...)`, `this(...)`, `super(...)`: the constructors T itself
@@ -2197,13 +2971,17 @@ export function createWorld(input: ResolveInput): World {
       if (r.kind === "super") {
         const key = enclosingClass(file, "java", caller);
         const bases = key ? basesOf(key) : null;
-        const at = bases ? bases.rels.findIndex((rel) => rel !== "implements") : -1;
+        const at = bases ? bases.rels.findIndex((rel, i) => rel !== "implements" && !isIface(bases.keys[i] as string)) : -1;
         const base = bases?.keys[at];
         // A superclass outside the graph: external when its name binds to a
         // declared dependency or the standard library, else unknown.
         if (!bases || !base) {
           const info = key ? classes.get(key) : undefined;
-          const sup = info?.bases.find((t) => t.rel === undefined);
+          const sup = info?.bases.find((t) => {
+            if (t.rel !== undefined) return false;
+            const base = typeKey(info.file, "java", t, 0, false, info.nesting);
+            return base === null || base === "ext" || !isIface(base.key);
+          });
           if (!info || !sup) return "ignore";
           return typeKey(info.file, "java", sup, 0, false, info.nesting) === "ext" ? { ext: true } : { unknown: "no-receiver-type", shape: "self", note: "the superclass is outside the graph" };
         }
@@ -2216,6 +2994,11 @@ export function createWorld(input: ResolveInput): World {
         if ("gap" in p) return { unknown: p.gap, shape: "name", note: p.note, candidates: p.candidates };
         if ("type" in p) return javaCtor(p.type, arity, p.ev);
         return { unknown: "no-receiver-type", shape: "name" };
+      }
+      if (r.kind === "type") {
+        const key = typeKey(file, "java", r.type, 0, false, nesting);
+        if (key === "ext") return { ext: true };
+        return key ? javaCtor(key.key, arity, key.ev) : { unknown: "no-receiver-type", shape: "typed" };
       }
     }
     switch (r.kind) {
@@ -2245,6 +3028,9 @@ export function createWorld(input: ResolveInput): World {
           if (out === "ignore") continue;
           if ("ids" in out) return out.ids.some((id) => methodsOn.i.get(classOfMember(id))?.get(call.name)?.includes(id) === true) ? withDispatch(out, { key, side: "i" }) : out;
           if ("unknown" in out) return out;
+          if ("miss" in out && out.cause === "no-receiver-type") {
+            return { unknown: "no-receiver-type", shape: "self", note: "An outside base may declare this method." };
+          }
           first ??= out;
         }
         // Every static import of the name together (a single-member import
@@ -2296,7 +3082,7 @@ export function createWorld(input: ResolveInput): World {
       case "super": {
         const key = enclosingClass(file, "java", caller);
         const bases = key ? basesOf(key) : null;
-        const at = bases ? bases.rels.findIndex((rel) => rel !== "implements") : -1;
+        const at = bases ? bases.rels.findIndex((rel, i) => rel !== "implements" && !isIface(bases.keys[i] as string)) : -1;
         const base = bases?.keys[at];
         if (!bases || !base) return key && outsideBase(key) ? { unknown: "no-receiver-type", shape: "self", note: "the base class is outside the graph" } : { unknown: "no-receiver-type", shape: "self" };
         const superEv = chain({ kind: "receiver-self", tier: "certain", via: null, note: null, rule: "receiver-super" }, bases.evs[at] as Ev);
@@ -2312,7 +3098,13 @@ export function createWorld(input: ResolveInput): World {
             const head = javaTypeValue(file, r.type.qualifier ? [...r.type.qualifier.split("."), r.type.name] : [r.type.name], nesting);
             if (head?.v === "gap") return { unknown: head.cause, shape: "typed", note: head.note, candidates: head.candidates };
           }
-          const note = r.type.result !== undefined ? `what ${named} returns is not known to the graph` : `the type ${named} is not found in the graph`;
+          const note = r.type.parts
+            ? "an intersection whose sides do not show which one alone declares the member"
+            : r.type.callback
+              ? `what ${named} hands its callback is not known to the graph`
+              : r.type.result !== undefined
+              ? `what ${named} returns is not known to the graph`
+              : `the type ${named} is not found in the graph`;
           return { unknown: "no-receiver-type", shape: "typed", note };
         }
         const key = followPath(t, r.path);
@@ -2361,7 +3153,21 @@ export function createWorld(input: ResolveInput): World {
         const side: Side = call.static && r.path.length === 0 ? "s" : "i";
         const own = enclosingClass(file, family, caller);
         if (!own) return { unknown: "no-receiver-type", shape: "self", note: "this or self outside a method of a class" };
-        const key = followPath({ key: own, ev: { kind: "receiver-self", tier: "certain", via: null, note: null, rule: "receiver-self" } }, r.path);
+        const selfEv: Ev = { kind: "receiver-self", tier: "certain", via: null, note: null, rule: "receiver-self" };
+        // A TypeScript member path that comes to `A & B` (`Pick<T, K>` is
+        // one): the one side that declares the method.
+        if (family === "js" && r.path.length > 0) {
+          let f = fieldRef(own, r.path[0] as string);
+          for (const p of r.path.slice(1)) f = f === null || f === "ext" ? f : stepStruct(f, p);
+          const n = f === null || f === "ext" ? f : normalize({ ...f, ev: evOf(selfEv, f.ev) }, 0);
+          if (n !== null && n !== "ext" && n.t.parts) {
+            const one = intersectionCall(n, call.name);
+            if (one === "ext") return { ext: true };
+            if (one === null) return { unknown: "no-receiver-type", shape: "self", note: intersectionNote(n.t) };
+            return withDispatch(onClass(one.key, call.name, "i", { ...one.ev, kind: "receiver-field", rule: "receiver-type" }), { key: one.key, side: "i" });
+          }
+        }
+        const key = followPath({ key: own, ev: selfEv }, r.path);
         if (key === "ext") return { ext: true };
         if (key === null) return { unknown: "no-receiver-type", shape: "self", note: "a field whose type no rule knows" };
         const ev: Ev = { ...key.ev, kind: r.path.length > 0 ? "receiver-field" : "receiver-self" };
@@ -2387,26 +3193,79 @@ export function createWorld(input: ResolveInput): World {
         return onClass(base, call.name, call.static ? "s" : "i", superEv);
       }
       case "type": {
+        // A name bound by destructuring is a member path of its type: the
+        // call's own path goes on from there.
+        if (r.type.path) return resolveCall(file, family, { ...call, recv: { kind: "type", type: { ...r.type, path: undefined }, path: [...r.type.path, ...r.path] } }, caller, asValue);
+        // A TypeScript member path the class table cannot follow (an object
+        // type written in place or aliased, an intersection, a result read
+        // from a body): read structurally.
+        const structurally = (): TypeHit => (family === "js" ? toHit({ file, family, t: r.path.length > 0 ? { ...r.type, path: r.path } : r.type, ev: null }, 0) : null);
+        // A path whose last member is a collection or a built-in type
+        // (`input.names.map()` with `names: string[]`): the language's own method.
+        const builtinEnd = (): boolean => {
+          if (family !== "js" || r.path.length === 0) return false;
+          const n = normalize({ file, family, t: { ...r.type, path: r.path }, ev: null }, 0);
+          return n !== null && n !== "ext" && (n.t.elem === true || (n.t.qualifier === null && BUILTIN_TYPES.js.has(n.t.name) && resolveLocal(n.file, n.t.name) === null));
+        };
+        // `A & B`, here or at the end of the path (`Pick<T, K>` is one): the
+        // one side that declares the method.
+        if (family === "js" && r.type.result === undefined) {
+          const n = normalize({ file, family, t: r.path.length > 0 ? { ...r.type, path: r.path } : r.type, ev: null }, 0);
+          if (n !== null && n !== "ext" && n.t.parts) {
+            const one = intersectionCall(n, call.name);
+            if (one === "ext") return { ext: true };
+            if (one === null) return { unknown: "no-receiver-type", shape: "typed", note: intersectionNote(n.t) };
+            const kind = one.ev.kind === "receiver-inferred" ? one.ev.kind : receiverKind(r.type, r.path);
+            return withDispatch(onClass(one.key, call.name, "i", { ...one.ev, kind, rule: "receiver-type" }), { key: one.key, side: "i" });
+          }
+        }
         if (untypedType(file, family, r.type, 0)) {
+          // A path through a member the object type declares has that member's type.
+          const members = r.type.fields !== undefined || !(r.type.qualifier === null && JS_UNTYPED.has(r.type.name));
+          const through = r.path.length > 0 && members ? structurally() : null;
+          if (through !== null && through !== "ext") {
+            const kind = through.ev.kind === "receiver-inferred" ? "receiver-inferred" : "receiver-field";
+            return withDispatch(onClass(through.key, call.name, "i", { ...through.ev, kind, rule: "receiver-type" }), { key: through.key, side: "i" });
+          }
+          if (through === null && builtinEnd()) return { ext: true };
           const spelled = r.type.name === "{}" ? "by an object type written in place" : `${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}`;
           return { unknown: "untyped-receiver", shape: "typed", note: `a value typed ${spelled} may be anything with a method of this name` };
         }
         const t = typeKey(file, family, r.type);
-        if (t === "ext") return { ext: true };
+        // What a package's function or method returned: its methods are the
+        // package's, unless the repository adds a method of that name to a
+        // package's type (a subclass, an implementation, `declare module`),
+        // which the value may be.
+        const fromPackage = (): Outcome =>
+          family === "js" && packageMemberNamed(call.name) && packageResult(file, family, r.type, 0)
+            ? { unknown: "no-receiver-type", shape: "typed", note: `what ${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name} returns comes from a package, and the repository adds a method ${call.name} to a package's type, by a subclass, an implementation or \`declare module\`, which the value may be` }
+            : { ext: true };
+        if (t === "ext") return fromPackage();
         // A collection itself (an array, a list, a slice) or a value of a
         // built-in type the file does not redefine: the method is the
         // language's own.
         if (t === null && r.path.length === 0 && (r.type.elem || (!r.type.qualifier && BUILTIN_TYPES[family].has(r.type.name) && resolveLocal(file, r.type.name) === null))) return { ext: true };
-        if (t === null) {
+        // What the class table cannot follow is read structurally.
+        const typed = t === null || (r.path.length > 0 && followPath(t, r.path) === null) ? structurally() : null;
+        // A path through an intersection (`Pick<T, K>` is one) to a built-in type: the language's own method.
+        if (t === null && typed === null && r.type.parts && builtinEnd()) return { ext: true };
+        if (t === null && typed === null) {
           const named = `${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}`;
           // `result`: the value is what calling `named` returns, not a type of that name.
-          const note = r.type.result !== undefined ? `what ${named} returns is not known to the graph` : `the type ${named} is not found in the graph`;
+          const note = r.type.parts
+            ? "an intersection whose sides do not show which one alone declares the member"
+            : r.type.callback
+              ? `what ${named} hands its callback is not known to the graph`
+              : r.type.result !== undefined
+              ? `what ${named} returns is not known to the graph`
+              : `the type ${named} is not found in the graph`;
           return { unknown: "no-receiver-type", shape: "typed", note };
         }
-        const key = followPath(t, r.path);
-        if (key === "ext") return { ext: true };
+        const key = typed ?? followPath(t, r.path);
+        if (key === "ext") return fromPackage();
+        if (key === null && builtinEnd()) return { ext: true };
         if (key === null) return { unknown: "no-receiver-type", shape: "typed", note: "a field whose type no rule knows" };
-        const kind = receiverKind(r.type, r.path);
+        const kind = key.ev.kind === "receiver-inferred" ? "receiver-inferred" : receiverKind(r.type, r.path);
         const out = onClass(key.key, call.name, "i", { ...key.ev, kind, rule: "receiver-type" });
         // A value a constructor made here is of that class alone; one typed
         // by an annotation, a declared result or a field may be any class
@@ -2442,6 +3301,15 @@ export function createWorld(input: ResolveInput): World {
   const withDispatch = (out: Outcome, d: Dispatch | null): Outcome => {
     if (d !== null && typeof out === "object" && "ids" in out) out.dispatch = d;
     return out;
+  };
+
+  // A gap's receiver as written and the type it was read as (`sessions
+  // any`, `deps.store Deps`): what tells which class's callers it may hide.
+  const receiverHint = (call: CallFact): string | undefined => {
+    const r = call.recv;
+    const parts = call.hint ? [call.hint] : r.kind === "name" ? [[r.name, ...r.path].join(".")] : [];
+    if (r.kind === "type") parts.push(`${r.type.qualifier ? `${r.type.qualifier}.` : ""}${r.type.name}${r.type.result !== undefined ? "()" : ""}`);
+    return parts.length > 0 ? parts.join(" ") : undefined;
   };
 
   // `rule`: the rule that made the edge, when it is not the one that bound
@@ -2511,6 +3379,81 @@ export function createWorld(input: ResolveInput): World {
     if (input.stop?.()) throw new BudgetStop("budget");
   };
 
+  // The module a name's import binds it to, when it is a file of the repository.
+  const importFileOf = (file: string, name: string, bound: BoundImport | undefined): string | null => {
+    let mod: Mod | { ns: string; ev: Ev } | undefined;
+    if (bound) {
+      const f = facts.get(file);
+      const imp = f?.imports[bound.import];
+      if (f && imp) mod = moduleOf(file, familyOf(f.lang), imp);
+    } else {
+      const b = index.bindings(file).names.get(name);
+      if (b && b.kind !== "pyns") mod = b.mod;
+    }
+    return mod && "file" in mod ? mod.file : null;
+  };
+  // A JavaScript module exports `name` as a variable (`export const LIMIT`,
+  // `export { LIMIT }`, through a re-export): an import of it binds a value,
+  // not a name the graph could not find.
+  const variablesMemo = new Map<string, { all: Set<string>; exported: Set<string> }>();
+  const variablesOf = (file: string, f: FileFacts) => {
+    let v = variablesMemo.get(file);
+    if (!v) variablesMemo.set(file, (v = { all: new Set(f.variables ?? []), exported: new Set(f.exportedVariables ?? []) }));
+    return v;
+  };
+  // Each answer is kept by file, name and depth (the depth bounds what is
+  // left to walk): barrels whose `export *` paths meet again are walked
+  // once, not once per path and per read. The build's deadline stops it.
+  const exportsVariableMemo = new Map<string, boolean>();
+  const exportsVariable = (file: string, name: string, depth = 0): boolean => {
+    const key = `${file}\0${name}\0${depth}`;
+    let found = exportsVariableMemo.get(key);
+    if (found === undefined) {
+      checkBudget();
+      exportsVariableMemo.set(key, (found = exportsVariableAt(file, name, depth)));
+    }
+    return found;
+  };
+  const exportsVariableAt = (file: string, name: string, depth: number): boolean => {
+    const f = facts.get(file);
+    if (!f || familyOf(f.lang) !== "js" || depth > MAX_DEPTH) return false;
+    const vars = variablesOf(file, f);
+    if (vars.exported.has(name)) return true;
+    if (name === "default" && f.defaultExport) return vars.all.has(f.defaultExport);
+    for (const e of f.exportsLocal) {
+      if (e.exported !== name) continue;
+      if (vars.all.has(e.local)) return true;
+      const b = index.bindings(file).names.get(e.local);
+      return b?.kind === "named" && b.mod !== null && "file" in b.mod ? exportsVariable(b.mod.file, b.imported, depth + 1) : false;
+    }
+    for (const imp of f.imports) {
+      if (!imp.reexport) continue;
+      const named = imp.names.find((n) => n.local === name);
+      if (!named && !imp.star) continue;
+      const mod = jsSpec(file, imp.line, imp.spec);
+      if (mod === null || !("file" in mod)) continue;
+      if (named ? named.imported !== "*" && exportsVariable(mod.file, named.imported, depth + 1) : exportsVariable(mod.file, name, depth + 1)) return true;
+    }
+    return false;
+  };
+  // The module and the name an import binds to `head` (`import { a as head }`,
+  // or `head.name` read on `import * as head`), when the module is a file here.
+  const importedAs = (file: string, head: string, bound: BoundImport | undefined, member: string | null): { file: string; name: string } | null => {
+    let b: { kind: string; mod: Mod | { ns: string; ev: Ev }; imported?: string } | undefined;
+    if (bound) {
+      const f = facts.get(file);
+      const imp = f?.imports[bound.import];
+      if (f && imp) b = bound.imported === "*" ? { kind: "ns", mod: moduleOf(file, familyOf(f.lang), imp) } : { kind: "named", mod: moduleOf(file, familyOf(f.lang), imp), imported: bound.imported };
+    } else {
+      const found = index.bindings(file).names.get(head);
+      if (found && found.kind !== "pyns") b = found;
+    }
+    if (!b || b.mod === null || !("file" in b.mod)) return null;
+    if (b.kind === "named" && member === null && b.imported) return { file: b.mod.file, name: b.imported };
+    if (b.kind === "ns" && member !== null) return { file: b.mod.file, name: member };
+    return null;
+  };
+
   // ---------- the world ----------
   const resolveAll = (): Resolved => {
     // One edge per (from, to, kind), found by the ids themselves: building
@@ -2553,6 +3496,15 @@ export function createWorld(input: ResolveInput): World {
       if (v === undefined) tsIface.set(key, (v = classes.get(key)?.family === "js" && classes.get(key)?.ids.some((id) => defById.get(id)?.iface === true) === true));
       return v;
     };
+    const shapeEv = (declared: string, iface: string, count: number): Ev => {
+      const k = `${declared} shape ${count}`;
+      let ev = evMemo.get(k);
+      if (!ev) {
+        ev = { kind: "by-shape", tier: "possible", via: null, note: `Its class matches ${iface} by shape: it has every method of ${iface} by name without declaring implements; its other members and the signatures are not compared. A call to ${declared} may run it, in one of ${count} classes.`, rule: "by-shape" };
+        evMemo.set(k, ev);
+      }
+      return ev;
+    };
     const openNotes = new Map<string, string>();
     const openShapeNote = (key: string): string => {
       let note = openNotes.get(key);
@@ -2563,6 +3515,58 @@ export function createWorld(input: ResolveInput): World {
     let externalSites = 0;
     const budgetFiles: string[] = [];
     let stopped = false;
+
+    // ---------- escape paths ----------
+    // Uses as a value per function, value uses no rule binds per family and
+    // name, and the modules found escaping with the first place each did.
+    const uses = new Map<string, Place & { count: number }>();
+    const unbound = new Map<string, Place & { count: number }>();
+    const marks = new Map<string, Place>();
+    const countUse = (id: string, file: string, line: number) => {
+      const kept = uses.get(id);
+      if (kept) kept.count++;
+      else uses.set(id, { file, line, count: 1 });
+    };
+    const mark = (module: string, file: string, line: number) => {
+      if (!marks.has(module)) marks.set(module, { file, line });
+    };
+    // A value reference that names no function: the module it names (any
+    // read of a module but `ns.x` lets a computed call reach its exports),
+    // an import that ends in a gap or a miss, and a name no rule binds.
+    const escapedRef = (file: string, family: Family, ref: ValueRef, named: boolean) => {
+      const r = ref.recv;
+      if ((r.kind !== "none" && r.kind !== "name") || ref.local !== undefined) return;
+      if (named && (family !== "js" || ref.role === "object")) return;
+      const head = r.kind === "none" ? ref.name : r.name;
+      const bound = r.kind === "none" ? ref.bound : r.bound;
+      let v = bound ? boundValue(file, head, bound) : resolveLocal(file, head);
+      for (const p of r.kind === "name" ? [...r.path, ref.name] : []) v = attr(v, p);
+      if (family === "js" && v?.v === "mod" && ref.role !== "object") mark(v.file, file, ref.line);
+      if (named || (v !== null && v.v !== "miss" && v.v !== "gap")) return;
+      if (v === null && r.kind === "none" && BUILTINS[family].has(ref.name)) return;
+      // An imported variable: a value the graph follows, though no definition.
+      const imported = family === "js" ? importedAs(file, head, bound, r.kind === "none" ? null : r.path.length === 0 ? ref.name : "") : null;
+      if (imported && imported.name !== "" && exportsVariable(imported.file, imported.name)) return;
+      if (family === "js") {
+        const via = importFileOf(file, head, bound);
+        if (via) mark(via, file, ref.line);
+        if (v?.v === "miss" && facts.has(v.target)) mark(v.target, file, ref.line);
+      }
+      const key = `${family}:${ref.name}`;
+      const kept = unbound.get(key);
+      if (kept) kept.count++;
+      else unbound.set(key, { file, line: ref.line, count: 1 });
+    };
+    // An unbound call that cannot run a plain function of its name: a bare
+    // call of a local or a parameter, `this.x()` where `this` is proved an
+    // instance of a class, a call on a value whose class or interface the
+    // graph knows but that lacks the member (`miss`).
+    const cannotRunPlain = (file: string, family: Family, call: CallFact, caller: Def | undefined, miss: boolean): boolean => {
+      const r = call.recv;
+      if (r.kind === "none") return call.shadowed === true && call.local === undefined && call.bound === undefined;
+      if (r.kind === "self") return r.path.length === 0 && enclosingClass(file, family, caller) !== null;
+      return r.kind === "type" && miss;
+    };
 
     for (const { path, facts: f } of input.files) {
       if (!stopped && input.stop?.()) stopped = true;
@@ -2604,10 +3608,19 @@ export function createWorld(input: ResolveInput): World {
         if (call.alias !== undefined) {
           const v = valueOf(path, call.alias);
           const ref = f.values[call.alias];
-          if (v && ref) {
-            const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
-            for (const t of v.ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
-            continue;
+          // A method called on a local copied from a property typed by a
+          // name (`repo: Repo`) runs that property only when the name is a
+          // function type; when it is a class or an object type the call
+          // binds on the local's type alone, and when the graph cannot tell
+          // (a type from outside the repository) it does both.
+          const held = v ? v.ids.map((id) => [id, call.recv.kind === "none" ? true : holdsFunction(id)] as const) : [];
+          const ids = held.filter(([, fn]) => fn !== false).map(([id]) => id);
+          if (ids.length > 0 && ref) {
+            const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.aliasOf ?? call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
+            for (const t of ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
+            // A method called on a local of a declared type (`Job j = this::work;
+            // j.run()`) is also a call of that type's method.
+            if (held.every(([, fn]) => fn === true) && call.recv.kind !== "type") continue;
           }
         }
         // What a call returned, called: the functions that callee returns by name.
@@ -2622,7 +3635,8 @@ export function createWorld(input: ResolveInput): World {
             const site = siteOf(path, call.line, call.column, ev);
             for (const t of targets.slice(0, DISPATCH_CAP)) addEdge(callerId, t, "may_invoke", site);
             if (targets.length > DISPATCH_CAP) {
-              unknowns.push({ file: path, line: call.line, column: call.column, name: "", cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${by} returns ${targets.length.toLocaleString("en-US")} functions by name; the ${(targets.length - DISPATCH_CAP).toLocaleString("en-US")} past the first ${DISPATCH_CAP} are not listed as possible targets of this call` });
+              // The functions past the cap are known: the gap reaches each of them.
+              unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { ids: targets.slice(DISPATCH_CAP) }, next: NEXT.returnedCap, name: "", shape, caller: callerId, note: `${by} returns ${targets.length.toLocaleString("en-US")} functions by name; the ${(targets.length - DISPATCH_CAP).toLocaleString("en-US")} past the first ${DISPATCH_CAP} are not listed as possible targets of this call` }));
             }
             // A callee that also returns something else (a parameter, a
             // call) may hand back any function: the call keeps its gap.
@@ -2648,9 +3662,17 @@ export function createWorld(input: ResolveInput): World {
         if ("unknown" in out) {
           if (call.implicit) continue;
           unresolvedSites++;
-          const u: UnknownSite = { file: path, line: call.line, column: call.column, name: call.name, cause: out.unknown, shape: out.shape, caller: callerId, scope: out.scope ?? "file" };
+          // A call with no name goes through a value; a named one is found by its name.
+          const u = gap({ cause: out.unknown, place: { file: path, line: call.line, column: call.column }, reaches: call.name === "" ? "values" : { names: [call.name] }, next: call.name === "" ? NEXT.values : NEXT.unbound, name: call.name, shape: out.shape, caller: callerId, scope: out.scope ?? "file" });
           if (out.note) u.note = out.note;
+          if (call.byName) {
+            u.next = NEXT.byName;
+            u.note = call.name === "" ? "a method found by a name given at run time (reflection), which may be any method" : `the method ${call.name} found by its name at run time (reflection)`;
+          }
           if (out.candidates) u.candidates = out.candidates;
+          const receiver = receiverHint(call);
+          if (receiver) u.receiver = receiver;
+          if (cannotRunPlain(path, family, call, caller, false)) u.notPlain = true;
           // A table nothing else can change narrows the gap to its entries
           // (or a key it does not hold). One that may change elsewhere keeps
           // the gap's whole scope: a function put in it later may be called.
@@ -2662,7 +3684,14 @@ export function createWorld(input: ResolveInput): World {
                 : "one of its entries, listed as possible targets";
             if (table.open) u.note = `a computed member of the table ${table.name} (line ${table.line}), which may be changed elsewhere (it is exported, a module's or a package's, written through a member or an index, or passed on): ${which}, or any function put in it`;
             else {
+              // A table nothing else can change: the call runs one of its
+              // entries or none, so the gap reaches the entries past the
+              // listed ones (none when every entry is listed).
               u.scope = "file";
+              if (u.name === "") {
+                u.reaches = { ids: entries.slice(listed.length) };
+                u.next = NEXT.tableCap;
+              }
               u.note = `a computed member of the table ${table.name} (line ${table.line}): ${which}, or a key the table does not hold`;
             }
           }
@@ -2673,20 +3702,21 @@ export function createWorld(input: ResolveInput): World {
           misses.push({ target: out.miss.target, name: out.miss.name, from: callerId, site: siteOf(path, call.line, call.column, out.ev) });
           if (call.implicit) continue;
           unresolvedSites++;
-          unknowns.push({
-            file: path,
-            line: call.line,
-            column: call.column,
-            name: call.name,
+          const u = gap({
             cause: out.cause,
+            place: { file: path, line: call.line, column: call.column },
+            reaches: { names: [call.name] },
+            next: NEXT.miss,
+            name: call.name,
             shape,
             caller: callerId,
-            scope: "file",
             note:
               out.cause === "miss"
                 ? `no definition of ${call.name} where the evidence points (${out.miss.target.split("\u0000").join(" ")})`
                 : `${out.miss.target.split("::").pop()} is an interface or a type alias without that member, or inherits from a class outside the graph`,
           });
+          if (cannotRunPlain(path, family, call, caller, true)) u.notPlain = true;
+          unknowns.push(u);
           continue;
         }
         // Several ids only when one name has several definitions in one place
@@ -2708,12 +3738,36 @@ export function createWorld(input: ResolveInput): World {
             const site = siteOf(path, call.line, call.column, dispatchEv(declared, contract, targets.length));
             for (const t of kept) addEdge(callerId, t, "dispatches_to", site);
             if (targets.length > DISPATCH_CAP) {
-              unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `the call may run ${targets.length} implementations or overrides of ${declared}; the ${targets.length - DISPATCH_CAP} past the first ${DISPATCH_CAP} in path order are not listed` });
+              unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.dispatchCap, shape, caller: callerId, note: `the call may run ${targets.length} implementations or overrides of ${declared}; the ${targets.length - DISPATCH_CAP} past the first ${DISPATCH_CAP} in path order are not listed` }));
             }
           }
-          // A TypeScript interface admits any value of its shape, declared or not.
+          // A TypeScript interface admits any value of its shape, declared or
+          // not: the classes that have every member by name are possible
+          // targets too, capped. The gap stays when the interface's members
+          // are not all known, or a class may get them from outside the graph.
           if (family === "js" && isTsInterface(d.key)) {
-            unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: openShapeNote(d.key) });
+            const shaped = shapeTargets(d.key, call.name, new Set([...out.ids, ...targets]));
+            if (shaped === null) {
+              unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.openShape, shape, caller: callerId, note: openShapeNote(d.key) }));
+            } else {
+              const iface = shortKey(d.key);
+              if (shaped.classes.length > 0) {
+                // The cap counts classes; a method two classes share (one inherits it) is listed once.
+                const keptIds = [...new Set(shaped.classes.slice(0, SHAPE_CAP).flatMap((c) => c.ids))];
+                const leftIds = new Set(shaped.classes.slice(SHAPE_CAP).flatMap((c) => c.ids).filter((id) => !keptIds.includes(id)));
+                const total = keptIds.length + leftIds.size;
+                dispatch.push({ file: path, line: call.line, column: call.column, caller: callerId, name: call.name, declared: out.ids, candidates: keptIds, total, rule: "by-shape" });
+                const site = siteOf(path, call.line, call.column, shapeEv(declared, iface, shaped.classes.length));
+                for (const t of keptIds) addEdge(callerId, t, "dispatches_to", site);
+                // Classes past the cap that run only methods already listed hide nothing.
+                if (leftIds.size > 0) {
+                  unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.dispatchCap, shape, caller: callerId, note: `${shaped.classes.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.classes.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` }));
+                }
+              }
+              if (shaped.open !== null) {
+                unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.openShape, shape, caller: callerId, note: `a value of the interface ${iface} may be any object of that shape; ${shaped.open}` }));
+              }
+            }
           }
         }
         // A function passed to a callee whose body calls that parameter.
@@ -2734,15 +3788,53 @@ export function createWorld(input: ResolveInput): World {
         }
       }
       // Uses as a value: a function or method named where it is not called.
+      // Each is counted for the function it names, in its own body too: a
+      // function that passes itself along may be called through that value.
       f.values.forEach((ref, i) => {
         const v = valueOf(path, i);
+        escapedRef(path, family, ref, v !== null);
         if (!v) return;
         const from = callerOf(ref.caller);
-        for (const to of v.ids) if (to !== from) addEdge(from, to, "uses_value", siteOf(path, ref.line, ref.column, v.ev, "value-ref"));
+        for (const to of v.ids) {
+          countUse(to, path, ref.line);
+          if (to !== from) addEdge(from, to, "uses_value", siteOf(path, ref.line, ref.column, v.ev, "value-ref"));
+        }
       });
       // Uses as a type: a class, interface or type named in an annotation, a cast or a type test.
       if (f.typeCuts) {
-        unknowns.push({ file: path, line: 0, column: 0, name: "", cause: "unsupported-rule", shape: "other", caller: path, scope: "file", note: `${f.typeCuts} type ${f.typeCuts === 1 ? "annotation is" : "annotations are"} too large to read whole (over 4,096 parts); the types past the cut are not recorded as type uses` });
+        // A type annotation holds no call: the cut hides type uses, which
+        // `references` reads by file, and no caller.
+        unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: 0 }, reaches: { ids: [] }, next: NEXT.typeCut, note: `${f.typeCuts} type ${f.typeCuts === 1 ? "annotation is" : "annotations are"} too large to read whole (over 4,096 parts); the types past the cut are not recorded as type uses` }));
+      }
+      // A region the parser could not read may hide a call of any name
+      // written in or around it, or one through a value (scope "project").
+      // A name the file binds to another (`import { target as t }`, a
+      // default import, `import * as ns`) reaches what it is bound to too.
+      // The gap sits inside the innermost definition that holds it, so the
+      // callees of that definition say so.
+      for (const r of f.unread ?? []) {
+        let inner = -1;
+        f.defs.forEach((d, i) => {
+          if (d.line > r.line || d.endLine < r.line) return;
+          const best = f.defs[inner];
+          if (!best || d.endLine - d.line < best.endLine - best.line) inner = i;
+        });
+        const at = { file: path, line: r.line, column: r.column };
+        const base = { cause: "file-not-parsed" as const, place: at, next: NEXT.unread, name: "", scope: "project" as const, caller: callerOf(inner) };
+        unknowns.push(gap({ ...base, reaches: r.names === null ? "scope" : { names: r.names }, note: "the parser could not read the code here, so a call in it may be missing" }));
+        if (r.names === null) continue;
+        const named = new Set(r.names);
+        const ids = new Set<string>();
+        const files = new Set<string>();
+        for (const w of r.names) {
+          const v = resolveLocal(path, w);
+          if (v?.v === "sym") for (const id of v.ids) if (!named.has(defById.get(id)?.name ?? "")) ids.add(id);
+          if (v?.v === "mod" && v.file !== path) files.add(v.file);
+        }
+        const note = "the parser could not read the code here, and a name written there is bound to it (an import under another name, a default import or a module)";
+        // The first gap counts the region as a call through a value; these add only targets.
+        if (ids.size > 0) unknowns.push(gap({ ...base, scope: "file", reaches: { ids: [...ids].sort() }, note }));
+        for (const file of [...files].sort()) unknowns.push(gap({ ...base, scope: "file", reaches: { file }, note }));
       }
       for (const t of f.types) {
         const k = typeKey(path, family, t.ref, 0, true, family === "java" && t.caller >= 0 ? javaNestingOf(defById.get(callerOf(t.caller))) : null);
@@ -2760,7 +3852,7 @@ export function createWorld(input: ResolveInput): World {
           if (!info) continue;
           for (const to of info.ids) {
             if (to === defIds[i]) continue;
-            addEdge(defIds[i] as string, to, b.rel === "implements" ? "implements" : "inherits", siteOf(path, b.line, b.column, key.ev));
+            addEdge(defIds[i] as string, to, b.rel === "implements" || (family === "java" && !d.iface && isIface(key.key)) ? "implements" : "inherits", siteOf(path, b.line, b.column, key.ev));
           }
         }
       });
@@ -2771,7 +3863,10 @@ export function createWorld(input: ResolveInput): World {
       f.defs.forEach((d, i) => {
         for (const b of d.dynamicBases ?? []) {
           if (b.head && family === "python" && (isTyping(path, b.head, "Generic") || isTyping(path, b.head, "Protocol"))) continue;
-          unknowns.push({ file: path, line: b.line, column: b.column, name: "", cause: "dynamic-base", shape: "other", caller: defIds[i] as string, scope: "file", note: `${d.name} names a base with an expression the graph does not read, so the class it extends is not known` });
+          // A call through the unknown base may run the class or any method it defines.
+          const owner = d.owner ? `${d.owner}.${d.name}` : d.name;
+          const own = [defIds[i] as string, ...f.defs.flatMap((m, j) => (m.owner === owner ? [defIds[j] as string] : []))];
+          unknowns.push(gap({ cause: "dynamic-base", place: { file: path, line: b.line, column: b.column }, reaches: { ids: own }, next: NEXT.dynamicBase, caller: defIds[i] as string, note: `${d.name} names a base with an expression the graph does not read, so the class it extends is not known` }));
         }
       });
       // Overrides: a method to the member of a base it overrides or implements.
@@ -2848,19 +3943,94 @@ export function createWorld(input: ResolveInput): World {
       }
     }
 
+    // ---------- imported types with no use read ----------
+    // A TypeScript file that imports a class, an interface or a type alias
+    // of the graph, and has no edge to it nor to a member of it: it may name
+    // the type where no rule reads it. One unknown per such import, its
+    // candidates the type's definitions, so `references` of the type says
+    // its list may be short and names the file. A re-export is no use.
+    const unread = new Map<string, Map<string, UnknownSite>>(); // file to class key to its unknown
+    const unresolved = new Set(budgetFiles); // already an unknown of its own
+    for (const { path, facts: f } of input.files) {
+      if (familyOf(f.lang) !== "js" || unresolved.has(path)) continue;
+      for (const imp of f.imports) {
+        if (imp.reexport || imp.scoped || imp.star) continue;
+        for (const n of imp.names) {
+          const k = typeKey(path, "js", { name: n.local, qualifier: null, line: imp.line, column: imp.column }, 0, true);
+          if (k === null || k === "ext") continue;
+          const ids = (classes.get(k.key)?.ids ?? []).filter((id) => {
+            const kind = defById.get(id)?.kind;
+            return kind === "class" || kind === "type";
+          });
+          if (ids.length === 0) continue;
+          let byKey = unread.get(path);
+          if (!byKey) unread.set(path, (byKey = new Map()));
+          if (byKey.has(k.key)) continue;
+          byKey.set(k.key, gap({ cause: "unsupported-rule", place: { file: path, line: imp.line, column: imp.column }, reaches: { ids }, next: NEXT.unreadImport, candidates: ids, note: `${n.local} is imported here, and no use of it in this file was read; a use in a place the graph does not read may be missing from its references` }));
+        }
+      }
+    }
+    if (unread.size > 0) {
+      // The class key an edge reaches: the type itself, or the type that owns the member.
+      const keyOf = (id: string): string | undefined => {
+        const own = classOfId.get(id);
+        if (own !== undefined) return own;
+        const d = defById.get(id);
+        return d && d.owner !== null ? classKey(d.family, d.file, d.owner) : undefined;
+      };
+      for (const list of [callerEdges, refEdges]) {
+        for (const e of list) {
+          for (const s of e.sites) {
+            const byKey = unread.get(s.file);
+            if (!byKey) continue;
+            const key = keyOf(e.to);
+            if (key !== undefined) byKey.delete(key);
+          }
+        }
+      }
+      for (const byKey of unread.values()) unknowns.push(...byKey.values());
+    }
+
+    // Escape analysis runs once every file is resolved, within the budget:
+    // a pass the budget stops leaves no escape read as whole, and every
+    // caller list a floor.
+    let escapes: Escapes = { uses, unbound, reach: new Map(), modules: new Map(), loadAny: [], offered: new Set(), opaque: new Map(), scripts: new Set(), members: new Map(), cut: true };
+    let escapesCut = stopped;
+    if (!stopped) {
+      try {
+        escapes = escapePaths(uses, unbound, marks);
+      } catch (error) {
+        if (!(error instanceof BudgetStop)) throw error;
+        escapesCut = true;
+      }
+    }
+
     // ---------- importers ----------
     const importers = new Map<string, GraphEdge[]>();
     for (const { path, facts: f } of input.files) {
       index.bindings(path);
       const family = familyOf(f.lang);
-      const seen = new Set<string>();
+      // One edge per importing file and target, with a site for each line
+      // that imports it: a type import and a value import of one module are two.
+      const seen = new Map<string, GraphEdge>();
+      const sites = new Set<string>();
       for (const t of importTargets.get(path) ?? []) {
         // Go: the target is a package folder; files of one package do not import each other.
         const key = family === "go" ? `go:${t.target}` : t.target;
-        if (seen.has(key) || (family === "go" && t.target === dirOf(path))) continue;
-        seen.add(key);
+        if (family === "go" && t.target === dirOf(path)) continue;
+        const at = `${key}\u0000${t.line}:${t.column}`;
+        if (sites.has(at)) continue;
+        sites.add(at);
         const site = siteOf(path, t.line, t.column, t.ev);
-        push(importers, key, { from: path, to: key, kind: "imports", tier: site.tier, sites: [site] } as GraphEdge);
+        const kept = seen.get(key);
+        if (kept) {
+          kept.sites.push(site);
+          kept.tier = weakest(kept.tier, site.tier);
+          continue;
+        }
+        const e = { from: path, to: key, kind: "imports", tier: site.tier, sites: [site] } as GraphEdge;
+        seen.set(key, e);
+        push(importers, key, e);
       }
     }
 
@@ -2871,7 +4041,365 @@ export function createWorld(input: ResolveInput): World {
     const summaries = new Map<string, InvocationSummary>();
     for (const [id, d] of defById) if (d.invokes || d.returns) summaries.set(id, { params: d.params ?? [], invokes: d.invokes ?? [], returns: returnsOf(id), returnsOther: d.returnsOther === true });
 
-    return { nodes, edges: callerEdges, references: refEdges, dispatch, summaries, importers, defsByFile, misses, unknowns, unresolvedSites, externalSites, budgetFiles };
+    return { nodes, edges: callerEdges, references: refEdges, dispatch, summaries, importers, defsByFile, misses, unknowns, unresolvedSites, externalSites, budgetFiles, escapes, escapesCut };
+  };
+
+  // What each function's escapes reach once every file is resolved
+  // (rules E and H of the list floor). A module escapes when a mark says
+  // so: each definition it offers by its export table, recursively through
+  // a namespace re-export, may be reached by a computed name; and each
+  // module it forwards names from escapes too, for a definition a change
+  // removed there. A name built at run time: `eval` reaches its file's
+  // definitions and imports; `eval` and the global ones reach every
+  // definition of a script (a file with no import and no export) and, as
+  // they can load a module, every definition a module offers; a load by a
+  // computed path reaches every definition a module offers.
+  const escapePaths = (uses: Escapes["uses"], unbound: Escapes["unbound"], marks: Map<string, Place>): Escapes => {
+    const reach = new Map<string, Reach[]>();
+    // The first place of each kind only: the floor's reason names that one
+    // (impact.ts), so a symbol keeps at most three, however many places
+    // there are.
+    const addReach = (id: string, r: Reach) => {
+      const list = reach.get(id);
+      if (!list) reach.set(id, [r]);
+      else if (!list.some((x) => x.why === r.why)) list.push(r);
+    };
+    const jsFiles = input.files.filter((x) => familyOf(x.facts.lang) === "js");
+    // A load fact that holds in its file: one marked `cjs` holds outside a CommonJS file only.
+    const loads = (path: string, e: EscapeFact) => e.kind === "load" && !(e.cjs === true && /\.c[jt]s$/.test(path));
+    // Every definition a module offers, and the modules whole namespaces of
+    // it name. A name the graph cannot follow to one definition (a chain
+    // of re-exports too deep, two stars that offer it) may come from any
+    // module the file forwards names from, so each of those counts whole.
+    // A name the walk of `export *` did not reach before its step budget ran
+    // out can only come through a star: `stars` names the modules the file
+    // stars from when its walk was cut. `skip` leaves out the names a
+    // module above already gives itself, and `default`, which no star brings.
+    // Escape analysis walks on a step budget of its own (escapeWalk).
+    // `open`: the modules of `export *` branches a lookup gave up on (too
+    // deep) though another branch gave the name, and `openNames` those
+    // names: such a branch may bring the name from elsewhere (issue 448).
+    const offers = (file: string, skip: NameSet | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string>; open: string[]; openNames: Set<string> } => {
+      const ids: string[] = [];
+      const modules: string[] = [];
+      const open: string[] = [];
+      const openNames = new Set<string>();
+      let gap = false;
+      const names = exportedJsNames(file, escapeWalk);
+      for (const [name] of names) {
+        checkBudget();
+        if (skip && hasName(skip, name)) continue;
+        const v = index.exports(file, name, 0);
+        if (v?.v === "sym") {
+          ids.push(...v.ids);
+          if (v.unfollowed) {
+            open.push(...v.unfollowed);
+            openNames.add(name);
+          }
+        } else if (v?.v === "mod") modules.push(v.file);
+        else if (v?.v === "gap") gap = true;
+      }
+      if (gap) modules.push(...forwards(file));
+      const stars: string[] = [];
+      if (namesCut.has(file)) {
+        for (const imp of facts.get(file)?.imports ?? []) {
+          if (!imp.reexport || !imp.star) continue;
+          const mod = jsSpec(file, imp.line, imp.spec);
+          if (mod !== null && "file" in mod) stars.push(mod.file);
+        }
+      }
+      return { ids, modules, stars, names: names.keys(), open, openNames };
+    };
+    // The modules a module forwards names from: `export ... from`, and a
+    // local `export { f }` or `export default f` of an imported name.
+    const forwards = (file: string): string[] => {
+      const f = facts.get(file);
+      if (!f) return [];
+      const out: string[] = [];
+      for (const imp of f.imports) {
+        if (!imp.reexport) continue;
+        const mod = jsSpec(file, imp.line, imp.spec);
+        if (mod !== null && "file" in mod) out.push(mod.file);
+      }
+      const b = index.bindings(file).names;
+      for (const local of [...f.exportsLocal.map((e) => e.local), ...(f.defaultExport ? [f.defaultExport] : [])]) {
+        const via = importFileOf(file, local, undefined);
+        if (via && b.has(local)) out.push(via);
+      }
+      return out;
+    };
+    const modules = new Map<string, Place>();
+    const offered = new Set<string>();
+    const NO_KEEP: ReadonlySet<string> = new Set();
+    const walk = (start: string, place: Place) => {
+      // A star's skip is a NameSet: each hop of a long chain of stars adds
+      // its own names to the set above it without copying it.
+      type Visit = { file: string; whole: boolean; skip: NameSet | null };
+      const queue: Visit[] = [{ file: start, whole: true, skip: null }];
+      const seen = new Set<string>();
+      // A module a cut walk stars from, with the names it was counted
+      // without. A later visit that skips fewer names reaches more, so it
+      // runs again with only the names both skip; the set only shrinks.
+      const skipped = new Map<string, NameSet>();
+      // Comparing two skips name by name costs their size, so a long chain
+      // that meets one module many times costs the square of the chain. Most
+      // skips are made from another, so most comparisons need not list a
+      // name: `made` keeps the skip a set was made from, the names it added
+      // and its size, and `within` the pairs found one inside the other.
+      const made = new Map<NameSet, { from: NameSet | null; added: string[]; size: number }>([[NO_NAMES, { from: null, added: [], size: 0 }]]);
+      const within = new Map<NameSet, Set<NameSet>>();
+      const sizeOf = (s: NameSet): number => {
+        const m = made.get(s);
+        if (m) return m.size;
+        const size = [...namesIn(s)].length;
+        made.set(s, { from: null, added: [], size });
+        return size;
+      };
+      const known = (x: NameSet, y: NameSet) => x === y || sizeOf(x) === 0 || within.get(x)?.has(y) === true;
+      // Whether every name of x is in y: y was made, up to 32 steps back,
+      // from a set that holds x; or x was made from a set known inside y (or
+      // inside the set y was made from) and y has the names x added; or, when
+      // `list`, name by name. A found pair is kept in `within`.
+      const isWithin = (x: NameSet, y: NameSet, list: boolean): boolean => {
+        if (known(x, y)) return true;
+        if (sizeOf(x) > sizeOf(y)) return false;
+        let ok = false;
+        for (let a = made.get(y)?.from, steps = 0; !ok && a && steps < 32 && sizeOf(a) >= sizeOf(x); a = made.get(a)?.from, steps++) {
+          walkWork.steps++;
+          ok = known(x, a);
+        }
+        const mx = made.get(x);
+        const fy = made.get(y)?.from;
+        if (!ok && mx?.from && (known(mx.from, y) || (fy && known(mx.from, fy)))) ok = mx.added.every((n) => (walkWork.steps++, hasName(y, n)));
+        if (!ok && list) ok = [...namesIn(x)].every((n) => hasName(y, n));
+        if (ok) within.set(x, (within.get(x) ?? new Set()).add(y));
+        return ok;
+      };
+      // A skip with the names both skip: `asked` when it is inside `had`;
+      // the set `asked` was made from, when that is inside `had`, with the
+      // names `asked` added that `had` has; or name by name.
+      const meet = (had: NameSet, asked: NameSet): NameSet => {
+        if (isWithin(asked, had, false)) return asked;
+        const m = made.get(asked);
+        if (m?.from && isWithin(m.from, had, false)) {
+          let s = m.from;
+          const added: string[] = [];
+          for (const n of m.added) {
+            walkWork.steps++;
+            const next = hasName(had, n) ? withName(s, n) : s;
+            if (next !== s) added.push(n);
+            s = next;
+          }
+          if (added.length > 0) made.set(s, { from: m.from, added, size: sizeOf(m.from) + added.length });
+          return s;
+        }
+        const both = [...namesIn(had)].filter((n) => hasName(asked, n));
+        const s = both.reduce<NameSet>((t, n) => withName(t, n), NO_NAMES);
+        made.set(s, { from: null, added: [], size: both.length });
+        return s;
+      };
+      while (queue.length > 0) {
+        checkBudget();
+        const { file, whole, skip: asked } = queue.pop() as Visit;
+        if (seen.has(`${file}\0${whole}`)) continue;
+        let skip: NameSet | null = null;
+        if (asked) {
+          const had = skipped.get(file);
+          if (had && isWithin(had, asked, true)) continue;
+          skip = had ? meet(had, asked) : asked;
+          skipped.set(file, skip);
+        } else seen.add(`${file}\0${whole}`);
+        if (!modules.has(file)) modules.set(file, place);
+        if (whole && familyOf(facts.get(file)?.lang ?? "go") === "js") {
+          const o = offers(file, skip);
+          for (const id of o.ids) addReach(id, { why: "module", ...place });
+          for (const m of o.modules) queue.push({ file: m, whole: true, skip: null });
+          const listed = o.stars.length > 0 || o.open.length > 0 ? ["default", ...o.names] : [];
+          // A star visit skips the names given above it and, but for `keep`, the module's own.
+          const skipOwn = (keep: ReadonlySet<string>): NameSet => {
+            const from = skip ?? NO_NAMES;
+            let given = from;
+            const added: string[] = [];
+            for (const n of listed) {
+              if (keep.has(n)) continue;
+              const next = withName(given, n);
+              if (next !== given) added.push(n);
+              given = next;
+            }
+            if (added.length > 0) made.set(given, { from, added, size: sizeOf(from) + added.length });
+            return given;
+          };
+          if (o.stars.length > 0) {
+            const given = skipOwn(NO_KEEP);
+            for (const m of o.stars) queue.push({ file: m, whole: true, skip: given });
+          }
+          // A branch a lookup gave up on is visited for the names it may bring instead.
+          if (o.open.length > 0) {
+            const given = skipOwn(o.openNames);
+            for (const m of new Set(o.open)) queue.push({ file: m, whole: true, skip: given });
+          }
+        }
+        for (const m of forwards(file)) queue.push({ file: m, whole: false, skip: null });
+      }
+    };
+    for (const [file, place] of marks) walk(file, place);
+
+    // Names built at run time, from the facts of each file.
+    const loadAny: Escapes["loadAny"] = [];
+    const loadPlaces = new Set<string>();
+    const runtime: { why: "eval" | "global"; place: Place }[] = [];
+    for (const { path, facts: f } of jsFiles) {
+      checkBudget();
+      // Every eval site of a file sees the same definitions and imports, and
+      // addReach keeps the first eval place of each: one site reads them.
+      let evalRead = false;
+      for (const e of f.escapes ?? []) {
+        const place = { file: path, line: e.line };
+        if (e.kind === "module") {
+          const mod = jsSpec(path, e.line, e.spec);
+          if (mod !== null && "file" in mod && !marks.has(mod.file)) {
+            marks.set(mod.file, place);
+            walk(mod.file, place);
+          }
+        } else if (e.kind === "own") {
+          if (!marks.has(path)) {
+            marks.set(path, place);
+            walk(path, place);
+          }
+        } else if (e.kind === "load") {
+          // One place once, so "and N more places" counts places.
+          if (loads(path, e) && !loadPlaces.has(`${path}:${e.line}`)) {
+            loadPlaces.add(`${path}:${e.line}`);
+            loadAny.push({ ...place, why: "load" });
+          }
+        } else {
+          runtime.push({ why: e.kind, place });
+          if (e.kind === "eval" && !evalRead) {
+            evalRead = true;
+            // Its own file's definitions and every definition the file imports.
+            for (const d of f.defs) addReach(symbolId(path, d), { why: "eval", ...place });
+            for (const imp of f.imports) {
+              const mod = jsSpec(path, imp.line, imp.spec);
+              if (mod === null || !("file" in mod)) continue;
+              const ids = imp.namespace !== null || imp.star ? offers(mod.file).ids : imp.names.flatMap((n) => { const v = index.exports(mod.file, n.imported, 0); return v?.v === "sym" ? v.ids : []; });
+              for (const id of ids) addReach(id, { why: "eval", ...place });
+            }
+          }
+        }
+      }
+    }
+    // A script's definitions are names of the global scope. A file with an
+    // `import` or `export` statement is a module, whatever it exports.
+    const script = (file: string, f: FileFacts) =>
+      !/\.(mjs|cjs|mts|cts)$/.test(file) && f.esm !== true && f.imports.length === 0 && f.exportsLocal.length === 0 && f.defaultExport === null && !f.defs.some((d) => d.exported) && !(f.escapes ?? []).some((e) => e.kind === "own" || e.kind === "module" || e.kind === "load");
+    const scripts = new Set<string>();
+    for (const { path, facts: f } of jsFiles) if (script(path, f)) scripts.add(path);
+    // The first place of each kind, as addReach keeps, in one pass.
+    const firstRuntime: typeof runtime = [];
+    for (const r of runtime) if (!firstRuntime.some((x) => x.why === r.why)) firstRuntime.push(r);
+    if (runtime.length > 0) {
+      for (const { path, facts: f } of jsFiles) {
+        if (!scripts.has(path)) continue;
+        for (const d of f.defs) if (d.topLevel || d.kind === "method") for (const r of firstRuntime) addReach(symbolId(path, d), { why: r.why, ...r.place });
+      }
+    }
+    // Code built at run time can load any module: each eval or global site is a load by a computed path too.
+    for (const r of runtime) loadAny.push({ ...r.place, why: r.why });
+    if (loadAny.length > 0) {
+      for (const { path } of jsFiles) {
+        checkBudget();
+        for (const id of offers(path).ids) offered.add(id);
+      }
+    }
+    // What an opaque file reaches: its own definitions, the modules it
+    // imports (a named import, the module the name comes from through
+    // re-exports; a whole module, every module it re-exports), the global
+    // scope when it reads a free name or is a script, and every module when
+    // it may load any.
+    const opaque: Escapes["opaque"] = new Map();
+    // Global names declared as plain data (`declare const V: string`), per
+    // project: a read of one in the project that declares it reaches nothing.
+    const plain = new Map<string, Set<string>>();
+    const declare = (file: string, names: readonly string[]) => {
+      const project = projectFolder(model, input.goModules, file);
+      const set = plain.get(project) ?? new Set<string>();
+      for (const n of names) set.add(n);
+      plain.set(project, set);
+    };
+    for (const { path, facts: f } of jsFiles) {
+      const names = ambientOf(path, f);
+      if (names.length > 0) declare(path, names);
+    }
+    for (const d of input.declared ?? []) declare(d.file, d.names);
+    for (const { path, facts: f } of jsFiles) {
+      checkBudget();
+      const own = plain.size > 0 ? plain.get(projectFolder(model, input.goModules, path)) : undefined;
+      const all = (f.opaque ?? []).filter((o) => !(o.name !== undefined && o.reach === "global" && own?.has(o.name)));
+      if (all.length === 0) continue;
+      // A load-any place is shown first: the reason says why it reaches every function.
+      const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || loads(path, e));
+      const loose = runs.map((e): OpaqueFact => ({ why: e.kind === "load" ? "loads a module by a computed path" : e.kind === "eval" ? "runs `eval`" : "builds code or a name at run time on the global scope", line: e.line, count: 1, reach: "any" }));
+      const shown = [...all, ...loose].filter((o) => o.reach === "any");
+      const any = shown.length > 0;
+      const first = (any ? shown : all).reduce((a, b) => (b.line < a.line ? b : a));
+      const seen = new Set<string>([path]);
+      const queue: string[] = [];
+      let unbound = false;
+      const take = (line: number, spec: string, names: ImportFact["names"] | null) => {
+        const mod = jsSpec(path, line, spec);
+        if (mod === null || "gap" in mod) unbound = true;
+        if (mod === null || !("file" in mod)) return;
+        if (names === null) return void queue.push(mod.file);
+        seen.add(mod.file);
+        for (const n of names) {
+          const v = index.exports(mod.file, n.imported, 0);
+          if (v?.v === "sym") for (const id of v.ids) seen.add(defById.get(id)?.file ?? mod.file);
+          else queue.push(v?.v === "mod" ? v.file : mod.file);
+        }
+      };
+      // `export ... from` binds no name the file's own code can read.
+      for (const imp of f.imports) if (!imp.typeOnly && !imp.reexport) take(imp.line, imp.spec, imp.namespace !== null || imp.star || imp.names.length === 0 ? null : imp.names);
+      for (const e of f.escapes ?? []) if (e.kind === "module") take(e.line, e.spec, null);
+      // A whole module: it and every module it re-exports.
+      const whole = new Set<string>();
+      for (let m = queue.pop(); m !== undefined; m = queue.pop()) {
+        checkBudget();
+        if (whole.has(m)) continue;
+        whole.add(m);
+        seen.add(m);
+        queue.push(...forwards(m));
+      }
+      opaque.set(path, {
+        file: path, line: first.line, why: first.why, count: all.reduce((k, o) => k + o.count, 0), all,
+        any, global: scripts.has(path) || all.some((o) => o.reach === "global"), unbound, reach: [...seen].sort(),
+      });
+    }
+    const members: Escapes["members"] = new Map();
+    // A type the repository declares under a name is never plain, though
+    // the name is one of a plain type (`class Record`, `interface Buffer`).
+    let declared: Set<string> | null = null;
+    const ownType = (names: readonly string[]): boolean => {
+      declared ??= new Set(jsFiles.flatMap(({ facts: f }) => [...f.defs.map((d) => d.name), ...(f.variables ?? [])]));
+      return names.some((n) => (declared as Set<string>).has(n));
+    };
+    for (const { path, facts: f } of jsFiles) {
+      checkBudget();
+      for (const m of f.looseMembers ?? []) {
+        if (m.plain && !ownType(m.plain)) continue;
+        const kept = members.get(`js:${m.why}`);
+        if (kept) kept.count += m.count;
+        else members.set(`js:${m.why}`, { file: path, line: m.line, count: m.count, ...(m.why === "*" ? { places: [] } : {}) });
+        // A read by a computed key: the first place in each file, and whether any passes its value on.
+        const all = members.get(`js:${m.why}`);
+        if (all?.places) {
+          all.places.push({ file: path, line: m.line });
+          if (m.passed) all.passed = true;
+        }
+      }
+    }
+    // Work past the deadline in the last file is not read as whole either.
+    checkBudget();
+    return { uses, unbound, reach, modules, loadAny, offered, opaque, scripts, members };
   };
 
   const trace = (files: Iterable<string>): SiteTrace[] => {
@@ -2934,8 +4462,14 @@ export function createWorld(input: ResolveInput): World {
   // step budget, so a diamond of barrels costs one visit a file and a cycle
   // ends where it closes.
   const jsNames = new Map<string, Map<string, number | null>>();
-  let walkSteps = 0;
-  let walkCut: Cut | null = null;
+  // A walk's budget of steps and the cut it met. The comparison of the
+  // change has its own, and escape analysis, which may list what every
+  // module offers first, another: neither spends the other's.
+  type WalkLimit = { steps: number; cut: Cut | null; note: string };
+  const compareWalk: WalkLimit = { steps: 0, cut: null, note: `the walk of export * stopped after ${EXPORT_WALK_STEPS} files; names re-exported past it were not compared` };
+  const escapeWalk: WalkLimit = { steps: 0, cut: null, note: `the walk of export * for escape analysis stopped after ${EXPORT_WALK_STEPS} files; a module may offer names re-exported past it that were not listed` };
+  // The modules whose last walk the step budget cut: their names miss some re-exported ones.
+  const namesCut = new Set<string>();
   type Frame = { file: string; names: Map<string, number | null>; stars: { file: string; line: number }[]; next: number; partial: boolean };
   const ownJsNames = (file: string): Frame => {
     const names = new Map<string, number | null>();
@@ -2956,7 +4490,7 @@ export function createWorld(input: ResolveInput): World {
     }
     return { file, names, stars, next: 0, partial: false };
   };
-  const exportedJsNames = (root: string): Map<string, number | null> => {
+  const exportedJsNames = (root: string, limit: WalkLimit): Map<string, number | null> => {
     const kept = jsNames.get(root);
     if (kept) return kept;
     const merge = (into: Frame, from: Map<string, number | null>, line: number) => {
@@ -2964,25 +4498,23 @@ export function createWorld(input: ResolveInput): World {
     };
     const open = new Set<string>([root]);
     const stack: Frame[] = [ownJsNames(root)];
+    let cut = false;
     for (;;) {
+      // Escape analysis stops at the build's deadline; the comparison of the
+      // change, which runs after it, has its step budget alone.
+      if (limit === escapeWalk) checkBudget();
       const top = stack[stack.length - 1] as Frame;
       if (top.next < top.stars.length) {
         const star = top.stars[top.next++] as { file: string; line: number };
         const done = jsNames.get(star.file);
         if (done) merge(top, done, star.line);
         else if (open.has(star.file)) top.partial = true;
-        else if (walkSteps >= EXPORT_WALK_STEPS) {
+        else if (limit.steps >= EXPORT_WALK_STEPS) {
           top.partial = true;
-          walkCut ??= {
-            by: "export-walk",
-            at: root,
-            omitted: null,
-            exact: false,
-            unit: "files",
-            note: `the walk of export * stopped after ${EXPORT_WALK_STEPS} files; names re-exported past it were not compared`,
-          };
+          cut = true;
+          limit.cut ??= { by: "export-walk", at: root, omitted: null, exact: false, unit: "files", note: limit.note };
         } else {
-          walkSteps++;
+          limit.steps++;
           open.add(star.file);
           stack.push(ownJsNames(star.file));
         }
@@ -2992,7 +4524,11 @@ export function createWorld(input: ResolveInput): World {
       open.delete(top.file);
       if (!top.partial) jsNames.set(top.file, top.names);
       const parent = stack[stack.length - 1];
-      if (!parent) return top.names;
+      if (!parent) {
+        if (cut) namesCut.add(root);
+        else namesCut.delete(root);
+        return top.names;
+      }
       merge(parent, top.names, (parent.stars[parent.next - 1] as { line: number }).line);
       if (top.partial) parent.partial = true;
     }
@@ -3012,7 +4548,7 @@ export function createWorld(input: ResolveInput): World {
     };
     let names = new Map<string, number | null>();
     if (family === "js") {
-      names = exportedJsNames(file);
+      names = exportedJsNames(file, compareWalk);
     } else if (family === "python") {
       for (const d of f.defs) if (d.topLevel) names.set(d.name, d.line);
       for (const [k] of index.bindings(file).names) names.set(k, null);
@@ -3081,8 +4617,10 @@ export function createWorld(input: ResolveInput): World {
     const [head, ...rest] = path;
     if (head === undefined) return { kind: "none" };
     let v = resolveLocal(file, head);
-    for (const name of rest) {
-      if (v === null || v.v === "ext" || v.v === "gap" || v.v === "miss") break;
+    for (const [i, name] of rest.entries()) {
+      if (v === null || v.v === "ext" || v.v === "gap") break;
+      // A miss before the last name: the names after it were never looked up.
+      if (v.v === "miss") return { kind: "miss", target: v.target, name: v.name, past: rest.slice(i) };
       const before: Value = v;
       v = attr(v, name);
       // A name a module or a class does not hold: a miss where it was looked up.
@@ -3096,7 +4634,7 @@ export function createWorld(input: ResolveInput): World {
     return modLookup(moduleOf(file, familyOf(f.lang), { spec, line: 0 }));
   };
 
-  return { resolveAll, trace, surface, importsOf, node, walkCuts: () => [walkCut, lookupCut].filter((c): c is Cut => c !== null), lookup, moduleLookup };
+  return { resolveAll, trace, surface, importsOf, node, walkCuts: () => [compareWalk.cut, escapeWalk.cut, lookupCut].filter((c): c is Cut => c !== null), lookup, moduleLookup };
 }
 
 // The name an unaliased Go import is used by when its package is not in the
@@ -3108,13 +4646,27 @@ function goGuess(spec: string): string {
   return last.replace(/^go-/, "").replace(/[.-].*$/, "");
 }
 
-// The project folder of a file: its nearest package.json, go.mod,
-// pyproject.toml, setup.cfg, Gemfile, pom.xml, build.gradle or
-// build.gradle.kts folder, else the repository root.
+// The project folder of a file: the nearest root of its own language family
+// (package.json for JavaScript and TypeScript, go.mod for Go, pyproject.toml,
+// setup.cfg or a src folder of packages for Python, pom.xml or build.gradle
+// for Java and Kotlin). A file whose family has no root above it, or whose
+// language has no family, takes the nearest root of any family, else the
+// repository root. A Python script under src/ is so never the project of the
+// TypeScript files beside it.
 export function projectFolder(model: ProjectModel, goModules: [string, string][], file: string): string {
-  let best = nodeProjectOf(model, file)?.dir ?? "";
-  for (const [, dir] of goModules) if ((dir === "" || file.startsWith(`${dir}/`)) && dir.length > best.length) best = dir;
-  for (const dir of model.pyRoots) if ((dir === "" || file.startsWith(`${dir}/`)) && dir.length > best.length) best = dir;
-  for (const dir of model.javaProjects) if ((dir === "" || file.startsWith(`${dir}/`)) && dir.length > best.length) best = dir;
+  const under = (dir: string): boolean => dir === "" || file.startsWith(`${dir}/`);
+  const nearest = (dirs: Iterable<string>): string | null => {
+    let best: string | null = null;
+    for (const dir of dirs) if (under(dir) && (best === null || dir.length > best.length)) best = dir;
+    return best;
+  };
+  const node = nodeProjectOf(model, file)?.dir ?? null;
+  const go = nearest(goModules.map(([, dir]) => dir));
+  const py = nearest(model.pyRoots);
+  const java = nearest(model.javaProjects);
+  const own = /\.[cm]?[jt]sx?$/.test(file) ? node : file.endsWith(".go") ? go : /\.pyi?$/.test(file) ? py : /\.(java|kt|kts)$/.test(file) ? java : null;
+  if (own !== null) return own;
+  let best = "";
+  for (const dir of [node, go, py, java]) if (dir !== null && dir.length > best.length) best = dir;
   return best;
 }

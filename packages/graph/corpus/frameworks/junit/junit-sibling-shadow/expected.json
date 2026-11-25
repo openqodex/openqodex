@@ -1,0 +1,25 @@
+{
+  "guards": "lets a sibling module annotation shadow a JUnit star across the repository",
+  "frameworks": {
+    "plugin": "junit",
+    "apps": 0,
+    "none": [
+      "role",
+      "tests"
+    ],
+    "notUnknowns": [
+      {
+        "file": "app/src/test/java/shop/ServiceTest.java",
+        "line": 4,
+        "cause": "ambiguous"
+      }
+    ]
+  },
+  "callers": [
+    {
+      "to": "app/src/main/java/shop/Service.java#Service.read",
+      "site": "app/src/test/java/shop/ServiceTest.java:4",
+      "tier": "certain"
+    }
+  ]
+}

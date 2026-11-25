@@ -1,0 +1,24 @@
+{
+  "covers": "a namespace re-export indexed through the barrel (flaw 3)",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/barrel.ts": "export * as ns from \"./a\";\n",
+    "src/use.ts": "import { ns } from \"./barrel\";\nexport function go(key: string) { (ns as any)[key](); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/use.ts#go",
+      "file": "src/use.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "its module is used as a value at",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "covers": "`createRequire` taken from `process.getBuiltinModule(\"module\")` and exported makes a loader",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.mjs": "import { cr } from \"./util.mjs\";\nconst load = cr(import.meta.url);\nconst key = \"f\";\nload(\"./a.cjs\")[key]();\n",
+    "src/util.mjs": "export const cr = process.getBuiltinModule(\"module\").createRequire;\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.mjs",
+      "file": "src/use.mjs",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

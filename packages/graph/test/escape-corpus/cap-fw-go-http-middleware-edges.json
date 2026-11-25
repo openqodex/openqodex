@@ -1,0 +1,39 @@
+{
+  "covers": "net/http middleware past the middleware edges the plugin lists in one build (go-http MAX_MIDDLEWARE_EDGES)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_MIDDLEWARE_EDGES"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport n \"net/http\"\n\nvar m = n.NewServeMux()\n\nfunc h(w n.ResponseWriter, r *n.Request) {}\n\nfunc w(next n.Handler) n.Handler {\n\treturn next\n}\n\nfunc rega() {\n",
+      {
+        "repeat": "\tm.Handle(\"/x\", w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(w(n.HandlerFunc(h))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\n",
+        "times": 501
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm.Handle(\"/y\", w(n.HandlerFunc(deep)))\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 8
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped adding middleware edges after 30000",
+      "at": "a.go:514",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "a.go:514"
+      }
+    }
+  ]
+}

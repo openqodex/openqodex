@@ -7,7 +7,13 @@
 // cannot carry a finding. Context lines (" ") are counted too, which matters
 // only if a diff with context is passed in. A hunk that only deletes is kept
 // apart as a deletion point, so a finding can cite the lines around it.
-import type { DeletionPoint, DiffCoverage } from "./types.js";
+import { statSync } from "node:fs";
+import { indexedHunks, indexedLines, patchIndex } from "./diff-index.js";
+import type { DiffRange, DiffReadOptions } from "./diff-index.js";
+export { DiffReadLimit } from "./diff-index.js";
+export type { DiffRange } from "./diff-index.js";
+import { LineSet } from "./line-set.js";
+import type { Change, DeletionPoint, DiffCoverage, DiffEntry } from "./types.js";
 
 const C_ESCAPES: Record<string, number> = {
   a: 7,
@@ -73,6 +79,11 @@ export function createCoverageParser(): {
   const deleted = new Map<string, Omit<DeletionPoint, "anchors">[]>();
   let currentFile: string | null = null;
   let rightLine = 0;
+  let runStart: number | null = null;
+  const flush = (): void => {
+    if (runStart !== null && currentFile !== null) out.get(currentFile)!.addRange(runStart, rightLine - 1);
+    runStart = null;
+  };
 
   // Header lines are only read in a block's preamble, before its first @@.
   // Inside hunk payload an added source line "++ x" renders as "+++ x" (SQL
@@ -83,6 +94,7 @@ export function createCoverageParser(): {
   let inHunk = false;
 
   const push = (rawLine: string): void => {
+    if (rawLine[0] !== "+" && rawLine[0] !== " ") flush();
     // File header on the new side: "+++ b/<path>", or "+++ /dev/null" for a
     // deletion. currentFile is set only when there is a new-side file.
     if (!inHunk && rawLine.startsWith("+++ ")) {
@@ -93,11 +105,11 @@ export function createCoverageParser(): {
         currentFile = null;
       } else if (target.startsWith("b/")) {
         currentFile = target.slice(2);
-        if (!out.has(currentFile)) out.set(currentFile, new Set());
+        if (!out.has(currentFile)) out.set(currentFile, new LineSet());
       } else {
         // Some diff producers omit the b/ prefix; accept as-is.
         currentFile = target;
-        if (!out.has(currentFile)) out.set(currentFile, new Set());
+        if (!out.has(currentFile)) out.set(currentFile, new LineSet());
       }
       return;
     }
@@ -127,17 +139,17 @@ export function createCoverageParser(): {
 
     const c = rawLine[0];
     if (c === "+") {
-      out.get(currentFile)!.add(rightLine);
+      runStart ??= rightLine;
       rightLine++;
     } else if (c === " ") {
-      out.get(currentFile)!.add(rightLine);
+      runStart ??= rightLine;
       rightLine++;
     }
     // "-" is an old-side line and does not advance the new side. Other
     // markers (the "\ No newline at end of file" sentinel, blank lines
     // outside any hunk) are ignored without changing line state.
   };
-  return { push, result: () => out, deletionPoints: () => deleted };
+  return { push, result: () => { flush(); return out; }, deletionPoints: () => { flush(); return deleted; } };
 }
 
 // What one file's diff removed at each deletion point: the runs of removed
@@ -191,4 +203,44 @@ export function removedRuns(fileDiff: string): { after: number; oldStart: number
   }
   close();
   return runs;
+}
+
+// One path index is shared by every consumer of the same per-file array.
+const entries = new WeakMap<NonNullable<Change["diffs"]>, Map<string, DiffEntry>>();
+export function diffEntry(change: Pick<Change, "diffs">, path: string): DiffEntry | undefined {
+  const diffs = change.diffs;
+  if (!diffs) return undefined;
+  let index = entries.get(diffs);
+  if (!index) { index = new Map(diffs.map((d) => [d.path, d])); entries.set(diffs, index); }
+  return index.get(path);
+}
+
+export function diffSize(change: Pick<Change, "diffs">, path: string): number {
+  const entry = diffEntry(change, path);
+  return entry ? entry.text === undefined ? statSync(entry.file).size : Buffer.byteLength(entry.text, "utf8") : 0;
+}
+
+export function diffIndex(change: Pick<Change, "diffs">, path: string) {
+  const entry = diffEntry(change, path);
+  return entry ? patchIndex(entry) : null;
+}
+
+type ByteHunk = ReturnType<typeof indexedLines>;
+export function diffHunks(change: Pick<Change, "diffs">, path: string, range: DiffRange, maxBytes: number, options: DiffReadOptions & { byteLines: true }): ByteHunk;
+export function diffHunks(change: Pick<Change, "diffs">, path: string, range?: DiffRange, maxBytes?: number, options?: DiffReadOptions): Generator<string>;
+export function* diffHunks(change: Pick<Change, "diffs">, path: string, range?: DiffRange, maxBytes = Infinity, options: DiffReadOptions & { byteLines?: boolean } = {}): Generator<string | { line: number; old: number; mark: string; source: import("./delivery.js").ByteLine }> {
+  const entry = diffEntry(change, path);
+  if (!entry) return;
+  if (options.byteLines && range) yield* indexedLines(entry, range);
+  else yield* indexedHunks(entry, range, maxBytes, options);
+}
+
+// Whole text is only for small patches. Large consumers walk diffHunks,
+// optionally selecting the old or new line range they actually need.
+export function diffText(change: Pick<Change, "diffs">, path: string): string | null {
+  const entry = diffEntry(change, path);
+  if (!entry) return null;
+  if (entry.text !== undefined) return entry.text;
+  if (diffSize(change, path) > 5 * 1024 * 1024) return null;
+  return patchIndex(entry).header + [...indexedHunks(entry, undefined, 5 * 1024 * 1024, { sections: true })].join("");
 }

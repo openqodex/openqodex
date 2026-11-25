@@ -87,13 +87,13 @@ describe("observations in reports", () => {
     expect(sha(renderMarkdown(sample))).toBe("7541d742ffdd8231b406e45fccb77ad2d562748b16f2c9de7d6e1da220d4aae9");
   });
   it("keeps the existing html bytes without observations", () => {
-    expect(sha(outputs.html!(sample))).toBe("232e450d4ae2ae3807c525eca68b7b5470e3f7a63a8eb3bd6be0682f22961246");
+    expect(sha(outputs.html!(sample))).toBe("35655e43b9ad100fdb9195373bdf5038bc25dd1021f447149076eec0e4abbc16");
   });
   it("keeps the existing sarif bytes without observations", () => {
     expect(sha(renderSarif(sample))).toBe("799e8690949407f48546da588ccd4975ea73ef9d1e5c6e67f380584778147bd9");
   });
   it("keeps the existing receipt bytes without observations", () => {
-    expect(sha(renderReceipt(sample, paths))).toBe("b88433c2e378e4146291d79b5d9d93e99e31cd97604c3fad9370a347c0f99f42");
+    expect(sha(renderReceipt(sample, paths))).toBe("f116291f779928ac28c627802583eb67dd56efbfa1362835e233b525d1f2cc1e");
   });
 
   it.each(["markdown", "reviewMarkdown"])("keeps all observation fields in %s after findings and before coverage", (name) => {
@@ -145,7 +145,7 @@ describe("observations in reports", () => {
 
   it("keeps observations before coverage in a completed review", () => {
     const r: Report = { ...report(), observations: [observation()], completion: {
-      version: 1, contract: "openqodex-review-2", status: "complete", missing: [], reviewer: null,
+      version: 1, contract: "openqodex-review-2", status: "complete", missing: [], refused: [], reviewer: null,
       snapshot: { change_id: "x", tree: null, before: "a", after: "a" }, candidates: { total: 0, disposed: 0 },
       coverage: { hunks: 0, covered: 0, unread: [], files_read: [], files_not_read: [] }, outside_reads: [], trace_complete: true,
     } };

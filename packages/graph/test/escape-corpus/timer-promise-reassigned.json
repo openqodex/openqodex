@@ -1,0 +1,25 @@
+{
+  "covers": "a Promise executor's parameter given another value may be a string",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\n",
+    "tools/package.json": "{\"name\": \"tools\"}\n",
+    "tools/t.ts": "export const p = new Promise((r: any) => { r = \"f()\"; setTimeout(r, 1); });\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "tools/t.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/a.ts#f",
+      "reason": "may load any module",
+      "at": "tools/t.ts:1"
+    }
+  ]
+}

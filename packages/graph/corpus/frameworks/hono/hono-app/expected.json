@@ -1,0 +1,47 @@
+{
+  "guards": "lists every Hono route with its full path and handler, through module routers, factory routers and basePath, keeps two applications apart, and turns what it cannot follow into an unknown",
+  "frameworks": {
+    "plugin": "hono",
+    "apps": 2,
+    "registrations": [
+      { "site": "src/app.ts:9", "methods": ["GET"], "pattern": "/health", "handler": "src/handlers.ts#health", "status": "bound", "mounted": true },
+      { "site": "src/users.ts:6", "methods": ["GET"], "pattern": "/users", "handler": "src/handlers.ts#listUsers", "status": "bound", "mounted": true },
+      { "site": "src/users.ts:7", "methods": ["GET"], "pattern": "/users/:id", "handler": "src/handlers.ts#getUser", "status": "bound", "mounted": true },
+      { "site": "src/users.ts:7", "pattern": null },
+      { "site": "src/admin.ts:6", "methods": ["GET"], "pattern": "/admin/v1/stats", "handler": "src/handlers.ts#stats", "status": "bound", "mounted": true },
+      { "site": "src/admin.ts:12", "methods": ["GET"], "pattern": "/a", "mounted": false },
+      { "site": "src/admin.ts:14", "methods": ["GET"], "pattern": "/b", "mounted": false },
+      { "site": "src/app.ts:13", "methods": ["POST"], "pattern": "/gone", "handler": null, "status": "missing" },
+      { "site": "src/app.ts:14", "methods": ["GET"], "pattern": "/inline", "handler": "src/app.ts#<get /inline>", "status": "bound" },
+      { "site": "src/app.ts:15", "methods": ["PUT", "PATCH"], "pattern": "/both", "handler": "src/handlers.ts#health" },
+      { "site": "src/app.ts:16", "methods": ["*"], "pattern": "/any", "handler": "src/handlers.ts#health" },
+      { "site": "src/status.ts:5", "methods": ["GET"], "pattern": "/health", "handler": "src/handlers.ts#health", "mounted": true }
+    ],
+    "edges": [
+      { "kind": "mounts", "from": "fw:hono:app:src/app.ts:7", "to": "fw:hono:router:src/users.ts:5", "tier": "certain" },
+      { "kind": "mounts", "from": "fw:hono:app:src/app.ts:7", "to": "fw:hono:router:src/admin.ts:5", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:src/users.ts:7", "to": "src/middleware.ts#logger", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:src/users.ts:7", "to": "src/middleware.ts#requireAuth", "tier": "certain" },
+      { "kind": "applies_middleware", "from": "registration:src/app.ts:9", "to": "src/middleware.ts#logger", "tier": "certain" }
+    ],
+    "roles": [
+      { "target": "src/handlers.ts#getUser", "role": "route_handler", "detail": "hono" },
+      { "target": "src/middleware.ts#logger", "role": "middleware", "detail": "hono" },
+      { "target": "src/middleware.ts#requireAuth", "role": "middleware", "detail": "hono" }
+    ],
+    "unknowns": [
+      { "file": "src/app.ts", "line": 12, "cause": "dynamic" },
+      { "file": "src/app.ts", "line": 13, "cause": "miss" },
+      { "file": "src/app.ts", "line": 17, "cause": "dynamic" },
+      { "file": "src/app.ts", "line": 18, "cause": "dynamic" }
+    ],
+    "notUnknowns": [{ "file": "src/app.ts", "line": 14, "cause": "unsupported-rule" }],
+    "notRegistrations": ["src/app.ts:17"],
+    "noRegistrationsIn": ["src/cache.ts"],
+    "notEdges": [
+      { "kind": "mounts", "from": "fw:hono:app:src/status.ts:4" },
+      { "kind": "applies_middleware", "from": "registration:src/status.ts:5" },
+      { "kind": "handles", "to": "src/cache.ts#fake" }
+    ]
+  }
+}

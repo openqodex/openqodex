@@ -1,0 +1,18 @@
+{
+  "covers": "a value specifier named `createRequire` beside a `type` one is still a loader: any module (the control of issue 422)",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/m.ts": "export type Base = string;\nexport const createRequire = (base: Base) => (path: string) => ({ base, path });\n",
+    "src/use.ts": "import { type Base, createRequire } from \"./m\";\nconst base: Base = \"x\";\nexport const load = createRequire(base);\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "may be any module of the repository",
+      "at": "src/use.ts:1"
+    }
+  ]
+}

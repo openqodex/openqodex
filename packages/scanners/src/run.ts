@@ -488,11 +488,7 @@ async function settingsFindings(args: SettingsArgs): Promise<StaticFinding[]> {
       const entry = files.find((f) => (f.anyFolder ? f.path === name : f.path === filePath));
       if (entry === undefined) continue;
       if (entry.reader && !(await touchesShared(args, filePath, entry.reader))) continue;
-      // A loop, not Math.min(...lines): a file can have more changed lines
-      // than a call can take as arguments.
-      let line = Infinity;
-      for (const n of args.coverage.get(filePath) ?? []) if (n < line) line = n;
-      if (line === Infinity) line = 1;
+      const line = args.coverage.get(filePath)?.min() ?? 1;
       out.push({
         source,
         ruleId: SETTINGS_RULE,
@@ -665,8 +661,9 @@ function skippedOutcome(
 }
 
 // A scanner that ran. An error with no findings is a failure; an error next
-// to findings (one Go module of several failed, one .sql file unreadable)
-// keeps the findings and the note. A note (a folder held back) is the reason
+// to findings (one Go module of several timed out, one .sql file unreadable)
+// keeps the findings and the note, unless the adapter marks the error
+// failed (a Go module that could not type-check), which keeps both. A note (a folder held back) is the reason
 // of a scanner that ran. An adapter that chose not to run is disabled, with
 // its reason. The rule packs it consumed (semgrep) go on its summary.
 function ranOutcome(
@@ -678,7 +675,7 @@ function ranOutcome(
   errorIsFailure = false,
 ): Outcome {
   if (result.skipped) return skippedOutcome(scanner, "disabled", result.skipped, started, cost);
-  const failed = result.error !== null && (result.findings.length === 0 || errorIsFailure);
+  const failed = result.error !== null && (result.findings.length === 0 || errorIsFailure || result.failed === true);
   return {
     summary: {
       scanner,

@@ -1,0 +1,14 @@
+{
+  "covers": "`createRequire(import.meta.url)` called at once with a literal path loads that module only, and leaves the repository whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nconst lib = createRequire(import.meta.url)(\"./a.cjs\");\nlib.f();\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
+}

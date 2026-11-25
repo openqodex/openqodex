@@ -31,6 +31,8 @@
 // 15. The reviewer omits shown defects or weakens impact and scope rules.
 // 16. The judgement rule substitutes the default for a configured confidence
 //     floor, including zero, while the other brief rules use that floor.
+// 17. A full diff budget tells the reviewer to open a deleted binary file.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { buildBrief, buildReviewerBrief, buildWholeRepoBrief } from "./brief.js";
 import { selectLenses } from "./lenses.js";
@@ -57,6 +59,13 @@ function brief(over: { change?: Change; candidates?: Candidate[]; lenses?: Selec
     instructions: over.instructions,
   });
 }
+
+it("does not tell the agent that possible issues are dropped", () => {
+  const text = brief();
+  expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
+  expect(text).not.toMatch(/0\.7 or higher\./);
+  expect(text).not.toContain("the floor removes the rest");
+});
 
 // The lines of the instructions block: from its heading to the next line that starts a section.
 function instructionLines(out: string): string[] {
@@ -200,20 +209,49 @@ describe("buildBrief with lenses from the shipped catalog", () => {
 describe("10. the reviewer brief's diff section", () => {
   it.each([0, 0.5, 0.9])("does not substitute the default for confidence floor %s", (confidenceFloor) => {
     const { text } = buildReviewerBrief({ change: makeChange(), scan: makeScan(), lenses: [], config: makeConfig(), secrets: [], confidenceFloor });
-    expect(text).toContain(`Raise every defect you can show from the code with confidence ${confidenceFloor} or higher.`);
-    expect(text).toContain(`Raise findings with evidence you can point at, with confidence ${confidenceFloor} or higher. Anchor each on an added or modified line or a deletion anchor.`);
-    expect(text).toContain(`Findings under ${confidenceFloor}, or under a cited lens's floor, are not counted.`);
+    expect(text).toContain(`Findings at ${confidenceFloor} or higher, and at a cited lens's floor, count toward the verdict.`);
+    if (confidenceFloor > 0.5) expect(text).toContain(`Findings under ${confidenceFloor} are shown as possible issues and never counted.`);
+    else {
+      // A floor at or under 0.5 counts everything it keeps; the brief must not promise possible issues the check never makes.
+      expect(text).toContain(`Findings under ${confidenceFloor} are dropped.`);
+      expect(text).toContain(`with confidence ${confidenceFloor} or higher.`);
+      expect(text).toContain("A finding under its cited lens's floor is a possible issue at 0.5 or higher, and dropped under 0.5.");
+      expect(text).not.toContain("are shown as possible issues");
+    }
   });
 
   it("does not omit shown defects at the confidence floor or weaken impact and scope rules", () => {
     const { text } = buildReviewerBrief({ change: makeChange(), scan: makeScan(), lenses: [], config: makeConfig(), secrets: [] });
-    expect(text).toContain("Raise every defect you can show from the code with confidence 0.7 or higher.");
-    expect(text).toContain("Set confidence honestly. The floor removes the rest.");
+    expect(text).toContain("Raise every defect you can show from the code with confidence 0.5 or higher. Set confidence honestly. Findings under 0.7 are shown as possible issues and never counted.");
     expect(text).not.toContain("A wrong finding is worse than a missed one");
     expect(text).not.toContain("leave it out");
-    expect(text).toContain("Raise findings with evidence you can point at, with confidence 0.7 or higher. Anchor each on an added or modified line or a deletion anchor.");
-    expect(text).toContain("Findings under 0.7, or under a cited lens's floor, are not counted.");
+    expect(text).toContain("Raise findings with evidence you can point at, with confidence set honestly. Anchor each on an added or modified line or a deletion anchor.");
+    expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict. Findings from 0.5 up to the floor are shown as possible issues and never counted. Findings under 0.5 are dropped.");
     expect(text).toContain("`severity` reflects impact on users or the system, not your confidence");
+  });
+
+  it("a full diff budget tells the reviewer to open a deleted binary file", () => {
+    const header = "diff --git a/app/big.py b/app/big.py\n--- /dev/null\n+++ b/app/big.py\n@@ -0,0 +1,205 @@\n";
+    const rows = `+${"x".repeat(1000)}\n`.repeat(204);
+    const big = header + rows + `+${"x".repeat(200 * 1024 - header.length - rows.length - 2)}\n`;
+    const deleted = "diff --git a/logo.png b/logo.png\ndeleted file mode 100644\nindex 1234567..0000000\nBinary files a/logo.png and /dev/null differ\n";
+    const change = makeChange({
+      files: [
+        { path: "app/big.py", status: "added", oldPath: null, binary: false },
+        { path: "logo.png", status: "deleted", oldPath: null, binary: true },
+      ],
+      changedPaths: ["app/big.py"],
+      coverage: new Map([["app/big.py", makeLineSet(Array.from({ length: 205 }, (_, i) => i + 1))]]),
+      deletionPoints: new Map([["logo.png", [{ after: 0, lines: 0, anchors: [1] }]]]),
+      diff: big + deleted,
+      diffs: [{ path: "app/big.py", text: big }, { path: "logo.png", text: deleted }],
+    });
+    const { text, diffFiles } = buildReviewerBrief({ change, scan: makeScan(), lenses: [], config: makeConfig(), secrets: [] });
+    expect([...diffFiles]).toEqual(["app/big.py", "logo.png"]);
+    expect(text).toContain("| deleted, binary | logo.png |");
+    // The deletion's diff text did not fit; the files table names it and it is never "not in this brief".
+    expect(text).not.toContain("Binary files a/logo.png and /dev/null differ");
+    expect(text).not.toContain("These files changed but their diff is not in this brief");
   });
 
   it("names the files to open with their changed lines and deletions, and says the rest is already shown", () => {
@@ -221,7 +259,7 @@ describe("10. the reviewer brief's diff section", () => {
     const change = makeChange({
       files: [...makeChange().files, { path: "app/big.py", status: "modified", oldPath: null, binary: false }],
       changedPaths: [...makeChange().changedPaths, "app/big.py"],
-      coverage: new Map([...makeChange().coverage, ["app/big.py", new Set([3, 4])]]),
+      coverage: new Map([...makeChange().coverage, ["app/big.py", makeLineSet([3, 4])]]),
       deletionPoints: new Map([["app/big.py", [{ after: 9, lines: 2, anchors: [9, 10] }]]]),
       diffs: [{ path: "app/search.py", text: "diff --git a/app/search.py b/app/search.py\n+q\n" }, big],
     });
@@ -305,9 +343,10 @@ const singlePassBuilders = [
 ];
 
 describe.each(singlePassBuilders)("$name investigation", ({ build }) => {
-  it("keeps the 0.7 floor without the old suppression rule", () => {
+  it("keeps the 0.7 floor without the old suppression rule or a 0.7 minimum", () => {
     const text = build({});
-    expect(text).toMatch(/confidence (?:to )?0\.7 or higher/);
+    expect(text).toContain("Findings at 0.7 or higher, and at a cited lens's floor, count toward the verdict.");
+    expect(text).not.toMatch(/confidence (?:to )?0\.7 or higher/);
     expect(text).not.toContain(["A wrong finding", "is worse than a missed one"].join(" "));
     expect(text).toMatch(/Raise (?:every defect|what) you can show from the code/);
     expect(text).toMatch(/(?:set|Set) confidence honestly/);

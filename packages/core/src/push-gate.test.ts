@@ -9,7 +9,8 @@
 // 5. Its message does not say what to run.
 // 6. A review judged with no threshold, or another one, passes a push after
 //    block_on_severity is set (the config is outside the change id).
-// 7. An incomplete record blocks a push, even with block_on_severity set.
+// 7. An incomplete record of this change blocks a push, or passes without
+//    saying the review did not finish, even with block_on_severity set.
 // 8. A legacy receipt (the old two-step protocol) counts as a complete
 //    record, or suddenly blocks a push the old version let through.
 // 9. A complete passing review of this change is not silent.
@@ -19,6 +20,10 @@
 //     longer gives its message.
 // 11. A blocked push tells the agent to fix everything, where the developer
 //     chooses what to fix.
+// 12. An unread-only failure omits the first range from the push message.
+// 13. A review made under another review.reviewers or review.reviewer_web
+//     passes the push (neither moves the change id), or a receipt written
+//     before reviewer lists stops passing.
 import { describe, expect, it } from "vitest";
 import { finalizeReview } from "./finalize.js";
 import { checkPush, gateReceipt } from "./push-gate.js";
@@ -126,9 +131,35 @@ describe("checkPush", () => {
     }
   });
 
+  it("13. does not count a review made under another reviewer list or reviewer_web; an older receipt keeps its rule", () => {
+    const listed = makeConfig({ blockOnSeverity: "critical", reviewers: [{ tool: "codex", model: "gpt-x" }] });
+    const under = (config: ReturnType<typeof makeConfig>) => gateReceipt(judged("critical"), "complete", DIR, HTML, config);
+    // The same policy: the review counts (and its finding blocks).
+    expect(checkPush({ currentChangeId: change.id, receipt: under(listed), config: listed }).message).toContain("the review of this change found");
+    for (const before of [makeConfig({ blockOnSeverity: "critical" }), { ...listed, reviewerWeb: false }, makeConfig({ blockOnSeverity: "critical", reviewers: [{ tool: "claude" }] })]) {
+      const d = checkPush({ currentChangeId: change.id, receipt: under(before), config: listed });
+      expect(d.decision).toBe("deny");
+      expect(d.message).toContain("under the current review.reviewers and review.reviewer_web");
+    }
+    // Without a threshold it says so and does not block.
+    const quiet = checkPush({ currentChangeId: change.id, receipt: under(makeConfig()), config: { ...listed, blockOnSeverity: null } });
+    expect(quiet.decision).toBe("abstain");
+    expect(quiet.message).toContain("under the current review.reviewers");
+    // A receipt written before lists has no policy: the old rule holds.
+    expect(checkPush({ currentChangeId: change.id, receipt: complete("critical"), config: listed }).message).toContain("the review of this change found");
+  });
+
   it("6. denies a passing review made before block_on_severity was set", () => {
     const d = checkPush({ currentChangeId: change.id, receipt: complete(null), config: makeConfig({ blockOnSeverity: "critical" }) });
     expect(d.decision).toBe("deny");
     expect(d.message).toContain("under the current block_on_severity");
   });
+});
+
+it("C3 fix 6. an unread-only push message names its heading and first range", () => {
+  const report = { ...judged(null), verdict: "incomplete", completion: { status: "incomplete", missing: ["2 changed ranges were not examined", "a.py:4-5 (deletion a.py#0)", "b.py:6-7"] } } as Report;
+  const receipt = gateReceipt(report, "incomplete", DIR);
+  const result = checkPush({ currentChangeId: change.id, receipt, config: makeConfig() });
+  expect(result.message).toContain("2 changed ranges were not examined; a.py:4-5 (deletion a.py#0)");
+  expect(result.message).not.toContain("b.py:6-7");
 });

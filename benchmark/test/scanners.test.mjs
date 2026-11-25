@@ -326,7 +326,7 @@ describe("a candidate the final answer raised and finalize hid reads as unanswer
   const shown = cand("c2", "hadolint:DL3007", "Dockerfile", 1, 1, "Using latest is prone to errors.");
   const finding = (c, extra = {}) => ({ severity: "minor", category: "maintainability", confidence: 0.9, file_path: c.filePath, line_number: c.lineStart, line_end: c.lineEnd, title: `About ${c.id}`, problem: "p", consequence: "c", fix: "f", suggested_change: null, source: c.token, candidate: c.id, ...extra });
   // The report lists what finalize hid by title and place only (low_confidence, below_threshold); the final answer names the candidate.
-  const report = { findings: [finding(shown)], outside_change: [], low_confidence: [], below_threshold: 1, dropped: [] };
+  const report = { findings: [finding(shown)], outside_change: [], possible: [], low_confidence: [], below_threshold: 1, dropped: [] };
   const submission = { findings: [finding(shown), finding(latest)] };
 
   it("counts a candidate the saved final answer raised, and the report does not show, as held", () => {

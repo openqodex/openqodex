@@ -314,11 +314,10 @@ export function modelSession(args: { reviewer: ModelReviewer; role: ReviewerRole
           log.push(entry);
           pending.push(entry);
           transcript.push(freeze({ role: "tool", toolCallId: request.id, name: request.name, text: out.text, ok: out.ok }));
-          if (out.inside !== true) outside = true;
+          if (out.ok && out.inside !== true) outside = true;
         }
-        // An attempt outside the snapshot, or at a tool the brain did not
-        // define, ends the conversation (conversation.ts reads the trace):
-        // its refusal is never sent.
+        // A served outside read ends the conversation. Refusals stay in the
+        // transcript for the model to read on its next call.
         if (outside) return turn("", null);
       }
     },

@@ -16,6 +16,7 @@
 //   7. A change to another field of an object that has a finding reports
 //      it; a change to the field the finding names does not.
 //   8. The rule id is not the check name, or the reference is not its page.
+import { makeLineSet } from "../../../../tests/line-set.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -104,13 +105,13 @@ describe("parseKubeLinterJson", () => {
     const findings = parse();
     // The change bumps the image of the Deployment's container: only
     // latest-tag is about that line.
-    const imageOnly = filterToChangedLines(findings, new Map([[REL, new Set([26])]]));
+    const imageOnly = filterToChangedLines(findings, new Map([[REL, makeLineSet([26])]]));
     expect(imageOnly.map((f) => f.ruleId)).toEqual(["latest-tag"]);
     // The change sets privileged: true.
-    const privileged = filterToChangedLines(findings, new Map([[REL, new Set([35])]]));
+    const privileged = filterToChangedLines(findings, new Map([[REL, makeLineSet([35])]]));
     expect(privileged.map((f) => f.ruleId)).toEqual(["privileged-container"]);
     // A change to the Service's selector touches no finding.
-    expect(filterToChangedLines(findings, new Map([[REL, new Set([58])]]))).toEqual([]);
+    expect(filterToChangedLines(findings, new Map([[REL, makeLineSet([58])]]))).toEqual([]);
   });
 
   it("a report on a file that cannot be read lands on line 1 of that file", () => {

@@ -1,0 +1,27 @@
+{
+  "covers": "a Ruby call in a region the parser could not read (a syntax error)",
+  "files": {
+    "w.rb": "class W\n  def target2; 1; end\nend\n",
+    "b.rb": "class X\n  def run(w)\n    w.target2(\n  end\nend\n"
+  },
+  "mustReach": [
+    {
+      "target": "w.rb#W.target2",
+      "caller": null,
+      "file": "b.rb",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "w.rb#W.target2",
+      "reason": "region of code the parser could not read (a syntax error) names `target2`",
+      "at": "b.rb:1",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "b.rb:1"
+      }
+    }
+  ]
+}

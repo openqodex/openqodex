@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { benchRoot } from "../lib/cases.mjs";
 import { GREPTILE_REPOS } from "../lib/greptile.mjs";
-import { entryHash, greptileTruth, martianTruth, realCaseId, sha256, suiteHashOf, truthHashOf } from "../lib/suites.mjs";
+import { SUITES, entryHash, greptileTruth, martianTruth, realCaseId, sha256, suiteHashOf, truthHashOf } from "../lib/suites.mjs";
 import { tempDir } from "../../tests/temp-dirs.mjs";
 
 const write = (path, bytes) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, bytes); };
@@ -45,7 +45,7 @@ export function boardSuiteFixture(name, root = tempDir("oq-board-suite-"), count
   suite.cases = suite.cases.slice(0, count);
   suite.hash = suiteHashOf(suite.cases);
   write(join(root, `suites/${name}/cases.json`), json(suite));
-  const split = `splits/${name}-v1.json`;
+  const split = SUITES[name].split;
   mkdirSync(dirname(join(root, split)), { recursive: true });
   cpSync(join(benchRoot, split), join(root, split));
   return { root, cache };

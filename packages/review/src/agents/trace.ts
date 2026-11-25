@@ -15,7 +15,7 @@ import type { TraceEntry } from "@openqodex/core";
 
 // What a driver saw for one tool call: its name, its input as the agent sent
 // it, whether it succeeded, and for a read what was delivered.
-export type ToolCall = { tool: string; input: unknown; ok: boolean; read: { path: string; start: number; lines: number } | null };
+export type ToolCall = { tool: string; input: unknown; ok: boolean; read: { path: string; start: number; lines: number; byteRanges?: { line: number; from: number; to: number }[] } | null };
 
 // Where the reviewing agent saves its own output for one session. Claude Code
 // saves a tool result too large to hand the model at
@@ -380,5 +380,5 @@ export function classify(snapshotDir: string, call: ToolCall, own: OwnFiles | nu
   const first = paths[0] ?? roots[0] ?? null;
   const real = first === null ? null : place(snapshot, call.read?.path ?? first);
   const rel = real === null ? null : (fold ? relative(snapshot.toLowerCase(), real.toLowerCase()) : relative(snapshot, real)) === "" ? "." : real.slice(snapshot.length + 1);
-  return { tool: call.tool, path: rel, inside: true, range, ok: call.ok };
+  return { tool: call.tool, path: rel, inside: true, range, ok: call.ok, ...(call.read?.byteRanges ? { byteRanges: call.read.byteRanges } : {}) };
 }

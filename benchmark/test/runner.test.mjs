@@ -6,13 +6,16 @@
 // Codex's own output. The run folder rules (one plan per folder, one runner
 // at a time, a crashed attempt kept) are checked on executeRun, the code
 // run.mjs runs, with the review step, which would call a model, replaced.
+// Failures guarded:
+// 1. The new not examined sentence loses the coverage halt class.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { reasonClass } from "../lib/halts.mjs";
 import { git } from "../lib/cases.mjs";
-import { redactRowReasons, saveSampleRow, attemptDir, codexModelFrom, executeRun, failureOf, lockRun, planJobs, provenanceProblems, resumeProblems, runManifest, sampleRecord, claudeModels, claudeRunModels, takeOverStale, treeState } from "../lib/runner.mjs";
+import { redactRowReasons, saveSampleRow, jobState, attemptDir, codexModelFrom, executeRun, failureOf, lockRun, planJobs, provenanceProblems, resumeProblems, runManifest, sampleRecord, claudeModels, claudeRunModels, takeOverStale, treeState } from "../lib/runner.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
@@ -32,13 +35,13 @@ describe("attempts", () => {
     expect(failureOf({ code: 2, signal: null, stderr: "Full review unavailable: openqodex could not start a reviewer." }, null)).toMatchObject({ infra: true, unavailable: true });
     const timedOut = { completion: { status: "incomplete", missing: ["the reviewer timed out and was stopped"] } };
     expect(failureOf({ code: 2, signal: null, stderr: "" }, timedOut)).toMatchObject({ infra: true, cause: "the reviewer timed out and was stopped" });
-    const unread = { completion: { status: "incomplete", missing: ["1 changed range was not read: a.py:3"] } };
+    const unread = { completion: { status: "incomplete", missing: ["1 changed range was not examined", "a.py:3-3"] } };
     expect(failureOf({ code: 2, signal: null, stderr: "" }, unread)).toMatchObject({ infra: false });
     expect(failureOf({ code: 0, signal: null, stderr: "" }, { completion: { status: "complete", missing: [] } })).toBeNull();
   });
 
   it("records a failed attempt as a sample with its cause, so it is scored and never a missing row", () => {
-    const rec = sampleRecord({ job, attempt: 1, result: { code: 2, signal: null, wallMs: 900_000 }, report: null, who: null, startedAt: "t", failure: { cause: "the reviewer timed out and was stopped" }, stopped: null });
+    const rec = sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: 1, result: { code: 2, signal: null, wallMs: 900_000 }, report: null, who: null, startedAt: "t", failure: { cause: "the reviewer timed out and was stopped" }, stopped: null });
     expect(rec).toMatchObject({ case: "c", repeat: 2, attempt: 1, status: "failed", failure: "the reviewer timed out and was stopped", findings: null });
   });
 
@@ -146,7 +149,7 @@ function runInputs(repeat = 1) {
 function saveAttempt(out, job, attempt, report) {
   const dir = attemptDir(out, job, attempt);
   mkdirSync(join(dir, "report"), { recursive: true });
-  writeFileSync(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt, result: { code: report ? 0 : 2, signal: null, wallMs: 1000 }, report, who: null, startedAt: "t", failure: null, stopped: null })));
+  writeFileSync(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt, result: { code: report ? 0 : 2, signal: null, wallMs: 1000 }, report, who: null, startedAt: "t", failure: null, stopped: null })));
   if (report) writeFileSync(join(dir, "report", "report.json"), JSON.stringify(report));
 }
 
@@ -349,4 +352,87 @@ it("redacts run and home paths in every saved reason and keeps null reasons", ()
   expect(redactRowReasons({ reason: `${nestedRun}/a ${homedir()}/b` }, nestedRun).row.reason).toBe("<run>/a <home>/b");
   const other = { reason: `${homedir()}-other/a and ${run}2/b` };
   expect(redactRowReasons(other, run)).toMatchObject({ row: other, count: 0 });
+});
+
+// Resume failures: a saved retryable failure is skipped, saved retry failures
+// get another retry, an unsaved folder spends a retry, or a saved laptop
+// failure leaves a model retry pending.
+describe("retry state on disk", () => {
+  it("resume keeps one shared retry for saved model failures and skips unsaved folders without spending it", () => {
+    const out = tempDir("oq-retry-state-");
+    const model = { ...job, reviewer: "model:test", config: "model-test-graph-on" };
+    const save = (attempt, failure, status = "incomplete") => {
+      const dir = attemptDir(out, model, attempt);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "sample.json"), JSON.stringify({ status, failure }));
+    };
+    expect(jobState(out, model)).toMatchObject({ done: false, retryPending: false, next: 1, retriesUsed: 0 });
+    save(1, "the model call failed: ECONNRESET");
+    expect(jobState(out, model)).toMatchObject({ done: false, retryPending: true, next: 2, retriesUsed: 0 });
+    mkdirSync(attemptDir(out, model, 2));
+    expect(jobState(out, model)).toMatchObject({ done: false, retryPending: true, next: 3, retriesUsed: 0 });
+    save(3, "the model call failed: HTTP 429: retry after 2 seconds");
+    expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false, next: 4, retriesUsed: 1 });
+    save(4, null, "complete");
+    expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false, next: 5, retriesUsed: 1 });
+    save(5, "the model endpoint's answer is not JSON");
+    expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false });
+  });
+
+  it("a manifest job without a reviewer takes it from its saved sample, a cut-short sample reads as unsaved, and a pending retry still counts as saved", () => {
+    const out = tempDir("oq-manifest-retry-state-");
+    const manifestJob = { caseId: job.caseId, case: job.case, config: "model-test-graph-on", repeat: 1 };
+    const dir = (n) => attemptDir(out, manifestJob, n);
+    mkdirSync(dir(1), { recursive: true });
+    writeFileSync(join(dir(1), "sample.json"), '{"status":"incomplete","failure":"the model call failed: ECONN');
+    expect(jobState(out, manifestJob)).toMatchObject({ started: true, saved: false, done: false, retryPending: false, next: 2, retriesUsed: 0 });
+    mkdirSync(dir(2), { recursive: true });
+    writeFileSync(join(dir(2), "sample.json"), JSON.stringify({ status: "incomplete", failure: "the model call failed: ECONNRESET", reviewer: "model:test" }));
+    expect(jobState(out, manifestJob)).toMatchObject({ saved: true, done: false, retryPending: true, next: 3, retriesUsed: 0 });
+    writeFileSync(join(dir(2), "sample.json"), JSON.stringify({ status: "incomplete", failure: "the model call failed: ECONNRESET", reviewer: "claude" }));
+    expect(jobState(out, manifestJob)).toMatchObject({ saved: true, done: true, retryPending: false });
+  });
+
+  it("resume keeps a saved laptop failure done when stderr contains a transport error", () => {
+    const out = tempDir("oq-laptop-retry-state-");
+    const dir = attemptDir(out, job, 1);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "sample.json"), JSON.stringify({ status: "failed", failure: "Claude Code failed: TypeError: fetch failed" }));
+    expect(jobState(out, job)).toMatchObject({ done: true, retryPending: false, next: 2, retriesUsed: 0 });
+  });
+
+  it("resume drops the saved retry count or retries a complete or nonretryable sample", async () => {
+    const { out, jobs, manifest, copies } = runInputs();
+    const model = { ...jobs[0], reviewer: "model:test" };
+    const dir = attemptDir(out, model, 1);
+    const save = (status, failure) => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "sample.json"), JSON.stringify({ status, failure }));
+    };
+    await executeRun({ out, manifest, jobs: [model], copies, runJob: async () => save("incomplete", "the model call failed: ECONNRESET") });
+    const calls = [];
+    await executeRun({ out, manifest: null, jobs: [model], resume: true, runJob: async (_job, next, _ticket, retriesUsed) => calls.push({ next, retriesUsed }) });
+    expect(calls).toEqual([{ next: 2, retriesUsed: 0 }]);
+    for (const [status, failure] of [["complete", "ECONNRESET"], ["incomplete", "the model endpoint's answer is not JSON"], ["incomplete", "HTTP 429 (insufficient_quota)"]]) {
+      save(status, failure);
+      expect(jobState(out, model)).toMatchObject({ done: true, retryPending: false, retriesUsed: 0 });
+    }
+  });
+});
+
+it("C3 fix 3. not examined ranges retain the coverage halt class", () => {
+  expect(reasonClass("2 changed ranges were not examined; a.py:3-4; b.py:5-6")).toBe("coverage");
+  expect(reasonClass("1 changed range was not examined; a.py:3-3")).toBe("coverage");
+});
+
+describe("the failure cause shortens split ranges as the receipt does", () => {
+  it("keeps a range's indented gap rows with it and counts ranges, not rows", () => {
+    const rows = ["a.js:7-7", "  a.js: line 7, bytes 2,001 to 4,000 of 6,000", "b.js:1-3"];
+    const report = { completion: { status: "incomplete", missing: ["2 changed ranges were not examined", ...rows, "the reviewer gave up"] } };
+    const { cause } = failureOf({ code: 2, signal: null, stderr: "" }, report);
+    expect(cause).toBe(["2 changed ranges were not examined", ...rows, "the reviewer gave up"].join("; "));
+    const many = Array.from({ length: 12 }, (_, i) => [`f${i}.js:1-1`, `  f${i}.js: line 1, bytes 1 to 2,000 of 9,000`]).flat();
+    const long = failureOf({ code: 2, signal: null, stderr: "" }, { completion: { status: "incomplete", missing: ["12 changed ranges were not examined", ...many] } });
+    expect(long.cause).toBe(["12 changed ranges were not examined", ...many.slice(0, 20), "and 2 more; the report names each one"].join("; "));
+  });
 });

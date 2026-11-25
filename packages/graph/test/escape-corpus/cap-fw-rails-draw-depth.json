@@ -1,0 +1,42 @@
+{
+  "covers": "a Rails action routed from a route file drawn deeper than the plugin reads (rails MAX_DRAW_DEPTH)",
+  "caps": [
+    "frameworks/rails/routes.ts#MAX_DRAW_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "Gemfile": "source \"https://rubygems.org\"\n\ngem \"rails\"\n",
+    "app/controllers/users_controller.rb": "class UsersController < ApplicationController\n  def deep\n  end\n\n  def top\n  end\nend\n",
+    "config/routes.rb": "Rails.application.routes.draw do\n  draw(:d1)\nend\n",
+    "config/routes/d1.rb": "draw(:d2)\n",
+    "config/routes/d2.rb": "draw(:d3)\n",
+    "config/routes/d3.rb": "draw(:d4)\n",
+    "config/routes/d4.rb": "draw(:d5)\n",
+    "config/routes/d5.rb": "draw(:d6)\n",
+    "config/routes/d6.rb": "draw(:d7)\n",
+    "config/routes/d7.rb": "draw(:d8)\n",
+    "config/routes/d8.rb": "draw(:d9)\n",
+    "config/routes/d9.rb": "draw(:d10)\n",
+    "config/routes/d10.rb": "get \"deep\", to: \"users#deep\"\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/controllers/users_controller.rb#UsersController.deep",
+      "caller": null,
+      "file": "config/routes/d10.rb",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/controllers/users_controller.rb#UsersController.deep",
+      "reason": "route files drawn more than 8 deep are not read",
+      "at": "config/routes/d8.rb:1",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "config/routes/d8.rb:1"
+      }
+    }
+  ]
+}

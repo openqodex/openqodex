@@ -23,8 +23,8 @@ const MAX_REPORT_BYTES = 32 * 1024 * 1024;
 const MAX_NUMBERS = 200;
 
 // "1,3", "1, 3", "1 3" or "all", as given in one or more arguments.
-function numbersOf(args: string[], findings: number, observations = 0): number[] {
-  const count = findings + observations;
+function numbersOf(args: string[], findings: number, observations = 0, possible = 0): number[] {
+  const count = findings + observations + possible;
   const words = args.join(",").split(/[\s,]+/).filter((w) => w !== "");
   if (words.length === 0) throw new OpenQodexError("name the findings to print by their numbers in the receipt, such as openqodex findings 1,3, or all");
   if (words.length === 1 && words[0] === "all") return Array.from({ length: findings }, (_, i) => i + 1);
@@ -34,6 +34,10 @@ function numbersOf(args: string[], findings: number, observations = 0): number[]
     if (!/^[1-9]\d{0,5}$/.test(w)) throw new OpenQodexError(`${w} is not a finding number; use the numbers in the receipt, such as 1,3, or all`);
     const n = Number(w);
     if (n > count) {
+      if (possible > 0) {
+        // wording: session
+        throw new OpenQodexError(`${n} is not an item of the last review. ${count === 1 ? "Its only item is numbered 1." : `Its ${count} items are numbered 1 to ${count}.`}`);
+      }
       if (observations > 0) {
         const items = `${findings} ${findings === 1 ? "finding" : "findings"} and ${observations} ${observations === 1 ? "observation" : "observations"}`;
         throw new OpenQodexError(`${n} is not a finding or observation of the last review: it has ${items}, numbered 1 to ${count}`);
@@ -74,10 +78,10 @@ export async function run(args: string[]): Promise<number> {
   } catch {
     report = null;
   }
-  if (report === null || report.kind !== "review" || report.change_id !== last.change_id || !Array.isArray(report.findings) || (report.observations !== undefined && !Array.isArray(report.observations))) {
+  if (report === null || report.kind !== "review" || report.change_id !== last.change_id || !Array.isArray(report.findings) || (report.observations !== undefined && !Array.isArray(report.observations)) || (report.possible !== undefined && !Array.isArray(report.possible))) {
     throw new OpenQodexError(`${unverified}the report of the last review is not in the shape openqodex writes; run openqodex review again`);
   }
-  const numbers = numbersOf(positionals, report.findings.length, report.observations?.length ?? 0);
+  const numbers = numbersOf(positionals, report.findings.length, report.observations?.length ?? 0, report.possible?.length ?? 0);
   process.stdout.write(`From the review in ${last.shown}\n\n${renderFindingDetails(report, numbers)}`);
   return EXIT_OK;
 }

@@ -1,0 +1,28 @@
+{
+  "covers": "an opaque file with an import the graph could not bind reaches every function of its project, and none of another",
+  "files": {
+    "src/package.json": "{\"name\": \"src\"}\n",
+    "src/a.ts": "export function f() {}\n",
+    "src/x.test.ts": "import { y } from \"./missing\";\nfunction t() { return this; }\nt();\ny();\n",
+    "other/package.json": "{\"name\": \"other\"}\n",
+    "other/c.ts": "export function h() {}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/x.test.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "other/c.ts#h"
+  ],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "imports a module the graph could not find",
+      "at": "src/x.test.ts:2"
+    }
+  ]
+}

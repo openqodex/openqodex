@@ -1,0 +1,22 @@
+{
+  "covers": "a value use the old reader skipped: this.m.bind(this) (test 6)",
+  "files": {
+    "src/a.ts": "export class K {\n  m() {}\n  run() {\n    const h = this.m.bind(this);\n    h();\n  }\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#K.m",
+      "caller": "src/a.ts#K.run",
+      "file": "src/a.ts",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#K.m",
+      "reason": "it is used as a value",
+      "at": "src/a.ts:4"
+    }
+  ]
+}

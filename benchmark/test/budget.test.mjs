@@ -113,7 +113,7 @@ function saveAttempt(out, job, attempt, rep, usage = null) {
   const dir = attemptDir(out, job, attempt);
   mkdirSync(join(dir, "report"), { recursive: true });
   const withUsage = usage ? { ...rep, completion: { ...rep.completion, reviewer: { usage } } } : rep;
-  writeFileSync(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt, result: { code: 0, signal: null, wallMs: 1000 }, report: withUsage, who: null, startedAt: "t", failure: null, stopped: null })));
+  writeFileSync(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt, result: { code: 0, signal: null, wallMs: 1000 }, report: withUsage, who: null, startedAt: "t", failure: null, stopped: null })));
   writeFileSync(join(dir, "report", "report.json"), JSON.stringify(withUsage));
 }
 

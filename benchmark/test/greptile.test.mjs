@@ -58,7 +58,7 @@ it.each([false, true])("ignores a cached repository answer with found %s and no 
   const again = await ingestGreptile(ctx);
   expect(again.suite).toEqual(result.suite);
   expect(again.suite.cases.filter((e) => e.status === "usable")).toHaveLength(50);
-  expect(again.split.counts).toEqual({ dev: 50, test: 0 });
+  expect(again.split.counts).toMatchObject({ dev: 30, test: 20, tune: 30, score: 20 });
 });
 
 it.each(["missing", "not found", "no licence answer"])("refuses a %s pinned repository answer and names its case", async (failure) => {

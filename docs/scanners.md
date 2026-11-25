@@ -1,6 +1,6 @@
 # Scanners
 
-OpenQodex has twenty-two built-in scanners. Most scanners run when the change holds a file they read. Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. OpenQodex pins each downloaded scanner to one version. OpenQodex does not use a copy of a built-in scanner from your `PATH`.
+OpenQodex has twenty-two built-in scanners. Most scanners run when the change holds a file they read. Every supported lockfile in the repository is checked against osv.dev at every review and scan of a change. It skips the paths you exclude. OpenQodex pins each downloaded scanner to one version. OpenQodex does not use a copy of a built-in scanner from your `PATH`.
 
 ## Terms
 
@@ -48,9 +48,9 @@ OpenQodex keeps the scanner findings on changed lines. Then it drops findings in
 | Security problems in code | semgrep | 1.94.0 | any file | Python 3.11, downloaded through uv; the Semgrep registry |
 | Security problems in code | bandit | 1.9.4 | a `.py` or `.pyi` file | the same Python as semgrep |
 | Security problems in code | brakeman | 6.2.1 | a Ruby or Rails file in a Rails app | Ruby 3.0 or newer |
-| Dependencies with known vulnerabilities | osv-scanner | 2.6.0 | every supported lockfile in the repository at every review and scan of a change | osv.dev |
+| Dependencies with known vulnerabilities | osv-scanner | 2.6.0 | every supported lockfile in the repository at every review and scan of a change, less excluded paths | osv.dev |
 | Dependencies with known vulnerabilities | cargo-deny | 0.20.2 | `Cargo.lock` | Cargo; github.com for the RustSec database |
-| Lint | ruff | 0.8.4 | a `.py` or `.pyi` file | nothing |
+| Lint | ruff | 0.17.3 | a `.py` or `.pyi` file | nothing |
 | Lint | oxlint | 1.86.0 | a JavaScript or TypeScript file | nothing |
 | Lint | rubocop | 1.69.2 | a `.rb`, `.rake` or `.gemspec` file, or a `Rakefile` | Ruby 2.7 or newer |
 | Lint | golangci-lint | 2.14.0 | a `.go` file | Go |
@@ -142,7 +142,7 @@ A download size is the size of the release asset, as GitHub reported it on 2026-
 | actionlint | 1.7.7 | 2.0 MB | 2.1 MB | 5 MiB |
 | hadolint | 2.15.1 | 102.6 MB | 55.7 MB | 98 MiB |
 | shellcheck | 0.10.0 | 7.2 MB | 2.4 MB | 58 MiB |
-| ruff | 0.8.4 | 9.9 MB | 11.2 MB | 27 MiB |
+| ruff | 0.17.3 | 9.4 MB | 10.2 MB | 22 MiB |
 | golangci-lint | 2.14.0 | 14.8 MB | 15.5 MB | not installed on that Mac (needs Go) |
 | oxlint | 1.86.0 | 5.5 MB | 6.4 MB | 12 MiB |
 | zizmor | 1.30.1 | 8.4 MB | 9.2 MB | 22 MiB |
@@ -219,7 +219,7 @@ Several scanners read settings or an ignore list from the repository, as OpenQod
 | zizmor | `.github/zizmor.yml`, `.github/zizmor.yaml`, `zizmor.yml`, `zizmor.yaml` | the repository root only |
 | squawk | `.squawk.toml` | the repository root only |
 | trivy | `.trivyignore` | the repository root only |
-| ruff | `ruff.toml`, `.ruff.toml`; `pyproject.toml` when the change alters its `[tool.ruff]` table, or the `requires-python` beside that table, which ruff reads as its target version | any folder |
+| ruff | `ruff.toml`, `.ruff.toml`; `pyproject.toml` when the change alters its `[tool.ruff]` table or its `requires-python`, which ruff reads as its target version | any folder |
 | shellcheck | `.shellcheckrc`, `shellcheckrc` | any folder |
 | osv-scanner | `osv-scanner.toml` | any folder |
 | SQLFluff | `.sqlfluff`, `.sqlfluffignore`; `setup.cfg`, `tox.ini` and `pep8.ini` when the change alters their `[sqlfluff]` and `[sqlfluff:...]` sections, with their `[DEFAULT]` keys; `pyproject.toml` when the change alters its `[tool.sqlfluff]` table | any folder |
@@ -246,11 +246,11 @@ A string, heredoc, template, raw string or block comment can be left open at the
 | semgrep | `nosemgrep` or `nosem`, in any case | anywhere on the line | the 1.94.0 binary; [docs](https://docs.semgrep.dev/ignoring-files-folders-code) |
 | gitleaks | `gitleaks:allow` | anywhere on the line | the 8.21.2 binary; [detect.go](https://github.com/gitleaks/gitleaks/blob/v8.21.2/detect/detect.go) |
 | bandit | `# nosec`, with or without the space | anywhere in a Python comment | the 1.9.4 binary; [manager.py](https://github.com/PyCQA/bandit/blob/1.9.4/bandit/core/manager.py) |
-| ruff | `# noqa` in any case; `# ruff: noqa` and `# flake8: noqa`; `isort: skip`, `isort: skip_file`, `# isort: off` | anywhere in a Python comment; `# ruff: noqa` and `# flake8: noqa` on a line of their own | the 0.8.4 binary; [noqa.rs](https://github.com/astral-sh/ruff/blob/0.8.4/crates/ruff_linter/src/noqa.rs), [directives.rs](https://github.com/astral-sh/ruff/blob/0.8.4/crates/ruff_linter/src/directives.rs) |
+| ruff | `# noqa` in any case; `# ruff: noqa` and `# flake8: noqa`; `# ruff: ignore[CODES]`, `# ruff: disable[CODES]` and `# ruff: file-ignore[CODES]`; `isort: skip`, `isort: skip_file`, `# isort: off` | anywhere in a Python comment; `# ruff: noqa`, `# flake8: noqa`, `# ruff: disable[...]` and `# ruff: file-ignore[...]` on a line of their own; `# ruff: ignore[...]` at the start of a comment, on a code line or its own | the 0.17.3 binary; [noqa.rs](https://github.com/astral-sh/ruff/blob/0.17.3/crates/ruff_linter/src/noqa.rs), [directives.rs](https://github.com/astral-sh/ruff/blob/0.17.3/crates/ruff_linter/src/directives.rs) |
 | shellcheck | `disable=` or `extended-analysis=false` anywhere after `# shellcheck` | a shell comment | the 0.10.0 binary; [Parser.hs](https://github.com/koalaman/shellcheck/blob/v0.10.0/src/ShellCheck/Parser.hs) |
 | hadolint | `# hadolint ignore=`, `# hadolint global ignore=`, `# hadolint stage ignore=` | a Dockerfile comment line, also inside a continued instruction | the 2.15.1 binary; [Pragma.hs](https://github.com/hadolint/hadolint/blob/v2.15.1/src/Hadolint/Pragma.hs) |
 | oxlint | `eslint-disable`, `oxlint-disable`, each also with `-line` or `-next-line` | the start of a `//` or `/* */` comment | the 1.86.0 binary; [disable_directives.rs](https://github.com/oxc-project/oxc/blob/oxlint_v1.86.0/crates/oxc_linter/src/disable_directives.rs) |
-| golangci-lint | `//nolint`; a comment that says `code generated`, `do not edit` or `autogenerated file` in any case; gosec's `#nosec` and `//gosec:disable` | a `//` comment for `//nolint`; a comment before the `package` line for the generated-file words, which skip the whole file; the start of a comment line for `#nosec` | source only: [nolint_filter.go](https://github.com/golangci/golangci-lint/blob/v2.14.0/pkg/result/processors/nolint_filter.go), [exclusion_generated_file_matcher.go](https://github.com/golangci/golangci-lint/blob/v2.14.0/pkg/result/processors/exclusion_generated_file_matcher.go), [gosec analyzer.go](https://github.com/securego/gosec/blob/v2.29.0/analyzer.go) |
+| golangci-lint | `//nolint`; a comment that says `code generated`, `do not edit` or `autogenerated file` in any case; gosec's `#nosec` and `//gosec:disable` | a `//` comment for `//nolint`; a comment before the `package` line for the generated-file words, which skip the whole file; the start of a comment line for `#nosec` | source only: [nolint_filter.go](https://github.com/golangci/golangci-lint/blob/v2.14.0/pkg/result/processors/nolint_filter.go), [exclusion_generated_file_matcher.go](https://github.com/golangci/golangci-lint/blob/v2.14.0/pkg/result/processors/exclusion_generated_file_matcher.go), [go.mod](https://github.com/golangci/golangci-lint/blob/v2.14.0/go.mod) for the gosec it builds in |
 | rubocop | `# rubocop:disable` and `# rubocop:todo` with a cop name or `all` | a Ruby comment, `=begin` blocks included | source only: [directive_comment.rb](https://github.com/rubocop/rubocop/blob/v1.69.2/lib/rubocop/directive_comment.rb) |
 | zizmor | `# zizmor: ignore[` and a rule list, with one blank after the `#` and after the colon | anywhere on the line: zizmor reads each line of a finding from its first `#`, so for some of its audits it obeys the comment inside a `run:` block or a quoted value too | the 1.30.1 binary; [location.rs](https://github.com/zizmorcore/zizmor/blob/v1.30.1/crates/zizmor/src/finding/location.rs) |
 | squawk | `squawk-ignore` and `squawk-ignore-file`, with a rule list or without; `squawk-disable-assume-in-transaction` | the start of a `--` or `/* */` comment, after blanks; never in a string, a dollar-quoted body or a quoted identifier. Block comments nest, as Postgres reads them | the 2.66.0 binary; [ignore.rs](https://github.com/sbdchd/squawk/blob/v2.66.0/crates/squawk_linter/src/ignore.rs) |
@@ -329,6 +329,21 @@ These are the known misses, where OpenQodex reads less than the scanner:
 - Network: OpenQodex starts it with no network option. It needs none.
 - Redaction: OpenQodex redacts the secrets that gitleaks finds. It redacts them in the review brief that the reviewer reads, in each report file and in the terminal. In this version, no file that OpenQodex keeps holds such a secret.
 
+To allowlist a known public value, add an `[allowlist]` section to the repository's root `.gitleaks.toml`. Use `paths` for a path or `regexes` for a pattern matching the value. The entries are regular expressions. For example, this keeps gitleaks's default rules and allowlists one file and one value pattern:
+
+```toml
+[extend]
+useDefault = true
+
+[allowlist]
+paths = ['''^assets/public-digests\.json$''']
+regexes = ['''^public-test-key-[a-z0-9]+$''']
+```
+
+The allowlist removes both the matching gitleaks candidates and their redaction in the frozen copy and diff. The reviewer sees the original values.
+
+Every reviewer brief explains that OpenQodex replaced matched values with `[redacted]`. The verifier refutes claims that these values are placeholders, missing or redacted. It cannot yet tell those replacements from a literal `"[redacted]"` committed by the repository. That literal gets no finding about being a placeholder until the redaction provenance follow-up records which file and line OpenQodex masked.
+
 ## bandit
 
 - Version: 1.9.4.
@@ -340,9 +355,10 @@ These are the known misses, where OpenQodex reads less than the scanner:
 
 ## ruff
 
-- Version: 0.8.4.
+- Version: 0.17.3.
 - Runs when: a `.py` or `.pyi` file changed.
 - Needs: nothing.
+- Default rules: ruff 0.17 selects 407 rules by default where ruff 0.8 selected 59. A repository with no ruff `select` now gets more findings, including the security rules S102, S110 and S112, which OpenQodex ranks as high severity. To keep the old set, put `select = ["E4", "E7", "E9", "F"]` in the ruff config.
 - Settings: ruff reads the repository's own ruff settings. OpenQodex runs it with fixes and its cache switched off, so ruff writes no fix and no cache file.
 - Frameworks: in a Django, FastAPI or Airflow project, OpenQodex adds ruff's `DJ`, `FAST` or `AIR` rules with `--extend-select`. These come on top of the repository's own selection. ruff applies a command-line selection after the repository's settings. So an `ignore` in those settings does not take these rules off again. A `# noqa`, `per-file-ignores` and `review.disabled_rules` (such as `ruff:DJ001`) do take them off.
 - Network: OpenQodex starts it with no network option. It needs none.
@@ -415,6 +431,7 @@ These are the known misses, where OpenQodex reads less than the scanner:
 - Settings: OpenQodex's own, with gosec switched on. OpenQodex does not load a `.golangci.yml` from the repository. As OpenQodex runs it, golangci-lint does not rewrite `go.mod` or `go.sum`.
 - Go version: golangci-lint 2.14.0 is built with Go 1.27. It checks code with Go 1.26 or 1.27 on your `PATH`. With a Go newer than 1.27, it cannot check the code. The report then lists `golangci` as failed, with the reason.
 - Network: OpenQodex runs it with the Go module proxy off, so it downloads no module. The modules that the repository needs must already be in your Go module cache.
+- Skipped: a module's dependencies can be listed in `go.sum` but missing from your Go module cache. The report names the Go module, the missing dependencies and the fix, `go mod download`. When a changed `.go` file has no `go.mod` in its folder or above it, the report names that folder. When no module was linted, the report lists `golangci` as skipped. Otherwise it lists `golangci` as ran, with the note in its reason. A skip is not a failure. A changed file that does not compile is still a failure, also next to a dependency that is not downloaded, and also when another module of the change gave findings. The findings stay in the report.
 
 ## brakeman
 
@@ -539,7 +556,7 @@ These are the known misses, where OpenQodex reads less than the scanner:
 
 ## TFLint
 
-- Version: 0.64.0, with the terraform ruleset 0.15.0 built into the binary.
+- Version: 0.64.0, with the terraform ruleset built into the binary.
 - Runs when: a `.tf` or `.tf.json` file changed. It checks the folder of each changed file, as trivy gets it.
 - Needs: nothing.
 - Settings: OpenQodex's own. TFLint runs the bundled terraform ruleset with its `recommended` preset, and no other plugin. That preset holds the rules about mistakes, such as unused declarations and deprecated syntax. It also covers modules without a pinned version and missing version constraints. It leaves out the naming and documentation rules of the `all` preset. OpenQodex does not load a `.tflint.hcl` from the repository.

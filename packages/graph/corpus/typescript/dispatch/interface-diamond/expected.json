@@ -24,7 +24,7 @@
       "omitted": 0
     }
   ],
-  "unknowns": [
+  "noUnknown": [
     {
       "file": "src/use.ts",
       "line": 4,

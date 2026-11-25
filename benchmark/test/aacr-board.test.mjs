@@ -54,9 +54,17 @@ import { aacrTruth, readCase, readSuite, specCopy } from "../lib/suites.mjs";
 import * as judgeRunner from "../outside/boards/aacr-judge.mjs";
 import { commentOf, convertRun, filterDataset, instanceIdOf, readAacrOutside } from "../outside/convert/aacr.mjs";
 import { loadRun, scoreRun } from "../score.mjs";
+import { newWave } from "../lib/wave.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
+
+// A wave of its own for each judging that pays, in a temporary journal
+// folder (lib/wave.mjs): the --wave flags and the environment naming it.
+const waveRoot = tempDir("oq-aacr-waves-");
+let waves = 0;
+const waveFor = () => ["--wave", newWave(`aacr-${++waves}`, { root: waveRoot }).id];
+const WAVES_ENV = { OPENQODEX_BENCH_WAVES: join(waveRoot, "index/waves") };
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(here, "fixtures", "aacr-board");
@@ -207,7 +215,7 @@ async function savedRun({ names = SMOKE, plan = PLAN, specs = {}, suite = "aacr"
       const result = { code: 0, signal: null, wallMs: 90_000 };
       const attempt = (n, rep) => {
         const dir = attemptDir(out, job, n);
-        write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ job, attempt: n, result, report: rep, who: null, startedAt: "t", failure: rep ? null : { cause: "no report.json" }, stopped: null })));
+        write(join(dir, "sample.json"), JSON.stringify(sampleRecord({ usageRecord: { calls: [{ model: "claude-opus-5-5" }] }, job, attempt: n, result, report: rep, who: null, startedAt: "t", failure: rep ? null : { cause: "no report.json" }, stopped: null })));
         if (rep) write(join(dir, "report", "report.json"), JSON.stringify(rep));
       };
       if (saved === "failed") attempt(1, null);
@@ -708,11 +716,11 @@ describe("the wrapper runs their evaluation stage with a model as judge", () => 
       const provider = await fakeJudge({ status });
       const home = tempDir("oq-aacr-relay-refused-");
       write(join(home, "azure.env"), `AZURE_OPENAI_BASE_URL=${provider.base}\nAZURE_OPENAI_KEY=test-key\n`);
-      const env = { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env") };
+      const env = { ...process.env, ...WAVES_ENV, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env") };
       delete env.JUDGE_USE_MOCK;
       try {
         const r = await new Promise((done) => {
-          const child = spawn(process.execPath, [join(benchRoot, "outside", "boards", "aacr-judge.mjs"), out, "--evaluation", EVALUATION, "--python", PYTHON], { env });
+          const child = spawn(process.execPath, [join(benchRoot, "outside", "boards", "aacr-judge.mjs"), out, "--evaluation", EVALUATION, "--python", PYTHON, ...waveFor()], { env });
           let stdout = "";
           let stderr = "";
           child.stdout.on("data", (c) => (stdout += c));
@@ -737,10 +745,10 @@ describe("the wrapper runs their evaluation stage with a model as judge", () => 
     const key = `fake-judge-key-${randomBytes(16).toString("hex")}`;
     const home = tempDir("oq-aacr-judged-");
     writeFileSync(join(home, "azure.env"), `AZURE_OPENAI_BASE_URL=${judge.base}\nAZURE_OPENAI_KEY=${key}\n`);
-    const env = { ...process.env, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), TMPDIR: home };
+    const env = { ...process.env, ...WAVES_ENV, OPENQODEX_BENCH_MODEL_ENV: join(home, "azure.env"), TMPDIR: home };
     delete env.JUDGE_USE_MOCK;
     const r = await new Promise((done) => {
-      const child = spawn(process.execPath, [join(benchRoot, "outside", "boards", "aacr-judge.mjs"), out, "--rounds", "1", "--evaluation", EVALUATION, "--python", PYTHON], { env });
+      const child = spawn(process.execPath, [join(benchRoot, "outside", "boards", "aacr-judge.mjs"), out, "--rounds", "1", "--evaluation", EVALUATION, "--python", PYTHON, ...waveFor()], { env });
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (c) => (stdout += c));
@@ -758,7 +766,7 @@ describe("the wrapper runs their evaluation stage with a model as judge", () => 
     // Azure receives the original token limit under its reasoning model parameter.
     expect(judge.seen.every((s) => s.request.max_completion_tokens === 40000)).toBe(true);
     expect(judge.seen.every((s) => ["chat_template_kwargs", "temperature", "top_p", "max_tokens"].every((name) => !(name in s.request)))).toBe(true);
-    expect(record.relay).toEqual({ relay: true, requests: judge.seen.length, stripped: judge.seen.length, parameterChanges: { chat_template_kwargs: judge.seen.length, temperature: judge.seen.length, top_p: judge.seen.length, max_tokens: judge.seen.length }, upstreamStatuses: { 200: judge.seen.length } });
+    expect(record.relay).toEqual({ relay: true, requests: judge.seen.length, stripped: judge.seen.length, usage: expect.objectContaining({ responses: judge.seen.length }), parameterChanges: { chat_template_kwargs: judge.seen.length, temperature: judge.seen.length, top_p: judge.seen.length, max_tokens: judge.seen.length }, upstreamStatuses: { 200: judge.seen.length } });
     const leaks = [["stdout", r.stdout], ["stderr", r.stderr], ...filesUnder(out).map((p) => [p, readFileSync(p, "utf8")])].filter(([, text]) => endpointSecrets(judge.base, key).some((s) => text.includes(s)));
     expect(leaks.map(([where]) => where)).toEqual([]);
     // Semantic numbers are reported now. Their line count drops below ours where the judge's yes on a

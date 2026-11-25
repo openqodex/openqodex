@@ -1,0 +1,29 @@
+{
+  "covers": "a load by a computed path read for one name may be any module: the path may name Node's module library, whose loader loads anything (rule H3)",
+  "files": {
+    "src/load.ts": "export async function main(path: string) { const { run } = await import(path); run(); }\n",
+    "src/r.ts": "export function run() {}\n",
+    "src/o.ts": "export function other() {}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/r.ts#run",
+      "caller": "src/load.ts#main",
+      "file": "src/load.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/r.ts#run",
+      "reason": "may be any module of the repository",
+      "at": "src/load.ts:1"
+    },
+    {
+      "target": "src/o.ts#other",
+      "reason": "may be any module of the repository",
+      "at": "src/load.ts:1"
+    }
+  ]
+}

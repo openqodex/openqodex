@@ -6,6 +6,7 @@
 //    longer match and finalize rejects a valid submission.
 // The end-to-end stream holds the same check through real gitleaks output
 // (a key in a file name, then scan.json and candidates.json searched for it).
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import type { Candidate, Change, Config, RunManifest, ScanResult } from "@openqodex/core";
 import { fingerprintSecrets, finalizeReview } from "@openqodex/core";
 import { describe, expect, it } from "vitest";
@@ -43,7 +44,7 @@ const change: Change = {
   shortId: "a".repeat(12),
   files: [{ path: file, status: "added", oldPath: null, binary: false }],
   changedPaths: [file],
-  coverage: new Map([[file, new Set([1])]]),
+  coverage: new Map([[file, makeLineSet([1])]]),
   deletionPoints: new Map(),
   diff: "",
   notReviewed: [],
