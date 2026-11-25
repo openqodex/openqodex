@@ -1,0 +1,19 @@
+{
+  "covers": "`queueMicrotask` takes only a function, so a callback it is given is no string run as code",
+  "files": {
+    "src/a.js": "export function f() {}\n",
+    "src/b.js": "import { f } from \"./a.js\";\nexport function later(cb) {\n  queueMicrotask(cb);\n}\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": "src/b.js",
+      "file": "src/b.js",
+      "line": 5
+    }
+  ],
+  "whole": [
+    "src/a.js#f"
+  ],
+  "floored": []
+}

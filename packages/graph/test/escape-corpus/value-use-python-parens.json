@@ -1,0 +1,28 @@
+{
+  "covers": "a FastAPI dependency named inside extra parentheses, Depends(((dep))): FastAPI calls dep, and the core must still record dep as used as a value at that place, so its callers floor",
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": "from fastapi import Depends, FastAPI\n\napp = FastAPI()\n\ndef dep():\n    return 1\n\n@app.get(\"/x\")\ndef index(v=Depends(((dep)))):\n    return v\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.py#dep",
+      "caller": null,
+      "file": "main.py",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#dep",
+      "reason": "it is used as a value in 1 place, first at main.py:9",
+      "at": "main.py:9",
+      "gap": {
+        "cause": "dynamic",
+        "at": "main.py:9"
+      }
+    }
+  ]
+}

@@ -4,6 +4,7 @@
 // build answered (`graph`). A count that cannot be known is null, never
 // zero; search hits are leads and are never counted.
 import type { Change, ImpactExportChange, ImpactSymbol } from "@openqodex/core";
+import type { GapPlace } from "../gap.js";
 import { toImpactUnknown } from "../impact.js";
 import { API_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
@@ -78,8 +79,15 @@ export type Answer = {
   counts: { certain: number | null; likely: number | null; possible: number | null };
   leads: Candidate[];
   // `groups`: the gaps by cause, each with how many there are and at most
-  // two examples, beside the reasons and causes it sums up.
-  unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[]; groups?: FloorGroup[] };
+  // two examples, beside the reasons and causes it sums up. `scope`, on a
+  // floor: "tests" when a callers list names every place that could hide a
+  // caller and each is a path `isTestPath` reads as a test (a fixtures
+  // folder among them), with `note`, the sentence that says so; "all" on
+  // any other floor. `gaps`, on a caller or callee list: each place the
+  // graph gave up that may hide a row, with its cause, its file and line
+  // (null for a whole file) and what to check next; at most 20, the
+  // reasons hold the counts.
+  unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[]; groups?: FloorGroup[]; scope?: "tests" | "all"; note?: string; gaps?: GapPlace[] };
   truncated: Truncated;
   // True on a floor: each row holds its tier, but rows may be missing, so
   // the counts are at least, never exactly. Set on every answer `query` gives.

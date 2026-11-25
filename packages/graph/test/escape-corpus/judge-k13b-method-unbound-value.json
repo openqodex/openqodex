@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: method unbound value",
+  "files": {
+    "src/a.ts": "export class Store { save() {} }\nexport function go(obj: any) { const h = obj.save; h.call(obj); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#Store.save",
+      "caller": null,
+      "file": "src/a.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

@@ -1,0 +1,43 @@
+{
+  "covers": "a caller in a file whose parse runs past its time limit (build MAX_PARSE_MS)",
+  "caps": [
+    "build.ts#MAX_PARSE_MS"
+  ],
+  "build": {
+    "maxFileBytes": 2097152,
+    "budgetMs": 60000,
+    "maxParseMs": 2000
+  },
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.ts": "export function target(): void {}\n",
+    "src/slow.ts": [
+      "import { target } from \"./a\";\ntarget();\nexport function f() {\n  return 1; ",
+      {
+        "repeat": "/* x ",
+        "times": 100000
+      },
+      "\n}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#target",
+      "caller": "src/slow.ts",
+      "file": "src/slow.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#target",
+      "reason": "1 file of its project was not read",
+      "at": "",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "src/slow.ts"
+      }
+    }
+  ]
+}

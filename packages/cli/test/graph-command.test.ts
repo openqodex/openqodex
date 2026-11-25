@@ -20,6 +20,11 @@
 //     caller.
 // 10. `routes` mixes the small applications tests build with the real ones,
 //     and gives no way to tell them apart or leave them out.
+// 11. A callback anywhere in the package marks an unrelated function's list
+//     incomplete, so agents learn to ignore the mark; or a function passed
+//     through a ternary and called through a parameter reads as whole; or
+//     a function passed straight to a caller of its parameter loses its
+//     floor because it is listed as a possible caller.
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -68,6 +73,12 @@ const files = {
   "src/use.ts": 'import { core } from "./core";\nexport function use(): number {\n  return core();\n}\n',
   "src/top.ts": 'import { use } from "./use";\nexport function top(): number {\n  return use();\n}\n',
 };
+// `core` passed through a ternary to a function that calls its parameter:
+// a call the graph cannot list, so its callers are a floor.
+const picked = {
+  ...files,
+  "src/value.ts": 'import { core } from "./core";\nexport function other(): number {\n  return 2;\n}\nexport function run(f: () => number): number {\n  return f();\n}\nexport function start(flag: boolean): number {\n  const pick = flag ? core : other;\n  return run(pick);\n}\n',
+};
 
 describe("openqodex graph", () => {
   it("answers as the query function does for the same request and kept build (2)", async () => {
@@ -108,7 +119,7 @@ describe("openqodex graph", () => {
   });
 
   it("exits 0 for an answer that is a floor, and 2 for a name the graph does not hold (4)", () => {
-    const root = repo({ ...files, "src/value.ts": "export function run(f: () => number): number {\n  return f();\n}\n" });
+    const root = repo(picked);
     const floor = cli(root, "graph", "callers", "core", "--json");
     expect(floor.status).toBe(0);
     expect((JSON.parse(floor.stdout) as Answer).unknown.floor).toBe(true);
@@ -121,13 +132,35 @@ describe("openqodex graph", () => {
     const whole = cli(repo(files), "graph", "callers", "core");
     expect(whole.status, whole.stderr).toBe(0);
     expect(whole.stdout).toMatch(/^counts: 2 certain, 0 likely, 0 possible$/m);
-    const root = repo({ ...files, "src/value.ts": "export function run(f: () => number): number {\n  return f();\n}\n" });
+    const root = repo(picked);
     const floor = cli(root, "graph", "callers", "core");
     expect(floor.stdout).toMatch(/^counts: 2 certain \(list incomplete\), 0 likely, 0 possible$/m);
     const json = JSON.parse(cli(root, "graph", "callers", "core", "--json").stdout) as Answer & { listIncomplete?: boolean };
     expect(json.unknown.floor).toBe(true);
     expect(json.listIncomplete).toBe(true);
     expect(json.counts).toEqual({ certain: 2, likely: 0, possible: 0 });
+  });
+
+  it("answers a list as whole when a callback elsewhere in the package cannot reach the function (11)", () => {
+    const root = repo({ ...files, "src/value.ts": "export function run(f: () => number): number {\n  return f();\n}\n" });
+    const r = cli(root, "graph", "callers", "core");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/^counts: 2 certain, 0 likely, 0 possible$/m);
+    expect(r.stdout).not.toMatch(/list incomplete/);
+    expect(r.stdout).not.toMatch(/^floor:/m);
+    const json = JSON.parse(cli(root, "graph", "callers", "core", "--json").stdout) as Answer & { listIncomplete?: boolean };
+    expect(json.unknown.floor).toBe(false);
+    expect(json.listIncomplete).toBe(false);
+  });
+
+  it("keeps the floor of a function passed through a ternary, naming the place, and of one passed straight on (11)", () => {
+    const r = cli(repo(picked), "graph", "callers", "core");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/^floor: .*used as a value .*src\/value\.ts:9/m);
+    const direct = repo({ ...files, "src/value.ts": 'import { core } from "./core";\nexport function run(f: () => number): number {\n  return f();\n}\nexport function start(): number {\n  return run(core);\n}\n' });
+    const json = JSON.parse(cli(direct, "graph", "callers", "core", "--json").stdout) as Answer;
+    expect(json.unknown.floor).toBe(true);
+    expect(json.counts.possible).toBeGreaterThanOrEqual(1);
   });
 
   it("refuses a generation that is not a build id, reading nothing outside the folder (5)", () => {
@@ -202,6 +235,14 @@ describe("dead ends of the text answers", () => {
     expect(lines.findIndex((l) => l.startsWith("floor:"))).toBeGreaterThan(lines.findIndex((l) => l.includes("src/use2.ts:")));
     expect((JSON.parse(cli(root, "graph", "callers", "save", "--json").stdout) as Answer).warning).toBe(warning);
     expect(cli(root, "graph", "callers", "core").stdout).not.toMatch(/^warning:/m);
+    // A call through `this` in a class cannot run a plain function: no warning and no floor.
+    const typed = repo({ ...files, "src/svc.ts": "export function save(): number {\n  return 1;\n}\n", "src/store.ts": "export class Store {\n  keep(): number {\n    return 2;\n  }\n  flush(): number {\n    return this.keep();\n  }\n}\nexport function keep(): number {\n  return new Store().flush();\n}\n" });
+    const plain = cli(typed, "graph", "callers", "src/store.ts:9", "--json");
+    expect(plain.status, plain.stderr).toBe(0);
+    const p = JSON.parse(plain.stdout) as Answer;
+    expect((p.target as { id: string }).id).toMatch(/^src\/store\.ts#keep@9:/);
+    expect(p.warning ?? null).toBeNull();
+    expect(p.unknown.floor, p.unknown.reasons.join("; ")).toBe(false);
   });
 
   it("prints the paging sentence from the answer's own field", () => {

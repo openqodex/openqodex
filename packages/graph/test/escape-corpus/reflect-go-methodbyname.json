@@ -1,0 +1,43 @@
+{
+  "covers": "Go reflect: MethodByName with a name written as a string, and with a name given at run time",
+  "files": {
+    "go.mod": "module m\n\ngo 1.21\n",
+    "lib.go": "package main\n\ntype T struct{}\n\nfunc (T) Target3() int { return 1 }\n",
+    "r.go": "package main\n\nimport \"reflect\"\n\nfunc run() { reflect.ValueOf(T{}).MethodByName(\"Target3\").Call(nil) }\n\nfunc any(n string) { reflect.ValueOf(T{}).MethodByName(n).Call(nil) }\n"
+  },
+  "mustReach": [
+    {
+      "target": "lib.go#T.Target3",
+      "caller": "r.go#run",
+      "file": "r.go",
+      "line": 5
+    },
+    {
+      "target": "lib.go#T.Target3",
+      "caller": "r.go#any",
+      "file": "r.go",
+      "line": 7
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "lib.go#T.Target3",
+      "reason": "finds `Target3` by a name given at run time (reflection)",
+      "at": "r.go:5",
+      "gap": {
+        "cause": "no-receiver-type",
+        "at": "r.go:5"
+      }
+    },
+    {
+      "target": "lib.go#T.Target3",
+      "reason": "finds a method by a name given at run time (reflection)",
+      "at": "",
+      "gap": {
+        "cause": "dynamic",
+        "at": "r.go:7"
+      }
+    }
+  ]
+}

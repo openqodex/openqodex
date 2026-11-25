@@ -1,0 +1,37 @@
+{
+  "covers": "a FastAPI route handler in a file over the size the plugin reads, which the graph itself reads (fastapi MAX_SOURCE_BYTES)",
+  "caps": [
+    "frameworks/fastapi/facts.ts#MAX_SOURCE_BYTES"
+  ],
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": [
+      "from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get(\"/x\")\ndef index():\n    return 1\n\nPAD = \"\"\"\n",
+      {
+        "repeat": "padding past the size bound the framework plugin reads\n",
+        "times": 5000
+      },
+      "\"\"\"\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "main.py#index",
+      "caller": null,
+      "file": "main.py",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#index",
+      "reason": "over the 262144-byte cap of the FastAPI plugin",
+      "at": "",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "main.py:1"
+      }
+    }
+  ]
+}

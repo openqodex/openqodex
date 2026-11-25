@@ -1,7 +1,8 @@
 export * from "./types.js";
 export { buildGraph, extractFacts, langOf, factsKey, isManifest, DEFAULT_BUDGET_MS, DEFAULT_MAX_FILES, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_HEAP_MB } from "./build.js";
 export type { BuildArgs } from "./build.js";
-export { detectImpact, emptyImpact, floorReasons, hotSymbols, isTestPath, toImpactUnknown } from "./impact.js";
+export { detectImpact, emptyImpact, floorOf, floorReasons, hotSymbols, isTestPath, toImpactUnknown } from "./impact.js";
+export type { Floor } from "./impact.js";
 export { renderImpactBlock, symbolKey } from "./render.js";
 export { CERTAIN_KINDS, MODEL_VERSION, API_VERSION, validateEvidence } from "./model/records.js";
 export type { Cause, Cut, Evidence, EvidenceKind, Tier, Unknown } from "./model/records.js";

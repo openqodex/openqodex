@@ -1,0 +1,14 @@
+{
+  "covers": "a `require` made by `createRequire` in one function makes no loader of a parameter named `require` in another: no load of any module",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/c.ts": "export function h(): void {}\n",
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nfunction one() {\n  const require = createRequire(import.meta.url);\n  return require(\"./b.ts\");\n}\nexport function two(require) {\n  return [require];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/c.ts#h"
+  ],
+  "floored": []
+}

@@ -1,0 +1,32 @@
+{
+  "covers": "a Next.js middleware whose matcher is computed: which routes it runs for is not known, but that hides no caller of any other function, so a helper a page calls stays whole while the middleware itself floors",
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\":\"web\",\"dependencies\":{\"next\":\"14.0.0\"}}\n",
+    "middleware.ts": "import { NextResponse } from \"next/server\";\n\nconst base = \"/api\";\n\nexport function middleware() {\n  return NextResponse.next();\n}\n\nexport const config = { matcher: [`${base}/:path*`] };\n",
+    "lib/util.ts": "export function helper() {\n  return 1;\n}\n",
+    "app/page.tsx": "import { helper } from \"../lib/util\";\n\nexport default function Page() {\n  return helper();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "lib/util.ts#helper",
+      "caller": "app/page.tsx#Page",
+      "file": "app/page.tsx",
+      "line": 4
+    }
+  ],
+  "whole": [
+    "lib/util.ts#helper"
+  ],
+  "floored": [
+    {
+      "target": "middleware.ts#middleware",
+      "reason": "the middleware's matcher is computed",
+      "at": "",
+      "gap": {
+        "cause": "dynamic",
+        "at": "middleware.ts:9"
+      }
+    }
+  ]
+}

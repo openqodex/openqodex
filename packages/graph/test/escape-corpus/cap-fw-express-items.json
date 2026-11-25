@@ -1,0 +1,32 @@
+{
+  "covers": "an Express route call with more handlers than the plugin's reader keeps (express MAX_ITEMS)",
+  "caps": [
+    "frameworks/express/js.ts#MAX_ITEMS"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"express\": \"^4.18.0\"}}",
+    "src/h.ts": "export function h(req: unknown, res: unknown): void {}\n",
+    "src/app.ts": "import express from \"express\";\nimport { h } from \"./h\";\nexport const app = express();\napp.get(\"/x\", h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h, h);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h",
+      "reason": "the call has 7 more arguments than the 24 the plugin reads",
+      "at": "src/app.ts:4",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/app.ts:4"
+      }
+    }
+  ]
+}

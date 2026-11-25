@@ -1,0 +1,38 @@
+{
+  "covers": "a method called on the result of more chained calls than the type depth limit follows (types MAX_TYPE_DEPTH)",
+  "caps": [
+    "types.ts#MAX_TYPE_DEPTH"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/c.ts": "export class C {\n  m(): C {\n    return this;\n  }\n  run(): void {}\n}\n",
+    "src/use.ts": [
+      "import { C } from \"./c\";\nexport function go(c: C) {\n  c",
+      {
+        "repeat": ".m()",
+        "times": 17
+      },
+      ".run();\n}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/c.ts#C.run",
+      "caller": "src/use.ts#go",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/c.ts#C.run",
+      "reason": "1 call named `run` in the repository could not be bound",
+      "at": "",
+      "gap": {
+        "cause": "no-receiver-type",
+        "at": "src/use.ts:3"
+      }
+    }
+  ]
+}

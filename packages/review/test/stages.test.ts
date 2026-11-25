@@ -18,13 +18,30 @@
 // Cross-file evidence review: a finder candidate folded into a scanner
 // candidate as its duplicate loses the lines in other files its verifier
 // relied on, so the shown scanner finding carries none of them.
+// Issue 315 follow-up: finalize merges a finding and an observation on the
+// same lines that the verifier did not link, and the merged finding is moved
+// out of the counted findings into the observations.
+// Duplicate folding: a folded major duplicate leaves its minor survivor
+// minor, so the review passes; the saved submission keeps it minor too; two
+// items sharing a key folded through a third fold each other away; an
+// observation sharing a counted finding's key folds that finding away; an
+// observation's severity reaches a counted finding through a shared key.
+// Every fold combination and its test: counted into counted (raises the
+// survivor, also along a chain), counted into an observation (never folds),
+// observation into counted (never raises it), observation into observation
+// (never raises it), an observation sharing a counted key (never folds it,
+// never raises it, folded or not, and never lists it when only the
+// observation's severity clears the threshold), counted into a below-floor
+// finding whose key an observation shares (never folds: that key does not
+// count), a key cycle (one key stays), an id cycle (rejected by the
+// verifier answer check, evidence-check.test.ts).
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
 import { buildFindBrief, buildVerifyBrief, completionRecord, getChange, readCoverage } from "@openqodex/core";
-import type { FindAnswer, ReviewUnit, VerifyAnswer, VerifyBatch } from "@openqodex/core";
+import type { FindAnswer, ReviewUnit, VerifyAnswer, VerifyBatch, VerifyVerdict } from "@openqodex/core";
 import { deliverRanges } from "../src/conversation.js";
 import { runStagedReview } from "../src/stages.js";
 import { TIMED_OUT } from "../src/agents/driver.js";
@@ -242,6 +259,22 @@ it("keeps a duplicate finding when its confirmed survivor is only an observation
   expect(r.report.observations).toHaveLength(0);
   expect(r.report.verdict).toBe("blocked");
 });
+it("keeps a finding counted beside an observation on its lines that the verifier did not link (315)", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = [candidate("a.txt", brief.pass === "local" ? "Counted" : "Style note")];
+    if (answer.version === "verify-1") {
+      const note = answer.verdicts.find((v) => v.title === "Style note")!;
+      note.tier = "observation";
+      note.problem = "The changed operation accepts unsafe input, and its name does not say so.";
+    }
+    return answer;
+  }, ["a.txt"]);
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings.map((finding) => finding.title)).toEqual(["Counted"]);
+  expect((r.report.observations ?? []).map((o) => o.title)).toEqual(["Style note"]);
+  expect(r.report.verdict).toBe("blocked");
+});
 it("keeps a finding whose key an observation below the floor shares", async () => {
   // Two lens candidates on one range share a key whatever their titles say.
   const f = setup((answer, _request, brief) => {
@@ -286,6 +319,172 @@ it("folds a duplicate into the first shown link of its chain when the chain's en
   f.args.confidenceFloor = 0.7;
   const r = await runStagedReview(f.args);
   expect(r.report.findings.map((finding) => finding.title)).toEqual(["Claim 2"]);
+});
+it("carries a folded major duplicate's severity to its minor survivor, so the review still blocks", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [{ ...candidate("a.txt", "Survivor"), line_number: 1 }]
+      : [{ ...candidate("a.txt", "Major duplicate"), line_number: 2, evidence: [{ file_path: "a.txt", line_number: 2, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const survivor = answer.verdicts.find((v) => v.title === "Survivor")!;
+      survivor.severity = "minor";
+      const duplicate = answer.verdicts.find((v) => v.title === "Major duplicate")!;
+      duplicate.line_number = 2;
+      duplicate.duplicate_of = survivor.id;
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(2));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Survivor", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+  // The saved submission a replay finalizes again carries the same severity.
+  expect(r.submission.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Survivor", "major"]]);
+});
+it("keeps one finding when duplicate links fold two items sharing a key through another, so the review still blocks", async () => {
+  // A1 folds into B and B into A2, and A1 and A2 share a finding key.
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [1, 2].map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }))
+      : [{ ...candidate("a.txt", "Claim 3"), line_number: 3, evidence: [{ file_path: "a.txt", line_number: 3, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const byLine = new Map(brief.batch!.candidates.map((c) => [c.kind === "finder" ? c.candidate.line_number : 0, c.id]));
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        const line = c.kind === "finder" ? c.candidate.line_number : 0;
+        // The Twin key survives the cycle at minor, so only the transfer from Other blocks.
+        if (line === 1) { v.title = "Twin"; v.line_number = 1; v.severity = "minor"; v.duplicate_of = byLine.get(2); }
+        if (line === 2) { v.title = "Other"; v.line_number = 2; v.duplicate_of = byLine.get(3); }
+        if (line === 3) { v.title = "Twin"; v.line_number = 1; v.severity = "minor"; }
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Twin", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+  expect(r.submission.findings.length).toBeGreaterThan(0);
+  expect(r.submission.findings.every((finding) => finding.title === "Twin" && finding.severity === "major")).toBe(true);
+});
+it("keeps a major finding whose key an observation shares when that observation is a duplicate of another observation", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [1, 2].map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }))
+      : [{ ...candidate("a.txt", "Claim 3"), line_number: 3, evidence: [{ file_path: "a.txt", line_number: 3, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const byLine = new Map(brief.batch!.candidates.map((c) => [c.kind === "finder" ? c.candidate.line_number : 0, c.id]));
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        const line = c.kind === "finder" ? c.candidate.line_number : 0;
+        if (line === 1) { v.title = "Shared"; v.line_number = 1; }
+        if (line === 2) { v.title = "Note"; v.line_number = 2; v.severity = "minor"; v.tier = "observation"; }
+        if (line === 3) { v.title = "Shared"; v.line_number = 1; v.severity = "minor"; v.tier = "observation"; v.duplicate_of = byLine.get(2); }
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Shared", "major"]]);
+  expect((r.report.observations ?? []).map((o) => [o.title, o.severity])).toEqual([["Note", "minor"]]);
+  expect(r.report.verdict).toBe("blocked");
+});
+// Three finder candidates on lines 1 to 3 of a.txt, verified in one batch.
+// Each verdict starts as a hidden nitpick finding titled by its line; `edit`
+// shapes it, with `id` giving the verdict id of another line.
+async function foldCase(edit: (v: VerifyVerdict, line: number, id: (line: number) => string) => void, threshold: "minor" | "major" = "minor") {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = (brief.pass === "local" ? [1, 2] : [3]).map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }));
+    if (answer.version === "verify-1") {
+      const byLine = new Map(brief.batch!.candidates.map((c) => [c.kind === "finder" ? c.candidate.line_number : 0, c.id]));
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        const line = c.kind === "finder" ? c.candidate.line_number : 0;
+        Object.assign(v, { line_number: line, title: `Claim ${line}`, severity: "nitpick" });
+        edit(v, line, (other) => byLine.get(other)!);
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
+  f.config.severityThreshold = threshold;
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  const shown = (list: { title: string; severity: string }[] | undefined) => (list ?? []).map((x) => [x.title, x.severity]);
+  return { r, findings: shown(r.report.findings), observations: shown(r.report.observations), saved: shown(r.submission.findings.filter((x) => x.severity !== "nitpick")) };
+}
+it("carries a major along a chain of counted duplicates to the last survivor", async () => {
+  const { r, findings, saved } = await foldCase((v, line, id) => {
+    if (line === 1) { v.severity = "major"; v.duplicate_of = id(2); }
+    if (line === 2) { v.severity = "minor"; v.duplicate_of = id(3); }
+    if (line === 3) v.severity = "minor";
+  });
+  expect(findings).toEqual([["Claim 3", "major"]]);
+  expect(saved).toEqual([["Claim 3", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+});
+it("never raises a counted finding with the severity of an observation folded into it", async () => {
+  const { r, findings, observations } = await foldCase((v, line, id) => {
+    if (line === 1) v.severity = "minor";
+    if (line === 2) { v.severity = "major"; v.tier = "observation"; v.duplicate_of = id(1); }
+  });
+  expect(findings).toEqual([["Claim 1", "minor"]]);
+  expect(observations).toEqual([]);
+  expect(r.report.verdict).toBe("passed");
+});
+it("never raises an observation with the severity of an observation folded into it", async () => {
+  const { r, findings, observations } = await foldCase((v, line, id) => {
+    if (line === 1) { v.severity = "minor"; v.tier = "observation"; }
+    if (line === 2) { v.severity = "major"; v.tier = "observation"; v.duplicate_of = id(1); }
+  });
+  expect(findings).toEqual([]);
+  expect(observations).toEqual([["Claim 1", "minor"]]);
+  expect(r.report.verdict).toBe("passed");
+});
+it.each([false, true])("never raises a counted finding with the severity of an observation sharing its key, folded: %s", async (folded) => {
+  const { r, findings, observations, saved } = await foldCase((v, line, id) => {
+    if (line === 1) { v.title = "Shared"; v.severity = "minor"; if (folded) v.duplicate_of = id(2); }
+    if (line === 2 && folded) v.severity = "minor";
+    if (line === 3) { v.title = "Shared"; v.line_number = 1; v.severity = "major"; v.tier = "observation"; }
+  });
+  expect(findings).toEqual(folded ? [["Claim 2", "minor"]] : [["Shared", "minor"]]);
+  expect(observations).toEqual([]);
+  expect(saved).toEqual(folded ? [["Claim 2", "minor"]] : [["Shared", "minor"]]);
+  expect(r.report.verdict).toBe("passed");
+});
+it("never folds a counted major into a below-floor finding whose key an observation shares", async () => {
+  const { r, findings } = await foldCase((v, line, id) => {
+    if (line === 1) { v.severity = "major"; v.duplicate_of = id(2); }
+    if (line === 2) { v.title = "Shared"; v.severity = "minor"; v.confidence = 0.6; }
+    if (line === 3) { v.title = "Shared"; v.line_number = 2; v.severity = "minor"; v.tier = "observation"; }
+  });
+  expect(findings).toEqual([["Claim 1", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+});
+it("hides a counted minor finding that only a major observation sharing its key lifted over the threshold", async () => {
+  const { r, findings, observations } = await foldCase((v, line) => {
+    if (line === 1) { v.title = "Shared"; v.severity = "minor"; }
+    if (line === 3) { v.title = "Shared"; v.line_number = 1; v.severity = "major"; v.tier = "observation"; }
+  }, "major");
+  expect(findings).toEqual([]);
+  expect(observations).toEqual([]);
+  // The hidden minor finding and the nitpick on line 2, as a replay counts them.
+  expect(r.report.below_threshold).toBe(2);
+  expect(r.report.verdict).toBe("passed");
 });
 it("lets a stopped session leave the budget queue while another session holds the lock", async () => {
   const budgetState = { pending: Promise.resolve(), refused: false };

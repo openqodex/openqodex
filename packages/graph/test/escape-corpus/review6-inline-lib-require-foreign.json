@@ -1,0 +1,25 @@
+{
+  "covers": "`require(\"node:module\").createRequire(base)` given another folder loads paths from there: any module",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/use.ts": "import { createRequire } from \"node:module\";\nconst require = createRequire(import.meta.url);\nconst lib = require(\"node:module\").createRequire(new URL(\"./lib/\", import.meta.url))(\"./a.cjs\");\nlib.f();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "caller": "src/use.ts",
+      "file": "src/use.ts",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "may be any module of the repository",
+      "at": "src/use.ts:3"
+    }
+  ]
+}

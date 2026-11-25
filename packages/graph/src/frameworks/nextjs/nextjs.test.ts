@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { buildGraph, frameworkLayer } from "../../index.js";
 import type { FrameworkLayer, Graph } from "../../index.js";
 import { cpuMs, expectLinear, growthTests } from "../../test-timing.js";
-import { intersects, parseMatcher, routeSegments } from "./resolve.js";
+import { intersects, MAX_PATTERN_SEGMENTS, parseMatcher, routeSegments } from "./resolve.js";
 
 function commit(root: string): void {
   const run = (...args: string[]) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args], { cwd: root, encoding: "utf8" });
@@ -101,5 +101,34 @@ describe("the Next.js plugin on a middleware whose matcher it cannot read, or th
       .filter((r) => r.site.file === "app/api/ping/route.ts")
       .flatMap((r) => r.methods);
     expect(methods).toEqual(["GET"]);
+  });
+});
+
+describe("the Next.js plugin at its route depth", () => {
+  let root: string;
+  let graph: Graph;
+  const deep = (n: number, tag: string) => `app/${Array.from({ length: n }, (_, i) => `${tag}${i}`).join("/")}/route.ts`;
+  beforeAll(async () => {
+    const files: Record<string, string> = {
+      "package.json": JSON.stringify({ name: "deep", private: true, dependencies: { next: "^15.1.6", react: "^19.0.0" } }),
+      [deep(MAX_PATTERN_SEGMENTS, "a")]: 'export function GET() {\n  return new Response("at");\n}\n',
+      [deep(MAX_PATTERN_SEGMENTS + 1, "b")]: 'export function GET() {\n  return new Response("past");\n}\n',
+    };
+    root = mkdtempSync(join(tmpdir(), "oq-next-deep-"));
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), content);
+    }
+    commit(root);
+    graph = await buildGraph({ repoRoot: root, store: null });
+  }, 60_000);
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it("reads a route exactly as many folders deep as its route paths hold segments, and cuts the one a folder deeper", () => {
+    const handled = (file: string) => (graph.frameworks?.edges ?? []).some((e) => e.plugin === "nextjs" && e.kind === "handles" && e.to.startsWith(`${file}#GET`));
+    expect(handled(deep(MAX_PATTERN_SEGMENTS, "a"))).toBe(true);
+    expect(handled(deep(MAX_PATTERN_SEGMENTS + 1, "b"))).toBe(false);
+    const cut = graph.frameworks?.unknowns.filter((u) => u.plugin === "nextjs" && u.note.includes(`more than ${MAX_PATTERN_SEGMENTS} folders deep`));
+    expect(cut?.map((u) => u.count)).toEqual([1]);
   });
 });

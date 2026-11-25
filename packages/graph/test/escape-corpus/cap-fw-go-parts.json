@@ -1,0 +1,31 @@
+{
+  "covers": "a net/http route pattern built from more pieces than the Go fact reader reads (go-http/facts MAX_PARTS)",
+  "caps": [
+    "frameworks/go-http/facts.ts#MAX_PARTS"
+  ],
+  "commit": true,
+  "files": {
+    "pieces/go.mod": "module example.com/pieces\n\ngo 1.22\n",
+    "pieces/main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm := n.NewServeMux()\n\tm.HandleFunc(\"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\" + \"/a\", deep)\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "pieces/main.go#deep",
+      "caller": null,
+      "file": "pieces/main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "pieces/main.go#deep",
+      "reason": "the route pattern is longer than the plugin reads",
+      "at": "pieces/main.go:9",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "pieces/main.go:9"
+      }
+    }
+  ]
+}

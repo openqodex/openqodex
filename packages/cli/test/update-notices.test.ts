@@ -130,9 +130,14 @@ describe("the notice of a change not yet released", () => {
 
   it("gets the package version from the release step, and then prints after the update to that version (failure 7)", async () => {
     const original = readFileSync(source, "utf8");
+    // The step also stamps the first release that reads review.reviewers:
+    // put back too, or a test run leaves the floor at this version.
+    const floor = join(root, "packages/core/src/reviewers.ts");
+    const floorOriginal = readFileSync(floor, "utf8");
     const was = NOTICES.filter((n) => n.version === "next").map((n) => n.text);
     try {
       execFileSync(process.execPath, [join(root, "scripts/sync-version.mjs")], { cwd: root, stdio: "pipe" });
+      if (floorOriginal.includes("// release: next")) expect(readFileSync(floor, "utf8")).toContain(`export const REVIEWERS_SINCE = "${version}";\n`);
       const stamped = readFileSync(source, "utf8");
       expect(stamped).not.toMatch(/version: "next"/);
       // The module as the release builds it, from a fresh path so no cache answers.
@@ -143,6 +148,7 @@ describe("the notice of a change not yet released", () => {
       expect(between("0.0.1", version).map((n) => n.text)).toEqual(expect.arrayContaining(was));
     } finally {
       writeFileSync(source, original);
+      writeFileSync(floor, floorOriginal);
     }
   });
 });

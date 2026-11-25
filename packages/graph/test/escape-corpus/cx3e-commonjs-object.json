@@ -1,0 +1,23 @@
+{
+  "covers": "a CommonJS object export, loaded and indexed (flaw 3)",
+  "files": {
+    "src/a.js": "function f() {}\nmodule.exports = { f };\n",
+    "src/use.js": "const m = require(\"./a\");\nm[process.argv[2]]();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": "src/use.js",
+      "file": "src/use.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.js#f",
+      "reason": "its module is used as a value at",
+      "at": "src/use.js:2"
+    }
+  ]
+}

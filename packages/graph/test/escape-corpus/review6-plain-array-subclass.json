@@ -1,0 +1,17 @@
+{
+  "covers": "a value typed `number[]` may hold an `Array` subclass with a getter: a read of it by a computed key may run the getter",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/rows.ts": "export class Rows extends Array<number> {\n  get total(): number {\n    return 1;\n  }\n}\n",
+    "src/use.ts": "export function pick(rows: number[], k: string): unknown {\n  return rows[k as any];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/rows.ts#Rows.total",
+      "reason": "by a computed key",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

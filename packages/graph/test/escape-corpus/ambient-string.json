@@ -1,0 +1,14 @@
+{
+  "covers": "a free name the repository declares as a string const holds plain data",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\n",
+    "app/b.ts": "import { f } from \"./a\";\nexport const v = VERSION;\nf();\n",
+    "app/globals.d.ts": "declare const VERSION: string;\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "app/a.ts#f"
+  ],
+  "floored": []
+}

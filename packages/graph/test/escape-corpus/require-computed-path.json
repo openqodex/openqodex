@@ -1,0 +1,23 @@
+{
+  "covers": "the real `require` called with a computed path beside a parameter named `require` still may load any module",
+  "files": {
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.cjs": "function pick(require) {\n  return require;\n}\nconst name = pick(\"./a.cjs\");\nconst key = pick(\"f\");\nrequire(name)[key]();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.cjs",
+      "file": "src/use.cjs",
+      "line": 6
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": "src/use.cjs:6"
+    }
+  ]
+}

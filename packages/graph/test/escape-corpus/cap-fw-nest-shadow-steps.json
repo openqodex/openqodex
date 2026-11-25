@@ -1,0 +1,43 @@
+{
+  "covers": "a NestJS controller written inside a function, in a file whose earlier code spent the steps the plugin's reader takes to tell a local name from an import; its route reads as not Nest's (nest facts MAX_SHADOW_STEPS)",
+  "caps": [
+    "frameworks/nest/facts.ts#MAX_SHADOW_STEPS"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"@nestjs/common\": \"^10.0.0\", \"@nestjs/core\": \"^10.0.0\"}}",
+    "src/m.ts": "import { Module } from \"@nestjs/common\";\n\n@Module({})\nexport class AppModule {}\n",
+    "src/c.ts": [
+      "import { Controller, Get } from \"@nestjs/common\";\nimport { NestFactory } from \"@nestjs/core\";\nimport { AppModule } from \"./m\";\n\nasync function boot() {\n",
+      {
+        "repeat": "  void 0;\n",
+        "times": 2000
+      },
+      {
+        "repeat": "  await NestFactory.create(AppModule);\n",
+        "times": 30
+      },
+      "}\n\nexport function make() {\n  @Controller(\"m\")\n  class M {\n    @Get(\"x\")\n    hidden() {\n      return 1;\n    }\n  }\n  return M;\n}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/c.ts#M.hidden",
+      "caller": null,
+      "file": "src/c.ts",
+      "line": 2040
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/c.ts#M.hidden",
+      "reason": "steps the plugin spends checking them",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "src/c.ts:2030"
+      }
+    }
+  ]
+}

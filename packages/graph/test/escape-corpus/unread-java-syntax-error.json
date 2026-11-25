@@ -1,0 +1,27 @@
+{
+  "covers": "a Java call in a region the parser could not read (a syntax error)",
+  "files": {
+    "D.java": "class D { static void target4() {} }\n",
+    "E.java": "class E { void run() { int x = D.target4(; } }\n"
+  },
+  "mustReach": [
+    {
+      "target": "D.java#D.target4",
+      "caller": null,
+      "file": "E.java",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "D.java#D.target4",
+      "reason": "region of code the parser could not read (a syntax error) names `target4`",
+      "at": "E.java:1",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "E.java:1"
+      }
+    }
+  ]
+}

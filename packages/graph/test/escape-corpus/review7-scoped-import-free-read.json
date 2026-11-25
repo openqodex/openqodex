@@ -1,0 +1,17 @@
+{
+  "covers": "a `require` bound inside one function does not make a free read of that name in another function harmless: the file stays opaque",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.go = function () {};\n",
+    "src/use.js": "export function f() {}\nfunction setup() {\n  const m = require(\"./a.cjs\");\n  return m;\n}\nexport function run() {\n  return m.go();\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/use.js#f",
+      "reason": "reads the free name `m`",
+      "at": "src/use.js:7"
+    }
+  ]
+}

@@ -7,8 +7,8 @@
 //     and no command names the key.
 //  2. A misspelled reviewer key (`reviewer-web: off`) silently keeps the
 //     default, and no command names it.
-//  3. The update switch and the reviewer read a file that is not a list of
-//     keys differently: one turns updates off, the other takes the defaults.
+//  3. A file that is not a list of keys turns updates off silently, or
+//     stops a review, which reads nothing from it.
 //  4. doctor does not say which value is in force for each key and where
 //     it came from.
 //  5. `update --off` or `--on` on a file of comments only drops the comments.
@@ -17,6 +17,10 @@
 //  7. A skip_version the update cannot read as a version (a part too large
 //     to count) passes the config check but is dropped when releases are
 //     chosen, so updates run with no threshold.
+//  8. The reviewer keys the file held up to 0.23.0 (reviewer, reviewer_web,
+//     reviewer_model, reviewer_effort) pause updates as unknown keys, or
+//     doctor shows them as if they were in force instead of naming the
+//     project lines that replace them.
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -54,15 +58,33 @@ describe("one reader for the user config", () => {
     expect(r.stdout).toMatch(/^updates +paused: unknown key updat in .*config\.yaml \(did you mean update\?\)/m);
   });
 
-  it("reviewer-web: off is named with reviewer_web, and doctor shows reviewer_web on (default) (failures 2 and 4)", () => {
+  it("reviewer-web: off is named with reviewer_web, and doctor shows update on (default) (failures 2 and 4)", () => {
     const s = installed();
-    writeFileSync(config(s), "reviewer-web: off\nreviewer: codex\n");
+    writeFileSync(config(s), "reviewer-web: off\n");
     const r = launch(s, ["doctor"]);
-    expect(r.stdout).toMatch(/^ {2}reviewer_web +on \(default\)$/m);
-    expect(r.stdout).toMatch(/^ {2}reviewer +codex \(config\.yaml\)$/m);
     expect(r.stdout).toMatch(/^ {2}update +on \(default\)$/m);
+    expect(r.stdout).not.toMatch(/^ {2}reviewer_web /m);
     expect(r.stdout).toMatch(/unknown key reviewer-web in .*config\.yaml \(did you mean reviewer_web\?\)/);
     expect(r.stdout).toMatch(/^ {2}updates +paused: unknown key reviewer-web/m);
+  });
+
+  it("doctor names the retired reviewer keys and the project lines that replace them, and updates stay on (failure 8)", () => {
+    const s = installed();
+    writeFileSync(config(s), "reviewer: codex\nreviewer_model: gpt-test-model\nreviewer_effort: high\nreviewer_web: off\n");
+    const r = launch(s, ["doctor"]);
+    expect(r.stdout).toMatch(/config\.yaml sets reviewer: codex, reviewer_web: off, reviewer_model: gpt-test-model, reviewer_effort: high\. openqodex no longer reads them there/);
+    expect(r.stdout).toContain("    - tool: codex");
+    expect(r.stdout).toContain('      model: "gpt-test-model"');
+    expect(r.stdout).toContain("Your reviewer_web: off still keeps the reviewer's web tools off for now");
+    expect(r.stdout).not.toMatch(/^ {2}reviewer(_model|_effort|_web)? +/m);
+    expect(r.stdout).not.toMatch(/unknown key reviewer/);
+    expect(r.stdout).toMatch(/^ {2}updates +on$/m);
+    // A value no tool takes is named as written, on one line, and carried nowhere.
+    writeFileSync(config(s), "reviewer_model: {toString: x}\nreviewer_effort: \"high\\nlow\"\n");
+    const odd = launch(s, ["doctor"]);
+    expect(odd.status, odd.stderr).not.toBe(2);
+    expect(odd.stdout).toMatch(/sets reviewer_model: a mapping, reviewer_effort: high\\u000alow\. openqodex no longer reads them there/);
+    expect(odd.stdout).not.toContain("- tool:");
   });
 
   it("an environment switch is named as the source of update off (failure 4)", () => {
@@ -71,13 +93,15 @@ describe("one reader for the user config", () => {
     expect(r.stdout).toMatch(/^ {2}update +off \(OPENQODEX_AUTO_UPDATE=0\)$/m);
   });
 
-  it("a file that is a list turns updates off and stops a review, both naming the file (failure 3)", () => {
+  it("a file that is a list turns updates off, and a review says so and goes on, both naming the file (failure 3)", () => {
     const s = installed();
     writeFileSync(config(s), "- update\n- off\n");
     expect(launch(s, ["update", "--status"]).stdout).toMatch(/^updates +off: .*config\.yaml is not a list of keys and values/m);
     const review = launch(s, ["review", "--no-install", "--offline"]);
-    expect(review.status).toBe(2);
-    expect(review.stderr).toMatch(/config\.yaml is not a list of keys and values/);
+    expect(review.stderr).toMatch(/config\.yaml is not a list of keys and values; automatic updates are off until it is fixed/);
+    // The review went on to look at the change: there is none here.
+    expect(review.stderr).toMatch(/^Nothing to review: /m);
+    expect(review.status).toBe(0);
   });
 
   it("update --off and --on keep the comments of a file of comments only (failure 5)", () => {

@@ -69,7 +69,7 @@ The reviewer edits nothing and runs none of the repository's code. Claude Code h
 |---|---|
 | Claude Code, logged in | A fresh Claude Code process that OpenQodex starts reviews the change. |
 | Codex, logged in, and no Claude Code (or Claude Code logged out) | A fresh Codex process that OpenQodex starts reviews the change. |
-| Both, logged in | The agent you run `review` from reviews: Codex from Codex, Claude Code from Claude Code. From anywhere else, Claude Code. `--reviewer codex` or `reviewer: codex` in `~/.openqodex/config.yaml` picks Codex. |
+| Both, logged in | With no `review.reviewers`, the agent you run `review` from reviews: Codex from Codex, Claude Code from Claude Code. From anywhere else, Claude Code. A `review.reviewers` list in the project's config file wins over that: its first entry that can start reviews, with a model and effort for each (`config`). `--reviewer codex` picks Codex for one run. |
 | Only Cursor (or both logged out), or Codex inside Codex's own sandbox | "Full review unavailable", exit 2, and a fallback: run `review --agent` and the agent you are in follows the brief it prints, then `review --finalize`. That report says on its first line after the verdict "Reviewed by the coding agent you are using." |
 | None of them | "Full review unavailable", exit 2, and the scanner findings saved to a file as unchecked candidates, never as a review. The fallback line prints too, but no agent is there to follow it. |
 
@@ -249,7 +249,7 @@ npx openqodex init --uninstall
 
 Add `--project` to remove project files. `init` records what it wrote in `~/.openqodex/install.json`. `--uninstall` removes only what that record holds:
 
-- A skill or rule file is removed only when it is unchanged since `init` wrote it.
+- A skill or rule file is removed only when it is unchanged since `init` wrote it, and no agent that stays set up uses it. In project scope Codex and Cursor share `.agents/skills/openqodex/SKILL.md`: `--uninstall --agent codex` leaves it for Cursor.
 - The instruction section is removed from each file; your own text in that file stays.
 - In the repository you run it in: the git pre-push hook, when it is still the one OpenQodex wrote, and the `.openqodex/config.yaml` and `.openqodex/custom-instructions.md` that `init` created, when they are unchanged and not committed.
 - The hook entry is removed from the settings file. Other settings stay. When `init` saved a backup and nothing else changed, the backup is put back.

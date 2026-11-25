@@ -23,7 +23,7 @@ Then say to your agent: "review my change with openqodex". `init` finds the agen
 For agents, the same install with no question:
 
 ```
-npx -y openqodex@0.22.0 init --yes --agent <host>
+npx -y openqodex@0.24.0 init --yes --agent <host>
 ```
 
 `<host>` is `claude-code`, `codex`, `cursor`, `cline` or `goose`. In its default sandbox, Codex gives commands no network, so run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent. AI agents: read the [agent guide](https://github.com/openqodex/openqodex/blob/main/docs/for-agents.md).
@@ -81,7 +81,7 @@ A picture drawn from real `openqodex graph` output on this repository, on 2026-1
 | Cline | yes | no | no, a rule asks Cline to review |
 | Goose | yes | no | no, the hints ask Goose to review |
 
-In Cursor, Cline and Goose, the review needs Claude Code or Codex installed as the reviewer. A push gate is a hook that looks for a review before your agent runs `git push`. [What init writes for each agent](https://github.com/openqodex/openqodex/blob/main/docs/agents.md) says how each gate works.
+In Cursor, Cline and Goose, the review needs Claude Code or Codex installed as the reviewer. Each project picks its reviewers, in order, with a model for each, in `.openqodex/config.yaml`: when one hits a usage limit, the review starts again with the next ([configuration](https://github.com/openqodex/openqodex/blob/main/docs/config.md#reviewers)). A push gate is a hook that looks for a review before your agent runs `git push`. [What init writes for each agent](https://github.com/openqodex/openqodex/blob/main/docs/agents.md) says how each gate works.
 
 <!-- benchmark-results:start -->
 ## Benchmark

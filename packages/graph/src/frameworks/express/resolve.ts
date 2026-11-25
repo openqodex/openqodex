@@ -47,6 +47,7 @@ const rule = (id: string) => ({ id, version: RULE_VERSION });
 export const MAX_MOUNT_DEPTH = 8; // routers deep under an application: past it that branch stops
 export const MAX_MIDDLEWARE_CHAIN = 64; // middleware kept for one route
 export const MAX_PATTERN_SEGMENTS = 64; // segments of one pattern or request path matched
+export const MAX_STRING_WRITES = 32; // writes of one name read to tell whether it holds a string; past it, it does not
 
 // Budgets for the whole build.
 export const MAX_FACTS_READ = 400_000; // facts of every file together
@@ -61,7 +62,7 @@ export const MAX_UNKNOWNS = 5000; // unknowns kept; past it one more says how ma
 export const MAX_APPS = 2000; // applications detected
 export const MAX_ROLES = 20_000; // roles given
 
-type Spend = "facts" | "lookups" | "mounts" | "registrations" | "middlewareEdges" | "requests" | "testLinks" | "matchWork" | "apps" | "roles";
+type Spend = "facts" | "lookups" | "mounts" | "registrations" | "middlewareEdges" | "requests" | "testLinks" | "matchWork" | "apps" | "roles" | "unknowns";
 const LIMIT: Record<Spend, number> = {
   facts: MAX_FACTS_READ,
   lookups: MAX_LOOKUPS,
@@ -73,6 +74,7 @@ const LIMIT: Record<Spend, number> = {
   apps: MAX_APPS,
   roles: MAX_ROLES,
   matchWork: MAX_MATCH_WORK,
+  unknowns: MAX_UNKNOWNS,
 };
 
 type Fact<K extends ExpressFact["kind"]> = Extract<ExpressFact, { kind: K }>;
@@ -145,8 +147,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   const apps: Detection[] = [];
 
   // ---------- the build's budgets ----------
-  const spent: Record<Spend, number> = { facts: 0, lookups: 0, mounts: 0, registrations: 0, middlewareEdges: 0, requests: 0, testLinks: 0, matchWork: 0, apps: 0, roles: 0 };
-  const refused: Record<Spend, number> = { facts: 0, lookups: 0, mounts: 0, registrations: 0, middlewareEdges: 0, requests: 0, testLinks: 0, matchWork: 0, apps: 0, roles: 0 };
+  const spent: Record<Spend, number> = { facts: 0, lookups: 0, mounts: 0, registrations: 0, middlewareEdges: 0, requests: 0, testLinks: 0, matchWork: 0, apps: 0, roles: 0, unknowns: 0 };
+  const refused: Record<Spend, number> = { facts: 0, lookups: 0, mounts: 0, registrations: 0, middlewareEdges: 0, requests: 0, testLinks: 0, matchWork: 0, apps: 0, roles: 0, unknowns: 0 };
   const take = (k: Spend, n = 1): boolean => {
     if (spent[k] + n > LIMIT[k]) {
       refused[k] += n;
@@ -157,14 +159,12 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   };
   // A budget is gone once it has refused some work: what it allowed was all done.
   const exhausted = (k: Spend): boolean => refused[k] > 0;
-  let unknownsLeftOut = 0;
   const seenUnknown = new Set<string>();
   const addUnknown = (u: FrameworkUnknown) => {
     const key = `${u.cause}\0${u.site ? `${u.site.file}:${u.site.line}:${u.site.column}` : JSON.stringify(u.scope)}\0${u.note}`;
     if (seenUnknown.has(key)) return;
     seenUnknown.add(key);
-    if (unknowns.length >= MAX_UNKNOWNS) unknownsLeftOut++;
-    else unknowns.push(u);
+    if (take("unknowns")) unknowns.push(u);
   };
   const lookup = (file: string, path: readonly string[]): Lookup => {
     if (!take("lookups")) return { kind: "gap", cause: "budget", note: `the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`, candidates: null };
@@ -361,7 +361,7 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   const fromImport = (file: string, path: readonly string[], depth: number): Val | Param | null => {
     let found: Lookup = lookup(file, path);
     let target: { file: string; name: string } | null = null;
-    if (found.kind === "miss") target = { file: found.target, name: found.name };
+    if (found.kind === "miss") target = found.past ? null : { file: found.target, name: found.name };
     else if (found.kind === "none" && path.length === 2) {
       found = lookup(file, [path[0] as string]);
       if (found.kind === "module") target = { file: found.file, name: path[1] as string };
@@ -516,13 +516,9 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   };
 
   const files = index.factFiles().filter(isEnabled);
-  let unreadFiles = 0;
   for (const file of files) {
     const fi = fx(file);
-    if (fi.unread) {
-      unreadFiles++;
-      continue;
-    }
+    if (fi.unread) continue;
     const big = fi.tooLarge;
     if (big) {
       addUnknown({ plugin: PLUGIN, site: { file, line: 1, column: 1 }, scope: { file }, affects: ["handles", "mounts", "applies_middleware", "tests"], cause: "file-not-parsed", name: null, note: `the file is ${big.bytes} bytes, over the ${MAX_SOURCE_BYTES}-byte cap of the Express plugin, so its routes were not read`, count: null, exact: false });
@@ -564,6 +560,113 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
     return null;
   };
 
+  // ---------- the strings a mount path may be ----------
+  // Whether an expression is a string the graph can show: a literal, a
+  // template or a concatenation, `process.env.X`, `String(x)`, or a name
+  // whose every write, here or in the module it is imported from, is one of
+  // those. Anything else, a parameter, a member of an object or of a
+  // required module, a value of a type the facts do not hold, is not.
+  type Binding = { file: string; at: number; name: string };
+  const NOT = -1;
+  // A name no binding of the file holds: the global of that name. A
+  // module-level destructuring (`const { String } = helpers`) writes no
+  // value fact, so the file's module-level variables are checked too.
+  const isGlobal = (file: string, scope: number, name: string): boolean => bindingScope(file, scope, name) === 0 && writesOf(file, name, 0).length === 0 && !index.languageFacts(file)?.variables?.includes(name) && lookup(file, [name]).kind === "none";
+  // The module and the name a module-level name is imported as: the index's
+  // own answer, or, for a name the module exports with an export clause
+  // (which the index binds to no definition), the import that names it.
+  const importTarget = (file: string, name: string): { file: string; name: string } | null => {
+    const found = lookup(file, [name]);
+    if (found.kind === "miss") return { file: found.target, name: found.name };
+    if (found.kind !== "none") return null;
+    const imp = index.languageFacts(file)?.imports.find((i) => i.names.some((n) => n.local === name));
+    const imported = imp?.names.find((n) => n.local === name)?.imported;
+    if (!imp || imported === undefined || !take("lookups")) return null;
+    const mod = index.module(file, imp.spec);
+    return mod.kind === "module" ? { file: mod.file, name: imported } : null;
+  };
+  // One expression for the string check: a string (0), no string (NOT), or the binding of a name, to read.
+  const stringStep = (file: string, e: Expr, scope: number): number | Binding => {
+    if (e.t === "str" || e.t === "dyn") return 0;
+    if (e.t === "call") return e.fn.t === "ref" && e.fn.path.length === 1 && e.fn.path[0] === "String" && isGlobal(file, scope, "String") ? 0 : NOT;
+    if (e.t !== "ref") return NOT;
+    const name = e.path[0] as string;
+    if (e.path.length === 3 && name === "process" && e.path[1] === "env") return isGlobal(file, scope, "process") ? 0 : NOT;
+    if (e.path.length !== 1) return NOT;
+    const at = bindingScope(file, scope, name);
+    if (writesOf(file, name, at).length > 0) return { file, at, name };
+    if (at !== 0) return NOT;
+    const target = importTarget(file, name);
+    const lf = target ? index.languageFacts(target.file) : null;
+    if (!target || !lf) return NOT;
+    // `export default Y` and `module.exports = Y` export Y's value when they
+    // run: Y must be a const, and no other `module.exports` may replace it.
+    if (target.name === "default" && lf.defaultExport !== null) {
+      const cjs = cjsEntry(target.file, "default");
+      const writes = writesOf(target.file, lf.defaultExport, 0);
+      return cjs !== "competing" && cjs !== "replaced" && writes.length > 0 && writes.every((w) => w.decl === "const") ? { file: target.file, at: 0, name: lf.defaultExport } : NOT;
+    }
+    // `export const X = ...`, or `const Y = ...; export { Y as X }`.
+    const local = writesOf(target.file, target.name, 0).some((v) => v.exported) ? target.name : (lf.exportsLocal.find((x) => x.exported === target.name)?.local ?? null);
+    return local !== null && writesOf(target.file, local, 0).length > 0 ? { file: target.file, at: 0, name: local } : NOT;
+  };
+  // How many names a binding is from a string (1 when every write is
+  // one), or NOT: a write that is no string, more than MAX_STRING_WRITES
+  // writes, more than MAX_MOUNT_DEPTH names to a string, or a name that
+  // reaches itself. Each is a property of the binding alone, so the answer
+  // is the same whichever mount asks first; each binding is read once per
+  // build, without recursion, and each write read is charged to the lookup
+  // budget.
+  const stringHeight = new Map<string, number>();
+  const keyOf = (b: Binding): string => `${b.file}\0${b.at}\0${b.name}`;
+  const heightOf = (root: Binding): number => {
+    const known = stringHeight.get(keyOf(root));
+    if (known !== undefined) return known;
+    type Frame = { key: string; steps: (number | Binding)[]; next: number; height: number };
+    const frames: Frame[] = [];
+    const reading = new Set<string>();
+    const open = (b: Binding): void => {
+      const key = keyOf(b);
+      const writes = writesOf(b.file, b.name, b.at);
+      const read = writes.length > 0 && writes.length <= MAX_STRING_WRITES && take("lookups", writes.length);
+      frames.push({ key, steps: read ? writes.map((w) => stringStep(b.file, w.value, w.scope)) : [NOT], next: 0, height: 0 });
+      reading.add(key);
+    };
+    open(root);
+    let out = NOT;
+    while (frames.length > 0) {
+      const f = frames[frames.length - 1] as Frame;
+      let opened = false;
+      while (f.height !== NOT && f.next < f.steps.length) {
+        const step = f.steps[f.next] as number | Binding;
+        const h = typeof step === "number" ? step : (stringHeight.get(keyOf(step)) ?? (reading.has(keyOf(step)) ? NOT : null));
+        if (h === null) {
+          open(step as Binding);
+          opened = true;
+          break;
+        }
+        f.height = h === NOT ? NOT : Math.max(f.height, h + 1);
+        f.next++;
+      }
+      if (opened) continue;
+      out = f.height !== NOT && f.height <= MAX_MOUNT_DEPTH ? f.height : NOT;
+      stringHeight.set(f.key, out);
+      reading.delete(f.key);
+      frames.pop();
+    }
+    return out;
+  };
+  const stringLike = (file: string, e: Expr, scope: number): boolean => {
+    const step = stringStep(file, e, scope);
+    return typeof step === "number" ? step !== NOT : heightOf(step) !== NOT;
+  };
+  // Whether the first argument of a use call is a mount path the code
+  // computes: `app.use(PREFIX, router)`, `app.use(process.env.PREFIX, auth)`.
+  // Express takes a first argument that is not a function for the path; it
+  // is read as one only when the graph shows it is a string. Any other
+  // first argument is middleware.
+  const computedPrefix = (file: string, first: Expr, rest: readonly Expr[], scope: number): boolean => rest.length > 0 && stringLike(file, first, scope);
+
   for (const file of files) {
     if (fx(file).tooLarge || fx(file).unread) continue;
     for (const f of fx(file).calls) {
@@ -582,7 +685,8 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
       if (f.prop === "use") {
         if (base.route || v.kind === "param") continue;
         const first = f.args[0];
-        const isPrefix = first !== undefined && (first.t === "str" || first.t === "dyn" || (first.t === "ref" && evaluate(first, constant(file, f.scope)) !== null));
+        const isPath = first !== undefined && (first.t === "str" || first.t === "dyn" || (first.t === "ref" && evaluate(first, constant(file, f.scope)) !== null));
+        const isPrefix = isPath || (first !== undefined && computedPrefix(file, first, f.args.slice(1), f.scope));
         addEvent(v, { type: "use", file, site, prefix: isPrefix ? (first as Expr) : null, args: isPrefix ? f.args.slice(1) : f.args, scope: f.scope, more: cutIn(f.args, f.more) });
         continue;
       }
@@ -949,18 +1053,26 @@ function run(index: PluginIndex<ExpressFact>): Analysis {
   for (const [root, n] of depthCut) addUnknown({ plugin: PLUGIN, site: null, scope: root.startsWith("fw:express:app:") ? { app: root } : whole, affects: ["mounts", "handles"], cause: "fan-out-capped", name: null, note: `routers mounted more than ${MAX_MOUNT_DEPTH} levels deep were not followed (${n} mounts); their routes are not listed`, count: n, exact: true });
   // These always fit: they are the record of what the caps and budgets cut.
   const cut = (affects: FrameworkUnknown["affects"], cause: FrameworkUnknown["cause"], count: number | null, note: string) => unknowns.push({ plugin: PLUGIN, site: null, scope: whole, affects, cause, name: null, note, count, exact: count !== null });
-  if (unreadFiles > 0) cut(["handles", "mounts", "applies_middleware", "tests"], "budget", unreadFiles, `${unreadFiles} files were not read: the Express plugin reads at most ${MAX_FACTS_READ} facts in one build`);
-  if (refused.lookups > 0) cut(["handles", "mounts", "applies_middleware"], "budget", refused.lookups, `${refused.lookups} names were not looked up: the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`);
-  if (refused.mounts > 0) cut(["mounts", "handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_MOUNTS} router mounts in this build; the routes past it are not listed`);
-  if (refused.registrations > 0) cut(["handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_REGISTRATIONS} registrations in this build; the routes past it are not listed`);
-  if (refused.middlewareEdges > 0) cut(["applies_middleware"], "fan-out-capped", refused.middlewareEdges, `${refused.middlewareEdges} middleware edges were left out: the Express plugin keeps at most ${MAX_MIDDLEWARE_EDGES} in one build`);
   if (middlewareOmitted > 0) cut(["applies_middleware"], "fan-out-capped", middlewareOmitted, `${middlewareOmitted} middleware entries past ${MAX_MIDDLEWARE_CHAIN} in one chain were left out`);
-  if (refused.testLinks > 0) cut(["tests"], "fan-out-capped", refused.testLinks, `${refused.testLinks} test links were left out: the Express plugin keeps at most ${MAX_TEST_LINKS} in one build`);
-  if (refused.apps > 0) cut(["handles", "mounts", "applies_middleware", "tests"], "fan-out-capped", refused.apps, `${refused.apps} applications and their routes were left out: the Express plugin keeps at most ${MAX_APPS} applications in one build`);
-  if (refused.roles > 0) cut(["handles", "applies_middleware", "tests"], "fan-out-capped", refused.roles, `${refused.roles} roles were left out: the Express plugin gives at most ${MAX_ROLES} roles in one build`);
-  if (requestsCut > 0) cut(["tests"], "fan-out-capped", requestsCut, `${requestsCut} test requests were not matched to routes: the Express plugin matches at most ${MAX_TEST_REQUESTS} requests in one build`);
-  if (stepsCut > 0) cut(["tests"], "budget", stepsCut, `${stepsCut} test requests were not matched to routes: matching stopped after ${MAX_MATCH_WORK} pattern steps in this build`);
-  if (unknownsLeftOut > 0) unknowns.push({ plugin: PLUGIN, site: null, scope: whole, affects: ["handles", "mounts", "applies_middleware", "tests"], cause: "fan-out-capped", name: null, note: `${unknownsLeftOut} more unknowns past the first ${MAX_UNKNOWNS} were left out`, count: unknownsLeftOut, exact: true });
+  // Each build budget's record of what it cut, the only place a refused
+  // take is said: a record over every budget, so a budget added without
+  // one does not typecheck. Each floors every caller of the build
+  // (escape-corpus/cap-fw-express-build-budgets.json trips one).
+  const unreadFiles = [...fileIndexes.values()].filter((f) => f.unread).length;
+  const spentOut: Record<Spend, () => void> = {
+    facts: () => cut(["handles", "mounts", "applies_middleware", "tests"], "budget", unreadFiles, `${unreadFiles} files were not read: the Express plugin reads at most ${MAX_FACTS_READ} facts in one build`),
+    lookups: () => cut(["handles", "mounts", "applies_middleware"], "budget", refused.lookups, `${refused.lookups} names were not looked up: the Express plugin makes at most ${MAX_LOOKUPS} lookups in one build`),
+    mounts: () => cut(["mounts", "handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_MOUNTS} router mounts in this build; the routes past it are not listed`),
+    registrations: () => cut(["handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_REGISTRATIONS} registrations in this build; the routes past it are not listed`),
+    middlewareEdges: () => cut(["applies_middleware"], "fan-out-capped", refused.middlewareEdges, `${refused.middlewareEdges} middleware edges were left out: the Express plugin keeps at most ${MAX_MIDDLEWARE_EDGES} in one build`),
+    testLinks: () => cut(["tests"], "fan-out-capped", refused.testLinks, `${refused.testLinks} test links were left out: the Express plugin keeps at most ${MAX_TEST_LINKS} in one build`),
+    apps: () => cut(["handles", "mounts", "applies_middleware", "tests"], "fan-out-capped", refused.apps, `${refused.apps} applications and their routes were left out: the Express plugin keeps at most ${MAX_APPS} applications in one build`),
+    roles: () => cut(["handles", "applies_middleware", "tests"], "fan-out-capped", refused.roles, `${refused.roles} roles were left out: the Express plugin gives at most ${MAX_ROLES} roles in one build`),
+    requests: () => cut(["tests"], "fan-out-capped", requestsCut, `${requestsCut} test requests were not matched to routes: the Express plugin matches at most ${MAX_TEST_REQUESTS} requests in one build`),
+    matchWork: () => cut(["tests"], "budget", stepsCut, `${stepsCut} test requests were not matched to routes: matching stopped after ${MAX_MATCH_WORK} pattern steps in this build`),
+    unknowns: () => cut(["handles", "mounts", "applies_middleware", "tests"], "fan-out-capped", refused.unknowns, `${refused.unknowns} more unknowns past the first ${MAX_UNKNOWNS} were left out`),
+  };
+  for (const k of Object.keys(spentOut) as Spend[]) if (refused[k] > 0) spentOut[k]();
   const entities: Entity[] = registrations;
   return { apps, output: { roles, entities, edges, unknowns } };
 }

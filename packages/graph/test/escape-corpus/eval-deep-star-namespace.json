@@ -1,0 +1,34 @@
+{
+  "covers": "a direct eval in a file that imports a namespace through a chain of `export *` longer than the graph follows by name",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/m0.ts": "export * from \"./m1\";\n",
+    "src/m1.ts": "export * from \"./m2\";\n",
+    "src/m2.ts": "export * from \"./m3\";\n",
+    "src/m3.ts": "export * from \"./m4\";\n",
+    "src/m4.ts": "export * from \"./m5\";\n",
+    "src/m5.ts": "export * from \"./m6\";\n",
+    "src/m6.ts": "export * from \"./m7\";\n",
+    "src/m7.ts": "export * from \"./m8\";\n",
+    "src/m8.ts": "export * from \"./m9\";\n",
+    "src/m9.ts": "export * from \"./m10\";\n",
+    "src/m10.ts": "export function deep(): void {}\n",
+    "src/use.ts": "import * as b from \"./m0\";\nexport function go(s: string) {\n  eval(s);\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/m10.ts#deep",
+      "caller": "src/use.ts#go",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/m10.ts#deep",
+      "reason": "code built at run time",
+      "at": "src/use.ts:3"
+    }
+  ]
+}

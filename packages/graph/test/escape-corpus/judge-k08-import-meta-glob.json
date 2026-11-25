@@ -1,0 +1,17 @@
+{
+  "covers": "an adversarial case from the review of piece A: import meta glob",
+  "files": {
+    "src/pages/a.ts": "export default function home() {}\n",
+    "src/main.ts": "const pages = import.meta.glob(\"./pages/*.ts\", { eager: true }) as Record<string, { default: () => void }>;\nfor (const k in pages) pages[k].default();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/pages/a.ts#home",
+      "caller": null,
+      "file": "src/main.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

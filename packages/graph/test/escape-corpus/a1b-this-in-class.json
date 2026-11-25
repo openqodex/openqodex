@@ -1,0 +1,18 @@
+{
+  "covers": "this.x() in a class method cannot run a plain function of that name (audit amendment 1, the other side)",
+  "files": {
+    "src/q.ts": "export function flush() {}\nexport class Q {\n  run() {\n    this.flush();\n  }\n}\nflush();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/q.ts#flush",
+      "caller": "src/q.ts",
+      "file": "src/q.ts",
+      "line": 7
+    }
+  ],
+  "whole": [
+    "src/q.ts#flush"
+  ],
+  "floored": []
+}

@@ -39,8 +39,8 @@ import {
   REVIEWER_WEB_TOOLS,
   cleanupDiffs,
   completionRecord,
+  crossedBoundary,
   configHash,
-  findingKey,
   getChange,
   getTreeChange,
   getWholeRepo,
@@ -59,10 +59,14 @@ import {
   verdictFor,
   resolveInstructionFiles,
   shortenedMissing,
+  entryLabel,
+  passedLines,
 } from "@openqodex/core";
 import type {
   BaseSource,
   Change,
+  PassedReviewer,
+  ReviewerEntry,
   ChangeScope,
   CompletionRecord,
   Config,
@@ -89,8 +93,8 @@ import { PacketCollision, PacketLeak, renderImpactBlock, writePacket } from "@op
 import type { Graph, GraphStore, Lease } from "@openqodex/graph";
 import { createToolResolver } from "@openqodex/scanners";
 import { meterSession } from "./agent-usage.js";
-import { REVIEWER_NAMES, hostAgent } from "./agents/driver.js";
-import type { ReviewerDriver, ReviewerSession } from "./agents/driver.js";
+import { REVIEWER_NAMES, cannotServe, hostAgent } from "./agents/driver.js";
+import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./agents/driver.js";
 import { checkContext, useContext } from "./context.js";
 import type { ContextItem } from "./context.js";
 import { converse, deliverRanges, redactSnapshot } from "./conversation.js";
@@ -105,7 +109,7 @@ import { modelEvidence } from "./evidence.js";
 import { modelRecord, modelReport, reviewRender } from "./model-record.js";
 import { agentReviewer } from "./reviewer.js";
 import type { Budget, Disposition, ModelReviewer, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult } from "./reviewer.js";
-import { disagreementsOf, mergeFindings, runSecondReviewer, withSecondReviewer } from "./second.js";
+import { disagreementsOf, mergeFindings, possibleAfterSecond, runSecondReviewer, withSecondReviewer } from "./second.js";
 import type { SecondRun } from "./second.js";
 import { buildGraphRun, buildHotSpots, nothingToReviewLine, ruleCoverage, scanChange, wholeRepoLenses } from "./pipeline.js";
 import type { GraphHost, PipelineResult, ScanHost } from "./pipeline.js";
@@ -168,8 +172,17 @@ export type ReviewInputs = {
   only?: ScannerSource[];
   skip?: ScannerSource[];
   noGraph: boolean;
-  // `auto` or one of REVIEWER_NAMES.
-  reviewer: string;
+  // `auto` or one of REVIEWER_NAMES: when auto, the agent running the host
+  // first, then the drivers in order; the first that can start reviews,
+  // with its own default model. A list (a project's review.reviewers, or
+  // one entry from --reviewer <tool>:<model>): tried top to bottom with
+  // each entry's model and effort. An entry that cannot start here is
+  // passed over with its reason; one whose model cannot serve (cannotServe:
+  // a limit, a model this login does not have, an overloaded API) stops
+  // every session of its run, and the whole reviewer phase starts again on
+  // the next entry. A driver the list does not name is never started, and
+  // a list used up ends the review unavailable, every entry's reason given.
+  reviewer: string | readonly ReviewerEntry[];
   // The reviewer gets its agent's web tools.
   web: boolean;
   // The deadline for the scan, the graph and every reviewer turn, fixed
@@ -212,6 +225,10 @@ export type ReviewEvent =
   | { type: "staged-brief"; role: ReviewerRole; brief: string }
   // The reviewer started.
   | { type: "started"; driver: string; version: string; pid: number | null; role?: ReviewerRole }
+  // A list's entry could not serve, and the reviewer phase starts again on
+  // the next entry: every session, round and answer so far is discarded.
+  // `line` says which entry failed, why, and what comes next.
+  | { type: "reviewer-restarted"; line: string }
   | { type: "session-ended"; session: ReviewerSessionRecord }
   // A correction round, as it is sent, redacted with the scan's secrets.
   | { type: "round"; round: CorrectionRound };
@@ -273,7 +290,9 @@ export type ReviewCoreResult =
   | { ended: "nothing" }
   // No reviewer could start, or its boundary could not be shown for this
   // run: the scan's candidates stay unchecked.
-  | { ended: "unavailable"; reasons: string[]; change: Change; scan: ScanResult; secrets: string[] }
+  // `started` and `usage`: a list whose every entry failed or was passed
+  // over after one had started; the calls those runs made.
+  | { ended: "unavailable"; reasons: string[]; change: Change; scan: ScanResult; secrets: string[]; started?: true; usage?: { calls: CallRecord[]; totals: UsageTotals } }
   // The reviewer ran. `report` carries the completion record and says
   // incomplete when the record does; `display` is the code report.html shows.
   // `usage`: one record per round, from the driver's running totals.
@@ -315,7 +334,59 @@ export type ReviewCoreResult =
       context?: NonNullable<RunManifest["context"]>;
     };
 
-type Chosen = { driver: ReviewerDriver; version: string; bin: string } | { unavailable: string[] } | { model: { reviewer: ModelReviewer; budget?: Budget } };
+// An agent reviewer that can start: its driver, and for a list its entry
+// and the entry's place in the list.
+type Picked = { driver: ReviewerDriver; version: string; bin: string; entry: ReviewerEntry | null; index: number };
+type Chosen = (Picked & { passed: PassedReviewer[] }) | { unavailable: string[]; passed: PassedReviewer[] } | { model: { reviewer: ModelReviewer; budget?: Budget } };
+
+// One passed entry as the unavailable page and the receipt list it.
+// One entry passed over or failed, as the run's lines and reasons name it.
+const passedReason = (p: PassedReviewer): string => passedLines([p])[0]!;
+const entryOf = (entry: ReviewerEntry): Omit<PassedReviewer, "outcome" | "reason"> => ({ tool: entry.tool, ...(entry.model !== undefined ? { model: entry.model } : {}), ...(entry.effort !== undefined ? { effort: entry.effort } : {}) });
+
+// Whether a list's entry can start on this machine, and why not: no driver
+// of that name, its agent not installed, not logged in or refused (detect),
+// or a model the login's own list of models (driver.models) does not hold.
+// A list of models that cannot be read is not a missing model: the entry is
+// tried. Nothing is started. `modelChecked`: the entry names no model, or
+// the login's list holds it; false when no list could say (Claude Code has
+// none), so only a review shows whether the model serves.
+//
+// `cache`: one run's answers, shared by every entry it checks: each tool's
+// detect() runs once and each program's list of models is read once, so a
+// long list starts at most one check per tool at a time.
+export type ReadinessCache = { detect: Map<string, Promise<Detected>>; models: Map<string, Promise<{ models: string[]; top: string | null } | null>> };
+export const readinessCache = (): ReadinessCache => ({ detect: new Map(), models: new Map() });
+
+export async function entryCanStart(entry: ReviewerEntry, drivers: readonly ReviewerDriver[], repoRoot: string, cache: ReadinessCache = readinessCache()): Promise<{ ok: true; driver: ReviewerDriver; version: string; bin: string; modelChecked: boolean } | { ok: false; reason: string }> {
+  const driver = drivers.find((d) => d.name === entry.tool);
+  if (driver === undefined) return { ok: false, reason: "no reviewer of that name" };
+  if (!cache.detect.has(driver.name)) cache.detect.set(driver.name, driver.detect(repoRoot));
+  const d = await cache.detect.get(driver.name)!;
+  if (!d.ok) return { ok: false, reason: `${d.missing}; ${d.fix}` };
+  let modelChecked = entry.model === undefined;
+  if (entry.model !== undefined && driver.models) {
+    const key = `${driver.name}\0${d.bin}`;
+    if (!cache.models.has(key)) cache.models.set(key, driver.models(d.bin));
+    const catalog = await cache.models.get(key)!;
+    if (catalog !== null && !catalog.models.includes(entry.model)) return { ok: false, reason: `this ${driver.name} login has no model ${entry.model} (its models: ${catalog.models.join(", ")})` };
+    modelChecked = catalog !== null;
+  }
+  return { ok: true, driver, version: d.version, bin: d.bin, modelChecked };
+}
+
+// The first entry of `list` from `from` on that can start here, and every
+// entry before it that cannot, each with why.
+async function pickFrom(list: readonly ReviewerEntry[], from: number, drivers: readonly ReviewerDriver[], repoRoot: string, cache: ReadinessCache): Promise<{ picked: Picked | null; passed: PassedReviewer[] }> {
+  const passed: PassedReviewer[] = [];
+  for (let i = from; i < list.length; i++) {
+    const entry = list[i]!;
+    const can = await entryCanStart(entry, drivers, repoRoot, cache);
+    if (can.ok) return { picked: { driver: can.driver, version: can.version, bin: can.bin, entry, index: i }, passed };
+    passed.push({ ...entryOf(entry), outcome: "skipped", reason: can.reason });
+  }
+  return { picked: null, passed };
+}
 
 // `choice` (auto or a driver's name), else the agent running this command
 // when its driver is enabled, else the first enabled driver. A driver is
@@ -332,15 +403,19 @@ export function reviewerOrder(choice: string, drivers: readonly ReviewerDriver[]
     : [...drivers.filter((d) => d.name === host), ...drivers.filter((d) => d.name !== host)];
 }
 
-async function chooseReviewer(choice: string, drivers: readonly ReviewerDriver[], repoRoot: string): Promise<Chosen> {
+async function chooseReviewer(choice: string | readonly ReviewerEntry[], drivers: readonly ReviewerDriver[], repoRoot: string, cache: ReadinessCache): Promise<Chosen> {
+  if (typeof choice !== "string") {
+    const { picked, passed } = await pickFrom(choice, 0, drivers, repoRoot, cache);
+    return picked === null ? { unavailable: passed.length > 0 ? passed.map(passedReason) : ["the project's reviewer list is empty"], passed } : { ...picked, passed };
+  }
   const order = reviewerOrder(choice, drivers);
   const unavailable: string[] = [];
   for (const driver of order) {
     const d = await driver.detect(repoRoot);
-    if (d.ok) return { driver, version: d.version, bin: d.bin };
+    if (d.ok) return { driver, version: d.version, bin: d.bin, entry: null, index: 0, passed: [] };
     unavailable.push(`${driver.name}: ${d.missing}; ${d.fix}`);
   }
-  return { unavailable: unavailable.length > 0 ? unavailable : [`${choice}: no driver of that name`] };
+  return { unavailable: unavailable.length > 0 ? unavailable : [`${choice}: no driver of that name`], passed: [] };
 }
 
 type Prepared = {
@@ -482,7 +557,9 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
   // Each phase timed as it runs, for the report's timings.
   const clock = deps.clock ?? phaseClock(deps.now);
   clock.enter("reviewer");
-  const chosen: Chosen = deps.model ? { model: deps.model } : await chooseReviewer(inputs.reviewer, deps.drivers, repoRoot);
+  // One run's readiness answers, kept for the entries a fallback reaches.
+  const readiness = readinessCache();
+  const chosen: Chosen = deps.model ? { model: deps.model } : await chooseReviewer(inputs.reviewer, deps.drivers, repoRoot, readiness);
   const deadline = inputs.deadlineAt ?? deps.now() + inputs.timeoutMs;
 
   const changes = new Set<Change>();
@@ -622,275 +699,350 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
 
     // A model reviewer runs in the brain's own loop, with the brain's tools.
     const model = "model" in chosen ? chosen.model : null;
-    const agent = "driver" in chosen ? chosen : null;
-    // A reviewer whose trace is not complete (Codex) has no read counted:
-    // coverage is the brief and the correction rounds only. The brain's own
-    // log of a model reviewer's tools is complete.
-    const traced = agent ? agent.driver.traced : true;
-    // The driver's per-run proof of its boundary (Codex's sandbox probe),
-    // on the redacted snapshot, before its hash is taken.
-    clock.enter("reviewer");
-    const unsafe = agent ? ((await agent.driver.check?.({ snapshotDir: prep.snapshot.tree, bin: agent.bin, register: (cleanup) => (checking = cleanup) })) ?? null) : null;
-    if (agent && unsafe !== null) return await finish({ ended: "unavailable", reasons: [`${agent.driver.name}: ${unsafe}`], change, scan, secrets: p.secrets });
-    clock.enter("brief");
-    const before = hashSnapshot(prep.snapshot.tree);
-    const lineCount = lineCounter(prep.snapshot.tree);
-    // A secret in a path would reach the reviewer through any listing: the
-    // reviewer is not started and the review is incomplete.
-    const refused = redaction.named > 0 ? "a file name in the change holds a secret the scanners found, so the reviewer was not started; rename the file" : null;
-    // What a model reviewer's tools read: the snapshot, the change, the
-    // graph, and the folder scopes when the review has any.
-    const box: ToolBox = {
-      snapshotDir: prep.snapshot.tree,
-      change,
-      secrets: p.secrets,
-      graph,
-      graphNote: graph === null ? `the graph is ${impact.status}${impact.reasons.length > 0 ? `: ${impact.reasons.join("; ")}` : ""}` : null,
-      ...(deps.scoped?.folderScopes ? { admit: deps.scoped.admit } : {}),
-    };
-    const inventory = config.stages && !prep.whole && refused === null ? obligations(change, fragmentSnapshotText(prep.snapshot.tree), stagedDiffCache(change, p.secrets)) : [];
-    // The single pass builds no inventory, but its pages still cut removed
-    // lines into fragments. They need the run's one secrets list on record.
-    if (inventory.length === 0) setFragmentSource(change, (path, from, to) => snapshotByteLines(prep.snapshot.tree, path, from, to), p.secrets);
-    const briefArgs = { change, scan, lenses, config, secrets: p.secrets, impactBlock: renderImpactBlock(impact), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown };
-    const findBrief = (unit: ReviewUnit, pass: import("@openqodex/core").FindPass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: pass === "contracts" ? withCrossFile(() => renderContractsBlock(neighbourhood, unit.files), unit.files) : neighbourhoodBlock(unit.files) }, unit, pass);
-    const units = unitsOf(change, inventory, (unit, both) => longestBrief(unit, findBrief, both));
-    const unitCount = units.length;
-    const staged = config.stages && !prep.whole && refused === null && inventory.length > 0;
-    if (staged) {
-      const startedIso = new Date(deps.now()).toISOString();
-      const started = deps.now();
-      const shared: CallRecord[] = [];
-      const budgetState = { pending: Promise.resolve(), refused: false };
-      const modelSessions: ModelSession[] = [];
-      clock.enter("reviewer");
-      say(`Reviewer: ${agent ? `${agent.driver.name} ${agent.version}` : `model ${model!.reviewer.model}`}; staged review, ${unitCount} units, ${unitCount * 2} finder sessions, then verifiers; this takes several minutes`);
-      const stagedRun = await runStagedReview({
-        snapshotDir: prep.snapshot.tree, change, citationChange: full, scan, config, manifest, secrets: p.secrets, deadline, now: deps.now, traced, model: model !== null, timedOut: inputs.timedOut, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files, say, stopped: () => stopped,
-        inventory, units, findBrief,
-        onUnits: (units) => deps.onEvent({ type: "staged-units", units }),
-        // The verifier also gets the code around every changed file its
-        // candidates cite, and the cited lines of every other file.
-        verifyBrief: (batch) => buildVerifyBrief({ ...briefArgs, neighbourhoodBlock: withCrossFile(() => renderCitedBlock(prep.snapshot.tree, batch, p.secrets), [batch.file, ...batch.candidates.flatMap((c) => c.kind === "finder" ? c.candidate.evidence.filter((e) => !e.removed).map((e) => e.file_path) : [])]) }, batch),
-        openSession: (role) => {
-          if (stopped) throw new Error("the review stopped");
-          const modelSessionForRole = model ? modelSession({ reviewer: model.reviewer, role, budget: model.budget, box, now: deps.now, deadline, shared, budgetState }) : null;
-          if (modelSessionForRole) modelSessions.push(modelSessionForRole);
-          const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web }), { driver: agent.driver.name, role, now: deps.now }) : null;
-          const opened = register(modelSessionForRole ?? metered!.session);
-          return {
-            send: (text) => opened.send(text),
-            pid: metered?.session.pid ?? null,
-            attempts: modelSessionForRole?.attempts,
-            get sentRounds() { return modelSessionForRole?.sentRounds; },
-            ...(metered ? { calls: () => metered.calls() } : {}),
-            close: () => opened.close(),
-            kill: () => opened.kill?.(),
-          };
-        },
-        onStarted: (role, pid) => {
-          deps.onEvent({ type: "started", driver: agent?.driver.name ?? "model", version: agent?.version ?? model!.reviewer.model, pid, role });
-        },
-        onEnded: (session) => deps.onEvent({ type: "session-ended", session: redactStored(session, p.secrets) }),
-        onBrief: (role, text) => deps.onEvent({ type: "staged-brief", role, brief: redact(text) }),
-        onRound: (round) => deps.onEvent({ type: "round", round: redactStored(round, p.secrets) }),
-      });
-      clock.enter("finalize");
-      const after = hashSnapshot(prep.snapshot.tree);
-      const sessionOrder = new Map(stagedRun.sessions.map((s, i) => [s.role, i]));
-      const modelLog = modelSessions.flatMap((s) => s.log).sort((a, b) => (sessionOrder.get(a.session ?? "") ?? 0) - (sessionOrder.get(b.session ?? "") ?? 0));
-      const coverage = model
-        ? modelCoverage({ change, briefSent: true, obligations: stagedRun.obligations, briefCarried: stagedRun.briefCarried, digestCarried: stagedRun.digestCarried, toolLog: modelLog.map(modelToolEntry), delivered: stagedRun.delivered, lineCount })
-        : readCoverage({ change, obligations: stagedRun.obligations, briefCarried: stagedRun.briefCarried, digestCarried: stagedRun.digestCarried, trace: traced ? stagedRun.trace : [], lineCount, delivered: stagedRun.delivered });
-      const notes = [...(stagedRun.report.notes ?? []), ...(instructions.notes ?? []), ...(neighbourhood.partial ? [`Code around the change is partial: ${neighbourhood.partial}`] : [])];
-      const report = redactStored({ ...stagedRun.report, impact, ...(notes.length ? { notes } : {}), timings: clock.timings() }, p.secrets);
-      if (model) {
-        const evidence: ModelReviewEvidence = redactStored({
-          reviewer: "primary", model: model.reviewer.model, changeId: change.id, snapshot: { tree: prep.tree, before, after }, candidates: { total: stagedRun.required, disposed: stagedRun.disposed }, coverage, briefSent: modelSessions.some((s) => s.sentRounds > 0), toolLog: modelLog, attempts: stagedRun.usage.calls, rounds: stagedRun.sessions.reduce((n, s) => n + s.rounds, 0), submissionErrors: [], failure: null, tools: [...TOOL_NAMES], startedAt: startedIso, endedAt: new Date(deps.now()).toISOString(), durationMs: deps.now() - started, sessions: stagedRun.sessions, missing: stagedRun.missing,
-        }, p.secrets);
-        // The optional second reviewer retains its existing single pass.
-        let second: SecondRun | null = null;
-        if (deps.model?.second && !evidence.attempts.some((a) => a.outcome === "refused") && !stopped) {
-          clock.enter("reviewer");
-          second = await runSecondReviewer({ reviewer: deps.model.second, budget: model.budget, box, earlier: evidence.attempts, now: deps.now, deadline,
-            started: (s) => { session = register(s); say(`Second reviewer: model ${deps.model!.second!.model} started`); },
-            converse: (s) => converse({ session: s, snapshotDir: prep.snapshot.tree, brief: brief.text, deadline, traced: true, say, now: deps.now,
-              check: (submission, trace, delivered) => {
-                const checked = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files });
-                return { report: checked.ok ? checked.report : null, errors: checked.ok ? [] : checked.errors, unread: singlePassModelCoverage({ change, briefSent: true, diffFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread, required: checked.required, disposed: checked.disposed };
-              },
-              deliver: (unread, earlier) => deliverRanges({ snapshotDir: prep.snapshot.tree, unread, earlier, secrets: p.secrets, change }),
-              onRound: (round) => { const kept = redactStored({ ...round, by: "second" as const }, p.secrets); stagedRun.rounds.push(kept); deps.onEvent({ type: "round", round: kept }); },
-            }),
-            evidence: (s, t, startedAt) => modelEvidence({ role: "second", model: deps.model!.second!.model, session: s, talk: t, change, snapshot: { tree: prep.tree, before: after, after: hashSnapshot(prep.snapshot.tree) }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt }),
-          });
-          clock.enter("finalize");
+    // A project's list, or null for `auto` or a reviewer named alone.
+    const list = typeof inputs.reviewer === "string" ? null : inputs.reviewer;
+    // The list's entries passed over so far, each with why, in order.
+    const passed: PassedReviewer[] = "passed" in chosen ? [...chosen.passed] : [];
+    // The usage of runs a later entry replaced: their calls were made.
+    const earlierCalls: CallRecord[] = [];
+    const withEarlier = (usage: { calls: CallRecord[]; totals: UsageTotals }) => (earlierCalls.length === 0 ? usage : { calls: [...earlierCalls, ...usage.calls], totals: usageTotals([...earlierCalls, ...usage.calls]) });
+    // Whether any entry's reviewer started, and the snapshot's hash before
+    // the first one did: every attempt is checked against that one baseline,
+    // so a change made during an attempt a later entry replaced still counts.
+    let anyStarted = false;
+    let baseline: string | null = null;
+    const tools = inputs.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS;
+    // The reviewer phase with one reviewer, from its boundary check to the
+    // result: a fresh conversation, coverage counted from nothing, the
+    // driver's own `traced`, and `deadline`. The snapshot, the scan and the
+    // brief's inputs are the run's. Returns `restart` when a list's entry
+    // could not serve, before anything is finished or handed to the host.
+    const reviewWith = async (agent: Picked | null, deadline: number): Promise<ReviewCoreResult | { restart: PassedReviewer["outcome"]; reason: string; calls: CallRecord[] }> => {
+      // A reviewer whose trace is not complete (Codex) has no read counted:
+      // coverage is the brief and the correction rounds only. The brain's own
+      // log of a model reviewer's tools is complete.
+      const traced = agent ? agent.driver.traced : true;
+      // The list entry's model and effort, for either agent; none for `auto`
+      // or a reviewer named alone, which take their agent's own default.
+      const tuned = { ...(agent?.entry?.model !== undefined ? { model: agent.entry.model } : {}), ...(agent?.entry?.effort !== undefined ? { effort: agent.entry.effort } : {}) };
+      const label = agent ? `${agent.driver.name} ${agent.version}${tuned.model !== undefined ? `, model ${tuned.model}` : ""}${tuned.effort !== undefined ? `, effort ${tuned.effort}` : ""}` : "";
+      // The first failure of this run that says the entry's model cannot
+      // serve (a list only). It stops every live session at once, and no new
+      // one starts: none of their answers is used.
+      let unserved: string | null = null;
+      // A failed attempt is dropped for the next entry only when it kept to
+      // its boundary: no served call outside it, no tool it was not given,
+      // the snapshot as it was. Else it ends the review, as any run does.
+      const keptBoundary = (trace: readonly TraceEntry[]): boolean => !(traced && crossedBoundary(trace, tools)) && hashSnapshot(prep.snapshot.tree) === before;
+      const watch = async (sent: Promise<Turn>): Promise<Turn> => {
+        const turn = await sent;
+        if (list !== null && agent !== null && unserved === null && cannotServe(turn.failure)) {
+          unserved = turn.failure;
+          for (const live of liveSessions) {
+            try { live.kill?.(); } catch { /* Stop the remaining sessions too. */ }
+          }
         }
-        const calls = [...stagedRun.usage.calls, ...(second?.evidence.attempts ?? [])];
-        return await finish({ ended: "model-reviewed", report, evidence, submission: stagedRun.submission, change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds: redactStored(stagedRun.rounds, p.secrets), ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
-      }
-      const totals = stagedRun.usage.totals;
-      const reviewer: ReviewerRecord = { driver: agent!.driver.name, version: agent!.version, pid: null, started_at: startedIso, ended_at: new Date(deps.now()).toISOString(), duration_ms: deps.now() - started, rounds: stagedRun.sessions.reduce((n, s) => n + s.rounds, 0), usage: { turns: stagedRun.sessions.reduce((n, s) => n + s.usage.turns, 0), input_tokens: totals.inputTokens, output_tokens: totals.outputTokens, cost_usd: totals.costUsd }, sessions: stagedRun.sessions };
-      const completion = redactStored(completionRecord({ change, reviewer, snapshot: { tree: prep.tree, before, after }, candidates: { total: stagedRun.required, disposed: stagedRun.disposed }, coverage, trace: stagedRun.trace, submissionErrors: [], wholeRepo: false, missing: stagedRun.missing, traced, tools: inputs.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS }), p.secrets);
-      report.completion = completion;
-      if (completion.status !== "complete") report.verdict = "incomplete";
-      return await finish({ ended: "reviewed", report, completion, display: buildDisplay({ change: full, secrets: p.secrets }), submission: stagedRun.submission, trace: redactStored(stagedRun.trace, p.secrets), change: full, secrets: p.secrets, whole: false, target: prep.target ?? null, usage: redactStored(stagedRun.usage, p.secrets), rounds: redactStored(stagedRun.rounds, p.secrets), ...(context ? { context: context.manifest } : {}) });
-    }
-    let modelTalk: ModelSession | null = null;
-    // An agent's usage is recorded round by round as its turns come back;
-    // the turns reach the conversation unchanged.
-    let metered: { session: ReviewerSession; calls(): CallRecord[] } | null = null;
-    let pid: number | null = null;
-    clock.enter("reviewer");
-    const notStarted = refused ?? (stopped ? "the review stopped before the reviewer was started" : null);
-    if (notStarted === null && model) {
-      modelTalk = modelSession({
-        reviewer: model.reviewer,
-        role: "primary",
-        budget: model.budget,
-        box,
-        now: deps.now,
-        deadline,
-      });
-      session = register(modelTalk);
-      deps.onEvent({ type: "started", driver: "model", version: model.reviewer.model, pid: null });
-      say(`Reviewer: model ${model.reviewer.model} started; this takes several minutes`);
-    } else if (notStarted === null && agent) {
-      metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web }), { driver: agent.driver.name, now: deps.now });
-      session = register(metered.session);
-      pid = metered.session.pid;
-      deps.onEvent({ type: "started", driver: agent.driver.name, version: agent.version, pid });
-      say(`Reviewer: ${agent.driver.name} ${agent.version} started${pid !== null ? ` (process ${pid})` : ""}; this takes several minutes`);
-    }
-    const startedIso = new Date(deps.now()).toISOString();
-    const now = deps.now();
-    // The checks every answer passes, and the changed ranges a correction
-    // round carries: the same for the primary and the second reviewer.
-    const check: Parameters<typeof converse>[0]["check"] = (submission, trace, delivered) => {
-      const r = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, wholeRepo: prep.whole ? { lines: prep.whole.lines } : undefined, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files });
-      // A model reviewer's reads count once a request carrying them was sent.
-      const unread = prep.whole
-        ? []
-        : model
-          ? singlePassModelCoverage({ change, briefSent: true, diffFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread
-          : singlePassCoverage({ change, diffFiles: brief.diffFiles, trace: traced ? trace : [], lineCount, delivered }).unread;
-      return { report: r.ok ? r.report : null, errors: r.ok ? [] : r.errors, unread, required: r.required, disposed: r.disposed };
-    };
-    const deliver: Parameters<typeof converse>[0]["deliver"] = (unread, earlier) => deliverRanges({ snapshotDir: prep.snapshot.tree, unread, earlier, secrets: p.secrets, change });
-    // Every correction round, redacted as the report is (an answer or a
-    // check error can quote a secret), kept and sent to the host at once.
-    const rounds: CorrectionRound[] = [];
-    const onRound = (by: ReviewerRole) => (round: Omit<CorrectionRound, "by">): void => {
-      const kept = redactStored({ by, ...round }, p.secrets);
-      rounds.push(kept);
-      deps.onEvent({ type: "round", round: kept });
-    };
-    // The second reviewer, once the primary is done: on the same brief,
-    // snapshot, tools, checks, deadline and budget. Not after a budget
-    // refusal, which has ended the review, and not when the primary was not
-    // started.
-    const secondReview = async (m: NonNullable<ReviewDeps["model"]>, primary: ModelSession | null, first: ModelReviewEvidence): Promise<SecondRun | null> => {
-      if (!m.second || primary === null || first.attempts.some((a) => a.outcome === "refused")) return null;
-      const reviewer = m.second;
-      return runSecondReviewer({
-        reviewer,
-        budget: m.budget,
-        box,
-        earlier: first.attempts,
-        now: deps.now,
-        deadline,
-        started: (s) => {
-          session = register(s);
-          say(`Second reviewer: model ${reviewer.model} started`);
-        },
-        converse: (s) => converse({ session: s, snapshotDir: prep.snapshot.tree, brief: brief.text, deadline, traced: true, say, now: deps.now, check, deliver, onRound: onRound("second"), timedOut: inputs.timedOut }),
-        evidence: (s, t, startedAt) => modelEvidence({ role: "second", model: reviewer.model, session: s, talk: t, change, snapshot: { tree: prep.tree, before: first.snapshot.after ?? first.snapshot.before, after: hashSnapshot(prep.snapshot.tree) }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt }),
-      });
-    };
-    const talk: Conversation = session === null ? { rounds: 0, trace: [], usage: { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null }, report: null, checked: null, errors: [], required: 0, disposed: 0, failure: notStarted, submission: null, delivered: [], carried: [], startedAt: now, endedAt: now } : await converse({
-      session,
-      snapshotDir: prep.snapshot.tree,
-      brief: brief.text,
-      deadline,
-      traced,
-      say,
-      now: deps.now,
-      check,
-      deliver,
-      onRound: onRound("primary"),
-      timedOut: inputs.timedOut,
-    }).finally(async () => {
-      await session?.close();
-    });
-    clock.enter("finalize");
-    if (talk.failure !== null) warn(`openqodex: ${talk.failure}`);
-    const after = hashSnapshot(prep.snapshot.tree);
-
-    if ("model" in chosen) {
-      const evidence = modelEvidence({ role: "primary", model: chosen.model.reviewer.model, session: modelTalk, talk, change, snapshot: { tree: prep.tree, before, after }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt: startedIso });
+        return turn;
+      };
+      // The driver's per-run proof of its boundary (Codex's sandbox probe),
+      // on the redacted snapshot, before its hash is taken.
       clock.enter("reviewer");
-      const second = await secondReview(chosen.model, modelTalk, evidence);
+      const unsafe = agent ? ((await agent.driver.check?.({ snapshotDir: prep.snapshot.tree, bin: agent.bin, register: (cleanup) => (checking = cleanup) })) ?? null) : null;
+      if (agent && unsafe !== null) {
+        // A list moves on to its next entry, which runs its own check.
+        if (list !== null) return { restart: "skipped", reason: unsafe, calls: [] };
+        return await finish({ ended: "unavailable", reasons: [`${agent.driver.name}: ${unsafe}`], change, scan, secrets: p.secrets });
+      }
+      clock.enter("brief");
+      const before = (baseline ??= hashSnapshot(prep.snapshot.tree));
+      const lineCount = lineCounter(prep.snapshot.tree);
+      // A secret in a path would reach the reviewer through any listing: the
+      // reviewer is not started and the review is incomplete.
+      const refused = redaction.named > 0 ? "a file name in the change holds a secret the scanners found, so the reviewer was not started; rename the file" : null;
+      // What a model reviewer's tools read: the snapshot, the change, the
+      // graph, and the folder scopes when the review has any.
+      const box: ToolBox = {
+        snapshotDir: prep.snapshot.tree,
+        change,
+        secrets: p.secrets,
+        graph,
+        graphNote: graph === null ? `the graph is ${impact.status}${impact.reasons.length > 0 ? `: ${impact.reasons.join("; ")}` : ""}` : null,
+        ...(deps.scoped?.folderScopes ? { admit: deps.scoped.admit } : {}),
+      };
+      const inventory = config.stages && !prep.whole && refused === null ? obligations(change, fragmentSnapshotText(prep.snapshot.tree), stagedDiffCache(change, p.secrets)) : [];
+      // The single pass builds no inventory, but its pages still cut removed
+      // lines into fragments. They need the run's one secrets list on record.
+      if (inventory.length === 0) setFragmentSource(change, (path, from, to) => snapshotByteLines(prep.snapshot.tree, path, from, to), p.secrets);
+      const briefArgs = { change, scan, lenses, config, secrets: p.secrets, impactBlock: renderImpactBlock(impact), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown };
+      const findBrief = (unit: ReviewUnit, pass: import("@openqodex/core").FindPass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: pass === "contracts" ? withCrossFile(() => renderContractsBlock(neighbourhood, unit.files), unit.files) : neighbourhoodBlock(unit.files) }, unit, pass);
+      const units = unitsOf(change, inventory, (unit, both) => longestBrief(unit, findBrief, both));
+      const unitCount = units.length;
+      const staged = config.stages && !prep.whole && refused === null && inventory.length > 0;
+      if (staged) {
+        const startedIso = new Date(deps.now()).toISOString();
+        const started = deps.now();
+        const shared: CallRecord[] = [];
+        const budgetState = { pending: Promise.resolve(), refused: false };
+        const modelSessions: ModelSession[] = [];
+        clock.enter("reviewer");
+        say(`Reviewer: ${agent ? label : `model ${model!.reviewer.model}`}; staged review, ${unitCount} units, ${unitCount * 2} finder sessions, then verifiers; this takes several minutes`);
+        const stagedRun = await runStagedReview({
+          snapshotDir: prep.snapshot.tree, change, citationChange: full, scan, config, manifest, secrets: p.secrets, deadline, now: deps.now, traced, model: model !== null, timedOut: inputs.timedOut, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files, say, stopped: () => stopped || unserved !== null,
+          inventory, units, findBrief,
+          onUnits: (units) => deps.onEvent({ type: "staged-units", units }),
+          // The verifier also gets the code around every changed file its
+          // candidates cite, and the cited lines of every other file.
+          verifyBrief: (batch) => buildVerifyBrief({ ...briefArgs, neighbourhoodBlock: withCrossFile(() => renderCitedBlock(prep.snapshot.tree, batch, p.secrets), [batch.file, ...batch.candidates.flatMap((c) => c.kind === "finder" ? c.candidate.evidence.filter((e) => !e.removed).map((e) => e.file_path) : [])]) }, batch),
+          openSession: (role) => {
+            if (stopped) throw new Error("the review stopped");
+            if (unserved !== null) throw new Error(unserved);
+            const modelSessionForRole = model ? modelSession({ reviewer: model.reviewer, role, budget: model.budget, box, now: deps.now, deadline, shared, budgetState }) : null;
+            if (modelSessionForRole) modelSessions.push(modelSessionForRole);
+            const metered = agent ? meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, ...tuned, secrets: p.secrets }), { driver: agent.driver.name, role, now: deps.now }) : null;
+            const opened = register(modelSessionForRole ?? metered!.session);
+            return {
+              send: (text) => watch(opened.send(text)),
+              pid: metered?.session.pid ?? null,
+              attempts: modelSessionForRole?.attempts,
+              get sentRounds() { return modelSessionForRole?.sentRounds; },
+              ...(metered ? { calls: () => metered.calls() } : {}),
+              close: () => opened.close(),
+              kill: () => opened.kill?.(),
+            };
+          },
+          onStarted: (role, pid) => {
+            deps.onEvent({ type: "started", driver: agent?.driver.name ?? "model", version: agent?.version ?? model!.reviewer.model, pid, role });
+          },
+          onEnded: (session) => deps.onEvent({ type: "session-ended", session: redactStored(session, p.secrets) }),
+          onBrief: (role, text) => deps.onEvent({ type: "staged-brief", role, brief: redact(text) }),
+          onRound: (round) => deps.onEvent({ type: "round", round: redactStored(round, p.secrets) }),
+        });
+        if (unserved !== null && keptBoundary(stagedRun.trace)) return { restart: "failed", reason: unserved, calls: stagedRun.usage.calls };
+        clock.enter("finalize");
+        const after = hashSnapshot(prep.snapshot.tree);
+        const sessionOrder = new Map(stagedRun.sessions.map((s, i) => [s.role, i]));
+        const modelLog = modelSessions.flatMap((s) => s.log).sort((a, b) => (sessionOrder.get(a.session ?? "") ?? 0) - (sessionOrder.get(b.session ?? "") ?? 0));
+        const coverage = model
+          ? modelCoverage({ change, briefSent: true, obligations: stagedRun.obligations, briefCarried: stagedRun.briefCarried, digestCarried: stagedRun.digestCarried, toolLog: modelLog.map(modelToolEntry), delivered: stagedRun.delivered, lineCount })
+          : readCoverage({ change, obligations: stagedRun.obligations, briefCarried: stagedRun.briefCarried, digestCarried: stagedRun.digestCarried, trace: traced ? stagedRun.trace : [], lineCount, delivered: stagedRun.delivered });
+        const notes = [...(stagedRun.report.notes ?? []), ...(instructions.notes ?? []), ...(neighbourhood.partial ? [`Code around the change is partial: ${neighbourhood.partial}`] : [])];
+        const report = redactStored({ ...stagedRun.report, impact, ...(notes.length ? { notes } : {}), timings: clock.timings() }, p.secrets);
+        if (model) {
+          const evidence: ModelReviewEvidence = redactStored({
+            reviewer: "primary", model: model.reviewer.model, changeId: change.id, snapshot: { tree: prep.tree, before, after }, candidates: { total: stagedRun.required, disposed: stagedRun.disposed }, coverage, briefSent: modelSessions.some((s) => s.sentRounds > 0), toolLog: modelLog, attempts: stagedRun.usage.calls, rounds: stagedRun.sessions.reduce((n, s) => n + s.rounds, 0), submissionErrors: [], failure: null, tools: [...TOOL_NAMES], startedAt: startedIso, endedAt: new Date(deps.now()).toISOString(), durationMs: deps.now() - started, sessions: stagedRun.sessions, missing: stagedRun.missing,
+          }, p.secrets);
+          // The optional second reviewer retains its existing single pass.
+          let second: SecondRun | null = null;
+          if (deps.model?.second && !evidence.attempts.some((a) => a.outcome === "refused") && !stopped) {
+            clock.enter("reviewer");
+            second = await runSecondReviewer({ reviewer: deps.model.second, budget: model.budget, box, earlier: evidence.attempts, now: deps.now, deadline,
+              started: (s) => { session = register(s); say(`Second reviewer: model ${deps.model!.second!.model} started`); },
+              converse: (s) => converse({ session: s, snapshotDir: prep.snapshot.tree, brief: brief.text, deadline, traced: true, say, now: deps.now,
+                check: (submission, trace, delivered) => {
+                  const checked = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files });
+                  return { report: checked.ok ? checked.report : null, errors: checked.ok ? [] : checked.errors, unread: singlePassModelCoverage({ change, briefSent: true, diffFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread, required: checked.required, disposed: checked.disposed };
+                },
+                deliver: (unread, earlier) => deliverRanges({ snapshotDir: prep.snapshot.tree, unread, earlier, secrets: p.secrets, change }),
+                onRound: (round) => { const kept = redactStored({ ...round, by: "second" as const }, p.secrets); stagedRun.rounds.push(kept); deps.onEvent({ type: "round", round: kept }); },
+              }),
+              evidence: (s, t, startedAt) => modelEvidence({ role: "second", model: deps.model!.second!.model, session: s, talk: t, change, snapshot: { tree: prep.tree, before: after, after: hashSnapshot(prep.snapshot.tree) }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt }),
+            });
+            clock.enter("finalize");
+          }
+          const calls = [...stagedRun.usage.calls, ...(second?.evidence.attempts ?? [])];
+          return await finish({ ended: "model-reviewed", report, evidence, submission: stagedRun.submission, change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds: redactStored(stagedRun.rounds, p.secrets), ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
+        }
+        const totals = stagedRun.usage.totals;
+        const reviewer: ReviewerRecord = { driver: agent!.driver.name, version: agent!.version, ...tuned, ...(passed.length > 0 ? { passed } : {}), pid: null, started_at: startedIso, ended_at: new Date(deps.now()).toISOString(), duration_ms: deps.now() - started, rounds: stagedRun.sessions.reduce((n, s) => n + s.rounds, 0), usage: { turns: stagedRun.sessions.reduce((n, s) => n + s.usage.turns, 0), input_tokens: totals.inputTokens, output_tokens: totals.outputTokens, cost_usd: totals.costUsd }, sessions: stagedRun.sessions };
+        const completion = redactStored(completionRecord({ change, reviewer, snapshot: { tree: prep.tree, before, after }, candidates: { total: stagedRun.required, disposed: stagedRun.disposed }, coverage, trace: stagedRun.trace, submissionErrors: [], wholeRepo: false, missing: stagedRun.missing, traced, tools }), p.secrets);
+        report.completion = completion;
+        if (completion.status !== "complete") report.verdict = "incomplete";
+        return await finish({ ended: "reviewed", report, completion, display: buildDisplay({ change: full, secrets: p.secrets }), submission: stagedRun.submission, trace: redactStored(stagedRun.trace, p.secrets), change: full, secrets: p.secrets, whole: false, target: prep.target ?? null, usage: redactStored(withEarlier(stagedRun.usage), p.secrets), rounds: redactStored(stagedRun.rounds, p.secrets), ...(context ? { context: context.manifest } : {}) });
+      }
+      let modelTalk: ModelSession | null = null;
+      // An agent's usage is recorded round by round as its turns come back;
+      // the turns reach the conversation unchanged.
+      let metered: { session: ReviewerSession; calls(): CallRecord[] } | null = null;
+      let pid: number | null = null;
+      clock.enter("reviewer");
+      const notStarted = refused ?? (stopped ? "the review stopped before the reviewer was started" : null);
+      if (notStarted === null && model) {
+        modelTalk = modelSession({
+          reviewer: model.reviewer,
+          role: "primary",
+          budget: model.budget,
+          box,
+          now: deps.now,
+          deadline,
+        });
+        session = register(modelTalk);
+        deps.onEvent({ type: "started", driver: "model", version: model.reviewer.model, pid: null });
+        say(`Reviewer: model ${model.reviewer.model} started; this takes several minutes`);
+      } else if (notStarted === null && agent) {
+        metered = meterSession(agentReviewer(agent.driver, { snapshotDir: prep.snapshot.tree, deadline, bin: agent.bin, web: inputs.web, ...tuned, secrets: p.secrets }), { driver: agent.driver.name, now: deps.now });
+        session = register(metered.session);
+        pid = metered.session.pid;
+        deps.onEvent({ type: "started", driver: agent.driver.name, version: agent.version, pid });
+        say(`Reviewer: ${label} started${pid !== null ? ` (process ${pid})` : ""}; this takes several minutes`);
+      }
+      const startedIso = new Date(deps.now()).toISOString();
+      const now = deps.now();
+      // The checks every answer passes, and the changed ranges a correction
+      // round carries: the same for the primary and the second reviewer.
+      const check: Parameters<typeof converse>[0]["check"] = (submission, trace, delivered) => {
+        const r = checkSubmission({ change: full, scan, manifest, config, submission, lineCount, wholeRepo: prep.whole ? { lines: prep.whole.lines } : undefined, confidenceFloor: inputs.confidenceFloor, instructionFiles: instructions.files });
+        // A model reviewer's reads count once a request carrying them was sent.
+        const unread = prep.whole
+          ? []
+          : model
+            ? singlePassModelCoverage({ change, briefSent: true, diffFiles: brief.diffFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount }).unread
+            : singlePassCoverage({ change, diffFiles: brief.diffFiles, trace: traced ? trace : [], lineCount, delivered }).unread;
+        return { report: r.ok ? r.report : null, errors: r.ok ? [] : r.errors, unread, required: r.required, disposed: r.disposed };
+      };
+      const deliver: Parameters<typeof converse>[0]["deliver"] = (unread, earlier) => deliverRanges({ snapshotDir: prep.snapshot.tree, unread, earlier, secrets: p.secrets, change });
+      // Every correction round, redacted as the report is (an answer or a
+      // check error can quote a secret), kept and sent to the host at once.
+      const rounds: CorrectionRound[] = [];
+      const onRound = (by: ReviewerRole) => (round: Omit<CorrectionRound, "by">): void => {
+        const kept = redactStored({ by, ...round }, p.secrets);
+        rounds.push(kept);
+        deps.onEvent({ type: "round", round: kept });
+      };
+      // The second reviewer, once the primary is done: on the same brief,
+      // snapshot, tools, checks, deadline and budget. Not after a budget
+      // refusal, which has ended the review, and not when the primary was not
+      // started.
+      const secondReview = async (m: NonNullable<ReviewDeps["model"]>, primary: ModelSession | null, first: ModelReviewEvidence): Promise<SecondRun | null> => {
+        if (!m.second || primary === null || first.attempts.some((a) => a.outcome === "refused")) return null;
+        const reviewer = m.second;
+        return runSecondReviewer({
+          reviewer,
+          budget: m.budget,
+          box,
+          earlier: first.attempts,
+          now: deps.now,
+          deadline,
+          started: (s) => {
+            session = register(s);
+            say(`Second reviewer: model ${reviewer.model} started`);
+          },
+          converse: (s) => converse({ session: s, snapshotDir: prep.snapshot.tree, brief: brief.text, deadline, traced: true, say, now: deps.now, check, deliver, onRound: onRound("second"), timedOut: inputs.timedOut }),
+          evidence: (s, t, startedAt) => modelEvidence({ role: "second", model: reviewer.model, session: s, talk: t, change, snapshot: { tree: prep.tree, before: first.snapshot.after ?? first.snapshot.before, after: hashSnapshot(prep.snapshot.tree) }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt }),
+        });
+      };
+      const talk: Conversation = session === null ? { rounds: 0, trace: [], usage: { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null }, report: null, checked: null, errors: [], required: 0, disposed: 0, failure: notStarted, submission: null, delivered: [], carried: [], startedAt: now, endedAt: now } : await converse({
+        session,
+        snapshotDir: prep.snapshot.tree,
+        brief: brief.text,
+        deadline,
+        traced,
+        say,
+        now: deps.now,
+        check,
+        deliver,
+        onRound: onRound("primary"),
+        timedOut: inputs.timedOut,
+      }).finally(async () => {
+        await session?.close();
+      });
+      if (list !== null && agent !== null && cannotServe(talk.failure) && keptBoundary(talk.trace)) return { restart: "failed", reason: talk.failure!, calls: metered?.calls() ?? [] };
       clock.enter("finalize");
-      // The checked report, or an empty one; the model record goes in it
-      // where the record is built (modelReport). A host that gave the clock
-      // reads it again once it has finished the report.
-      const report: Report = { ...(talk.report ?? talk.checked?.report ?? incompleteReport(full, scan, config, deps.now())), ...((instructions.notes?.length || neighbourhood.partial) ? { notes: [...(instructions.notes ?? []), ...(neighbourhood.partial ? [`Code around the change is partial: ${neighbourhood.partial}`] : [])] } : {}), impact, timings: clock.timings() };
-      const calls = [...evidence.attempts, ...(second?.evidence.attempts ?? [])];
-      return await finish({ ended: "model-reviewed", report, evidence, submission: talk.report ? talk.submission : (talk.checked?.submission ?? talk.submission), change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds, ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
+      if (talk.failure !== null) warn(`openqodex: ${talk.failure}`);
+      const after = hashSnapshot(prep.snapshot.tree);
+
+      if ("model" in chosen) {
+        const evidence = modelEvidence({ role: "primary", model: chosen.model.reviewer.model, session: modelTalk, talk, change, snapshot: { tree: prep.tree, before, after }, diffFiles: brief.diffFiles, lineCount, secrets: p.secrets, startedAt: startedIso });
+        clock.enter("reviewer");
+        const second = await secondReview(chosen.model, modelTalk, evidence);
+        clock.enter("finalize");
+        // The checked report, or an empty one; the model record goes in it
+        // where the record is built (modelReport). A host that gave the clock
+        // reads it again once it has finished the report.
+        const report: Report = { ...(talk.report ?? talk.checked?.report ?? incompleteReport(full, scan, config, deps.now())), ...((instructions.notes?.length || neighbourhood.partial) ? { notes: [...(instructions.notes ?? []), ...(neighbourhood.partial ? [`Code around the change is partial: ${neighbourhood.partial}`] : [])] } : {}), impact, timings: clock.timings() };
+        const calls = [...evidence.attempts, ...(second?.evidence.attempts ?? [])];
+        return await finish({ ended: "model-reviewed", report, evidence, submission: talk.report ? talk.submission : (talk.checked?.submission ?? talk.submission), change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds, ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
+      }
+
+      const reviewer: ReviewerRecord | null = session === null ? null : {
+        // The entry that served, which is not the first one tried after a fallback.
+        driver: agent!.driver.name,
+        version: agent!.version,
+        ...tuned,
+        ...(passed.length > 0 ? { passed } : {}),
+        pid,
+        started_at: startedIso,
+        ended_at: new Date(talk.endedAt).toISOString(),
+        duration_ms: talk.endedAt - talk.startedAt,
+        rounds: talk.rounds,
+        usage: talk.usage,
+      };
+      const coverage = singlePassCoverage({ change, diffFiles: brief.diffFiles, trace: traced ? talk.trace : [], lineCount, delivered: talk.delivered });
+      // Redacted like the report: a path or a tool input may hold a secret.
+      const completion = redactStored(completionRecord({
+        change,
+        reviewer,
+        snapshot: { tree: prep.tree, before, after },
+        candidates: { total: talk.required, disposed: talk.disposed },
+        coverage,
+        trace: talk.trace,
+        submissionErrors: talk.errors,
+        wholeRepo: prep.whole !== undefined,
+        failure: talk.failure,
+        tools,
+        traced,
+      }), p.secrets);
+      // An incomplete review keeps the findings of an answer that passed every
+      // check: the report prints them as the findings so far.
+      const report: Report = {
+        ...(talk.report ?? talk.checked?.report ?? incompleteReport(full, scan, config, deps.now())),
+        impact: prep.whole ? null : impact,
+        completion,
+        ...((instructions.notes?.length || neighbourhood.partial) ? { notes: [...(instructions.notes ?? []), ...(neighbourhood.partial ? [`Code around the change is partial: ${neighbourhood.partial}`] : [])] } : {}),
+      };
+      if (completion.status !== "complete") report.verdict = "incomplete";
+
+      // report.html's code, while the diff and the matched secrets are still
+      // in memory: the change as a diff, or for the whole repository a few
+      // lines of the redacted snapshot around each cited line.
+      const display = prep.whole
+        ? buildExcerptDisplay({
+            changeId: change.id,
+            cited: [
+              ...report.findings,
+              ...report.dropped.map((d) => (d.cited ? { ...d.cited, line_end: d.cited.line_number } : { file_path: d.candidate.filePath, line_number: d.candidate.lineStart, line_end: d.candidate.lineEnd })),
+            ],
+            read: snapshotText(prep.snapshot.tree),
+            secrets: p.secrets,
+          })
+        : buildDisplay({ change: full, secrets: p.secrets });
+      const calls = [...earlierCalls, ...(metered?.calls() ?? [])];
+      report.timings = clock.timings();
+      return await finish({ ended: "reviewed", report, completion, display, submission: talk.submission, trace: talk.trace, change: full, secrets: p.secrets, whole: prep.whole !== undefined, target: prep.target ?? null, usage: { calls, totals: usageTotals(calls) }, ...(context ? { context: context.manifest } : {}) });
+    };
+    let agent: Picked | null = "driver" in chosen ? chosen : null;
+    let until = deadline;
+    for (;;) {
+      const outcome = await reviewWith(agent, until);
+      if (!("restart" in outcome)) return outcome;
+      const failed: PassedReviewer = { ...entryOf(agent!.entry!), outcome: outcome.restart, reason: redact(outcome.reason) };
+      passed.push(failed);
+      earlierCalls.push(...outcome.calls);
+      // A boundary check that failed (`skipped`) started no reviewer.
+      if (outcome.restart === "failed") anyStarted = true;
+      const next = stopped ? { picked: null, passed: [] } : await pickFrom(list!, agent!.index + 1, deps.drivers, repoRoot, readiness);
+      passed.push(...next.passed);
+      // Every line here goes through the run's redaction, the entries'
+      // models included: a model value can match a secret.
+      if (next.picked === null) {
+        warn(redact(`openqodex: ${passedReason(failed)}; no reviewer of the project's list is left`));
+        const reasons = [...passed.map(passedReason), ...(stopped ? ["the review stopped"] : [])].map(redact);
+        return await finish({ ended: "unavailable", reasons, change, scan, secrets: p.secrets, ...(anyStarted ? { started: true as const } : {}), ...(earlierCalls.length > 0 ? { usage: { calls: earlierCalls, totals: usageTotals(earlierCalls) } } : {}) });
+      }
+      agent = next.picked;
+      deps.onEvent({ type: "reviewer-restarted", line: redact(`openqodex: ${passedReason(failed)}; the review starts again with ${entryLabel(agent.entry!)}`) });
+      // A fresh time budget: the first reviewer's time is not taken from it.
+      until = deps.now() + inputs.timeoutMs;
     }
-
-    const reviewer: ReviewerRecord | null = session === null ? null : {
-      driver: chosen.driver.name,
-      version: chosen.version,
-      pid,
-      started_at: startedIso,
-      ended_at: new Date(talk.endedAt).toISOString(),
-      duration_ms: talk.endedAt - talk.startedAt,
-      rounds: talk.rounds,
-      usage: talk.usage,
-    };
-    const coverage = singlePassCoverage({ change, diffFiles: brief.diffFiles, trace: traced ? talk.trace : [], lineCount, delivered: talk.delivered });
-    // Redacted like the report: a path or a tool input may hold a secret.
-    const completion = redactStored(completionRecord({
-      change,
-      reviewer,
-      snapshot: { tree: prep.tree, before, after },
-      candidates: { total: talk.required, disposed: talk.disposed },
-      coverage,
-      trace: talk.trace,
-      submissionErrors: talk.errors,
-      wholeRepo: prep.whole !== undefined,
-      failure: talk.failure,
-      tools: inputs.web ? [...REVIEWER_TOOLS, ...REVIEWER_WEB_TOOLS] : REVIEWER_TOOLS,
-      traced,
-    }), p.secrets);
-    // An incomplete review keeps the findings of an answer that passed every
-    // check: the report prints them as the findings so far.
-    const report: Report = {
-      ...(talk.report ?? talk.checked?.report ?? incompleteReport(full, scan, config, deps.now())),
-      impact: prep.whole ? null : impact,
-      completion,
-      ...((instructions.notes?.length || neighbourhood.partial) ? { notes: [...(instructions.notes ?? []), ...(neighbourhood.partial ? [`Code around the change is partial: ${neighbourhood.partial}`] : [])] } : {}),
-    };
-    if (completion.status !== "complete") report.verdict = "incomplete";
-
-    // report.html's code, while the diff and the matched secrets are still
-    // in memory: the change as a diff, or for the whole repository a few
-    // lines of the redacted snapshot around each cited line.
-    const display = prep.whole
-      ? buildExcerptDisplay({
-          changeId: change.id,
-          cited: [
-            ...report.findings,
-            ...report.dropped.map((d) => (d.cited ? { ...d.cited, line_end: d.cited.line_number } : { file_path: d.candidate.filePath, line_number: d.candidate.lineStart, line_end: d.candidate.lineEnd })),
-          ],
-          read: snapshotText(prep.snapshot.tree),
-          secrets: p.secrets,
-        })
-      : buildDisplay({ change: full, secrets: p.secrets });
-    const calls = metered?.calls() ?? [];
-    report.timings = clock.timings();
-    return await finish({ ended: "reviewed", report, completion, display, submission: talk.submission, trace: talk.trace, change: full, secrets: p.secrets, whole: prep.whole !== undefined, target: prep.target ?? null, usage: { calls, totals: usageTotals(calls) }, ...(context ? { context: context.manifest } : {}) });
   } finally {
     over = true;
     for (const live of liveSessions) { try { await live.close(); } catch { /* Other cleanup must still run. */ } }
@@ -1198,8 +1350,7 @@ async function reviewInScope(
       // A candidate the second reviewer raised or dropped is no longer
       // unchecked, even when the primary never answered.
       const disposed = new Set(theirs.map((d) => d.candidate));
-      const countedKeys = new Set(merged.findings.map(findingKey));
-      checked = { ...r.report, findings: merged.findings, possible: r.report.possible.filter((f) => !countedKeys.has(findingKey(f))), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
+      checked = { ...r.report, findings: merged.findings, possible: possibleAfterSecond(r.report.possible, merged), not_reviewed: r.report.not_reviewed.filter((c) => !disposed.has(c.id)), ...(answered ? { verdict: verdictFor(config.blockOnSeverity, merged.findings.map((f) => f.severity)) } : {}) };
       foundBy = merged.foundBy;
       if (answered) disagreements = disagreementsOf({ name: model.model, dispositions }, { name: second.name, dispositions: theirs });
       dispositions.push(...theirs);

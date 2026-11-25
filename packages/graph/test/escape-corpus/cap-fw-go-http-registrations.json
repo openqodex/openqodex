@@ -1,0 +1,79 @@
+{
+  "covers": "a net/http route past the registrations the plugin lists in one build (go-http MAX_REGISTRATIONS)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_REGISTRATIONS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport n \"net/http\"\n\nvar m = n.NewServeMux()\n\nfunc h(w n.ResponseWriter, r *n.Request) {}\n\nfunc rega() {\n",
+      {
+        "repeat": "\tm.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "b.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regb() {\n",
+      {
+        "repeat": "\tm.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "c.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regc() {\n",
+      {
+        "repeat": "\tm.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "d.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regd() {\n",
+      {
+        "repeat": "\tm.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "e.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc rege() {\n",
+      {
+        "repeat": "\tm.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "f.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regf() {\n",
+      {
+        "repeat": "\tm.HandleFunc(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm.HandleFunc(\"/y\", deep)\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 8
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped listing registrations after 10000",
+      "at": "f.go:1671",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "f.go:1671"
+      }
+    }
+  ]
+}

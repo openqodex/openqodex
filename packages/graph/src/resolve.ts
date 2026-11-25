@@ -24,9 +24,10 @@ import type { ProjectModel } from "./discovery/projects.js";
 import { governingTsconfig, isGoStdlib, isNodeBuiltin, isPyStdlib, isRubyStdlib, linkageOf, metadataUnknown, nodeProjectOf, normalisePy, packageName, pathLinkOff } from "./discovery/projects.js";
 import type { Cause, Cut, EvidenceKind, Shape, Tier, Via } from "./model/records.js";
 import { weakest } from "./model/records.js";
+import { NEXT, gap } from "./gap.js";
 import type { Lookup as PluginLookup } from "./frameworks/plugin.js";
-import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, Family, FileFacts, GraphEdge, GraphNode, GraphSite, InvocationSummary, Miss, TypeRef, UnknownSite, ValueRef } from "./types.js";
-import { CALLER_KINDS, MAX_TYPE_DEPTH, familyOf } from "./types.js";
+import type { BoundImport, CallFact, DefFact, DispatchSite, EdgeKind, EscapeFact, Escapes, Family, FileFacts, GraphEdge, GraphNode, GraphSite, ImportFact, InvocationSummary, Miss, OpaqueFact, Place, Reach, TypeRef, UnknownSite, ValueRef } from "./types.js";
+import { CALLER_KINDS, MAX_TYPE_DEPTH, ambientOf, familyOf } from "./types.js";
 
 const MAX_DEPTH = 8; // re-export and base-class chains
 // Files the walk of `export *` may open in one world. Each file is walked
@@ -80,7 +81,21 @@ export const SHAPE_CAP = 20;
 // unknown whose candidates are the type's definitions.
 // 30: a value given members in place (`f.get = g`, Object.assign) and a
 // literal with a computed key keep an interface call's gap (LiteralFact).
-export const RESOLVER_VERSION = 30;
+// 31: the escape paths of each function (Resolved.escapes): its uses as a
+// value, its own body included, the modules that escape and what they
+// offer, the places a name built at run time may reach it, and the value
+// uses no rule binds; an unbound call that cannot run a plain function is
+// marked (UnknownSite.notPlain). 32: the opaque files (Escapes.opaque).
+// 33: what each opaque file reaches, and the scripts (Escapes.scripts).
+// 34: a free name its project declares as plain data vouches for itself.
+// 35: a module that offers a name the graph cannot follow to one
+// definition reaches whole every module it forwards names from.
+// 36: a module whose walk of `export *` the step budget cut reaches the
+// names its stars may bring, past the names it gives itself; a file with an
+// `import` or `export` statement is no script; escape analysis walks
+// `export *` on a budget of its own and stops at the build's deadline
+// (Resolved.escapesCut).
+export const RESOLVER_VERSION = 37;
 
 // How a base written as an expression stands in a lookup order.
 const DYNAMIC_BASE = "\u0000a base written as an expression";
@@ -164,7 +179,8 @@ const LOOKUP_CUT = {
 
 // A branch of an `export *` set the graph could not follow: what it was
 // and why. It may bring the name too.
-type Unfollowed = { spec: string; cause: Cause; note: string };
+// `file`: the repository module of an `export *` whose lookup gave up.
+type Unfollowed = { spec: string; cause: Cause; note: string; file?: string };
 
 // A step through a module: the outer binding (the import the call read)
 // keeps its kind and line; the tier is the weaker of the two and the notes
@@ -199,15 +215,22 @@ type Mod =
   | null; // a path specifier that names nothing here: a miss
 
 // What a name or an expression stands for.
+// `unfollowed` on a sym: the repository modules of `export *` branches
+// that may also bring the name and whose lookup gave up (too deep), so
+// escape analysis visits them whole (`offers`, issue 448).
 type Value =
-  | { v: "sym"; ids: string[]; ev: Ev }
+  | { v: "sym"; ids: string[]; ev: Ev; unfollowed?: string[] }
   | { v: "mod"; file: string; ev: Ev }
   | { v: "pkg"; dir: string; ev: Ev }
   | { v: "pyns"; dir: string; ev: Ev } // a Python namespace package: a folder without __init__.py
   | { v: "pymod"; from: string; dotted: string } // Python `import a.b`: a dotted module path
   | { v: "ext" }
   | { v: "gap"; cause: Cause; note: string; candidates: string[] | null }
-  | { v: "miss"; target: string; name: string; ev: Ev };
+  // `held`: the module gives the name out as a value that is no definition
+  // (`export const router = Router()`, `export { router }`), so the name is
+  // there, though the graph does not follow the value; it is the local name
+  // of that value, one binding under every name it is given out as.
+  | { v: "miss"; target: string; name: string; ev: Ev; held?: string };
 
 type Def = DefFact & { id: string; file: string; family: Family };
 
@@ -220,6 +243,9 @@ export type ResolveInput = {
   known: ReadonlySet<string>; // every path import resolution may land on: eligible files and removed ones
   model: ProjectModel;
   goModules: [string, string][]; // module path, folder ("" for the root)
+  // The global names each declaration file (`.d.ts`, read beside the
+  // source files) declares as plain data.
+  declared?: { file: string; names: string[] }[];
   // Checked between files while calls are resolved: true stops; the files
   // left are listed in `budgetFiles`.
   stop?: () => boolean;
@@ -238,6 +264,10 @@ export type Resolved = {
   unresolvedSites: number;
   externalSites: number;
   budgetFiles: string[]; // files whose calls were not resolved: the budget ran out
+  escapes: Escapes;
+  // The budget ran out before escape analysis finished (or began): its
+  // escapes are not whole, so the build is partial and every list a floor.
+  escapesCut: boolean;
 };
 
 // One call site or import binding, resolved with a record of the exports it
@@ -289,6 +319,55 @@ function dirOf(path: string): string {
 function join(...parts: string[]): string {
   const j = posix.normalize(posix.join(...parts.filter((p) => p !== "")));
   return j === "." ? "" : j;
+}
+
+// A set of names that shares its nodes with the set it was made from (a
+// hash trie): a set one name larger copies a few nodes of 32 slots, never
+// every name. A slot holds one name or a node of the next level; a node
+// past the hash's 32 bits is a list of the names whose hashes are equal.
+type NameSet = readonly (NameSet | string | undefined)[];
+const NAME_LEVELS = 7;
+function nameHash(name: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+function hasName(set: NameSet, name: string): boolean {
+  const h = nameHash(name);
+  let node = set;
+  for (let level = 0; level < NAME_LEVELS; level++) {
+    const slot = node[(h >>> (5 * level)) & 31];
+    if (typeof slot !== "object") return slot === name;
+    node = slot;
+  }
+  return node.includes(name);
+}
+function withName(set: NameSet | undefined, name: string, h = nameHash(name), level = 0): NameSet {
+  if (level === NAME_LEVELS) return set?.includes(name) ? set : [...(set ?? []), name];
+  const i = (h >>> (5 * level)) & 31;
+  const slot = set?.[i];
+  let next: NameSet | string = name;
+  if (slot === name) return set as NameSet;
+  if (typeof slot === "string") next = withName(withName(undefined, slot, nameHash(slot), level + 1), name, h, level + 1);
+  else if (slot !== undefined) {
+    next = withName(slot, name, h, level + 1);
+    if (next === slot) return set as NameSet;
+  }
+  const copy = set ? set.slice() : [];
+  copy[i] = next;
+  return copy;
+}
+const NO_NAMES: NameSet = [];
+// The work the export walk spends comparing skipped names: each name it
+// lists and each step it takes instead. Tests read it to hold that work to
+// the size of the input, which a clock on a busy runner cannot.
+export const walkWork = { steps: 0 };
+function* namesIn(set: NameSet): Generator<string> {
+  for (const slot of set) {
+    walkWork.steps++;
+    if (typeof slot === "string") yield slot;
+    else if (slot !== undefined) yield* namesIn(slot);
+  }
 }
 
 const JS_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
@@ -994,22 +1073,27 @@ export function createWorld(input: ResolveInput): World {
       if (family === "js") {
         // The export table: exported declarations, `export { a as b }`,
         // `export default`, CommonJS assignments, then re-exports. A private
-        // top-level definition is never an export.
-        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1);
+        // top-level definition is never an export. A local value that is no
+        // definition (`export const router = Router()`, `export { router }`)
+        // is a held miss in this file, so a framework reader reads its own
+        // facts there, and it shadows any `export *` that offers the name.
+        const held = (local: string): Value => ({ v: "miss", target: file, name, ev: SAME_SCOPE, held: local });
+        if (name === "default" && f.defaultExport) return resolveLocal(file, f.defaultExport, depth + 1) ?? held(f.defaultExport);
         const top = topByFile.get(file)?.get(name)?.filter((id) => defById.get(id)?.exported);
         if (top && top.length > 0) return { v: "sym", ids: top, ev: SAME_SCOPE };
-        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1);
+        for (const e of f.exportsLocal) if (e.exported === name) return resolveLocal(file, e.local, depth + 1) ?? held(e.local);
+        if (f.exportedVariables?.includes(name)) return held(name);
         // Every `export *` that offers the name: one definition binds; two
         // different ones are ambiguous (JavaScript exports neither). A star
         // the graph cannot follow (a module that is not there, a package
         // outside the repository, a gap) may bring the name too, so nothing
-        // it competes with is certain.
+        // it competes with is certain. `export *` never gives out `default`.
         const starHits: { v: Value; spec: string }[] = [];
         const unfollowed: Unfollowed[] = [];
         for (const imp of f.imports) {
           if (!imp.reexport) continue;
           const named = imp.names.find((n) => n.local === name);
-          if (!named && !imp.star) continue;
+          if (!named && (!imp.star || name === "default")) continue;
           const mod = jsSpec(file, imp.line, imp.spec);
           if (named) {
             if (mod === null) return { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1023,8 +1107,8 @@ export function createWorld(input: ResolveInput): World {
           else {
             const hit = withEv(index.exports(mod.file, name, depth + 1), mod.ev);
             if (hit === null) unfollowed.push({ spec: imp.spec, cause: "miss", note: `export * from ${imp.spec} could not be read` });
-            else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note });
-            else if (hit.v !== "miss") starHits.push({ v: hit, spec: imp.spec });
+            else if (hit.v === "gap") unfollowed.push({ spec: imp.spec, cause: hit.cause, note: hit.note, file: mod.file });
+            else if (hit.v !== "miss" || hit.held) starHits.push({ v: hit, spec: imp.spec });
           }
         }
         return starValue(file, name, starHits, unfollowed) ?? noStarHit(unfollowed) ?? { v: "miss", target: file, name, ev: SAME_SCOPE };
@@ -1067,7 +1151,12 @@ export function createWorld(input: ResolveInput): World {
   function onlyPossible(v: Value, open: Unfollowed[]): Value {
     if (open.length === 0 || v.v !== "sym") return v;
     const why = `${open.map((u) => u.note).join("; ")}, so the name may come from there instead.`;
-    return { ...v, ev: { ...v.ev, tier: weakest(v.ev.tier, "possible"), note: [v.ev.note, why].filter(Boolean).join(" ") } };
+    return withOpen({ ...v, ev: { ...v.ev, tier: weakest(v.ev.tier, "possible"), note: [v.ev.note, why].filter(Boolean).join(" ") } }, open);
+  }
+  // A sym with the repository modules of the branches its lookup left open.
+  function withOpen<V extends Extract<Value, { v: "sym" }>>(v: V, open: Unfollowed[]): V {
+    const files = open.flatMap((u) => (u.file !== undefined ? [u.file] : []));
+    return files.length === 0 ? v : { ...v, unfollowed: [...(v.unfollowed ?? []), ...files] };
   }
 
   // No branch brought the name: the first branch that could not be
@@ -1084,21 +1173,26 @@ export function createWorld(input: ResolveInput): World {
   // ambiguous: every candidate at the possible tier, with a note.
   function starValue(file: string, name: string, hits: { v: Value; spec: string }[], open: Unfollowed[]): Value | null {
     if (hits.length === 0) return null;
-    const keyOf = (v: Value): string | null => (v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : null);
+    const keyOf = (v: Value): string | null =>
+      v.v === "sym" ? [...new Set(v.ids.map(stableKey))].sort().join("\0") : v.v === "mod" ? `mod:${v.file}` : v.v === "ext" ? "ext" : v.v === "miss" && v.held ? `value:${v.target}\0${v.held}` : null;
     const distinct = new Map<string, { v: Value; spec: string }>();
     for (const h of hits) {
       const k = keyOf(h.v);
       if (k === null) return (hits[0] as { v: Value }).v; // a gap or a namespace: the first decides, as before
       if (!distinct.has(k)) distinct.set(k, h);
     }
+    // The branches each hit's own lookup left open stay open in the value
+    // made of them, from every hit, not only the first or the distinct ones.
+    const carried = [...new Set(hits.flatMap(({ v }) => (v.v === "sym" ? (v.unfollowed ?? []) : [])))];
+    const kept = carried.length > 0 ? { unfollowed: carried } : {};
     const first = hits[0] as { v: Value };
-    if (distinct.size === 1) return onlyPossible(first.v, open);
+    if (distinct.size === 1) return onlyPossible(first.v.v === "sym" ? { ...first.v, ...kept } : first.v, open);
     const syms = [...distinct.values()].filter((h): h is { v: Extract<Value, { v: "sym" }>; spec: string } => h.v.v === "sym");
     const unopened = open.length > 0 ? ` ${open.map((u) => u.note).join("; ")}.` : "";
     const note = `${file} re-exports ${name} through export * from ${distinct.size} modules (${[...distinct.values()].map((h) => h.spec).join(", ")}); JavaScript exports neither, and a bundler may pick one.${unopened}`;
     if (syms.length < 2) return { v: "gap", cause: "ambiguous", note, candidates: [...distinct.keys()] };
     const base = syms[0]?.v.ev as Ev;
-    return { v: "sym", ids: syms.flatMap((h) => h.v.ids), ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } };
+    return withOpen({ v: "sym", ids: syms.flatMap((h) => h.v.ids), ...kept, ev: { ...base, tier: "possible", note: [base.note, note].filter(Boolean).join(" "), rule: "js-star-ambiguous" } }, open);
   }
 
   // A value reached through a module step keeps that step's evidence.
@@ -3285,6 +3379,81 @@ export function createWorld(input: ResolveInput): World {
     if (input.stop?.()) throw new BudgetStop("budget");
   };
 
+  // The module a name's import binds it to, when it is a file of the repository.
+  const importFileOf = (file: string, name: string, bound: BoundImport | undefined): string | null => {
+    let mod: Mod | { ns: string; ev: Ev } | undefined;
+    if (bound) {
+      const f = facts.get(file);
+      const imp = f?.imports[bound.import];
+      if (f && imp) mod = moduleOf(file, familyOf(f.lang), imp);
+    } else {
+      const b = index.bindings(file).names.get(name);
+      if (b && b.kind !== "pyns") mod = b.mod;
+    }
+    return mod && "file" in mod ? mod.file : null;
+  };
+  // A JavaScript module exports `name` as a variable (`export const LIMIT`,
+  // `export { LIMIT }`, through a re-export): an import of it binds a value,
+  // not a name the graph could not find.
+  const variablesMemo = new Map<string, { all: Set<string>; exported: Set<string> }>();
+  const variablesOf = (file: string, f: FileFacts) => {
+    let v = variablesMemo.get(file);
+    if (!v) variablesMemo.set(file, (v = { all: new Set(f.variables ?? []), exported: new Set(f.exportedVariables ?? []) }));
+    return v;
+  };
+  // Each answer is kept by file, name and depth (the depth bounds what is
+  // left to walk): barrels whose `export *` paths meet again are walked
+  // once, not once per path and per read. The build's deadline stops it.
+  const exportsVariableMemo = new Map<string, boolean>();
+  const exportsVariable = (file: string, name: string, depth = 0): boolean => {
+    const key = `${file}\0${name}\0${depth}`;
+    let found = exportsVariableMemo.get(key);
+    if (found === undefined) {
+      checkBudget();
+      exportsVariableMemo.set(key, (found = exportsVariableAt(file, name, depth)));
+    }
+    return found;
+  };
+  const exportsVariableAt = (file: string, name: string, depth: number): boolean => {
+    const f = facts.get(file);
+    if (!f || familyOf(f.lang) !== "js" || depth > MAX_DEPTH) return false;
+    const vars = variablesOf(file, f);
+    if (vars.exported.has(name)) return true;
+    if (name === "default" && f.defaultExport) return vars.all.has(f.defaultExport);
+    for (const e of f.exportsLocal) {
+      if (e.exported !== name) continue;
+      if (vars.all.has(e.local)) return true;
+      const b = index.bindings(file).names.get(e.local);
+      return b?.kind === "named" && b.mod !== null && "file" in b.mod ? exportsVariable(b.mod.file, b.imported, depth + 1) : false;
+    }
+    for (const imp of f.imports) {
+      if (!imp.reexport) continue;
+      const named = imp.names.find((n) => n.local === name);
+      if (!named && !imp.star) continue;
+      const mod = jsSpec(file, imp.line, imp.spec);
+      if (mod === null || !("file" in mod)) continue;
+      if (named ? named.imported !== "*" && exportsVariable(mod.file, named.imported, depth + 1) : exportsVariable(mod.file, name, depth + 1)) return true;
+    }
+    return false;
+  };
+  // The module and the name an import binds to `head` (`import { a as head }`,
+  // or `head.name` read on `import * as head`), when the module is a file here.
+  const importedAs = (file: string, head: string, bound: BoundImport | undefined, member: string | null): { file: string; name: string } | null => {
+    let b: { kind: string; mod: Mod | { ns: string; ev: Ev }; imported?: string } | undefined;
+    if (bound) {
+      const f = facts.get(file);
+      const imp = f?.imports[bound.import];
+      if (f && imp) b = bound.imported === "*" ? { kind: "ns", mod: moduleOf(file, familyOf(f.lang), imp) } : { kind: "named", mod: moduleOf(file, familyOf(f.lang), imp), imported: bound.imported };
+    } else {
+      const found = index.bindings(file).names.get(head);
+      if (found && found.kind !== "pyns") b = found;
+    }
+    if (!b || b.mod === null || !("file" in b.mod)) return null;
+    if (b.kind === "named" && member === null && b.imported) return { file: b.mod.file, name: b.imported };
+    if (b.kind === "ns" && member !== null) return { file: b.mod.file, name: member };
+    return null;
+  };
+
   // ---------- the world ----------
   const resolveAll = (): Resolved => {
     // One edge per (from, to, kind), found by the ids themselves: building
@@ -3347,6 +3516,58 @@ export function createWorld(input: ResolveInput): World {
     const budgetFiles: string[] = [];
     let stopped = false;
 
+    // ---------- escape paths ----------
+    // Uses as a value per function, value uses no rule binds per family and
+    // name, and the modules found escaping with the first place each did.
+    const uses = new Map<string, Place & { count: number }>();
+    const unbound = new Map<string, Place & { count: number }>();
+    const marks = new Map<string, Place>();
+    const countUse = (id: string, file: string, line: number) => {
+      const kept = uses.get(id);
+      if (kept) kept.count++;
+      else uses.set(id, { file, line, count: 1 });
+    };
+    const mark = (module: string, file: string, line: number) => {
+      if (!marks.has(module)) marks.set(module, { file, line });
+    };
+    // A value reference that names no function: the module it names (any
+    // read of a module but `ns.x` lets a computed call reach its exports),
+    // an import that ends in a gap or a miss, and a name no rule binds.
+    const escapedRef = (file: string, family: Family, ref: ValueRef, named: boolean) => {
+      const r = ref.recv;
+      if ((r.kind !== "none" && r.kind !== "name") || ref.local !== undefined) return;
+      if (named && (family !== "js" || ref.role === "object")) return;
+      const head = r.kind === "none" ? ref.name : r.name;
+      const bound = r.kind === "none" ? ref.bound : r.bound;
+      let v = bound ? boundValue(file, head, bound) : resolveLocal(file, head);
+      for (const p of r.kind === "name" ? [...r.path, ref.name] : []) v = attr(v, p);
+      if (family === "js" && v?.v === "mod" && ref.role !== "object") mark(v.file, file, ref.line);
+      if (named || (v !== null && v.v !== "miss" && v.v !== "gap")) return;
+      if (v === null && r.kind === "none" && BUILTINS[family].has(ref.name)) return;
+      // An imported variable: a value the graph follows, though no definition.
+      const imported = family === "js" ? importedAs(file, head, bound, r.kind === "none" ? null : r.path.length === 0 ? ref.name : "") : null;
+      if (imported && imported.name !== "" && exportsVariable(imported.file, imported.name)) return;
+      if (family === "js") {
+        const via = importFileOf(file, head, bound);
+        if (via) mark(via, file, ref.line);
+        if (v?.v === "miss" && facts.has(v.target)) mark(v.target, file, ref.line);
+      }
+      const key = `${family}:${ref.name}`;
+      const kept = unbound.get(key);
+      if (kept) kept.count++;
+      else unbound.set(key, { file, line: ref.line, count: 1 });
+    };
+    // An unbound call that cannot run a plain function of its name: a bare
+    // call of a local or a parameter, `this.x()` where `this` is proved an
+    // instance of a class, a call on a value whose class or interface the
+    // graph knows but that lacks the member (`miss`).
+    const cannotRunPlain = (file: string, family: Family, call: CallFact, caller: Def | undefined, miss: boolean): boolean => {
+      const r = call.recv;
+      if (r.kind === "none") return call.shadowed === true && call.local === undefined && call.bound === undefined;
+      if (r.kind === "self") return r.path.length === 0 && enclosingClass(file, family, caller) !== null;
+      return r.kind === "type" && miss;
+    };
+
     for (const { path, facts: f } of input.files) {
       if (!stopped && input.stop?.()) stopped = true;
       if (stopped) {
@@ -3397,7 +3618,9 @@ export function createWorld(input: ResolveInput): World {
           if (ids.length > 0 && ref) {
             const ev: Ev = { kind: "value-alias", tier: "possible", via: null, note: `${call.aliasOf ?? call.name} is given ${ref.name} at line ${ref.line}, so calling it may run it.`, rule: "value-alias" };
             for (const t of ids) addEdge(callerId, t, "may_invoke", siteOf(path, call.line, call.column, ev));
-            if (held.every(([, fn]) => fn === true)) continue;
+            // A method called on a local of a declared type (`Job j = this::work;
+            // j.run()`) is also a call of that type's method.
+            if (held.every(([, fn]) => fn === true) && call.recv.kind !== "type") continue;
           }
         }
         // What a call returned, called: the functions that callee returns by name.
@@ -3412,7 +3635,8 @@ export function createWorld(input: ResolveInput): World {
             const site = siteOf(path, call.line, call.column, ev);
             for (const t of targets.slice(0, DISPATCH_CAP)) addEdge(callerId, t, "may_invoke", site);
             if (targets.length > DISPATCH_CAP) {
-              unknowns.push({ file: path, line: call.line, column: call.column, name: "", cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${by} returns ${targets.length.toLocaleString("en-US")} functions by name; the ${(targets.length - DISPATCH_CAP).toLocaleString("en-US")} past the first ${DISPATCH_CAP} are not listed as possible targets of this call` });
+              // The functions past the cap are known: the gap reaches each of them.
+              unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { ids: targets.slice(DISPATCH_CAP) }, next: NEXT.returnedCap, name: "", shape, caller: callerId, note: `${by} returns ${targets.length.toLocaleString("en-US")} functions by name; the ${(targets.length - DISPATCH_CAP).toLocaleString("en-US")} past the first ${DISPATCH_CAP} are not listed as possible targets of this call` }));
             }
             // A callee that also returns something else (a parameter, a
             // call) may hand back any function: the call keeps its gap.
@@ -3438,11 +3662,17 @@ export function createWorld(input: ResolveInput): World {
         if ("unknown" in out) {
           if (call.implicit) continue;
           unresolvedSites++;
-          const u: UnknownSite = { file: path, line: call.line, column: call.column, name: call.name, cause: out.unknown, shape: out.shape, caller: callerId, scope: out.scope ?? "file" };
+          // A call with no name goes through a value; a named one is found by its name.
+          const u = gap({ cause: out.unknown, place: { file: path, line: call.line, column: call.column }, reaches: call.name === "" ? "values" : { names: [call.name] }, next: call.name === "" ? NEXT.values : NEXT.unbound, name: call.name, shape: out.shape, caller: callerId, scope: out.scope ?? "file" });
           if (out.note) u.note = out.note;
+          if (call.byName) {
+            u.next = NEXT.byName;
+            u.note = call.name === "" ? "a method found by a name given at run time (reflection), which may be any method" : `the method ${call.name} found by its name at run time (reflection)`;
+          }
           if (out.candidates) u.candidates = out.candidates;
           const receiver = receiverHint(call);
           if (receiver) u.receiver = receiver;
+          if (cannotRunPlain(path, family, call, caller, false)) u.notPlain = true;
           // A table nothing else can change narrows the gap to its entries
           // (or a key it does not hold). One that may change elsewhere keeps
           // the gap's whole scope: a function put in it later may be called.
@@ -3454,7 +3684,14 @@ export function createWorld(input: ResolveInput): World {
                 : "one of its entries, listed as possible targets";
             if (table.open) u.note = `a computed member of the table ${table.name} (line ${table.line}), which may be changed elsewhere (it is exported, a module's or a package's, written through a member or an index, or passed on): ${which}, or any function put in it`;
             else {
+              // A table nothing else can change: the call runs one of its
+              // entries or none, so the gap reaches the entries past the
+              // listed ones (none when every entry is listed).
               u.scope = "file";
+              if (u.name === "") {
+                u.reaches = { ids: entries.slice(listed.length) };
+                u.next = NEXT.tableCap;
+              }
               u.note = `a computed member of the table ${table.name} (line ${table.line}): ${which}, or a key the table does not hold`;
             }
           }
@@ -3465,20 +3702,21 @@ export function createWorld(input: ResolveInput): World {
           misses.push({ target: out.miss.target, name: out.miss.name, from: callerId, site: siteOf(path, call.line, call.column, out.ev) });
           if (call.implicit) continue;
           unresolvedSites++;
-          unknowns.push({
-            file: path,
-            line: call.line,
-            column: call.column,
-            name: call.name,
+          const u = gap({
             cause: out.cause,
+            place: { file: path, line: call.line, column: call.column },
+            reaches: { names: [call.name] },
+            next: NEXT.miss,
+            name: call.name,
             shape,
             caller: callerId,
-            scope: "file",
             note:
               out.cause === "miss"
                 ? `no definition of ${call.name} where the evidence points (${out.miss.target.split("\u0000").join(" ")})`
                 : `${out.miss.target.split("::").pop()} is an interface or a type alias without that member, or inherits from a class outside the graph`,
           });
+          if (cannotRunPlain(path, family, call, caller, true)) u.notPlain = true;
+          unknowns.push(u);
           continue;
         }
         // Several ids only when one name has several definitions in one place
@@ -3500,7 +3738,7 @@ export function createWorld(input: ResolveInput): World {
             const site = siteOf(path, call.line, call.column, dispatchEv(declared, contract, targets.length));
             for (const t of kept) addEdge(callerId, t, "dispatches_to", site);
             if (targets.length > DISPATCH_CAP) {
-              unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `the call may run ${targets.length} implementations or overrides of ${declared}; the ${targets.length - DISPATCH_CAP} past the first ${DISPATCH_CAP} in path order are not listed` });
+              unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.dispatchCap, shape, caller: callerId, note: `the call may run ${targets.length} implementations or overrides of ${declared}; the ${targets.length - DISPATCH_CAP} past the first ${DISPATCH_CAP} in path order are not listed` }));
             }
           }
           // A TypeScript interface admits any value of its shape, declared or
@@ -3510,7 +3748,7 @@ export function createWorld(input: ResolveInput): World {
           if (family === "js" && isTsInterface(d.key)) {
             const shaped = shapeTargets(d.key, call.name, new Set([...out.ids, ...targets]));
             if (shaped === null) {
-              unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: openShapeNote(d.key) });
+              unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.openShape, shape, caller: callerId, note: openShapeNote(d.key) }));
             } else {
               const iface = shortKey(d.key);
               if (shaped.classes.length > 0) {
@@ -3523,11 +3761,11 @@ export function createWorld(input: ResolveInput): World {
                 for (const t of keptIds) addEdge(callerId, t, "dispatches_to", site);
                 // Classes past the cap that run only methods already listed hide nothing.
                 if (leftIds.size > 0) {
-                  unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "fan-out-capped", shape, caller: callerId, scope: "file", note: `${shaped.classes.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.classes.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` });
+                  unknowns.push(gap({ cause: "fan-out-capped", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.dispatchCap, shape, caller: callerId, note: `${shaped.classes.length} classes match ${iface} by shape and may run ${declared}; the ${shaped.classes.length - SHAPE_CAP} past the first ${SHAPE_CAP} in path order are not listed` }));
                 }
               }
               if (shaped.open !== null) {
-                unknowns.push({ file: path, line: call.line, column: call.column, name: call.name, cause: "unsupported-rule", shape, caller: callerId, scope: "file", note: `a value of the interface ${iface} may be any object of that shape; ${shaped.open}` });
+                unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: call.line, column: call.column }, reaches: { names: [call.name] }, next: NEXT.openShape, shape, caller: callerId, note: `a value of the interface ${iface} may be any object of that shape; ${shaped.open}` }));
               }
             }
           }
@@ -3550,15 +3788,53 @@ export function createWorld(input: ResolveInput): World {
         }
       }
       // Uses as a value: a function or method named where it is not called.
+      // Each is counted for the function it names, in its own body too: a
+      // function that passes itself along may be called through that value.
       f.values.forEach((ref, i) => {
         const v = valueOf(path, i);
+        escapedRef(path, family, ref, v !== null);
         if (!v) return;
         const from = callerOf(ref.caller);
-        for (const to of v.ids) if (to !== from) addEdge(from, to, "uses_value", siteOf(path, ref.line, ref.column, v.ev, "value-ref"));
+        for (const to of v.ids) {
+          countUse(to, path, ref.line);
+          if (to !== from) addEdge(from, to, "uses_value", siteOf(path, ref.line, ref.column, v.ev, "value-ref"));
+        }
       });
       // Uses as a type: a class, interface or type named in an annotation, a cast or a type test.
       if (f.typeCuts) {
-        unknowns.push({ file: path, line: 0, column: 0, name: "", cause: "unsupported-rule", shape: "other", caller: path, scope: "file", note: `${f.typeCuts} type ${f.typeCuts === 1 ? "annotation is" : "annotations are"} too large to read whole (over 4,096 parts); the types past the cut are not recorded as type uses` });
+        // A type annotation holds no call: the cut hides type uses, which
+        // `references` reads by file, and no caller.
+        unknowns.push(gap({ cause: "unsupported-rule", place: { file: path, line: 0 }, reaches: { ids: [] }, next: NEXT.typeCut, note: `${f.typeCuts} type ${f.typeCuts === 1 ? "annotation is" : "annotations are"} too large to read whole (over 4,096 parts); the types past the cut are not recorded as type uses` }));
+      }
+      // A region the parser could not read may hide a call of any name
+      // written in or around it, or one through a value (scope "project").
+      // A name the file binds to another (`import { target as t }`, a
+      // default import, `import * as ns`) reaches what it is bound to too.
+      // The gap sits inside the innermost definition that holds it, so the
+      // callees of that definition say so.
+      for (const r of f.unread ?? []) {
+        let inner = -1;
+        f.defs.forEach((d, i) => {
+          if (d.line > r.line || d.endLine < r.line) return;
+          const best = f.defs[inner];
+          if (!best || d.endLine - d.line < best.endLine - best.line) inner = i;
+        });
+        const at = { file: path, line: r.line, column: r.column };
+        const base = { cause: "file-not-parsed" as const, place: at, next: NEXT.unread, name: "", scope: "project" as const, caller: callerOf(inner) };
+        unknowns.push(gap({ ...base, reaches: r.names === null ? "scope" : { names: r.names }, note: "the parser could not read the code here, so a call in it may be missing" }));
+        if (r.names === null) continue;
+        const named = new Set(r.names);
+        const ids = new Set<string>();
+        const files = new Set<string>();
+        for (const w of r.names) {
+          const v = resolveLocal(path, w);
+          if (v?.v === "sym") for (const id of v.ids) if (!named.has(defById.get(id)?.name ?? "")) ids.add(id);
+          if (v?.v === "mod" && v.file !== path) files.add(v.file);
+        }
+        const note = "the parser could not read the code here, and a name written there is bound to it (an import under another name, a default import or a module)";
+        // The first gap counts the region as a call through a value; these add only targets.
+        if (ids.size > 0) unknowns.push(gap({ ...base, scope: "file", reaches: { ids: [...ids].sort() }, note }));
+        for (const file of [...files].sort()) unknowns.push(gap({ ...base, scope: "file", reaches: { file }, note }));
       }
       for (const t of f.types) {
         const k = typeKey(path, family, t.ref, 0, true, family === "java" && t.caller >= 0 ? javaNestingOf(defById.get(callerOf(t.caller))) : null);
@@ -3587,7 +3863,10 @@ export function createWorld(input: ResolveInput): World {
       f.defs.forEach((d, i) => {
         for (const b of d.dynamicBases ?? []) {
           if (b.head && family === "python" && (isTyping(path, b.head, "Generic") || isTyping(path, b.head, "Protocol"))) continue;
-          unknowns.push({ file: path, line: b.line, column: b.column, name: "", cause: "dynamic-base", shape: "other", caller: defIds[i] as string, scope: "file", note: `${d.name} names a base with an expression the graph does not read, so the class it extends is not known` });
+          // A call through the unknown base may run the class or any method it defines.
+          const owner = d.owner ? `${d.owner}.${d.name}` : d.name;
+          const own = [defIds[i] as string, ...f.defs.flatMap((m, j) => (m.owner === owner ? [defIds[j] as string] : []))];
+          unknowns.push(gap({ cause: "dynamic-base", place: { file: path, line: b.line, column: b.column }, reaches: { ids: own }, next: NEXT.dynamicBase, caller: defIds[i] as string, note: `${d.name} names a base with an expression the graph does not read, so the class it extends is not known` }));
         }
       });
       // Overrides: a method to the member of a base it overrides or implements.
@@ -3687,7 +3966,7 @@ export function createWorld(input: ResolveInput): World {
           let byKey = unread.get(path);
           if (!byKey) unread.set(path, (byKey = new Map()));
           if (byKey.has(k.key)) continue;
-          byKey.set(k.key, { file: path, line: imp.line, column: imp.column, name: "", cause: "unsupported-rule", shape: "other", caller: path, scope: "file", candidates: ids, note: `${n.local} is imported here, and no use of it in this file was read; a use in a place the graph does not read may be missing from its references` });
+          byKey.set(k.key, gap({ cause: "unsupported-rule", place: { file: path, line: imp.line, column: imp.column }, reaches: { ids }, next: NEXT.unreadImport, candidates: ids, note: `${n.local} is imported here, and no use of it in this file was read; a use in a place the graph does not read may be missing from its references` }));
         }
       }
     }
@@ -3710,6 +3989,20 @@ export function createWorld(input: ResolveInput): World {
         }
       }
       for (const byKey of unread.values()) unknowns.push(...byKey.values());
+    }
+
+    // Escape analysis runs once every file is resolved, within the budget:
+    // a pass the budget stops leaves no escape read as whole, and every
+    // caller list a floor.
+    let escapes: Escapes = { uses, unbound, reach: new Map(), modules: new Map(), loadAny: [], offered: new Set(), opaque: new Map(), scripts: new Set(), members: new Map(), cut: true };
+    let escapesCut = stopped;
+    if (!stopped) {
+      try {
+        escapes = escapePaths(uses, unbound, marks);
+      } catch (error) {
+        if (!(error instanceof BudgetStop)) throw error;
+        escapesCut = true;
+      }
     }
 
     // ---------- importers ----------
@@ -3748,7 +4041,365 @@ export function createWorld(input: ResolveInput): World {
     const summaries = new Map<string, InvocationSummary>();
     for (const [id, d] of defById) if (d.invokes || d.returns) summaries.set(id, { params: d.params ?? [], invokes: d.invokes ?? [], returns: returnsOf(id), returnsOther: d.returnsOther === true });
 
-    return { nodes, edges: callerEdges, references: refEdges, dispatch, summaries, importers, defsByFile, misses, unknowns, unresolvedSites, externalSites, budgetFiles };
+    return { nodes, edges: callerEdges, references: refEdges, dispatch, summaries, importers, defsByFile, misses, unknowns, unresolvedSites, externalSites, budgetFiles, escapes, escapesCut };
+  };
+
+  // What each function's escapes reach once every file is resolved
+  // (rules E and H of the list floor). A module escapes when a mark says
+  // so: each definition it offers by its export table, recursively through
+  // a namespace re-export, may be reached by a computed name; and each
+  // module it forwards names from escapes too, for a definition a change
+  // removed there. A name built at run time: `eval` reaches its file's
+  // definitions and imports; `eval` and the global ones reach every
+  // definition of a script (a file with no import and no export) and, as
+  // they can load a module, every definition a module offers; a load by a
+  // computed path reaches every definition a module offers.
+  const escapePaths = (uses: Escapes["uses"], unbound: Escapes["unbound"], marks: Map<string, Place>): Escapes => {
+    const reach = new Map<string, Reach[]>();
+    // The first place of each kind only: the floor's reason names that one
+    // (impact.ts), so a symbol keeps at most three, however many places
+    // there are.
+    const addReach = (id: string, r: Reach) => {
+      const list = reach.get(id);
+      if (!list) reach.set(id, [r]);
+      else if (!list.some((x) => x.why === r.why)) list.push(r);
+    };
+    const jsFiles = input.files.filter((x) => familyOf(x.facts.lang) === "js");
+    // A load fact that holds in its file: one marked `cjs` holds outside a CommonJS file only.
+    const loads = (path: string, e: EscapeFact) => e.kind === "load" && !(e.cjs === true && /\.c[jt]s$/.test(path));
+    // Every definition a module offers, and the modules whole namespaces of
+    // it name. A name the graph cannot follow to one definition (a chain
+    // of re-exports too deep, two stars that offer it) may come from any
+    // module the file forwards names from, so each of those counts whole.
+    // A name the walk of `export *` did not reach before its step budget ran
+    // out can only come through a star: `stars` names the modules the file
+    // stars from when its walk was cut. `skip` leaves out the names a
+    // module above already gives itself, and `default`, which no star brings.
+    // Escape analysis walks on a step budget of its own (escapeWalk).
+    // `open`: the modules of `export *` branches a lookup gave up on (too
+    // deep) though another branch gave the name, and `openNames` those
+    // names: such a branch may bring the name from elsewhere (issue 448).
+    const offers = (file: string, skip: NameSet | null = null): { ids: string[]; modules: string[]; stars: string[]; names: Iterable<string>; open: string[]; openNames: Set<string> } => {
+      const ids: string[] = [];
+      const modules: string[] = [];
+      const open: string[] = [];
+      const openNames = new Set<string>();
+      let gap = false;
+      const names = exportedJsNames(file, escapeWalk);
+      for (const [name] of names) {
+        checkBudget();
+        if (skip && hasName(skip, name)) continue;
+        const v = index.exports(file, name, 0);
+        if (v?.v === "sym") {
+          ids.push(...v.ids);
+          if (v.unfollowed) {
+            open.push(...v.unfollowed);
+            openNames.add(name);
+          }
+        } else if (v?.v === "mod") modules.push(v.file);
+        else if (v?.v === "gap") gap = true;
+      }
+      if (gap) modules.push(...forwards(file));
+      const stars: string[] = [];
+      if (namesCut.has(file)) {
+        for (const imp of facts.get(file)?.imports ?? []) {
+          if (!imp.reexport || !imp.star) continue;
+          const mod = jsSpec(file, imp.line, imp.spec);
+          if (mod !== null && "file" in mod) stars.push(mod.file);
+        }
+      }
+      return { ids, modules, stars, names: names.keys(), open, openNames };
+    };
+    // The modules a module forwards names from: `export ... from`, and a
+    // local `export { f }` or `export default f` of an imported name.
+    const forwards = (file: string): string[] => {
+      const f = facts.get(file);
+      if (!f) return [];
+      const out: string[] = [];
+      for (const imp of f.imports) {
+        if (!imp.reexport) continue;
+        const mod = jsSpec(file, imp.line, imp.spec);
+        if (mod !== null && "file" in mod) out.push(mod.file);
+      }
+      const b = index.bindings(file).names;
+      for (const local of [...f.exportsLocal.map((e) => e.local), ...(f.defaultExport ? [f.defaultExport] : [])]) {
+        const via = importFileOf(file, local, undefined);
+        if (via && b.has(local)) out.push(via);
+      }
+      return out;
+    };
+    const modules = new Map<string, Place>();
+    const offered = new Set<string>();
+    const NO_KEEP: ReadonlySet<string> = new Set();
+    const walk = (start: string, place: Place) => {
+      // A star's skip is a NameSet: each hop of a long chain of stars adds
+      // its own names to the set above it without copying it.
+      type Visit = { file: string; whole: boolean; skip: NameSet | null };
+      const queue: Visit[] = [{ file: start, whole: true, skip: null }];
+      const seen = new Set<string>();
+      // A module a cut walk stars from, with the names it was counted
+      // without. A later visit that skips fewer names reaches more, so it
+      // runs again with only the names both skip; the set only shrinks.
+      const skipped = new Map<string, NameSet>();
+      // Comparing two skips name by name costs their size, so a long chain
+      // that meets one module many times costs the square of the chain. Most
+      // skips are made from another, so most comparisons need not list a
+      // name: `made` keeps the skip a set was made from, the names it added
+      // and its size, and `within` the pairs found one inside the other.
+      const made = new Map<NameSet, { from: NameSet | null; added: string[]; size: number }>([[NO_NAMES, { from: null, added: [], size: 0 }]]);
+      const within = new Map<NameSet, Set<NameSet>>();
+      const sizeOf = (s: NameSet): number => {
+        const m = made.get(s);
+        if (m) return m.size;
+        const size = [...namesIn(s)].length;
+        made.set(s, { from: null, added: [], size });
+        return size;
+      };
+      const known = (x: NameSet, y: NameSet) => x === y || sizeOf(x) === 0 || within.get(x)?.has(y) === true;
+      // Whether every name of x is in y: y was made, up to 32 steps back,
+      // from a set that holds x; or x was made from a set known inside y (or
+      // inside the set y was made from) and y has the names x added; or, when
+      // `list`, name by name. A found pair is kept in `within`.
+      const isWithin = (x: NameSet, y: NameSet, list: boolean): boolean => {
+        if (known(x, y)) return true;
+        if (sizeOf(x) > sizeOf(y)) return false;
+        let ok = false;
+        for (let a = made.get(y)?.from, steps = 0; !ok && a && steps < 32 && sizeOf(a) >= sizeOf(x); a = made.get(a)?.from, steps++) {
+          walkWork.steps++;
+          ok = known(x, a);
+        }
+        const mx = made.get(x);
+        const fy = made.get(y)?.from;
+        if (!ok && mx?.from && (known(mx.from, y) || (fy && known(mx.from, fy)))) ok = mx.added.every((n) => (walkWork.steps++, hasName(y, n)));
+        if (!ok && list) ok = [...namesIn(x)].every((n) => hasName(y, n));
+        if (ok) within.set(x, (within.get(x) ?? new Set()).add(y));
+        return ok;
+      };
+      // A skip with the names both skip: `asked` when it is inside `had`;
+      // the set `asked` was made from, when that is inside `had`, with the
+      // names `asked` added that `had` has; or name by name.
+      const meet = (had: NameSet, asked: NameSet): NameSet => {
+        if (isWithin(asked, had, false)) return asked;
+        const m = made.get(asked);
+        if (m?.from && isWithin(m.from, had, false)) {
+          let s = m.from;
+          const added: string[] = [];
+          for (const n of m.added) {
+            walkWork.steps++;
+            const next = hasName(had, n) ? withName(s, n) : s;
+            if (next !== s) added.push(n);
+            s = next;
+          }
+          if (added.length > 0) made.set(s, { from: m.from, added, size: sizeOf(m.from) + added.length });
+          return s;
+        }
+        const both = [...namesIn(had)].filter((n) => hasName(asked, n));
+        const s = both.reduce<NameSet>((t, n) => withName(t, n), NO_NAMES);
+        made.set(s, { from: null, added: [], size: both.length });
+        return s;
+      };
+      while (queue.length > 0) {
+        checkBudget();
+        const { file, whole, skip: asked } = queue.pop() as Visit;
+        if (seen.has(`${file}\0${whole}`)) continue;
+        let skip: NameSet | null = null;
+        if (asked) {
+          const had = skipped.get(file);
+          if (had && isWithin(had, asked, true)) continue;
+          skip = had ? meet(had, asked) : asked;
+          skipped.set(file, skip);
+        } else seen.add(`${file}\0${whole}`);
+        if (!modules.has(file)) modules.set(file, place);
+        if (whole && familyOf(facts.get(file)?.lang ?? "go") === "js") {
+          const o = offers(file, skip);
+          for (const id of o.ids) addReach(id, { why: "module", ...place });
+          for (const m of o.modules) queue.push({ file: m, whole: true, skip: null });
+          const listed = o.stars.length > 0 || o.open.length > 0 ? ["default", ...o.names] : [];
+          // A star visit skips the names given above it and, but for `keep`, the module's own.
+          const skipOwn = (keep: ReadonlySet<string>): NameSet => {
+            const from = skip ?? NO_NAMES;
+            let given = from;
+            const added: string[] = [];
+            for (const n of listed) {
+              if (keep.has(n)) continue;
+              const next = withName(given, n);
+              if (next !== given) added.push(n);
+              given = next;
+            }
+            if (added.length > 0) made.set(given, { from, added, size: sizeOf(from) + added.length });
+            return given;
+          };
+          if (o.stars.length > 0) {
+            const given = skipOwn(NO_KEEP);
+            for (const m of o.stars) queue.push({ file: m, whole: true, skip: given });
+          }
+          // A branch a lookup gave up on is visited for the names it may bring instead.
+          if (o.open.length > 0) {
+            const given = skipOwn(o.openNames);
+            for (const m of new Set(o.open)) queue.push({ file: m, whole: true, skip: given });
+          }
+        }
+        for (const m of forwards(file)) queue.push({ file: m, whole: false, skip: null });
+      }
+    };
+    for (const [file, place] of marks) walk(file, place);
+
+    // Names built at run time, from the facts of each file.
+    const loadAny: Escapes["loadAny"] = [];
+    const loadPlaces = new Set<string>();
+    const runtime: { why: "eval" | "global"; place: Place }[] = [];
+    for (const { path, facts: f } of jsFiles) {
+      checkBudget();
+      // Every eval site of a file sees the same definitions and imports, and
+      // addReach keeps the first eval place of each: one site reads them.
+      let evalRead = false;
+      for (const e of f.escapes ?? []) {
+        const place = { file: path, line: e.line };
+        if (e.kind === "module") {
+          const mod = jsSpec(path, e.line, e.spec);
+          if (mod !== null && "file" in mod && !marks.has(mod.file)) {
+            marks.set(mod.file, place);
+            walk(mod.file, place);
+          }
+        } else if (e.kind === "own") {
+          if (!marks.has(path)) {
+            marks.set(path, place);
+            walk(path, place);
+          }
+        } else if (e.kind === "load") {
+          // One place once, so "and N more places" counts places.
+          if (loads(path, e) && !loadPlaces.has(`${path}:${e.line}`)) {
+            loadPlaces.add(`${path}:${e.line}`);
+            loadAny.push({ ...place, why: "load" });
+          }
+        } else {
+          runtime.push({ why: e.kind, place });
+          if (e.kind === "eval" && !evalRead) {
+            evalRead = true;
+            // Its own file's definitions and every definition the file imports.
+            for (const d of f.defs) addReach(symbolId(path, d), { why: "eval", ...place });
+            for (const imp of f.imports) {
+              const mod = jsSpec(path, imp.line, imp.spec);
+              if (mod === null || !("file" in mod)) continue;
+              const ids = imp.namespace !== null || imp.star ? offers(mod.file).ids : imp.names.flatMap((n) => { const v = index.exports(mod.file, n.imported, 0); return v?.v === "sym" ? v.ids : []; });
+              for (const id of ids) addReach(id, { why: "eval", ...place });
+            }
+          }
+        }
+      }
+    }
+    // A script's definitions are names of the global scope. A file with an
+    // `import` or `export` statement is a module, whatever it exports.
+    const script = (file: string, f: FileFacts) =>
+      !/\.(mjs|cjs|mts|cts)$/.test(file) && f.esm !== true && f.imports.length === 0 && f.exportsLocal.length === 0 && f.defaultExport === null && !f.defs.some((d) => d.exported) && !(f.escapes ?? []).some((e) => e.kind === "own" || e.kind === "module" || e.kind === "load");
+    const scripts = new Set<string>();
+    for (const { path, facts: f } of jsFiles) if (script(path, f)) scripts.add(path);
+    // The first place of each kind, as addReach keeps, in one pass.
+    const firstRuntime: typeof runtime = [];
+    for (const r of runtime) if (!firstRuntime.some((x) => x.why === r.why)) firstRuntime.push(r);
+    if (runtime.length > 0) {
+      for (const { path, facts: f } of jsFiles) {
+        if (!scripts.has(path)) continue;
+        for (const d of f.defs) if (d.topLevel || d.kind === "method") for (const r of firstRuntime) addReach(symbolId(path, d), { why: r.why, ...r.place });
+      }
+    }
+    // Code built at run time can load any module: each eval or global site is a load by a computed path too.
+    for (const r of runtime) loadAny.push({ ...r.place, why: r.why });
+    if (loadAny.length > 0) {
+      for (const { path } of jsFiles) {
+        checkBudget();
+        for (const id of offers(path).ids) offered.add(id);
+      }
+    }
+    // What an opaque file reaches: its own definitions, the modules it
+    // imports (a named import, the module the name comes from through
+    // re-exports; a whole module, every module it re-exports), the global
+    // scope when it reads a free name or is a script, and every module when
+    // it may load any.
+    const opaque: Escapes["opaque"] = new Map();
+    // Global names declared as plain data (`declare const V: string`), per
+    // project: a read of one in the project that declares it reaches nothing.
+    const plain = new Map<string, Set<string>>();
+    const declare = (file: string, names: readonly string[]) => {
+      const project = projectFolder(model, input.goModules, file);
+      const set = plain.get(project) ?? new Set<string>();
+      for (const n of names) set.add(n);
+      plain.set(project, set);
+    };
+    for (const { path, facts: f } of jsFiles) {
+      const names = ambientOf(path, f);
+      if (names.length > 0) declare(path, names);
+    }
+    for (const d of input.declared ?? []) declare(d.file, d.names);
+    for (const { path, facts: f } of jsFiles) {
+      checkBudget();
+      const own = plain.size > 0 ? plain.get(projectFolder(model, input.goModules, path)) : undefined;
+      const all = (f.opaque ?? []).filter((o) => !(o.name !== undefined && o.reach === "global" && own?.has(o.name)));
+      if (all.length === 0) continue;
+      // A load-any place is shown first: the reason says why it reaches every function.
+      const runs = (f.escapes ?? []).filter((e) => e.kind === "eval" || e.kind === "global" || loads(path, e));
+      const loose = runs.map((e): OpaqueFact => ({ why: e.kind === "load" ? "loads a module by a computed path" : e.kind === "eval" ? "runs `eval`" : "builds code or a name at run time on the global scope", line: e.line, count: 1, reach: "any" }));
+      const shown = [...all, ...loose].filter((o) => o.reach === "any");
+      const any = shown.length > 0;
+      const first = (any ? shown : all).reduce((a, b) => (b.line < a.line ? b : a));
+      const seen = new Set<string>([path]);
+      const queue: string[] = [];
+      let unbound = false;
+      const take = (line: number, spec: string, names: ImportFact["names"] | null) => {
+        const mod = jsSpec(path, line, spec);
+        if (mod === null || "gap" in mod) unbound = true;
+        if (mod === null || !("file" in mod)) return;
+        if (names === null) return void queue.push(mod.file);
+        seen.add(mod.file);
+        for (const n of names) {
+          const v = index.exports(mod.file, n.imported, 0);
+          if (v?.v === "sym") for (const id of v.ids) seen.add(defById.get(id)?.file ?? mod.file);
+          else queue.push(v?.v === "mod" ? v.file : mod.file);
+        }
+      };
+      // `export ... from` binds no name the file's own code can read.
+      for (const imp of f.imports) if (!imp.typeOnly && !imp.reexport) take(imp.line, imp.spec, imp.namespace !== null || imp.star || imp.names.length === 0 ? null : imp.names);
+      for (const e of f.escapes ?? []) if (e.kind === "module") take(e.line, e.spec, null);
+      // A whole module: it and every module it re-exports.
+      const whole = new Set<string>();
+      for (let m = queue.pop(); m !== undefined; m = queue.pop()) {
+        checkBudget();
+        if (whole.has(m)) continue;
+        whole.add(m);
+        seen.add(m);
+        queue.push(...forwards(m));
+      }
+      opaque.set(path, {
+        file: path, line: first.line, why: first.why, count: all.reduce((k, o) => k + o.count, 0), all,
+        any, global: scripts.has(path) || all.some((o) => o.reach === "global"), unbound, reach: [...seen].sort(),
+      });
+    }
+    const members: Escapes["members"] = new Map();
+    // A type the repository declares under a name is never plain, though
+    // the name is one of a plain type (`class Record`, `interface Buffer`).
+    let declared: Set<string> | null = null;
+    const ownType = (names: readonly string[]): boolean => {
+      declared ??= new Set(jsFiles.flatMap(({ facts: f }) => [...f.defs.map((d) => d.name), ...(f.variables ?? [])]));
+      return names.some((n) => (declared as Set<string>).has(n));
+    };
+    for (const { path, facts: f } of jsFiles) {
+      checkBudget();
+      for (const m of f.looseMembers ?? []) {
+        if (m.plain && !ownType(m.plain)) continue;
+        const kept = members.get(`js:${m.why}`);
+        if (kept) kept.count += m.count;
+        else members.set(`js:${m.why}`, { file: path, line: m.line, count: m.count, ...(m.why === "*" ? { places: [] } : {}) });
+        // A read by a computed key: the first place in each file, and whether any passes its value on.
+        const all = members.get(`js:${m.why}`);
+        if (all?.places) {
+          all.places.push({ file: path, line: m.line });
+          if (m.passed) all.passed = true;
+        }
+      }
+    }
+    // Work past the deadline in the last file is not read as whole either.
+    checkBudget();
+    return { uses, unbound, reach, modules, loadAny, offered, opaque, scripts, members };
   };
 
   const trace = (files: Iterable<string>): SiteTrace[] => {
@@ -3811,8 +4462,14 @@ export function createWorld(input: ResolveInput): World {
   // step budget, so a diamond of barrels costs one visit a file and a cycle
   // ends where it closes.
   const jsNames = new Map<string, Map<string, number | null>>();
-  let walkSteps = 0;
-  let walkCut: Cut | null = null;
+  // A walk's budget of steps and the cut it met. The comparison of the
+  // change has its own, and escape analysis, which may list what every
+  // module offers first, another: neither spends the other's.
+  type WalkLimit = { steps: number; cut: Cut | null; note: string };
+  const compareWalk: WalkLimit = { steps: 0, cut: null, note: `the walk of export * stopped after ${EXPORT_WALK_STEPS} files; names re-exported past it were not compared` };
+  const escapeWalk: WalkLimit = { steps: 0, cut: null, note: `the walk of export * for escape analysis stopped after ${EXPORT_WALK_STEPS} files; a module may offer names re-exported past it that were not listed` };
+  // The modules whose last walk the step budget cut: their names miss some re-exported ones.
+  const namesCut = new Set<string>();
   type Frame = { file: string; names: Map<string, number | null>; stars: { file: string; line: number }[]; next: number; partial: boolean };
   const ownJsNames = (file: string): Frame => {
     const names = new Map<string, number | null>();
@@ -3833,7 +4490,7 @@ export function createWorld(input: ResolveInput): World {
     }
     return { file, names, stars, next: 0, partial: false };
   };
-  const exportedJsNames = (root: string): Map<string, number | null> => {
+  const exportedJsNames = (root: string, limit: WalkLimit): Map<string, number | null> => {
     const kept = jsNames.get(root);
     if (kept) return kept;
     const merge = (into: Frame, from: Map<string, number | null>, line: number) => {
@@ -3841,25 +4498,23 @@ export function createWorld(input: ResolveInput): World {
     };
     const open = new Set<string>([root]);
     const stack: Frame[] = [ownJsNames(root)];
+    let cut = false;
     for (;;) {
+      // Escape analysis stops at the build's deadline; the comparison of the
+      // change, which runs after it, has its step budget alone.
+      if (limit === escapeWalk) checkBudget();
       const top = stack[stack.length - 1] as Frame;
       if (top.next < top.stars.length) {
         const star = top.stars[top.next++] as { file: string; line: number };
         const done = jsNames.get(star.file);
         if (done) merge(top, done, star.line);
         else if (open.has(star.file)) top.partial = true;
-        else if (walkSteps >= EXPORT_WALK_STEPS) {
+        else if (limit.steps >= EXPORT_WALK_STEPS) {
           top.partial = true;
-          walkCut ??= {
-            by: "export-walk",
-            at: root,
-            omitted: null,
-            exact: false,
-            unit: "files",
-            note: `the walk of export * stopped after ${EXPORT_WALK_STEPS} files; names re-exported past it were not compared`,
-          };
+          cut = true;
+          limit.cut ??= { by: "export-walk", at: root, omitted: null, exact: false, unit: "files", note: limit.note };
         } else {
-          walkSteps++;
+          limit.steps++;
           open.add(star.file);
           stack.push(ownJsNames(star.file));
         }
@@ -3869,7 +4524,11 @@ export function createWorld(input: ResolveInput): World {
       open.delete(top.file);
       if (!top.partial) jsNames.set(top.file, top.names);
       const parent = stack[stack.length - 1];
-      if (!parent) return top.names;
+      if (!parent) {
+        if (cut) namesCut.add(root);
+        else namesCut.delete(root);
+        return top.names;
+      }
       merge(parent, top.names, (parent.stars[parent.next - 1] as { line: number }).line);
       if (top.partial) parent.partial = true;
     }
@@ -3889,7 +4548,7 @@ export function createWorld(input: ResolveInput): World {
     };
     let names = new Map<string, number | null>();
     if (family === "js") {
-      names = exportedJsNames(file);
+      names = exportedJsNames(file, compareWalk);
     } else if (family === "python") {
       for (const d of f.defs) if (d.topLevel) names.set(d.name, d.line);
       for (const [k] of index.bindings(file).names) names.set(k, null);
@@ -3958,8 +4617,10 @@ export function createWorld(input: ResolveInput): World {
     const [head, ...rest] = path;
     if (head === undefined) return { kind: "none" };
     let v = resolveLocal(file, head);
-    for (const name of rest) {
-      if (v === null || v.v === "ext" || v.v === "gap" || v.v === "miss") break;
+    for (const [i, name] of rest.entries()) {
+      if (v === null || v.v === "ext" || v.v === "gap") break;
+      // A miss before the last name: the names after it were never looked up.
+      if (v.v === "miss") return { kind: "miss", target: v.target, name: v.name, past: rest.slice(i) };
       const before: Value = v;
       v = attr(v, name);
       // A name a module or a class does not hold: a miss where it was looked up.
@@ -3973,7 +4634,7 @@ export function createWorld(input: ResolveInput): World {
     return modLookup(moduleOf(file, familyOf(f.lang), { spec, line: 0 }));
   };
 
-  return { resolveAll, trace, surface, importsOf, node, walkCuts: () => [walkCut, lookupCut].filter((c): c is Cut => c !== null), lookup, moduleLookup };
+  return { resolveAll, trace, surface, importsOf, node, walkCuts: () => [compareWalk.cut, escapeWalk.cut, lookupCut].filter((c): c is Cut => c !== null), lookup, moduleLookup };
 }
 
 // The name an unaliased Go import is used by when its package is not in the

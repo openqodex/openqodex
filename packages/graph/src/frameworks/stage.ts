@@ -24,7 +24,8 @@ export const FRAMEWORK_DATA_VERSION = 2;
 export { MAX_ENTITIES_PER_APP, MAX_EDGES_PER_APP } from "./plugin.js";
 
 // Applies the caps to one plugin's output, in the order the plugin emitted it.
-function capPerApp(plugin: string, entities: Entity[], edges: FrameworkEdge[], unknowns: FrameworkUnknown[]): { entities: Entity[]; edges: FrameworkEdge[] } {
+// What no application reaches may be in any project, so its cut reaches the build.
+export function capPerApp(plugin: string, entities: Entity[], edges: FrameworkEdge[], unknowns: FrameworkUnknown[]): { entities: Entity[]; edges: FrameworkEdge[] } {
   const count = new Map<string, number>();
   const droppedIds = new Set<string>();
   const droppedPerApp = new Map<string, number>();
@@ -48,8 +49,8 @@ function capPerApp(plugin: string, entities: Entity[], edges: FrameworkEdge[], u
     droppedEdges.set(k, (droppedEdges.get(k) ?? 0) + 1);
     return false;
   });
-  for (const [k, n] of droppedPerApp) unknowns.push({ plugin, site: null, scope: k === "-" ? { project: "" } : { app: k }, affects: ["handles", "renders", "tests"], cause: "fan-out-capped", name: null, note: `${n} entities past the ${MAX_ENTITIES_PER_APP} kept for one application were left out`, count: n, exact: true });
-  for (const [k, n] of droppedEdges) unknowns.push({ plugin, site: null, scope: k === "-" ? { project: "" } : { app: k }, affects: ["handles", "renders", "tests"], cause: "fan-out-capped", name: null, note: `${n} edges past the ${MAX_EDGES_PER_APP} kept for one application were left out`, count: n, exact: true });
+  for (const [k, n] of droppedPerApp) unknowns.push({ plugin, site: null, scope: k === "-" ? { build: true } : { app: k }, affects: ["handles", "renders", "tests"], cause: "fan-out-capped", name: null, note: `${n} entities past the ${MAX_ENTITIES_PER_APP} kept for one application were left out`, count: n, exact: true });
+  for (const [k, n] of droppedEdges) unknowns.push({ plugin, site: null, scope: k === "-" ? { build: true } : { app: k }, affects: ["handles", "renders", "tests"], cause: "fan-out-capped", name: null, note: `${n} edges past the ${MAX_EDGES_PER_APP} kept for one application were left out`, count: n, exact: true });
   return { entities: keptEntities, edges: keptEdges };
 }
 

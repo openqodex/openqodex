@@ -1,0 +1,23 @@
+{
+  "covers": "`import.meta.resolve` is not on the exact list of the module's own place, so the file stays one the reader cannot vouch for",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/b.ts": "import { f } from \"./a\";\nexport const where = import.meta.resolve(\"./a\");\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/b.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "uses `import.meta` that the reader does not read",
+      "at": "src/b.ts:2"
+    }
+  ]
+}

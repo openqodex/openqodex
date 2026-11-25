@@ -1,0 +1,19 @@
+{
+  "covers": "a `__filename` bound by a default import is no proof of the file's own place: any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/lib/paths.mjs": "import { fileURLToPath } from \"node:url\";\nexport default fileURLToPath(import.meta.url);\n",
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nimport __filename from \"./lib/paths.mjs\";\nconst k = \"f\";\ncreateRequire(__filename)(\"./a.cjs\")[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

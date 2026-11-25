@@ -64,8 +64,8 @@ export const MAX_UNKNOWNS = 5000;
 export const MAX_APPS = 2000;
 export const MAX_ROLES = 20_000;
 
-type Spend = "facts" | "lookups" | "steps" | "mounts" | "registrations" | "middlewareEdges" | "apps" | "roles";
-const LIMIT: Record<Spend, number> = { facts: MAX_FACTS_READ, lookups: MAX_LOOKUPS, steps: MAX_STEPS, mounts: MAX_MOUNTS, registrations: MAX_REGISTRATIONS, middlewareEdges: MAX_MIDDLEWARE_EDGES, apps: MAX_APPS, roles: MAX_ROLES };
+type Spend = "facts" | "lookups" | "steps" | "mounts" | "registrations" | "middlewareEdges" | "apps" | "roles" | "unknowns";
+const LIMIT: Record<Spend, number> = { facts: MAX_FACTS_READ, lookups: MAX_LOOKUPS, steps: MAX_STEPS, mounts: MAX_MOUNTS, registrations: MAX_REGISTRATIONS, middlewareEdges: MAX_MIDDLEWARE_EDGES, apps: MAX_APPS, roles: MAX_ROLES, unknowns: MAX_UNKNOWNS };
 
 type Fact<K extends HonoFact["kind"]> = Extract<HonoFact, { kind: K }>;
 
@@ -189,8 +189,8 @@ function run(index: PluginIndex<HonoFact>): Analysis {
   const registrations: Registration[] = [];
   const apps: Detection[] = [];
 
-  const spent: Record<Spend, number> = { facts: 0, lookups: 0, steps: 0, mounts: 0, registrations: 0, middlewareEdges: 0, apps: 0, roles: 0 };
-  const refused: Record<Spend, number> = { facts: 0, lookups: 0, steps: 0, mounts: 0, registrations: 0, middlewareEdges: 0, apps: 0, roles: 0 };
+  const spent: Record<Spend, number> = { facts: 0, lookups: 0, steps: 0, mounts: 0, registrations: 0, middlewareEdges: 0, apps: 0, roles: 0, unknowns: 0 };
+  const refused: Record<Spend, number> = { facts: 0, lookups: 0, steps: 0, mounts: 0, registrations: 0, middlewareEdges: 0, apps: 0, roles: 0, unknowns: 0 };
   const take = (k: Spend, n = 1): boolean => {
     if (spent[k] + n > LIMIT[k]) {
       refused[k] += n;
@@ -200,14 +200,12 @@ function run(index: PluginIndex<HonoFact>): Analysis {
     return true;
   };
   const exhausted = (k: Spend): boolean => refused[k] > 0;
-  let unknownsLeftOut = 0;
   const seenUnknown = new Set<string>();
   const addUnknown = (u: FrameworkUnknown) => {
     const key = `${u.cause}\0${u.site ? `${u.site.file}:${u.site.line}:${u.site.column}` : JSON.stringify(u.scope)}\0${u.note}`;
     if (seenUnknown.has(key)) return;
     seenUnknown.add(key);
-    if (unknowns.length >= MAX_UNKNOWNS) unknownsLeftOut++;
-    else unknowns.push(u);
+    if (take("unknowns")) unknowns.push(u);
   };
   const lookup = (file: string, path: readonly string[]): Lookup => {
     if (!take("lookups")) return { kind: "gap", cause: "budget", note: `the Hono plugin makes at most ${MAX_LOOKUPS} lookups in one build`, candidates: null };
@@ -382,7 +380,7 @@ function run(index: PluginIndex<HonoFact>): Analysis {
   const fromImport = (file: string, path: readonly string[]): Deref => {
     let found: Lookup = lookup(file, path);
     let target: { file: string; name: string } | null = null;
-    if (found.kind === "miss") target = { file: found.target, name: found.name };
+    if (found.kind === "miss") target = found.past ? null : { file: found.target, name: found.name };
     else if (found.kind === "none" && path.length === 1) target = importedFrom(file, path[0] as string);
     else if (found.kind === "none" && path.length === 2) {
       found = lookup(file, [path[0] as string]);
@@ -571,13 +569,9 @@ function run(index: PluginIndex<HonoFact>): Analysis {
   const typeOf = (prop: string): Base["type"] | null => (METHOD_SET.has(prop) || prop === "on" ? "route" : prop === "use" ? "use" : prop === "openapi" ? "openapi" : prop === "route" ? "mount" : prop === "mount" ? "foreign" : null);
 
   const files = index.factFiles().filter(isEnabled);
-  let unreadFiles = 0;
   for (const file of files) {
     const fi = fx(file);
-    if (fi.unread) {
-      unreadFiles++;
-      continue;
-    }
+    if (fi.unread) continue;
     if (fi.tooLarge) {
       addUnknown({ plugin: PLUGIN, site: { file, line: 1, column: 1 }, scope: { file }, affects: ["handles", "mounts", "applies_middleware"], cause: "file-not-parsed", name: null, note: `the file is ${fi.tooLarge.bytes} bytes, over the ${MAX_SOURCE_BYTES}-byte cap of the Hono plugin, so its routes were not read`, count: null, exact: false });
       continue;
@@ -1012,16 +1006,24 @@ function run(index: PluginIndex<HonoFact>): Analysis {
   const whole = { build: true } as const;
   for (const [root, n] of depthCut) addUnknown({ plugin: PLUGIN, site: null, scope: whole, affects: ["mounts", "handles"], cause: "fan-out-capped", name: null, note: `routers mounted more than ${MAX_MOUNT_DEPTH} levels deep under ${root} were not followed (${n} mounts); their routes are not listed`, count: n, exact: true });
   const capped = (affects: FrameworkUnknown["affects"], cause: FrameworkUnknown["cause"], count: number | null, note: string) => unknowns.push({ plugin: PLUGIN, site: null, scope: whole, affects, cause, name: null, note, count, exact: count !== null });
-  if (unreadFiles > 0) capped(["handles", "mounts", "applies_middleware"], "budget", unreadFiles, `${unreadFiles} files were not read: the Hono plugin reads at most ${MAX_FACTS_READ} facts in one build`);
-  if (refused.lookups > 0) capped(["handles", "mounts", "applies_middleware"], "budget", refused.lookups, `${refused.lookups} names were not looked up: the Hono plugin makes at most ${MAX_LOOKUPS} lookups in one build`);
-  if (refused.steps > 0) capped(["handles", "mounts", "applies_middleware"], "budget", null, `the Hono plugin stopped following values after ${MAX_STEPS} steps in this build; routes past it may be missing`);
-  if (refused.mounts > 0) capped(["mounts", "handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_MOUNTS} router mounts in this build; the routes past it are not listed`);
-  if (refused.registrations > 0) capped(["handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_REGISTRATIONS} registrations in this build; the routes past it are not listed`);
-  if (refused.middlewareEdges > 0) capped(["applies_middleware"], "fan-out-capped", refused.middlewareEdges, `${refused.middlewareEdges} middleware edges were left out: the Hono plugin keeps at most ${MAX_MIDDLEWARE_EDGES} in one build`);
   if (middlewareOmitted > 0) capped(["applies_middleware"], "fan-out-capped", middlewareOmitted, `${middlewareOmitted} middleware entries past ${MAX_MIDDLEWARE_CHAIN} in one chain were left out`);
-  if (refused.apps > 0) capped(["handles", "mounts", "applies_middleware"], "fan-out-capped", refused.apps, `${refused.apps} applications and their routes were left out: the Hono plugin keeps at most ${MAX_APPS} applications in one build`);
-  if (refused.roles > 0) capped(["handles", "applies_middleware"], "fan-out-capped", refused.roles, `${refused.roles} roles were left out: the Hono plugin gives at most ${MAX_ROLES} roles in one build`);
-  if (unknownsLeftOut > 0) unknowns.push({ plugin: PLUGIN, site: null, scope: whole, affects: ["handles", "mounts", "applies_middleware"], cause: "fan-out-capped", name: null, note: `${unknownsLeftOut} more unknowns past the first ${MAX_UNKNOWNS} were left out`, count: unknownsLeftOut, exact: true });
+  // Each build budget's record of what it cut, the only place a refused
+  // take is said: a record over every budget, so a budget added without
+  // one does not typecheck. Each floors every caller of the build
+  // (escape-corpus/cap-fw-hono-build-budgets.json trips one).
+  const unreadFiles = [...fileIndexes.values()].filter((f) => f.unread).length;
+  const spentOut: Record<Spend, () => void> = {
+    facts: () => capped(["handles", "mounts", "applies_middleware"], "budget", unreadFiles, `${unreadFiles} files were not read: the Hono plugin reads at most ${MAX_FACTS_READ} facts in one build`),
+    lookups: () => capped(["handles", "mounts", "applies_middleware"], "budget", refused.lookups, `${refused.lookups} names were not looked up: the Hono plugin makes at most ${MAX_LOOKUPS} lookups in one build`),
+    steps: () => capped(["handles", "mounts", "applies_middleware"], "budget", null, `the Hono plugin stopped following values after ${MAX_STEPS} steps in this build; routes past it may be missing`),
+    mounts: () => capped(["mounts", "handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_MOUNTS} router mounts in this build; the routes past it are not listed`),
+    registrations: () => capped(["handles", "applies_middleware"], "fan-out-capped", null, `the walk stopped after ${MAX_REGISTRATIONS} registrations in this build; the routes past it are not listed`),
+    middlewareEdges: () => capped(["applies_middleware"], "fan-out-capped", refused.middlewareEdges, `${refused.middlewareEdges} middleware edges were left out: the Hono plugin keeps at most ${MAX_MIDDLEWARE_EDGES} in one build`),
+    apps: () => capped(["handles", "mounts", "applies_middleware"], "fan-out-capped", refused.apps, `${refused.apps} applications and their routes were left out: the Hono plugin keeps at most ${MAX_APPS} applications in one build`),
+    roles: () => capped(["handles", "applies_middleware"], "fan-out-capped", refused.roles, `${refused.roles} roles were left out: the Hono plugin gives at most ${MAX_ROLES} roles in one build`),
+    unknowns: () => capped(["handles", "mounts", "applies_middleware"], "fan-out-capped", refused.unknowns, `${refused.unknowns} more unknowns past the first ${MAX_UNKNOWNS} were left out`),
+  };
+  for (const k of Object.keys(spentOut) as Spend[]) if (refused[k] > 0) spentOut[k]();
   const entities: Entity[] = registrations;
   return { apps, output: { roles, entities, edges, unknowns } };
 }

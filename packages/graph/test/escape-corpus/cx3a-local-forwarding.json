@@ -1,0 +1,27 @@
+{
+  "covers": "a barrel that forwards an imported name, imported as a namespace and indexed (flaw 3)",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/barrel.ts": "import { f } from \"./a\";\nexport { f };\n",
+    "src/use.ts": "import * as ns from \"./barrel\";\nexport function go(k: string) { (ns as Record<string, () => void>)[k](); }\n",
+    "src/z.ts": "export function z() {}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/use.ts#go",
+      "file": "src/use.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "src/z.ts#z"
+  ],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "its module is used as a value at src/use.ts:2",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

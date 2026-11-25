@@ -1,0 +1,46 @@
+{
+  "covers": "a net/http router and a handler each reached through more than the `a := b` steps the plugin follows (go-http MAX_VALUE_STEPS)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_VALUE_STEPS"
+  ],
+  "commit": true,
+  "files": {
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport \"net/http\"\n\nfunc deep(w http.ResponseWriter, r *http.Request) {}\n\nfunc deep2(w http.ResponseWriter, r *http.Request) {}\n\nfunc main() {\n\tm0 := http.NewServeMux()\n\tm1 := m0\n\tm2 := m1\n\tm3 := m2\n\tm4 := m3\n\tm5 := m4\n\tm6 := m5\n\tm7 := m6\n\tm8 := m7\n\tm9 := m8\n\tm10 := m9\n\tm10.HandleFunc(\"/x\", deep)\n\th1 := deep2\n\th2 := h1\n\th3 := h2\n\th4 := h3\n\th5 := h4\n\th6 := h5\n\th7 := h6\n\th8 := h7\n\th9 := h8\n\th10 := h9\n\tm0.HandleFunc(\"/y\", h10)\n\thttp.ListenAndServe(\":8080\", m0)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 21
+    },
+    {
+      "target": "main.go#deep2",
+      "caller": null,
+      "file": "main.go",
+      "line": 32
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "more than 8 assignments",
+      "at": "main.go:12",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.go:12"
+      }
+    },
+    {
+      "target": "main.go#deep2",
+      "reason": "more than 8 assignments",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.go:24"
+      }
+    }
+  ]
+}

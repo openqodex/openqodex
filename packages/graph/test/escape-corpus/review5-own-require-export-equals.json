@@ -1,0 +1,20 @@
+{
+  "covers": "the file's own `require` exported by TypeScript `export = require` goes to an importer: any module",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.ts": "import r = require(\"./lib/req.cjs\");\nconst k = \"f\";\nr(\"./a.cjs\")[k]();\n",
+    "src/lib/req.cts": "import { createRequire } from \"node:module\";\nconst require = createRequire(__filename);\nexport = require;\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

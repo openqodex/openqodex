@@ -1,4 +1,6 @@
 import type { LineSet } from "./line-set.js";
+import type { ReviewerEntry } from "./reviewers.js";
+import { entryLabel } from "./reviewers.js";
 // Shared contracts for every OpenQodex package. Code against these types;
 // a change here is agreed first, never made inside a feature branch.
 
@@ -169,6 +171,10 @@ export type ScanResult = {
 export type AdapterResult = {
   findings: StaticFinding[];
   error: string | null;
+  // Set when the error is a failure even beside findings, such as a Go
+  // module that could not type-check while another module gave findings.
+  // Without it, an error next to findings leaves the scanner ran.
+  failed?: boolean;
   secrets?: string[];
   // Set when the adapter chose not to run (for example dependency lookups
   // while offline). The runner records status "disabled" with this reason.
@@ -307,6 +313,13 @@ export type Config = {
   // fresh verifier) when the tool starts its own reviewer; false runs one
   // pass as before. Always one pass for --agent and --all.
   stages: boolean;
+  // review.reviewers: the reviewers to try, top to bottom; absent when the
+  // file lists none (the agent running the command first, then Claude Code,
+  // then Codex). Part of the config hash, so a run briefed under another
+  // list is not finalized or trusted as this one.
+  reviewers?: ReviewerEntry[];
+  // review.reviewer_web: false when the file sets off; absent means on.
+  reviewerWeb?: boolean;
   disabledScanners: BuiltinScanner[];
   custom: CustomScanner[];
   // the code graph in the brief; enabled by default. maxFiles caps new parses per build.
@@ -460,8 +473,10 @@ export type ImpactSummary = {
   exports: ImpactExportChange[];
   // What the graph could not see. `floor` is true when any listed caller
   // count may be short: a call of the same name was not bound, a file of
-  // the project was not read, a call through a value could reach it, or a
-  // walk was cut. Per seed, with its reasons.
+  // the project was not read, the symbol or its module is used as a value,
+  // code built at run time or a module loaded by a computed path may reach
+  // it, a call through a value could reach it, or a walk was cut. Per
+  // seed, with its reasons.
   unknown: {
     floor: boolean;
     seeds: { seed: string; floor: boolean; reasons: string[] }[];
@@ -611,9 +626,26 @@ export type SubmissionV2 = {
 // comes from the model.
 export type ReviewerUsage = { turns: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
 
+// An entry of a project's reviewer list that did not review: `skipped`, it
+// could not start on this machine; `failed`, its model could not serve (a
+// limit, a model it does not have) and the review started again on the next
+// entry. `reason` is one line.
+export type PassedReviewer = { tool: string; model?: string; effort?: string; outcome: "skipped" | "failed"; reason: string };
+
+// The entries passed over, as the report lines print them.
+export function passedLines(passed: readonly PassedReviewer[] | undefined): string[] {
+  return (passed ?? []).map((p) => `${entryLabel(p)} ${p.outcome}: ${p.reason}`);
+}
+
 export type ReviewerRecord = {
   driver: string;
   version: string;
+  // The model and reasoning effort the reviewer was asked for, when the
+  // project's list or the command line set them; absent, its own default.
+  model?: string;
+  effort?: string;
+  // The entries of the project's list tried before this one, in order.
+  passed?: PassedReviewer[];
   pid: number | null;
   started_at: string;
   ended_at: string;

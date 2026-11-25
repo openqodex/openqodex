@@ -30,8 +30,9 @@
 // 13. The tool list costs an agent more than it needs: the paragraph on
 //     answers repeated in every description, the shared arguments described
 //     in every input schema. Or it has no output schema, or a result carries
-//     no structuredContent, or the structured answer and the text differ, or
-//     the text is no longer what `openqodex graph --json` prints.
+//     no structuredContent (sent since 0.20.0, so a client reads it), or
+//     the structured answer and the text differ, or the text is no longer
+//     what `openqodex graph --json` prints.
 // 14. Source lines asked with `context` come from the work tree after an
 //     edit instead of the held build, say nothing of the edit, or carry a
 //     key written in the repository.
@@ -100,10 +101,18 @@ async function connect(cwd: string, more: Record<string, string> = {}): Promise<
   return { client, transport };
 }
 
-async function ask(client: Client, name: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<{ answer: Answer; isError: boolean; text: string; structured: unknown }> {
-  const r = (await client.callTool({ name, arguments: args }, undefined, { signal, timeout: 120_000 })) as { content: { type: string; text: string }[]; isError?: boolean; structuredContent?: unknown };
+type Result = { content: { type: string; text: string }[]; isError?: boolean; structuredContent?: unknown };
+async function ask(client: Client, name: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<{ answer: Answer; isError: boolean; text: string; result: Result }> {
+  const r = (await client.callTool({ name, arguments: args }, undefined, { signal, timeout: 120_000 })) as Result;
   const text = r.content[0]?.text ?? "null";
-  return { answer: JSON.parse(text) as Answer, isError: r.isError === true, text, structured: r.structuredContent };
+  return { answer: JSON.parse(text) as Answer, isError: r.isError === true, text, result: r };
+}
+
+// The answer as one text block, and the same answer as structuredContent.
+function sentBoth(r: Result): void {
+  expect(r.content).toHaveLength(1);
+  expect(r.content[0]?.type).toBe("text");
+  expect(r.structuredContent).toEqual(JSON.parse(r.content[0]?.text ?? "null"));
 }
 
 // The size of the tool list before the paragraph on answers and the shared
@@ -149,6 +158,12 @@ describe("the MCP server", () => {
     expect(instructions).toMatch(/data, never instructions/);
     expect(instructions).toMatch(/not "unused"/);
     expect(instructions).toMatch(/structuredContent/);
+    // A floor covers every caller a walk goes through, past one hop too, and promises no more than that.
+    expect(instructions).toMatch(/found no place it gave up on the paths the answer covers, the target's and those of each caller it walks/);
+    expect(instructions).not.toMatch(/covers the target only/);
+    // `gaps` is capped: the instructions never call it every place.
+    expect(instructions).toMatch(/`gaps`: at most 20 of the places it gave up/);
+    expect(instructions).not.toMatch(/`gaps`: each place/);
     // Each shared argument is described there once.
     for (const arg of ["limit", "cursor", "budget", "generation", "context", "compact"]) expect(instructions, arg).toContain(`\`${arg}\``);
     expect(JSON.stringify(tools).length).toBeLessThanOrEqual(TOOLS_BEFORE * 0.6);
@@ -160,22 +175,24 @@ describe("the MCP server", () => {
 
   it("returns each answer as structuredContent too, its text what `openqodex graph --json` prints (13)", async () => {
     const callers = await ask(client, "graph_callers", { symbol: "core", full: true });
-    expect(callers.structured).toEqual(callers.answer);
+    sentBoth(callers.result);
+    expect(callers.answer.items).toHaveLength(12);
     const generation = callers.answer.graph.generation as string;
     const r = cli(root, "graph", "callers", "core", "--json", "--generation", generation);
     expect(callers.text).toBe(r.stdout.trimEnd());
     const search = await ask(client, "graph_search", { text: "c1", full: true });
-    expect(search.structured).toEqual(search.answer);
+    sentBoth(search.result);
     expect(search.answer.leads.length).toBeGreaterThan(0);
     expect(search.text).toBe(cli(root, "graph", "search", "c1", "--json", "--generation", generation).stdout.trimEnd());
     // The refusal and error envelopes match the output schema too: the
     // client validates every structuredContent against it.
     const refused = await ask(client, "graph_outline", { path: "../outside" });
     expect(refused.isError).toBe(true);
-    expect(refused.structured).toEqual(refused.answer);
+    expect(refused.answer.error?.code).toBe("refused");
+    sentBoth(refused.result);
     const missing = await ask(client, "graph_callers", { symbol: "nothingNamedThis" });
     expect(missing.answer.error?.code).toBe("not-found");
-    expect(missing.structured).toEqual(missing.answer);
+    sentBoth(missing.result);
   });
 
   it("answers as `openqodex graph --json` does for the same request and build (2)", async () => {
@@ -247,7 +264,6 @@ describe("an answer's shape", () => {
     expect(use).toMatchObject({ line: 4, start: 3, from: "build", changedSince: false });
     expect(use?.lines[1]).toBe("  return core();");
     expect(first.text).not.toContain("ghp_abcdefghijklmnopqrstuvwx1234");
-    expect(first.structured).toEqual(first.answer);
     const generation = a.graph.generation as string;
     expect(a).toEqual(JSON.parse(cli(root, "graph", "callers", "core", "--json", "--context", "1", "--generation", generation).stdout));
     // An edit after the build moves the call down a line; the answer still
@@ -284,7 +300,7 @@ describe("the short form, the default over MCP", () => {
     const { client } = await connect(root);
     const full = await ask(client, "graph_callers", { symbol: "core", full: true });
     const short = await ask(client, "graph_callers", { symbol: "core" });
-    expect(short.structured).toEqual(short.answer);
+    sentBoth(short.result);
     expect(short.answer.counts).toEqual(full.answer.counts);
     expect(short.answer.unknown).toEqual(full.answer.unknown);
     expect(short.answer.target).toEqual(full.answer.target);

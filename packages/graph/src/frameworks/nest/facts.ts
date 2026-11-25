@@ -109,7 +109,11 @@ export type NestFact =
   | (FrameworkFactBase & { kind: "too-large"; bytes: number })
   // The file has a syntax error at the fact's position; nothing inside a
   // broken region was read.
-  | (FrameworkFactBase & { kind: "syntax-error" });
+  | (FrameworkFactBase & { kind: "syntax-error" })
+  // The file spent MAX_SHADOW_STEPS at the fact's position: from there on a
+  // name inside a function reads as bound, so a decorator or a NestFactory
+  // call written inside a function is not read as Nest's.
+  | (FrameworkFactBase & { kind: "shadow-cut" });
 
 // A file the plugin may read: a decorator, a factory call, a call on an
 // application, or an exported constant another file may read as a path.
@@ -241,6 +245,7 @@ export function readFacts(root: Node): NestFact[] {
   // Names an export clause with no source exports under their own name.
   const clauseExports = new Set<string>();
   let shadowSteps = 0;
+  const shadowCut: { at: { line: number; column: number } | null } = { at: null };
 
   for (const st of root.namedChildren) {
     if (st.type === "import_statement") {
@@ -308,6 +313,11 @@ export function readFacts(root: Node): NestFact[] {
   // function binds it (a module-level name). Past MAX_SHADOW_STEPS every
   // name counts as bound to something not read.
   const binding = (n: Node, name: string): Node | "other" | null => {
+    const b = bindingWalk(n, name);
+    if (shadowSteps > MAX_SHADOW_STEPS) shadowCut.at ??= pos(n);
+    return b;
+  };
+  const bindingWalk = (n: Node, name: string): Node | "other" | null => {
     for (let at = n.parent; at && at.type !== "program"; at = at.parent) {
       if (++shadowSteps > MAX_SHADOW_STEPS) return "other";
       if (FUNCTIONS.has(at.type)) {
@@ -650,6 +660,7 @@ export function readFacts(root: Node): NestFact[] {
     if (s !== null && s.length > 0 && s.length <= MAX_EXPORTED_CONSTANT && pathShaped(s) && keptText(s) === s) out.push({ kind: "value", name, ...pos(c.value), value: { t: "str", v: s, ...pos(c.value) }, exported: true });
   }
   if (broken) out.push({ kind: "syntax-error", ...broken });
+  if (shadowCut.at) out.push({ kind: "shadow-cut", ...shadowCut.at });
   return out;
 }
 
@@ -710,6 +721,7 @@ export function isNestFact(v: unknown): v is NestFact {
     case "too-large":
       return isNum(v.bytes);
     case "syntax-error":
+    case "shadow-cut":
       return true;
     default:
       return false;

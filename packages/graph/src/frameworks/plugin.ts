@@ -353,7 +353,10 @@ export type FrameworkEdge = {
 // (`{ build: true }`: a budget or a cap a plugin counts across every
 // application, which may hide anything past the point it stopped).
 // `affects` the framework relations it can hide; empty means every one. A
-// count that cannot be known is null, never zero.
+// count that cannot be known is null, never zero. `symbol`, when set, is the
+// one function the gap is about, already linked to what runs it (a
+// middleware whose matcher is computed): the gap may hide where it runs,
+// never that it runs, so it floors that function's callers and no other's.
 export type FrameworkUnknown = {
   plugin: string;
   site: Site | null;
@@ -364,6 +367,7 @@ export type FrameworkUnknown = {
   note: string;
   count: number | null;
   exact: boolean;
+  symbol?: string;
 };
 
 // ---------- the read API a plugin resolves through ----------
@@ -374,13 +378,14 @@ export type FrameworkUnknown = {
 // class key. A module-level value that is not a definition (a router
 // built by `APIRouter()`, `express.Router()`) shows as a miss whose target
 // is the module's file, so a plugin reads its own facts in that file to
-// tell a value from a real miss.
+// tell a value from a real miss. `past`: the names of the path after the
+// one that missed, never looked up (`router.handler` misses at `router`).
 export type Lookup =
   | { kind: "symbol"; ids: string[]; tier: Tier; evidence: string; via: { file: string; line: number; spec: string | null } | null; note: string | null }
   | { kind: "module"; file: string; tier: Tier; via: { file: string; line: number; spec: string | null } | null; note: string | null }
   | { kind: "external" }
   | { kind: "gap"; cause: Cause; note: string; candidates: string[] | null }
-  | { kind: "miss"; target: string; name: string }
+  | { kind: "miss"; target: string; name: string; past?: string[] }
   | { kind: "none" }; // the name is not bound at the top level of the file
 
 // Every cross-file read a plugin makes goes through this object, so a later

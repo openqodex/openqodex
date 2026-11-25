@@ -171,7 +171,7 @@ export function readFacts(root: Node): FastApiFact[] {
         if (node.type === "function_definition" && !node.childForFieldName("parameters")?.hasError) {
           const name = node.childForFieldName("name")?.text;
           const deps = paramDeps(node);
-          if (name && deps.params.length > 0) out.push({ kind: "deps", ...pos(node), fn: name, def: own.at, scope: scope.line, params: deps.params, omitted: deps.omitted });
+          if (name && (deps.params.length > 0 || deps.omitted > 0)) out.push({ kind: "deps", ...pos(node), fn: name, def: own.at, scope: scope.line, params: deps.params, omitted: deps.omitted });
         }
         if (node.type === "function_definition") {
           for (const p of node.childForFieldName("parameters")?.namedChildren ?? []) {
@@ -354,7 +354,8 @@ export function readFacts(root: Node): FastApiFact[] {
 // path; "tpath": a constant a request's target names, kept as a path.
 type Form = "path" | "target" | "tpath" | "method" | "name" | "segment" | "tsegment";
 
-const unread = (e: Expr): Expr => ({ t: "other", line: e.line, column: e.column });
+// A text not kept; a read the reader cut at a cap stays marked as cut.
+const unread = (e: Expr): Expr => ((e.t === "dyn" || e.t === "other") && e.cut ? { t: "other", cut: true, line: e.line, column: e.column } : { t: "other", line: e.line, column: e.column });
 
 // A decorator as the facts name it: what it calls, with every argument
 // left out at every depth (`factory(...)()` for `@factory("x")()`).

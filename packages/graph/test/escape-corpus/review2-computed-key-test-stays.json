@@ -1,0 +1,18 @@
+{
+  "covers": "a computed key read only in a test, whose value stays there, scopes the floor to tests",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/cart.ts": "export class Cart {\n  get total(): number {\n    return 1;\n  }\n  run(): void {}\n}\n",
+    "src/cart.test.ts": "export function peek(c: any, k: string): number {\n  return c[k] + 1;\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/cart.ts#Cart.total",
+      "reason": "by a computed key",
+      "at": "src/cart.test.ts:2",
+      "scope": "tests"
+    }
+  ]
+}

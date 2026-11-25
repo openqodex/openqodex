@@ -1,0 +1,45 @@
+{
+  "covers": "a floor names the first three files that could hide a caller, each with what it does, and counts the rest",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\n",
+    "app/b1.ts": "import { f } from \"./a\";\nexport const v = X1;\nf();\n",
+    "app/b2.ts": "import { f } from \"./a\";\nexport const v = X2;\nf();\n",
+    "app/b3.ts": "import { f } from \"./a\";\nexport const v = X3;\nf();\n",
+    "app/b4.ts": "import { f } from \"./a\";\nexport const v = X4;\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "app/b1.ts",
+      "line": 2
+    },
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "app/b2.ts",
+      "line": 2
+    },
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "app/b3.ts",
+      "line": 2
+    },
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "app/b4.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/a.ts#f",
+      "reason": "4 files the graph cannot read whole could call it by a path it does not see: app/b1.ts:2 reads the free name `X1` (its file imports its module), app/b2.ts:2 reads the free name `X2` (its file imports its module), app/b3.ts:2 reads the free name `X3` (its file imports its module) and 1 more",
+      "at": "app/b1.ts:2"
+    }
+  ]
+}

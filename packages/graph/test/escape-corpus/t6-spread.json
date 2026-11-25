@@ -1,0 +1,22 @@
+{
+  "covers": "a value use the old reader skipped: a spread of a list that holds it (test 6)",
+  "files": {
+    "src/a.ts": "export function f() {}\nfunction call(...fns: Array<() => void>) {\n  for (const fn of fns) fn();\n}\nexport function run() {\n  call(...[f]);\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/a.ts#call",
+      "file": "src/a.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "it is used as a value",
+      "at": "src/a.ts:6"
+    }
+  ]
+}

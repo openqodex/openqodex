@@ -1,0 +1,40 @@
+{
+  "covers": "a Rails action routed after the application's first 10,000 route registrations (rails MAX_REGISTRATIONS)",
+  "caps": [
+    "frameworks/rails/routes.ts#MAX_REGISTRATIONS"
+  ],
+  "commit": true,
+  "files": {
+    "Gemfile": "source \"https://rubygems.org\"\n\ngem \"rails\"\n",
+    "config/routes.rb": [
+      "Rails.application.routes.draw do\n",
+      {
+        "repeat": "  resources :r{{i}}\n",
+        "times": 1429
+      },
+      "  get \"deep\", to: \"users#deep\"\nend\n"
+    ],
+    "app/controllers/application_controller.rb": "class ApplicationController < ActionController::Base\nend\n",
+    "app/controllers/users_controller.rb": "class UsersController < ApplicationController\n  def deep\n  end\nend\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/controllers/users_controller.rb#UsersController.deep",
+      "caller": null,
+      "file": "config/routes.rb",
+      "line": 1431
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/controllers/users_controller.rb#UsersController.deep",
+      "reason": "the application has more than 10,000 route registrations",
+      "at": "config/routes.rb:1430",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "config/routes.rb:1430"
+      }
+    }
+  ]
+}

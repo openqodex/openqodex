@@ -6,17 +6,21 @@
 // the second reviewer's, with the usage of the primary's calls counted in.
 //
 // How its work joins the primary's:
-//   findings       merged by finalize's rule for the same finding (the file,
-//                  the range, the category, and the candidate, source or
-//                  title); the higher severity is kept, then the primary's;
-//                  `foundBy` names every reviewer that raised it
+//   findings       merged by finalize's rule for the same finding
+//                  (findingKey: the file, the range, the category, and the
+//                  candidate, source or title), else for one defect
+//                  (sameDefect: the file, the category and overlapping
+//                  lines, with no candidate and the same source or none)
+//                  when the two are each other's one overlap; the higher
+//                  severity is kept, then the primary's; `foundBy` names
+//                  every reviewer that raised it
 //   dispositions   both reviewers' kept, each marked with who made it
 //   disagreements  each candidate one raised and the other dropped
 //   failures       a budget refusal ends the whole review incomplete (the
 //                  record says so in `missing`, the primary's findings stay);
 //                  any other failure leaves the review as the primary made it
 //                  and is named in the notes and the record
-import { findingKey, severityRank, shortenedMissing } from "@openqodex/core";
+import { findingKey, mergedParts, sameDefect, severityRank, shortenedMissing, uncounted } from "@openqodex/core";
 import type { Disagreement, ModelCompletionRecord, Report, ReportFinding } from "@openqodex/core";
 import type { Conversation } from "./conversation.js";
 import { modelSession } from "./model-loop.js";
@@ -54,13 +58,19 @@ export async function runSecondReviewer(args: {
 }
 
 // The two answers' findings as one list, the primary's first, each with the
-// names of the reviewers that raised it.
-export function mergeFindings(primary: { name: string; findings: ReportFinding[] }, second: { name: string; findings: ReportFinding[] }): { findings: ReportFinding[]; foundBy: string[][] } {
-  const merged = new Map<string, { finding: ReportFinding; foundBy: string[] }>();
-  for (const f of primary.findings) merged.set(findingKey(f), { finding: f, foundBy: [primary.name] });
+// names of the reviewers that raised it. `alone`: the second reviewer's
+// findings that joined no primary finding.
+export function mergeFindings(primary: { name: string; findings: ReportFinding[] }, second: { name: string; findings: ReportFinding[] }): { findings: ReportFinding[]; foundBy: string[][]; alone: ReportFinding[] } {
+  const merged = primary.findings.map((f) => ({ finding: f, foundBy: [primary.name] }));
   for (const f of second.findings) {
-    const same = merged.get(findingKey(f));
-    if (!same) merged.set(findingKey(f), { finding: f, foundBy: [second.name] });
+    // The same finding first. Else one defect, only when this finding and a
+    // primary finding are each other's one overlap: each reviewer reports a
+    // defect once, so two second findings on one primary finding are two
+    // defects, and neither joins it.
+    const near = primary.findings.filter((p) => sameDefect(p, f));
+    const twin = near.length === 1 && second.findings.filter((s) => sameDefect(near[0]!, s)).length === 1 ? merged[primary.findings.indexOf(near[0]!)] : undefined;
+    const same = merged.find((m) => findingKey(m.finding) === findingKey(f)) ?? twin;
+    if (!same) merged.push({ finding: f, foundBy: [second.name] });
     else {
       same.foundBy.push(second.name);
       // The staged primary's evidence in other files and its rule citation
@@ -72,8 +82,19 @@ export function mergeFindings(primary: { name: string; findings: ReportFinding[]
       }
     }
   }
-  const all = [...merged.values()];
-  return { findings: all.map((m) => m.finding), foundBy: all.map((m) => m.foundBy) };
+  return { findings: merged.map((m) => m.finding), foundBy: merged.map((m) => m.foundBy), alone: merged.slice(primary.findings.length).map((m) => m.finding) };
+}
+
+// The primary's possible issues once the second reviewer's findings join:
+// one with the key of a merged finding leaves, and so does one that is one
+// defect with a second finding that joined no primary finding. A second
+// finding that joined a primary finding takes no possible issue: the primary
+// review already ruled on those two, and a staged verifier may have kept
+// them apart. A possible issue finalize merged from two leaves only for a
+// second finding that overlaps both.
+export function possibleAfterSecond(possible: ReportFinding[], merged: { findings: ReportFinding[]; alone: ReportFinding[] }): ReportFinding[] {
+  const keys = new Set(merged.findings.map(findingKey));
+  return uncounted(possible, merged.alone, sameDefect, mergedParts).filter((f) => !keys.has(findingKey(f)));
 }
 
 // Each candidate one reviewer raised and the other dropped, in the order

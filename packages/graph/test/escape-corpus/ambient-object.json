@@ -1,0 +1,25 @@
+{
+  "covers": "a free name declared as an object type may hold functions",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\n",
+    "app/b.ts": "import { f } from \"./a\";\nexport const v = VERSION;\nf();\n",
+    "app/globals.d.ts": "declare const VERSION: { run(): void };\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "app/b.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/a.ts#f",
+      "reason": "reads the free name `VERSION` (its file imports its module)",
+      "at": "app/b.ts:2"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "covers": "a computed key read in a test followed by `.valueOf()` whose result is passed on may take a method product code calls, so the scope is all",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/cart.ts": "export class Cart {\n  get total(): number {\n    return 1;\n  }\n  run(): void {}\n}\n",
+    "src/cart.test.ts": "export function pick(c: any, k: string, b: string): unknown {\n  return c[k].valueOf();\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/cart.ts#Cart.run",
+      "reason": "by a computed key",
+      "at": "src/cart.test.ts:2",
+      "scope": "all"
+    }
+  ]
+}

@@ -7,12 +7,33 @@
 //    barrels never finish.
 // 3. A walk stopped by its step budget drops the names past the stop with
 //    nothing said.
+// 4. A walk stopped by its step budget drops a name a module offers, so a
+//    function past the stop reads as having every caller listed, though
+//    the module is used as a value and a computed name may call it.
+// 5. The fix for 4 floors names the module cannot give through the cut
+//    star: a default export (no star brings it), a name the module's own
+//    export shadows, or a sibling a named re-export leaves out.
+// 6. A module two cut stars reach is counted once, without the names the
+//    first star's module gives itself, so a name only the second star
+//    brings reads as having every caller listed.
+// 7. A chain of barrels past the cut that meets one module many times (each
+//    barrel stars the same leaf, or stars back to one barrel of the chain)
+//    compares every name the chain skips at each meeting: the walk's work
+//    grows with the square of the chain, seconds at 8,000 barrels.
+// 8. Escape analysis, which lists what every module offers when a module is
+//    loaded by a computed path, spends the step budget the comparison of
+//    the change needs, so a changed barrel is said not compared (issue 421).
+// 9. Escape analysis's own walk stops at its step budget, and a function
+//    re-exported past the stop by a module used as a value keeps a caller
+//    list that reads as whole.
 import { afterAll, describe, expect, it } from "vitest";
 import { getChange } from "@openqodex/core";
-import { buildGraph, detectImpact } from "../src/index.js";
-import { EXPORT_WALK_STEPS } from "../src/resolve.js";
-import { expectLinear, growthTests, stageCpuMs } from "../src/test-timing.js";
-import { commitAll, makeRepo, writeFiles } from "./helpers.js";
+import { buildGraph, detectImpact, floorReasons } from "../src/index.js";
+import { query } from "../src/query/engine.js";
+import type { Request } from "../src/query/answer.js";
+import { EXPORT_WALK_STEPS, walkWork } from "../src/resolve.js";
+import { expectLinear, growthTests, MAX_GROWTH, stageCpuMs } from "../src/test-timing.js";
+import { commitAll, makeRepo, symbol, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
 afterAll(removeTempDirs);
@@ -92,6 +113,21 @@ describe("the export walk", () => {
     }, 300_000);
   });
 
+  it("compares a changed barrel with a step budget of its own after escape analysis walked every module (8)", async () => {
+    // A ring's walks are kept by no one (each meets the ring's cycle), so
+    // listing what each of 70 barrels offers takes 70 times 69 steps, past
+    // the budget; the comparison of top.ts needs 70 more.
+    const [files] = ring(70);
+    files["load.js"] = "const name = process.argv[2];\nrequire(name);\n";
+    files["top.ts"] = 'export * from "./r0";\nexport function mine() {\n  return 2;\n}\n';
+    expect(70 * 69).toBeGreaterThan(EXPORT_WALK_STEPS);
+    const { graph, impact } = await change(files, { "top.ts": 'export * from "./r0";\nfunction mine() {\n  return 2;\n}\n' });
+    expect(impact.exports.find((e) => e.name === "mine")).toMatchObject({ file: "top.ts", change: "removed" });
+    const notes = graph.status.cuts.filter((c) => c.by === "export-walk").map((c) => c.note);
+    expect(notes, notes.join("; ")).toEqual(expect.arrayContaining([expect.stringContaining("export * for escape analysis stopped")]));
+    expect(notes.filter((note) => note.includes("not compared")), notes.join("; ")).toEqual([]);
+  }, 300_000);
+
   it("records a cut when the walk passes its step budget (3)", async () => {
     const levels = Math.ceil(EXPORT_WALK_STEPS / 2) + 5;
     const files: Record<string, string> = { "x.ts": "export function target() {\n  return 1;\n}\n" };
@@ -102,5 +138,94 @@ describe("the export walk", () => {
     const cut = graph.status.cuts.find((c) => c.by === "export-walk");
     expect(cut).toMatchObject({ by: "export-walk", exact: false, omitted: null, unit: "files" });
     expect(cut?.note).toMatch(/export \*/);
+  }, 300_000);
+
+  // Eight barrels that each `export *` from the other seven: no walk
+  // through them finishes, so a walk from `r.ts` spends its whole budget
+  // there before it reaches `end.ts`. `use.ts` uses `r.ts` as a value.
+  // The names `r.ts` gives itself come before its stars, so looking them
+  // up never enters the web. `over` replaces or adds files.
+  async function cutWeb(over: Record<string, string> = {}) {
+    const files: Record<string, string> = {
+      "end.ts": "export function t(): void {}\nexport function mine(): void {}\nfunction d(): void {}\nexport default d;\n",
+      "side.ts": "export function s(): void {}\nexport function sibling(): void {}\n",
+      "r.ts": 'export { s } from "./side";\nexport function mine(): void {}\nexport * from "./mesh0";\nexport * from "./end";\n',
+      "use.ts": 'import * as r from "./r";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n',
+    };
+    for (let i = 0; i < 8; i++) files[`mesh${i}.ts`] = [0, 1, 2, 3, 4, 5, 6, 7].filter((j) => j !== i).map((j) => `export * from "./mesh${j}";\n`).join("") + `export function own${i}(): void {}\n`;
+    const graph = await buildGraph({ repoRoot: makeRepo({ ...files, ...over }), store: null });
+    expect(graph.status.cuts.some((c) => c.by === "export-walk"), "the walk passes its step budget").toBe(true);
+    return (file: string, name: string) => query({ graph, generation: "test-build", treeSha: null, builtAt: null, laterEditsKnown: false }, { apiVersion: 1, kind: "callers", target: { id: symbol(graph, file, name) }, depth: 1 } as Request);
+  }
+
+  it("keeps the floor of a function the walk did not reach before its step budget ran out (4)", async () => {
+    const callers = await cutWeb();
+    const a = callers("end.ts", "t");
+    expect(a.unknown.floor).toBe(true);
+    expect(a.unknown.reasons.join(" ")).toContain("its module is used as a value at use.ts:3");
+    expect(callers("side.ts", "s").unknown.floor).toBe(true);
+  }, 120_000);
+
+  it("leaves whole a default export, a shadowed name and a sibling the cut module cannot give (5)", async () => {
+    const callers = await cutWeb();
+    for (const [file, name] of [["end.ts", "d"], ["end.ts", "mine"], ["side.ts", "sibling"]] as const) {
+      const a = callers(file, name);
+      expect(a.unknown.floor, `${file}#${name}: ${a.unknown.reasons.join("; ")}`).toBe(false);
+    }
+  }, 120_000);
+
+  it("compares the names a long cut chain skips in work that grows with the chain (7)", async () => {
+    // `r.ts` spends the step budget in the web, so each barrel's walk is cut
+    // and only star visits reach the chain. Each barrel stars `leaf.ts`;
+    // each barrel in the second half also stars the middle one. The work is
+    // counted, not timed: four times the chain does about four times the work.
+    const work = async (n: number) => {
+      const files: Record<string, string> = {
+        "r.ts": 'export * from "./mesh0";\nexport * from "./c1";\n',
+        "use.ts": 'import * as r from "./r";\nexport function go(k: string) {\n  (r as any)[k]();\n}\n',
+        "leaf.ts": "export function lf(): void {}\n",
+      };
+      for (let i = 0; i < 8; i++) files[`mesh${i}.ts`] = [0, 1, 2, 3, 4, 5, 6, 7].filter((j) => j !== i).map((j) => `export * from "./mesh${j}";\n`).join("") + `export function own${i}(): void {}\n`;
+      const mid = n / 2;
+      for (let i = 1; i <= n; i++) files[`c${i}.ts`] = 'export * from "./leaf";\n' + (i < n ? `export * from "./c${i + 1}";\n` : "") + (i > mid + 1 ? `export * from "./c${mid}";\n` : "") + `export function f${i}(): void {}\n`;
+      const root = makeRepo(files);
+      const before = walkWork.steps;
+      const graph = await buildGraph({ repoRoot: root, store: null, budgetMs: 60_000, maxFiles: 100_000 });
+      expect(graph.status.cuts.some((c) => c.by === "export-walk"), "the walk passes its step budget").toBe(true);
+      expect(graph.escapes.reach.has(symbol(graph, "leaf.ts", "lf")), "the leaf is reached past the cut").toBe(true);
+      return walkWork.steps - before;
+    };
+    const small = await work(250);
+    const large = await work(1000);
+    expect(large / Math.max(small, 1), `the walk's work: ${small} at 250 barrels, ${large} at 1,000`).toBeLessThan(MAX_GROWTH);
+  }, 300_000);
+
+  it("counts a module two cut stars reach with only the names both give (6)", async () => {
+    // `a.ts`, `b.ts` and `c.ts` each star the web, so their walks are cut
+    // too and only a star visit reaches c's names. `a.ts` and `b.ts` both
+    // star `c.ts`. Through `a.ts`, c's x is a's own; through `b.ts`, c's y
+    // is b's own; both give z.
+    const callers = await cutWeb({
+      "r.ts": 'export * from "./mesh0";\nexport * from "./a";\nexport * from "./b";\n',
+      "a.ts": 'export function x(): void {}\nexport function z(): void {}\nexport * from "./c";\nexport * from "./mesh0";\n',
+      "b.ts": 'export function y(): void {}\nexport function z(): void {}\nexport * from "./c";\nexport * from "./mesh0";\n',
+      "c.ts": 'export function x(): void {}\nexport function y(): void {}\nexport function z(): void {}\nexport * from "./mesh0";\n',
+    });
+    for (const [name, floor] of [["x", true], ["y", true], ["z", false]] as const) {
+      const a = callers("c.ts", name);
+      expect(a.unknown.floor, `c.ts#${name}: ${a.unknown.reasons.join("; ")}`).toBe(floor);
+    }
+  }, 120_000);
+
+  it("floors a function re-exported past the escape walk's stop by a module used as a value (9)", async () => {
+    // A chain longer than the step budget, one barrel a level, ends at x.ts.
+    const levels = EXPORT_WALK_STEPS + 10;
+    const files: Record<string, string> = { "x.ts": "export function target() {\n  return 1;\n}\n" };
+    for (let i = 1; i <= levels; i++) files[`c${i}.ts`] = i === 1 ? 'export * from "./x";\n' : `export * from "./c${i - 1}";\n`;
+    files["use.ts"] = `import * as all from "./c${levels}";\nexport function run(k: string) {\n  return (all as Record<string, () => number>)[k]();\n}\n`;
+    const g = await buildGraph({ repoRoot: makeRepo(files), store: null, budgetMs: 120_000, maxFiles: 100_000 });
+    expect(g.status.cuts.map((c) => c.note)).toContainEqual(expect.stringContaining("export * for escape analysis stopped"));
+    const reasons = floorReasons(g, { id: symbol(g, "x.ts", "target"), name: "target", file: "x.ts", kind: "function" }, new Set());
+    expect(reasons).toContainEqual(expect.stringMatching(/its module is used as a value at use\.ts:/));
   }, 300_000);
 });

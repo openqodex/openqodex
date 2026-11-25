@@ -31,6 +31,13 @@
 //     back on, and a custom scanner's paths select no file, so the scanner
 //     never runs. The error must name the file, the key, the limit and the
 //     pattern itself, so a long glob can be found in the config and fixed.
+// 20. A reviewer list entry takes a value its tool cannot (a Codex effort of
+//     max or minimal, a model that reads as a flag, a tool openqodex does
+//     not list), or refuses one it can (Claude's sonnet[1m], effort max), or
+//     the error does not name the entry and the key.
+// 21. A config that sets no reviewer list or web line hashes differently
+//     from before lists existed, so every stored run of an upgraded repo
+//     stops finalizing; or a list change leaves the hash as it was.
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -392,6 +399,47 @@ scanners:
     expect(error("scanners:\n  custom:\n    - { source: https://github.com/a/b, run: t, format: json-map }\n")).toMatch(
       /scanners\.custom\[0\]\.map: required when format is json-map/,
     );
+  });
+});
+
+describe("the reviewer list", () => {
+  const list = (entry: string) => `review:\n  reviewers:\n    - ${entry}\n`;
+
+  it("20. takes each tool's own models and efforts, in order", () => {
+    const { config, warnings } = parseConfig(
+      "review:\n  reviewer_web: off\n  reviewers:\n    - tool: claude\n      model: sonnet[1m]\n      effort: max\n    - tool: claude\n      model: claude-opus-4-1-20250805\n    - tool: codex\n      model: gpt-6.2-sol\n      effort: xhigh\n    - tool: codex\n",
+    );
+    expect(warnings).toEqual([]);
+    expect(config.reviewers).toEqual([
+      { tool: "claude", model: "sonnet[1m]", effort: "max" },
+      { tool: "claude", model: "claude-opus-4-1-20250805" },
+      { tool: "codex", model: "gpt-6.2-sol", effort: "xhigh" },
+      { tool: "codex" },
+    ]);
+    expect(config.reviewerWeb).toBe(false);
+    expect(parseConfig("pr_review:\n  reviewers:\n    - tool: codex\n").config.reviewers).toEqual([{ tool: "codex" }]);
+  });
+
+  it("20. refuses a value its tool cannot take, naming the entry and the key", () => {
+    expect(error(list("tool: codex\n      effort: max"))).toMatch(/^\.openqodex\/config\.yaml: review\.reviewers\[0\]\.effort: must be one of low, medium, high, xhigh for codex, not max/);
+    expect(error(list("tool: codex\n      effort: minimal"))).toMatch(/review\.reviewers\[0\]\.effort: .*minimal/);
+    expect(error(list("tool: codex\n      model: '--yolo'"))).toMatch(/review\.reviewers\[0\]\.model: /);
+    expect(error(list("tool: claude\n      model: '-p'"))).toMatch(/review\.reviewers\[0\]\.model: /);
+    expect(error(list("tool: claude\n      effort: ultra"))).toMatch(/review\.reviewers\[0\]\.effort: must be one of low, medium, high, xhigh, max for claude/);
+    expect(error(list("tool: gemini"))).toMatch(/review\.reviewers\[0\]\.tool: /);
+    expect(error(list("tool: cursor"))).toMatch(/review\.reviewers\[0\]\.tool: /);
+    expect(error("review:\n  reviewers: claude\n")).toMatch(/review\.reviewers: /);
+    expect(error("review:\n  reviewer_web: sometimes\n")).toMatch(/review\.reviewer_web: /);
+  });
+
+  it("21. an empty list, an absent list and reviewer_web: on hash as before lists existed; a list change does not", () => {
+    const before = configHash(DEFAULT_CONFIG);
+    expect(configHash(parseConfig("review:\n  reviewers: []\n  reviewer_web: on\n").config)).toBe(before);
+    expect(configHash(parseConfig("").config)).toBe(before);
+    const one = configHash(parseConfig(list("tool: claude")).config);
+    expect(one).not.toBe(before);
+    expect(configHash(parseConfig(list("tool: claude\n      model: opus")).config)).not.toBe(one);
+    expect(configHash(parseConfig("review:\n  reviewer_web: off\n").config)).not.toBe(before);
   });
 });
 

@@ -1,0 +1,18 @@
+{
+  "covers": "an adversarial case from the review of piece A: barrel star indexed",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/barrel.ts": "export * from \"./a\";\n",
+    "src/use.ts": "import * as b from \"./barrel\";\nexport function go(k: string) { (b as any)[k](); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": null,
+      "file": "src/use.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

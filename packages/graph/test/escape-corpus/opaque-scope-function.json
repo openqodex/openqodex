@@ -1,0 +1,36 @@
+{
+  "covers": "an opaque file that makes code from a string reaches every function of the repository, in another project and private ones too",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\nfunction g() {}\nexport function k() { g(); }\n",
+    "tools/package.json": "{\"name\": \"tools\"}\n",
+    "tools/z.js": "export function run(code) { return Function(code)(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/a.ts#f",
+      "caller": null,
+      "file": "tools/z.js",
+      "line": 1
+    },
+    {
+      "target": "app/a.ts#g",
+      "caller": null,
+      "file": "tools/z.js",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/a.ts#f",
+      "reason": "may load any module",
+      "at": "tools/z.js:1"
+    },
+    {
+      "target": "app/a.ts#g",
+      "reason": "may load any module",
+      "at": "tools/z.js:1"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "covers": "this.f() in a plain script, where this is the global object (audit amendment 1)",
+  "files": {
+    "public/s.js": "function f() {}\nthis.f();\nfunction g() { this.f(); }\ng();\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/s.js#f",
+      "caller": "public/s.js",
+      "file": "public/s.js",
+      "line": 2
+    },
+    {
+      "target": "public/s.js#f",
+      "caller": "public/s.js#g",
+      "file": "public/s.js",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "public/s.js#f",
+      "reason": "calls named `f`",
+      "at": ""
+    }
+  ]
+}

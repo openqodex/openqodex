@@ -31,6 +31,7 @@ import { discoverProjects } from "./discovery/projects.js";
 import { traceReads } from "./discovery/trace.js";
 import type { ProjectModel } from "./discovery/projects.js";
 import { EXTRACTOR_VERSION, extract } from "./extract.js";
+import { ambientOf } from "./types.js";
 import { frameworkReaders } from "./frameworks/facts.js";
 import { contextFingerprint, runFrameworks } from "./frameworks/stage.js";
 import { pluginsKey } from "./frameworks/registry.js";
@@ -44,6 +45,7 @@ import type { FileInput, Resolved, World } from "./resolve.js";
 import { asPredictMeta, decideMode, predictMs, recordBuild } from "./runtime/predict.js";
 import type { Mode } from "./runtime/predict.js";
 import { RepoReader } from "./safe-fs.js";
+import { NEXT, gap, namesReached } from "./gap.js";
 import { INDEX_FORMAT, readIndex, serializeModel, writeIndex } from "./store/graph-files.js";
 import type { GraphStore } from "./store/types.js";
 import type { DefFact, FileFacts, Graph, GraphEdge, GraphNode, Lang, NotRead, UnknownSite } from "./types.js";
@@ -70,6 +72,9 @@ export type BuildArgs = {
   // so an excluded file never reaches the brief).
   only?: string[];
   budgetMs?: number;
+  // The longest one file's parse may take, MAX_PARSE_MS when not set. A
+  // test lifts it so a loaded machine does not leave a file unread.
+  maxParseMs?: number;
   maxFiles?: number;
   maxFileBytes?: number;
   maxHeapMb?: number;
@@ -149,6 +154,7 @@ export async function workTreeDigest(root: string, maxFileBytes: number): Promis
   const traced = traceReads(reader);
   const model = discoverProjects(inv.all, traced.reader, traced.look);
   readGoModules(traced.reader, inv.all);
+  readDeclarations(traced.reader, inv.all);
   return captureDigest({ inv, only: null, maxFileBytes, reads: traced.entries(), model });
 }
 
@@ -167,6 +173,53 @@ function readGoModules(reader: RepoReader, all: string[]): [string, string][] {
   return out;
 }
 
+// Declaration files (`.d.ts`), which the graph does not read as source, are
+// read for one fact: the global names they declare as plain data
+// (`declare const V: string`). Read through the traced reader, so their
+// contents are part of the capture's digest. Past the cap the rest are not
+// read, and the names they declare stay unknown. The cap counts every
+// file read, one that declares nothing too.
+const DECLARATION = /\.d\.[cm]?ts$/;
+const DECLARATION_FILES = 500;
+function readDeclarations(reader: RepoReader, all: string[]): [string, string][] {
+  const out: [string, string][] = [];
+  let read = 0;
+  for (const f of all) {
+    if (read >= DECLARATION_FILES) break;
+    if (!DECLARATION.test(f) || langOf(f.replace(DECLARATION, ".ts")) === null) continue;
+    read++;
+    const text = reader.read(f, MANIFEST_BYTES);
+    if (text !== null && text.includes("declare")) out.push([f, text]);
+  }
+  return out;
+}
+
+// The global names each declaration file declares as plain data, parsed and
+// extracted as a source file is, with the same limit on one parse.
+export async function declaredPlain(files: [string, string][], deadline: number, parseMs = MAX_PARSE_MS): Promise<{ file: string; names: string[] }[]> {
+  if (files.length === 0) return [];
+  const out: { file: string; names: string[] }[] = [];
+  const parser = await parserFor("typescript");
+  try {
+    for (const [file, text] of files) {
+      // Past the build's budget no parse starts: the names stay unknown, a floor.
+      if (performance.now() > deadline) break;
+      const limit = Math.min(performance.now() + parseMs, deadline);
+      const tree = parser.parse(text, null, { progressCallback: (() => performance.now() > limit) as unknown as (state: unknown) => void });
+      if (!tree) continue;
+      try {
+        const names = ambientOf(file, extract(tree, "typescript"));
+        if (names.length > 0) out.push({ file, names });
+      } finally {
+        tree.delete();
+      }
+    }
+  } finally {
+    parser.delete();
+  }
+  return out;
+}
+
 
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
@@ -180,6 +233,7 @@ function plural(n: number, one: string, many = `${one}s`): string {
 export const MAX_PARSE_MS = 2000;
 
 class Parsers {
+  constructor(private readonly parseMs = MAX_PARSE_MS) {}
   private map = new Map<Lang, Parser>();
   count = 0; // parses started: what the parse cap counts
   // "slow" when the last parse was stopped at MAX_PARSE_MS, "budget" when at the build's deadline.
@@ -193,12 +247,12 @@ class Parsers {
     this.count++;
     this.stopped = null;
     const started = performance.now();
-    const limit = Math.min(started + MAX_PARSE_MS, deadline);
+    const limit = Math.min(started + this.parseMs, deadline);
     // Returning true from the progress callback cancels the parse.
     const progressCallback = (() => performance.now() > limit) as unknown as (state: unknown) => void;
     const tree = parser.parse(content, null, { progressCallback });
     if (!tree) {
-      this.stopped = limit === deadline && deadline < started + MAX_PARSE_MS ? "budget" : "slow";
+      this.stopped = limit === deadline && deadline < started + this.parseMs ? "budget" : "slow";
       return null;
     }
     try {
@@ -238,6 +292,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
   const started = performance.now();
   const budgetMs = args.budgetMs ?? DEFAULT_BUDGET_MS;
   const deadline = started + budgetMs;
+  const maxParseMs = args.maxParseMs ?? MAX_PARSE_MS;
   const maxFiles = args.maxFiles ?? DEFAULT_MAX_FILES;
   const maxFileBytes = args.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const maxHeap = (args.maxHeapMb ?? DEFAULT_MAX_HEAP_MB) * 1024 * 1024;
@@ -279,6 +334,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
   const traced = traceReads(reader);
   const model = discoverProjects(inv.all, traced.reader, traced.look);
   const goModules = readGoModules(traced.reader, inv.all);
+  const declarations = readDeclarations(traced.reader, inv.all);
   stage("projects");
 
   const meta = store ? asPredictMeta(store.readMeta()?.predict ?? null) : null;
@@ -338,7 +394,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
   }
 
   // ---------- facts ----------
-  const parsers = new Parsers();
+  const parsers = new Parsers(maxParseMs);
   const inputs: FileInput[] = [];
   const keys = new Map<string, { key: string; blob: string; lang: Lang }>();
   let hits = 0;
@@ -451,9 +507,10 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       if (p === undefined) projects.set(file, (p = projectFolder(model, goModules, file)));
       return p;
     };
-    const world = createWorld({ files: inputs, known, model, goModules, stop: overBudget });
+    const declared = await declaredPlain(declarations, deadline, maxParseMs);
+    const world = createWorld({ files: inputs, known, model, goModules, declared, stop: overBudget });
     const resolved = world.resolveAll();
-    if (resolved.budgetFiles.length > 0) stoppedBy ??= "budget";
+    if (resolved.budgetFiles.length > 0 || resolved.escapesCut) stoppedBy ??= "budget";
     stage("resolve");
 
     // ---------- frameworks ----------
@@ -511,12 +568,13 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     }
     const unknowns: UnknownSite[] = [...resolved.unknowns];
     for (const file of resolved.budgetFiles) {
-      unknowns.push({ file, line: 0, column: 0, name: "", cause: "budget", shape: "other", caller: file, scope: "file", note: "the budget ran out before every call of this file was resolved" });
+      // What the file's unresolved calls run is not known: no narrower target.
+      unknowns.push(gap({ cause: "budget", place: { file, line: 0 }, reaches: "scope", next: NEXT.budget, note: "the budget ran out before every call of this file was resolved" }));
     }
     const unknownNames = new Map<string, number>();
     const valueCalls = new Map<string, number>();
     for (const u of unknowns) {
-      if (u.name !== "") unknownNames.set(u.name, (unknownNames.get(u.name) ?? 0) + 1);
+      for (const name of namesReached(u)) unknownNames.set(name, (unknownNames.get(name) ?? 0) + 1);
       if (u.scope === "project" && u.cause !== "metadata-unreadable") {
         const p = projectOf(u.file);
         valueCalls.set(p, (valueCalls.get(p) ?? 0) + 1);
@@ -528,7 +586,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     if (removalUnchecked > 0) reasons.push(`removed symbols were not checked in ${plural(removalUnchecked, "changed file")}`);
     if (stoppedBy === "budget") {
       const left = notRead.filter((n) => n.reason === "budget").length;
-      reasons.push(`the ${(budgetMs / 1000).toFixed(budgetMs < 1000 ? 3 : 0)} s budget ran out${left > 0 ? ` with ${plural(left, "file")} not read` : ""}${resolved.budgetFiles.length > 0 ? ` and the calls of ${plural(resolved.budgetFiles.length, "file")} not resolved` : ""}`);
+      reasons.push(`the ${(budgetMs / 1000).toFixed(budgetMs < 1000 ? 3 : 0)} s budget ran out${left > 0 ? ` with ${plural(left, "file")} not read` : ""}${resolved.budgetFiles.length > 0 ? ` and the calls of ${plural(resolved.budgetFiles.length, "file")} not resolved` : ""}${resolved.escapesCut ? ", before every way a function escapes was found" : ""}`);
       cuts.push({ by: "budget", at: null, omitted: left + resolved.budgetFiles.length, exact: true, unit: "files", note: `stopped ${Math.max(0, Math.round(performance.now() - deadline))} ms after the ${budgetMs} ms budget` });
     }
     if (stoppedBy === "memory") {
@@ -546,6 +604,9 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     }
     const parseErrors = notRead.filter((n) => n.reason === "parse-error" || n.reason === "unreadable").length;
     if (parseErrors > 0) reasons.push(`${plural(parseErrors, "file")} could not be read or parsed`);
+    // Named, since a floor in another project has no other reason that says it.
+    const slow = notRead.filter((n) => n.reason === "slow-parse").map((n) => n.file);
+    if (slow.length > 0) reasons.push(`${plural(slow.length, "file")} took longer than the ${maxParseMs / 1000} s limit on one parse and ${slow.length === 1 ? "was" : "were"} not read: ${slow.slice(0, 3).join(", ")}${slow.length > 3 ? ` and ${slow.length - 3} more` : ""}`);
     const gaps = model.unreadable;
     // Only a gap that can hide a relation makes the build partial
     // (discovery/projects.ts GAP_RULES); every gap is said.
@@ -583,6 +644,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       unknowns,
       unknownNames,
       valueCalls,
+      escapes: resolved.escapes,
       model,
       goModules,
       projectOf,
@@ -590,7 +652,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       frameworks,
       digest,
       status: {
-        status: skipped > 0 || removalUnchecked > 0 || resolved.budgetFiles.length > 0 || hidingGaps.length > 0 ? "partial" : "ok",
+        status: skipped > 0 || removalUnchecked > 0 || resolved.budgetFiles.length > 0 || resolved.escapesCut || hidingGaps.length > 0 ? "partial" : "ok",
         reason: reasons[0] ?? null,
         reasons,
         filesParsed: inputs.length,
@@ -619,7 +681,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // a build whose project model lacks a manifest or tsconfig that can hide
     // a relation: its index is never loaded as if nothing were missing.
     const later = new Set<NotRead["reason"]>(["budget", "parse-cap", "memory", "slow-parse", "unreadable"]);
-    const complete = !notRead.some((n) => later.has(n.reason)) && resolved.budgetFiles.length === 0 && hidingGaps.length === 0;
+    const complete = !notRead.some((n) => later.has(n.reason)) && resolved.budgetFiles.length === 0 && !resolved.escapesCut && hidingGaps.length === 0;
     // Under the five-second line too, a complete build of the work tree keeps
     // its index, so the next question on the same tree loads it (the kept
     // index above), but only when what it says is what any build of these
@@ -642,12 +704,14 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
         reasons.push(`the capture's files were not kept: ${((error as Error).message ?? "").split("\n")[0]}`);
       }
       stage("capture");
+      // The index's own files first: this build's projects.json, which also
+      // keeps what the declaration files declare, replaces the index's.
       const files: Record<string, string> = {
+        ...(withIndex ? writeIndex(graph) : {}),
         "inventory.json": JSON.stringify({ files: Object.fromEntries([...keys].map(([p, k]) => [p, k])) }),
-        "projects.json": JSON.stringify({ model: serializeModel(model), goModules }),
+        "projects.json": JSON.stringify({ model: serializeModel(model), goModules, ...(declared.length > 0 ? { declared } : {}) }),
         "coverage.json": JSON.stringify({ notRead, cuts, budgetFiles: resolved.budgetFiles, ...(unreadLanguages.length > 0 ? { unreadLanguages } : {}) }),
       };
-      if (withIndex) Object.assign(files, writeIndex(graph));
       const published = await store.publish({
         manifest: {
           capture: { kind: args.capture === "working-tree" ? "working-tree" : args.capture === "snapshot" ? "snapshot" : "revision", treeSha, digest, dirtyPaths: null },

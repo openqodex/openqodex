@@ -15,6 +15,16 @@
 // 6. A build kept as an index, reopened, does not say which build it is:
 //    the index was written before the build had its id, so an answer read
 //    from it names no build (`graph ... --generation <id>` included).
+// 7. A build reopened from its facts forgets the global names a declaration
+//    file declares as plain data, or an edit to that file keeps the digest,
+//    so a kept build vouches for a name its file no longer declares so.
+// 8. A build kept as an index forgets that a read by a computed key passes
+//    its value on, or where it is, so a reopened build says only tests could
+//    hide a caller that product code may call.
+// 9. A file that declares more global names as plain data than the reader
+//    of saved facts accepts, or one longer than it accepts, is refused when
+//    reopened from its facts, so a whole build reopens as partial with the
+//    file not read (issue 426).
 import { afterAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readdirSync, unlinkSync } from "node:fs";
@@ -22,6 +32,7 @@ import { join } from "node:path";
 import { buildGraph, openStore } from "../src/index.js";
 import type { Graph } from "../src/index.js";
 import { graphOf } from "../src/session.js";
+import { workTreeDigest } from "../src/build.js";
 import { commitAll, makeHome, makeRepo, writeFiles } from "./helpers.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
 
@@ -122,5 +133,59 @@ describe("reopening a kept build", () => {
     const gen = st.open({ id });
     expect(gen?.manifest.hasIndex).toBe(true);
     expect((graphOf(st, gen!) as Graph).status.generation).toBe(id);
+  });
+  it("keeps what a declaration file declares, and an edit to one is a new capture (7)", async () => {
+    const root = makeRepo({
+      "app/package.json": '{"name": "app"}\n',
+      "app/a.ts": "export function f() {}\n",
+      "app/b.ts": 'import { f } from "./a";\nexport const v = VERSION;\nf();\n',
+      "app/globals.d.ts": "declare const VERSION: string;\n",
+    });
+    const st = await store(root);
+    const built = await buildGraph({ repoRoot: root, store: st, mode: "fresh" });
+    expect([...built.escapes.opaque.keys()]).toEqual([]);
+    const gen = st.open({ id: built.status.generation as string });
+    expect(gen?.manifest.hasIndex).toBe(false);
+    expect([...(graphOf(st, gen!) as Graph).escapes.opaque.keys()]).toEqual([]);
+    const digest = await workTreeDigest(root, 1_000_000);
+    writeFiles(root, { "app/globals.d.ts": "declare const VERSION: any;\n" });
+    expect(await workTreeDigest(root, 1_000_000)).not.toBe(digest);
+    const again = await buildGraph({ repoRoot: root, store: st });
+    expect([...again.escapes.opaque.keys()]).toEqual(["app/b.ts"]);
+  });
+  it("reads back the facts of a declaration file with more than 4,096 plain global names, one of them longer than 4,096 characters (9)", async () => {
+    const names = `${Array.from({ length: 5000 }, (_, i) => `declare const V${i}: string;\n`).join("")}declare const L${"o".repeat(5000)}: string;\n`;
+    const root = makeRepo({
+      "app/package.json": '{"name": "app"}\n',
+      "app/a.ts": "export function f() {}\n",
+      "app/b.ts": 'import { f } from "./a";\nexport const v = V4999;\nf();\n',
+      "app/globals.d.ts": names,
+      "app/env.ts": `export {};\ndeclare global {\n${names.replace(/^declare /gm, "")}}\n`,
+    });
+    const st = await store(root);
+    const built = await buildGraph({ repoRoot: root, store: st, mode: "fresh" });
+    expect(built.status.status).toBe("ok");
+    const gen = st.open({ id: built.status.generation as string });
+    expect(gen?.manifest.hasIndex).toBe(false);
+    const reopened = graphOf(st, gen!) as Graph;
+    expect(reopened.status.notRead).toEqual([]);
+    expect(reopened.status.status).toBe("ok");
+    expect([...reopened.escapes.opaque.keys()]).toEqual([]);
+    expect(shape(reopened)).toEqual(shape(built));
+  });
+  it("keeps whether a read by a computed key passes its value on, and its places (8)", async () => {
+    const root = makeRepo({
+      "src/cart.ts": "export class Cart {\n  run(): void {}\n}\n",
+      "src/cart.test.ts": "export function pick(c: any, k: string): unknown {\n  return c[k];\n}\n",
+      "src/stay.test.ts": "export function go(c: any, k: string): void {\n  c[k]();\n}\n",
+    });
+    const st = await store(root);
+    const built = await buildGraph({ repoRoot: root, store: st, mode: "retained" });
+    const gen = st.open({ id: built.status.generation as string });
+    expect(gen?.manifest.hasIndex).toBe(true);
+    const read = (graphOf(st, gen!) as Graph).escapes.members.get("js:*");
+    expect(read?.passed).toBe(true);
+    expect(read?.places).toEqual([{ file: "src/cart.test.ts", line: 2 }, { file: "src/stay.test.ts", line: 2 }]);
+    expect(read).toEqual(built.escapes.members.get("js:*"));
   });
 });

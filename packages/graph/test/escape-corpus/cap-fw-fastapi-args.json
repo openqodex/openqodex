@@ -1,0 +1,39 @@
+{
+  "covers": "a FastAPI dependency in a keyword argument past the arguments the plugin's reader reads from one call (fastapi py.ts MAX_ARGS)",
+  "caps": [
+    "frameworks/fastapi/py.ts#MAX_ARGS"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": [
+      "from fastapi import Depends, FastAPI\n\napp = FastAPI()\n\n",
+      "def d():\n    return 1\n\n@app.get(\"/x\", ",
+      {
+        "repeat": "k{{i}}=1, ",
+        "times": 24
+      },
+      "dependencies=[Depends(d)])\ndef index():\n    return 1\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "main.py#d",
+      "caller": null,
+      "file": "main.py",
+      "line": 8
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#d",
+      "reason": "more arguments than the plugin reads, so its dependencies= may be among them",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.py:8"
+      }
+    }
+  ]
+}

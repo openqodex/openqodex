@@ -34,6 +34,8 @@
 // 15. The port drifts from the designer's reference renderer (render.py):
 //     for the same sample it gives another element, class, id, link, line
 //     number or text, or other code in a diff cell.
+// 23. The page does not name the model and effort the reviewer was asked
+//     for, or names one when none was set.
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { setFlagsFromString } from "node:v8";
@@ -286,6 +288,13 @@ describe("report.html", () => {
     expect(html).toContain("No findings on the changed lines.");
     expect(html).not.toContain('id="f1"');
     expect(html).toContain('id="file-1"');
+  });
+
+  it("23. names the model and effort the reviewer was asked for, and none when none was set", () => {
+    const change = fixtureChange();
+    const completion: CompletionRecord = { ...COMPLETE, reviewer: { ...COMPLETE.reviewer!, driver: "codex", version: "0.171.0", model: "gpt-test-model", effort: "medium" } };
+    expect(page(report(change, { completion }), change)).toContain("codex 0.171.0, model gpt-test-model, effort medium, 60 s");
+    expect(page(report(change), change)).toContain("claude 2.1.293, 60 s");
   });
 
   it("7. shows what an incomplete review is missing first, and its findings as findings so far", () => {

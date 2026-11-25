@@ -1,0 +1,18 @@
+{
+  "covers": "an adversarial case from the review of piece A: java reflection mixed",
+  "files": {
+    "src/main/java/demo/Job.java": "package demo;\n\npublic class Job {\n  public void runJob() {}\n}\n",
+    "src/main/java/demo/Main.java": "package demo;\n\npublic class Main {\n  public static void main(String[] a) throws Exception {\n    Job j = new Job();\n    Job.class.getMethod(a[0]).invoke(j);\n  }\n}\n",
+    "web/x.ts": "export function go(o: any) { o.runJob(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/main/java/demo/Job.java#Job.runJob",
+      "caller": null,
+      "file": "src/main/java/demo/Main.java",
+      "line": 6
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

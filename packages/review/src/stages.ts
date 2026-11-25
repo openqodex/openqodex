@@ -402,8 +402,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         }
       }
       const filteredScan = { ...scan, candidates: scan.candidates.filter((c) => !unverified.has(c.id)) };
-      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles });
-      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles }) : null;
+      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles, verified: true });
+      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles, verified: true }) : null;
       return { submission, findingOwners, droppedOwners, items, checked, visible };
     };
     let built = assemble();
@@ -450,8 +450,25 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     const report = built.checked.report;
     const shownKeys = new Set(report.findings.map(findingKey));
     const keyOf = (item: typeof built.items[number]) => findingKey({ ...item.finding, line_end: item.finding.line_end ?? item.finding.line_number, candidate: item.finding.candidate ?? null });
-    // A key a shown finding owns stays a finding, whatever tier another item with that key was given.
-    const shownFindingTierKeys = new Set(built.items.filter((item) => item.v.tier === "finding").map(keyOf).filter((key) => shownKeys.has(key)));
+    const lowConfidenceOf = (f: FindingV2) => {
+      if (f.source && config.disabledRules.some((glob) => matchesGlob(f.source!, glob))) return null;
+      const lens = f.source?.startsWith("lens:") ? args.manifest.lenses.find((l) => l.name === f.source!.slice("lens:".length)) : undefined;
+      const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lens?.confidenceFloor ?? 0);
+      if (f.confidence >= floor) return null;
+      return { title: redactByFingerprint(f.title, scan.secretFingerprints), file_path: redactByFingerprint(f.file_path, scan.secretFingerprints), confidence: f.confidence, floor };
+    };
+    // A key a shown finding owns stays a finding, whatever tier another item
+    // with that key was given, at the highest severity of its finding-tier
+    // items that count (at or above the floor): an observation sharing the
+    // key never sets it.
+    const countedSeverity = new Map<string, ReportFinding["severity"]>();
+    for (const item of built.items) {
+      const key = keyOf(item);
+      if (item.v.tier !== "finding" || !shownKeys.has(key) || lowConfidenceOf(item.finding) !== null) continue;
+      const best = countedSeverity.get(key);
+      if (best === undefined || severityRank(item.finding.severity) > severityRank(best)) countedSeverity.set(key, item.finding.severity);
+    }
+    const shownFindingTierKeys = new Set(countedSeverity.keys());
     const observationKeys = new Set(built.items.filter((item) => item.v.tier === "observation").map(keyOf).filter((key) => !shownFindingTierKeys.has(key)));
     const shownObservationKeys = new Set((built.visible?.ok ? built.visible.report.findings : report.findings)
       .filter((f) => observationKeys.has(findingKey(f)))
@@ -464,6 +481,9 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     const foldedInto = new Map<string, typeof built.items[number]>();
     for (const item of built.items) {
       const key = keyOf(item);
+      // An observation never folds away a key a shown finding owns, so a
+      // shown finding folds only into another shown finding.
+      if (item.v.tier === "observation" && shownFindingTierKeys.has(key)) continue;
       // Along a chain of duplicates, the first link that is shown folds this item.
       let target = item;
       let folded = false;
@@ -474,7 +494,9 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         if (!next) break;
         target = next;
         const targetKey = keyOf(target);
-        const shown = target.v.tier === "finding" ? shownKeys.has(targetKey) : item.v.tier === "observation" && shownObservationKeys.has(targetKey);
+        // A finding-tier link is shown only when its key counts: a below-floor
+        // finding whose key an observation shares is no place to fold into.
+        const shown = target.v.tier === "finding" ? shownFindingTierKeys.has(targetKey) : item.v.tier === "observation" && shownObservationKeys.has(targetKey);
         if (targetKey !== key && shown) { folded = true; break; }
       }
       if (folded) { duplicateKeys.add(key); foldedInto.set(key, target); }
@@ -483,11 +505,40 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         if (targetKey !== key && item.v.tier === "finding" && target.v.tier === "observation" && shownKeys.has(key) && observationKeys.has(targetKey)) supersededKeys.add(targetKey);
       }
     }
+    // Keys can fold in a cycle when two items share a key (A1 into B, B
+    // into A2), which would fold every key in it away: the cycle's first key
+    // the report shows stays.
+    for (const start of foldedInto.keys()) {
+      const path: string[] = [];
+      let key = start;
+      while (foldedInto.has(key) && !path.includes(key)) { path.push(key); key = keyOf(foldedInto.get(key)!); }
+      if (!path.includes(key)) continue;
+      const cycle = new Set(path.slice(path.indexOf(key)));
+      const keep = report.findings.map(findingKey).find((k) => cycle.has(k)) ?? key;
+      foldedInto.delete(keep);
+      duplicateKeys.delete(keep);
+    }
+    // A counted key folded into another gives the survivor its counted
+    // severity when higher, so a folded major still blocks.
+    const raised = new Map<string, ReportFinding["severity"]>();
+    for (const [key, into] of foldedInto) {
+      const severity = countedSeverity.get(key);
+      if (severity === undefined) continue;
+      let target = keyOf(into);
+      while (foldedInto.has(target)) target = keyOf(foldedInto.get(target)!);
+      const best = raised.get(target) ?? countedSeverity.get(target);
+      if (best === undefined || severityRank(severity) > severityRank(best)) raised.set(target, severity);
+    }
     const observations: ReportFinding[] = [];
+    // A counted finding an observation sharing its key lifted over the
+    // threshold is hidden at its own severity, and counted as hidden.
+    const listed = (severity: ReportFinding["severity"]) => severityRank(severity) >= severityRank(config.severityThreshold) || config.blockOnSeverity !== null && severityRank(severity) >= severityRank(config.blockOnSeverity);
     report.findings = report.findings.flatMap((f) => {
       const key = findingKey(f);
       if (duplicateKeys.has(key)) return [];
-      const entry = { ...f };
+      const severity = raised.get(key) ?? countedSeverity.get(key);
+      if (severity && severityRank(severity) < severityRank(f.severity) && !listed(severity)) { report.below_threshold++; return []; }
+      const entry = { ...f, ...(severity ? { severity } : {}) };
       if (observationKeys.has(key)) { if (!supersededKeys.has(key)) observations.push(entry); return []; }
       return [entry];
     });
@@ -522,13 +573,6 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       }
     };
     ownComponent(owned, [...owned]);
-    const lowConfidenceOf = (f: FindingV2) => {
-      if (f.source && config.disabledRules.some((glob) => matchesGlob(f.source!, glob))) return null;
-      const lens = f.source?.startsWith("lens:") ? args.manifest.lenses.find((l) => l.name === f.source!.slice("lens:".length)) : undefined;
-      const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lens?.confidenceFloor ?? 0);
-      if (f.confidence >= floor) return null;
-      return { title: redactByFingerprint(f.title, scan.secretFingerprints), file_path: redactByFingerprint(f.file_path, scan.secretFingerprints), confidence: f.confidence, floor };
-    };
     const matchesLow = (low: Report["low_confidence"][number], entry: Report["low_confidence"][number]) => low.title === entry.title && low.file_path === entry.file_path && low.confidence === entry.confidence && low.floor === entry.floor;
     const removeLow = (entry: Report["low_confidence"][number]) => {
       const index = report.low_confidence.findIndex((low) => matchesLow(low, entry));
@@ -612,6 +656,10 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       if (item.c.kind === "scanner") return true;
       const key = findingKey({ ...item.finding, line_end: item.finding.line_end ?? item.finding.line_number, candidate: null });
       return item.v.tier === "finding" && !duplicateKeys.has(key);
+    }).map((finding) => {
+      // A survivor keeps the severity it was raised to, so a replay blocks too.
+      const severity = raised.get(findingKey({ ...finding, line_end: finding.line_end ?? finding.line_number, candidate: finding.candidate ?? null }));
+      return severity ? { ...finding, severity } : finding;
     }) };
     const sent = runs.filter((r) => (r.session.sentRounds ?? r.talk.rounds) > 0);
     const digested = new Set(sent.filter((r) => r.digestCarried.length).map((r) => r.unit));

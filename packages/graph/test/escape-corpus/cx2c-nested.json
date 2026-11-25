@@ -1,0 +1,23 @@
+{
+  "covers": "an import pattern with a nested pattern marks the module (flaw 2)",
+  "files": {
+    "src/m.js": "exports.a = function a() {};\nexports.b = function b() {};\nexports.cfg = { x: 1 };\n",
+    "src/use.js": "const { cfg: { x }, a } = require(\"./m\");\na(x);\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/m.js#a",
+      "caller": "src/use.js",
+      "file": "src/use.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/m.js#b",
+      "reason": "its module is used as a value at",
+      "at": "src/use.js:1"
+    }
+  ]
+}

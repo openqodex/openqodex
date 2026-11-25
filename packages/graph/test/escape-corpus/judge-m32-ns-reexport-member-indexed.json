@@ -1,0 +1,18 @@
+{
+  "covers": "an adversarial case from the review of piece A: ns reexport member indexed",
+  "files": {
+    "src/h.ts": "export function f() {}\n",
+    "src/a.ts": "export * as helpers from \"./h\";\n",
+    "src/use.ts": "import * as ns from \"./a\";\nexport function go(k: string) { (ns.helpers as any)[k](); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#f",
+      "caller": null,
+      "file": "src/a.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

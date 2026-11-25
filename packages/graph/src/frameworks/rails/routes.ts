@@ -14,7 +14,8 @@
 import type { Cause } from "../../model/records.js";
 import type { FrameworkEdgeKind, Site } from "../plugin.js";
 import type { Lit, RailsFact, RouteFact } from "./facts.js";
-import { pluralize, singularize, underscore } from "./inflect.js";
+import { MAX_NODE_DEPTH } from "./facts.js";
+import { MAX_NAME, pluralize, singularize, underscore } from "./inflect.js";
 import type { App, RailsWorld } from "./world.js";
 import { relTo, under } from "./world.js";
 
@@ -206,7 +207,8 @@ export function expandRoutes(world: RailsWorld, budget: Budget): Expansion {
     });
     for (const cap of facts) {
       if (cap.kind !== "route-cap") continue;
-      out.gaps.push({ site: { file, line: cap.line, column: cap.column }, scope: { file }, cause: "fan-out-capped", affects: ["handles"], name: null, note: "route blocks nested deeper than eight levels are not read" });
+      const note = cap.by === "syntax" ? `route calls nested more than ${MAX_NODE_DEPTH} syntax levels deep are not read` : "route blocks nested deeper than eight levels are not read";
+      out.gaps.push({ site: { file, line: cap.line, column: cap.column }, scope: { file }, cause: "fan-out-capped", affects: ["handles"], name: null, note });
     }
     contexts.set(file, ctx);
     return ctx;
@@ -520,6 +522,7 @@ export function expandRoutes(world: RailsWorld, budget: Budget): Expansion {
         names.forEach((name, i) => {
           const asName = text(o.as) ?? name;
           const ctrlName = text(o.controller) ?? (singular ? pluralize(name) : name);
+          if (singular && text(o.controller) === null && name.length > MAX_NAME) gap(f, "fan-out-capped", `the ${f.call} name is longer than ${MAX_NAME} characters, so it is not made plural and its controller may not be found`);
           const mod = text(o.module);
           const controller = joinModule(mod ? joinModule(S.module, mod) : S.module, ctrlName);
           const seg = text(o.path) ?? name;

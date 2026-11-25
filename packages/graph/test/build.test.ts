@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact, openStore, renderImpactBlock } from "../src/index.js";
+import { declaredPlain } from "../src/build.js";
 import { at, callSites, commitAll, makeHome, makeRepo, symbol, writeFiles } from "./helpers.js";
 import { cpuMs, expectLinear, growthTests } from "../src/test-timing.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
@@ -122,6 +123,43 @@ describe("budget", () => {
       const large = await cpuMs(() => buildGraph({ repoRoot: root, store: null, budgetMs: 60_000 }));
       expectLinear("a build of 5,000 and of 20,000 nested blocks", small, large);
     }, 120_000);
+  });
+
+  // Every name read once fetched the node above it, which tree-sitter finds
+  // by a walk down from the root: a file of nested reads took time that grew
+  // with the square of its depth (issue 418).
+  const nestedReads = (depth: number) => repo({ "reads.ts": `export const v = 1;\n${"{ v; ".repeat(depth)}${"}".repeat(depth)}\n` });
+  growthTests("in time that grows with the depth of its name reads", () => {
+    it("reads 20,000 nested name reads in time that grows with the depth (418)", async () => {
+      const quarter = nestedReads(n / 4);
+      const root = nestedReads(n);
+      // Each build read the file whole: a parse cut by its time limit lists
+      // the file as not read, and a time that measures nothing.
+      const read = (at: string) => async () => expect((await buildGraph({ repoRoot: at, store: null, budgetMs: 60_000 })).status.notRead).toEqual([]);
+      const small = await cpuMs(read(quarter));
+      const large = await cpuMs(read(root));
+      expectLinear("a build of 5,000 and of 20,000 nested name reads", small, large);
+    }, 120_000);
+  });
+
+  // Every timer given one callback once read the whole file again to prove
+  // the callback a function: a file of many timers took time that grew
+  // with its square.
+  const timers = (count: number) => repo({ "timers.ts": `const tick = () => {};\nexport function f() {}\n${"setTimeout(tick, 1);\n".repeat(count)}` });
+  growthTests("in time that grows with the timers", () => {
+    it("reads 16,000 timers given one callback in time that grows with the count", async () => {
+      const quarter = timers(4_000);
+      const root = timers(16_000);
+      const small = await cpuMs(() => buildGraph({ repoRoot: quarter, store: null, budgetMs: 60_000 }));
+      const large = await cpuMs(() => buildGraph({ repoRoot: root, store: null, budgetMs: 60_000 }));
+      expectLinear("a build of 4,000 and of 16,000 timers given one callback", small, large);
+    }, 120_000);
+  });
+
+  it("starts no declaration file's parse once the build's budget is spent", async () => {
+    const files: [string, string][] = [["env.d.ts", "declare const V: string;\n"]];
+    expect(await declaredPlain(files, Number.POSITIVE_INFINITY)).toEqual([{ file: "env.d.ts", names: ["V"] }]);
+    expect(await declaredPlain(files, performance.now() - 1)).toEqual([]);
   });
 
   it("caps the number of parses and parses the changed files first", async () => {
