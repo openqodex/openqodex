@@ -1,5 +1,19 @@
 # openqodex
 
+## 0.25.0
+
+### Minor Changes
+
+- [#468](https://github.com/openqodex/openqodex/pull/468) [`136a390`](https://github.com/openqodex/openqodex/commit/136a3907c986885fb241b41181138c1ea4e00441) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - OpenQodex is now opt-in per repository: agents review before a push only in a repository with an OpenQodex settings file (`.openqodex/config.yaml`, or `.openqodex.yaml` at its root), and the Claude Code and Codex push hooks say nothing anywhere else. The note `init` writes for each agent, the team note in a repository's `CLAUDE.md` and `AGENTS.md`, and the project note are each one line now, and the team note names `npx -y openqodex review` with no version. A review you run by hand in a repository with no settings file still runs; the settings file it creates opts that repository in, and it says so. What you need to do: run `openqodex init` once to replace the old note with the new one, and run it in each repository you want reviewed. An old note you did not edit is replaced in place; one you edited is left as it is.
+
+- [#468](https://github.com/openqodex/openqodex/pull/468) [`4436e1a`](https://github.com/openqodex/openqodex/commit/4436e1a4f08255946b22a8422b7faaf5a8998d99) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - `init` in your own terminal now shows the reviewer list it plans for the team and asks before writing it: keep it, change the order, leave reviewers out, or write no list. From an agent or with `--yes`, `init` writes the planned list without asking, as before. A review in a project with no reviewer list now names the reviewer the automatic order picked, in the receipt and the report, and says to run `openqodex init` to pin the reviewers for the whole team.
+
+- [#468](https://github.com/openqodex/openqodex/pull/468) [`820cc8c`](https://github.com/openqodex/openqodex/commit/820cc8ca1bb1982ad78da43f4bbe57ff0a0d6601) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - OpenQodex now sends anonymous usage data: the version, your operating system, the agent and model that reviewed, timings, scanner names, finding counts and token counts. It never sends code, paths, repository names or finding text. To turn it off, add `openqodex_telemetry: 0` to `.openqodex/config.yaml`, or set `OPENQODEX_TELEMETRY=0` or `DO_NOT_TRACK=1`. It is always off in CI and with `--offline`. `openqodex guide telemetry` lists every field.
+
+### Patch Changes
+
+- [#468](https://github.com/openqodex/openqodex/pull/468) [`63530f6`](https://github.com/openqodex/openqodex/commit/63530f667ff3d394ca4cbf4ad23546de5809c1d2) Thanks [@siddhant-mohan](https://github.com/siddhant-mohan)! - The benchmark can run a release on the published npm package with `--package npm:<release>`. Before the package's code runs, the run checks its record and asks the npm registry for that version's integrity again. A cached unpacked package is unpacked again when any file or its `record.json` differs from the tarball. The benchmark guide in `docs/benchmark.md` describes both.
+
 ## 0.24.0
 
 ### Minor Changes
