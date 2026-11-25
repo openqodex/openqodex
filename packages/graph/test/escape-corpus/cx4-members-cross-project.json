@@ -1,0 +1,27 @@
+{
+  "covers": "a member called by a computed name in another project (flaw 4)",
+  "files": {
+    "package.json": "{\"name\": \"root\", \"private\": true, \"workspaces\": [\"packages/*\"]}",
+    "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+    "packages/core/package.json": "{\"name\": \"core\", \"version\": \"1.0.0\", \"main\": \"src/jobs.ts\"}",
+    "packages/core/src/jobs.ts": "export class Jobs {\n  runA() {}\n  runB() {}\n}\n",
+    "packages/cli/package.json": "{\"name\": \"cli\", \"version\": \"1.0.0\", \"dependencies\": {\"core\": \"workspace:*\"}}",
+    "packages/cli/src/go.ts": "import { Jobs } from \"core\";\nexport function go(name: string) { const j = new Jobs(); (j as any)[name](); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "packages/core/src/jobs.ts#Jobs.runA",
+      "caller": "packages/cli/src/go.ts#go",
+      "file": "packages/cli/src/go.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "packages/core/src/jobs.ts#Jobs.runA",
+      "reason": "in projects that can hold its objects, first at packages/cli/src/go.ts:2",
+      "at": "packages/cli/src/go.ts:2"
+    }
+  ]
+}

@@ -9,9 +9,9 @@ inputs:
   version:
     description: The openqodex version to run, an exact release version such as 0.6.1. The release workflow sets the default to the version it publishes.
     required: false
-    default: "0.16.0"
+    default: "0.24.0"
   review:
-    description: auto runs the full review when the step's environment holds ANTHROPIC_API_KEY, and the scanners only without it. off always runs the scanners only. required always attempts the review and fails the job unless the review completes or the change has nothing to review.
+    description: auto runs the full review when a reviewer the config lists can run (Claude Code with ANTHROPIC_API_KEY in the step's environment, Codex on the runner's PATH; with no list, Claude Code), and the scanners only otherwise. off always runs the scanners only. required always attempts the review and fails the job unless the review completes or the change has nothing to review.
     required: false
     default: "auto"
   claude-code-version:
@@ -31,7 +31,7 @@ inputs:
     required: false
     default: "false"
   config-from:
-    description: In a pull request, read the OpenQodex config and the review's custom instructions from the base branch (base, the default) or from the pull request's own code (head). The pull request's author can change the head files to hide findings.
+    description: In a pull request, read the OpenQodex config, its reviewer list and the review's custom instructions from the base branch (base, the default) or from the pull request's own code (head). The pull request's author can change the head files to hide findings or choose their own reviewer.
     required: false
     default: "base"
 
@@ -72,7 +72,6 @@ runs:
         OPENQODEX_STEP: plan
         OPENQODEX_VERSION: ${{ inputs.version }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        BASE_REF: ${{ github.base_ref }}
         BLOCK_ON_SEVERITY: ${{ inputs.block-on-severity }}
         CONFIG_FROM: ${{ inputs.config-from }}
         EVENT_NAME: ${{ github.event_name }}
@@ -102,7 +101,6 @@ runs:
       env:
         OPENQODEX_VERSION: ${{ inputs.version }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        BASE_REF: ${{ github.base_ref }}
         BLOCK_ON_SEVERITY: ${{ inputs.block-on-severity }}
         CONFIG_FROM: ${{ inputs.config-from }}
         EVENT_NAME: ${{ github.event_name }}

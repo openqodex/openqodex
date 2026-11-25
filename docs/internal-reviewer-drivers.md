@@ -21,6 +21,8 @@ claude -p --output-format stream-json --verbose --input-format stream-json
   --strict-mcp-config --mcp-config {"mcpServers":{}}
   --disable-slash-commands
   --no-session-persistence
+  [--model <model>]                   (only with a list entry's model, or --reviewer claude:<model>)
+  [--effort <effort>]                 (only with a list entry's effort, or --reviewer-effort)
 ```
 
 The child gets an environment built from an allowlist (`reviewerEnv` in `packages/review/src/agents/claude.ts`): `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, locale, `TERM`, `TZ`, `CLAUDE_CONFIG_DIR`, proxy and CA settings, the `ANTHROPIC_*` key, URL and model variables, and the Bedrock, Vertex or Foundry variables only when the matching `CLAUDE_CODE_USE_*` flag is set; plus `OPENQODEX_REVIEW_DEPTH=1`. No other variable is copied, so no developer token and nothing that ties the child to a running Claude Code session (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, messaging sockets) reaches it. A run from inside a Claude Code session with this environment worked as the runs below did.
@@ -33,12 +35,14 @@ The child gets an environment built from an allowlist (`reviewerEnv` in `package
 | `--output-format stream-json --verbose` | One JSON event per line: an `init` event (tools, MCP servers, plugins, permission mode, memory paths, version), every `tool_use` with its input, every `tool_result` with `is_error`, a `permission_denied` event for each refusal, and a `result` event with the final text, turns, usage and cost. For a Read, `tool_use_result.file` gives the path, `startLine` and `numLines` delivered. |
 | `--tools Read,Grep,Glob` | The `init` event lists exactly `Glob`, `Grep`, `Read`. Asked to run `ls /` and to write a file, the model answered that it has no Bash or Write tool; no such tool call appears in the trace. The `Agent` tool is absent, so no subagent can start. |
 | `--permission-mode dontAsk` | Reads inside the working directory succeed. A Read of an absolute path outside it (`/tmp/.../outside/secret.txt`, `/etc/hosts`, a decoy ssh config), a relative path that leaves it (`../outside/secret.txt`), a Read through a link inside the folder that points outside, and a Grep or Glob rooted outside (`/tmp/...`, `/`) were each refused with a `permission_denied` event and an error result. A recursive Grep and a `**/*` Glob in the folder did not follow the link out. |
-| `--tools Read,Grep,Glob,WebSearch,WebFetch --allowedTools WebSearch,WebFetch` (the default; dropped with `reviewer_web: off` or `review --reviewer-web off`) | The `init` event lists the five tools. Without `--allowedTools`, `dontAsk` refused both web tools ("Permission to use WebFetch has been denied because Claude Code is running in don't ask mode"); with it, a WebFetch of example.com and a WebSearch both returned results (2026-10-03). |
+| `--tools Read,Grep,Glob,WebSearch,WebFetch --allowedTools WebSearch,WebFetch` (the default; dropped with `review.reviewer_web: off` or `review --reviewer-web off`) | The `init` event lists the five tools. Without `--allowedTools`, `dontAsk` refused both web tools ("Permission to use WebFetch has been denied because Claude Code is running in don't ask mode"); with it, a WebFetch of example.com and a WebSearch both returned results (2026-10-03). |
 | `--setting-sources ""` | No user, project or local settings file is read. In the same folder, a run without this flag loaded the project `CLAUDE.md` canary (the answer ended with the canary word) and the user's global instructions (the answer quoted them, about 155,000 input tokens); with it, the input was about 4,500 tokens and neither canary nor any sentence of the global file appeared anywhere in the event stream. With `--include-hook-events`, a run reading user settings showed 11 hook events; this run showed none. |
 | `--settings {"autoMemoryEnabled":false,"hooks":{},"disableAllHooks":true}` | The `init` event has no `memory_paths`: auto memory is off. With `disableAllHooks`, a SessionStart hook that a terminal wrapper (cmux) added to every `claude` it starts no longer ran: 2 hook events without it, 0 with it (2026-10-04, Claude Code 2.1.289). The driver also stops the run if any hook event appears in the stream. A repository `AGENTS.md` with a canary instruction was not followed. |
 | `--strict-mcp-config --mcp-config {"mcpServers":{}}` | The `init` event lists no MCP server. |
 | `--disable-slash-commands` | The `init` event lists no skill and no slash command. |
 | `--no-session-persistence` | Nothing is saved for a later `--resume`; the correction rounds use the open process instead. |
+| `--model haiku --effort low` (Claude Code 2.1.331, 2026-11-24) | The run answered; its `init` event named the model `claude-haiku-5-5`. A model given here wins over `ANTHROPIC_MODEL`. No `--fallback-model` is passed: the project's list decides what happens next. |
+| `--model bogus-model-xyz` (Claude Code 2.1.331, 2026-11-24) | Exit 1 after about a second. Stderr: `[claude-code:unrecognized_model]`. The `assistant` event has `"error": "model_not_found"`, `"api_error_status": 404`, `"api_error_type": "not_found_error"` and the text "There's an issue with the selected model (bogus-model-xyz). It may not exist or you may not have access to it." The `result` event has `"is_error": true`, `"subtype": "success"`, `"terminal_reason": "api_error"` and the same text. The driver reads this as a model that cannot serve (`reviewerError` in `driver.ts`), so a project's list moves on to its next entry. The recorded events are `packages/cli/test/fixtures/claude-stream-bad-model.jsonl`. |
 
 `AGENTS.md`: a canary there was not loaded in any run, with or without settings. The built-in plugins (`cc-plugin-agents-md`, `cc-plugin-telemetry`, `cc-plugin-plugin-authoring`) stay listed; they are part of Claude Code and read no repository instruction file in this configuration.
 
@@ -66,13 +70,13 @@ The boundary is Claude Code's own permission rules: `--tools Read,Grep,Glob` and
 - every path-bearing input (`file_path`, `path`, `notebook_path`, `cwd`, `directory`, and a `pattern` or `glob` that starts at `/`, `~`, a drive or `..`) is resolved against the snapshot, then through the real path of its deepest existing folder, and compared case-insensitively on macOS and Windows; a path with `$`, `%` or a NUL is refused, `~` is the home folder;
 - an input that is not an object, or a path field that is not text, makes the review incomplete;
 - a read outside the snapshot makes the review incomplete. An attempt the agent marked as an error is a refusal: it is listed on the receipt and does not fail the review. The error flag also marks a tool that ran and failed, so the init check on the tool list is the guard that keeps a tool the reviewer was not given from running at all. A review whose init event shows such a tool is failed before any call. A call with no result recorded still counts as a read;
-- one place outside the snapshot is the agent's own. Claude Code saves a tool result too large to hand the model at `<configuration folder>/projects/<its name for the working folder>/<session id>/tool-results/<tool call id>.txt` and tells the model to read it back. A call on the `tool-results` folder of this session (the session id from the `init` event; the configuration folder from `CLAUDE_CONFIG_DIR`, else `~/.claude`, as `init` reads it) is kept in `trace.json` with `own: true` and does not make the review incomplete: it holds only what this session's own calls returned, and each of those calls was checked. Any other path in the configuration folder (the login, another session's output, a transcript) stays outside. With Claude Code 2.1.296, `dontAsk` refused that read (2026-10-09).
+- one place outside the snapshot is the agent's own. Claude Code saves a tool result too large to hand the model at `<configuration folder>/projects/<its name for the working folder>/<session id>/tool-results/<tool call id>.txt` and tells the model to read it back. A call on the `tool-results` folder of this session (the session id from the `init` event; the configuration folder from `CLAUDE_CONFIG_DIR`, else `~/.claude`, as `init` reads it; a relative `CLAUDE_CONFIG_DIR` from the snapshot, the agent's working folder) is kept in `trace.json` with `own: true` and does not make the review incomplete: it holds only what this session's own calls returned, and each of those calls was checked. Any other path in the configuration folder (the login, another session's output, a transcript) stays outside. With Claude Code 2.1.296, `dontAsk` refused that read (2026-10-09).
 
-The snapshot holds no links (they are written as plain files) and secrets the scanners found are redacted in every file of it before the reviewer starts; a file too large to check is removed from it.
+The snapshot holds no links (they are written as plain files) and secrets the scanners found are redacted in every file of it before the reviewer starts. Every file remains readable regardless of size. Redaction streams bytes and range reads use a cached line index; time and budget bound the review.
 
 ### What the agent stores
 
-With `--no-session-persistence` and auto memory off, real runs with Claude Code 2.1.289 left no transcript, no `history.jsonl` line and no project entry for a snapshot folder in the configuration folder (searched for the brief's text and the snapshot paths after the runs). A tool result too large to hand the model is the exception: Claude Code 2.1.296 saved it at `projects/<snapshot folder name>/<session id>/tool-results/` in the configuration folder, and it stays there after the run (2026-10-09). An earlier run without `autoMemoryEnabled: false` left one empty `projects/<folder>/memory` folder; with the flag, none. The driver keeps the developer's configuration folder because a temporary one loses the login.
+With `--no-session-persistence` and auto memory off, real runs with Claude Code 2.1.289 left no transcript, no `history.jsonl` line and no project entry for a snapshot folder in the configuration folder (searched for the brief's text and the snapshot paths after the runs). A tool result too large to hand the model is the exception: Claude Code 2.1.296 saved it at `projects/<snapshot folder name>/<session id>/tool-results/` in the configuration folder, and it stayed there after the run (2026-10-09). When the session closes, the driver removes exactly `projects/<snapshot folder name>/<session id>/`, never through a link, then `projects/<snapshot folder name>/` when that left it empty. The folder name is Claude Code's: each character other than a letter or a digit as `-`. A name over 200 characters, which Claude Code cuts and ends with a hash, is left (issue 95). An earlier run without `autoMemoryEnabled: false` left one empty `projects/<folder>/memory` folder; with the flag, none. The driver keeps the developer's configuration folder because a temporary one loses the login.
 
 ### Not covered
 
@@ -90,11 +94,13 @@ The driver starts this command without a shell, with the snapshot as the working
 ```
 codex exec --json --color never --ephemeral --skip-git-repo-check
   --ignore-user-config --ignore-rules
+  [-m <model>]                        (only with a list entry's model, or --reviewer codex:<model>)
+  [-c model_reasoning_effort="<effort>"]  (only with a list entry's effort, or --reviewer-effort)
   -C <snapshot>
   -c approval_policy="never"
   -c default_permissions="openqodex_review"
   -c permissions.openqodex_review.filesystem={":minimal"="read",":project_roots"="read","/tmp"="deny"}
-  -c web_search="disabled"            (web_search="cached" unless reviewer_web: off)
+  -c web_search="disabled"            (web_search="cached" unless review.reviewer_web: off)
   -c project_doc_max_bytes=0
   -c allow_login_shell=false
   -c shell_environment_policy.inherit="core"
@@ -147,7 +153,10 @@ Observed with codex-cli 0.160.0 (2026-10-04):
 
 What `traced: false` changes in the run (`packages/review/src/review-change.ts`, `packages/review/src/conversation.ts`, `packages/core/src/completion.ts`):
 
-- No read in the stream counts as coverage. A changed range counts only when its diff is in the brief or the run sent it in a correction round. A range still not sent after two rounds makes the review incomplete ("not given to the reviewer"). A changed line over 2,000 characters is given in numbered parts; a line too large for the byte budget keeps the review incomplete.
+- No read in the stream counts as coverage.
+  A changed range counts only when a brief, a delivery page or a structural summary carried it to the reviewer.
+  A long line counts only when every fragment of it arrived; see [Long lines](claude-code-review.md#long-lines).
+  Each unexamined range keeps the review incomplete and has its own entry in the record.
 - The commands and searches the stream shows are kept in `trace.json` with `inside: null` and their input under `detail`. They never pass or fail a review: there is no "read outside the snapshot" alarm and no "tool it was not given" check. The sandbox is the boundary.
 - The completion record holds `trace_complete: false`, and empty `files_read` and `files_not_read`. The report prints "Files the reviewer opened: not recorded by Codex" and "Reads outside the snapshot: not recorded by Codex".
 
@@ -156,6 +165,8 @@ Read confinement held in every test: the permission profile is a real boundary, 
 ### Detecting it
 
 - `codex --version` prints `codex-cli 0.160.0`.
+- `codex debug models` (codex-cli 0.171.0, 2026-11-24) prints JSON, `{"models":[{"slug": ..., "visibility": "list" or "hide", "priority": ...}, ...]}`, in about 20 ms. The driver reads every slug as a model this login has, and the first listed one by priority as its top model, which `init` writes. A list entry whose model is not there is passed over before anything starts. Output that is not that JSON counts as no list, and the entry is tried.
+- A model the login cannot use ends the run with `{"type":"error","message":"The '<model>' model is not supported when using Codex with a ChatGPT account."}` and then `turn.failed`. The driver reads this as a model that cannot serve, so a project's list moves on to its next entry.
 - `codex login status` prints "Logged in using ChatGPT" and exits 0 when logged in. With an empty `CODEX_HOME` it prints "Not logged in" and exits 1. The driver takes exit 0 as logged in.
 - A Codex session sets these variables for the commands it runs (seen in a `codex exec` run, 2026-10-04): `CODEX_THREAD_ID` and `CODEX_SESSION_ID` (the thread id), `CODEX_VERSION` and `CODEX_CI=1`. Under a sandbox it also sets `CODEX_SANDBOX=seatbelt`, and `CODEX_SANDBOX_NETWORK_DISABLED=1` when network is off. `hostAgent` takes `CODEX_THREAD_ID` as "running inside Codex". The interactive Codex was not run for this; the binary holds the same name.
 

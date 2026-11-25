@@ -102,9 +102,9 @@ describe.skipIf(modelTestsOff("total review with claude"))("with Claude Code as 
     expect(html, demoRun.stdout).toBeDefined();
     expect(html).toBe(join(realpathSync(reportDir(dir)), "report.html"));
     expect(lines.at(-1)).toBe(`Markdown: ${html!.replace(/report\.html$/, "report.md")}`);
-    // The receipt numbers the findings, then the observations after them,
-    // the numbers `openqodex findings <n>` takes.
-    expect(lines.filter((l) => /^\d+\. (Critical|Major|Minor|Nitpick|Info) /.test(l))).toHaveLength(report.findings.length + (report.observations?.length ?? 0));
+    // The receipt numbers the findings, then the observations, then the
+    // possible issues, the numbers `openqodex findings <n>` takes.
+    expect(lines.filter((l) => /^\d+\. (Critical|Major|Minor|Nitpick|Info) /.test(l))).toHaveLength(report.findings.length + (report.observations?.length ?? 0) + (report.possible?.length ?? 0));
     const page = readFileSync(html!, "utf8");
     expect(statSync(html!).mode & 0o777).toBe(0o600);
     for (let n = 1; n <= report.findings.length; n++) expect(page.split(`id="f${n}"`).length - 1, `finding ${n}`).toBe(1);

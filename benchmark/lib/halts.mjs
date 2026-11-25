@@ -69,7 +69,7 @@ const CLASSES = [
   // The staged forms: a finder or verifier whose answer still failed its
   // numbered checks, or a verifier that used up its correction rounds.
   ["answer-checks", /answer still failed \d+ checks?|was not examined by (?:local|contracts): \d+\. |were not verified: (?:\d+\. |the verifier exhausted its correction rounds)/],
-  ["coverage", /ranges? (?:was|were) not (?:read|given|sent)/],
+  ["coverage", /ranges? (?:was|were) not (?:read|given|sent|examined)/],
   ["objects", /missing objects|not a commit|missing commit|history unknown|diverged|git failed/],
   ["outside", /outside its workDir/],
   ["threw", /the review threw/],

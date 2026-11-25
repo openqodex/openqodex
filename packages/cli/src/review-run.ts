@@ -2,9 +2,9 @@
 //
 // The review itself (prepare, scan, redact, review, check, report, clean)
 // is @openqodex/review's runReviewCore. This file is the command around it:
-//   before    the flags and the user config turned into the core's inputs,
-//             the repository's config, the team files, the --report-dir
-//             folder checked before anything runs
+//   before    the flags and the repository's config turned into the core's
+//             inputs (the reviewer list, its web tools), the team files,
+//             the --report-dir folder checked before anything runs
 //   parts     the laptop's parts the core runs with: snapshots under
 //             <openqodex home>/checkouts/, scanners from the pinned table
 //             with the install wait, the graph's kept store, the owners'
@@ -21,6 +21,7 @@ import { join, relative, resolve } from "node:path";
 import { OpenQodexError, STATE_DIR, gateReceipt, openReportDir, phaseClock, redactSecrets, renderUnavailableHtml, resolveInstructionRef, writeLatest, writeReportFiles } from "@openqodex/core";
 import type { ChangeScope, Config, Latest, ReviewerSessionRecord, Severity } from "@openqodex/core";
 import { DEPTH_ENV, TIMED_OUT, claudeDriver, codexDriver, cursorDriver, redactStored, reviewerOrder, runReviewCore } from "@openqodex/review";
+import { loadConfig, passedLines } from "@openqodex/core";
 import type { CorrectionRound, ReviewCoreResult, ReviewDeps, ReviewerDriver } from "@openqodex/review";
 import { createToolResolver } from "@openqodex/scanners";
 import { announceRepoFiles } from "./agents/repo-folder.js";
@@ -32,7 +33,8 @@ import { INSTALL_BUDGET_MS, emitReview, exitFor, graphStore, loadRepo, ownersIns
 import { keepRunStateOutOfRepo, noteScan } from "./feedback.js";
 import { directRunner, launcherPath, launcherRunner, launcherStarted, openqodexHomeDir, shQuote } from "./launcher.js";
 import { writeHomeLastReview, writeHomeReceipt } from "./receipts.js";
-import { readReviewerSettings } from "./reviewers/settings.js";
+import { listReadiness, reviewerChoice } from "./reviewers/list.js";
+import { personalWebOff, userConfigNotes } from "./reviewers/settings.js";
 import { conventionHint } from "./instructions.js";
 import { dropTempRef, resolveTarget } from "./target.js";
 
@@ -65,7 +67,8 @@ export type ReviewOptions = {
   only?: string;
   skip?: string;
   noGraph: boolean;
-  // --reviewer; when left out, `reviewer:` in the user config, else auto.
+  // --reviewer: auto, a tool, or <tool>:<model>; when left out, the
+  // project's review.reviewers, else auto (reviewers/list.ts).
   reviewer?: string;
   timeoutMs: number;
   // The drivers to choose from; tests pass a model provider stand-in.
@@ -88,9 +91,12 @@ export type ReviewOptions = {
   // reviewer.json there says whether a reviewer started (and which), and
   // why none could when none did.
   reportDir?: string;
-  // --reviewer-web: the reviewer's web tools for this run, over the user
-  // config's reviewer_web.
+  // --reviewer-web: the reviewer's web tools for this run, over the
+  // project's review.reviewer_web.
   web?: boolean;
+  // --reviewer-effort: with --reviewer <tool>[:<model>], that one entry's
+  // reasoning effort for this run.
+  reviewerEffort?: string;
   // Filled with how the review ended, beside the exit code, which cannot
   // tell an incomplete review from one that never had a reviewer.
   end?: ReviewEnd;
@@ -105,10 +111,18 @@ export const REVIEWER_LABELS: Record<string, string> = { claude: "Claude Code", 
 export type Readiness = { ready: { name: string; version: string } | null; reasons: string[] };
 
 // The reviewer a review started now would use, by the same choice and order
-// as `review`, with every driver's detect() run at once; or, when none can
-// start, each one's reason and fix. Nothing is started.
+// as `review`: the project's list when it has one, each entry checked as a
+// review checks it, else `auto` with every driver's detect() run at once;
+// or, when none can start, each one's reason and fix. Nothing is started.
 export async function reviewerReadiness(repoRoot: string, drivers: ReviewerDriver[] = DRIVERS): Promise<Readiness> {
-  const choice = readReviewerSettings().reviewer;
+  const listed = loadConfig(repoRoot, undefined, { runtimeVersion: __OPENQODEX_VERSION__ }).config.reviewers;
+  if (listed !== undefined) {
+    const rows = await listReadiness(listed, drivers, repoRoot);
+    const first = rows.find((r) => r.version !== null);
+    if (first !== undefined) return { ready: { name: first.entry.tool, version: first.version! }, reasons: [] };
+    return { ready: null, reasons: rows.map((r) => `${r.label}: ${r.line}`) };
+  }
+  const choice = "auto";
   const order = reviewerOrder(choice, drivers);
   const found = await Promise.all(order.map((d) => d.detect(repoRoot)));
   const reasons: string[] = [];
@@ -135,6 +149,7 @@ export function laptopParts(o: ReviewOptions, repoRoot: string, config: Config):
   return {
     drivers: o.drivers ?? DRIVERS,
     snapshots: laptopSnapshots,
+    diffTempRoot: join(openqodexHomeDir(), "tmp"),
     resolveTool: createToolResolver({ allowInstall: !o.flags.noInstall, installBudgetMs: o.installBudgetMs ?? INSTALL_BUDGET_MS, onProgress: progress(o.flags) }),
     resolveTarget: async (spec) => {
       const t = await resolveTarget({ repoRoot, spec, offline: o.flags.offline, base: o.base, defaultBase: config.defaultBase });
@@ -206,15 +221,16 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   // A --report-dir reached through a link stops the run here, before
   // anything is made, scanned or written.
   const reportWriter = o.reportDir === undefined ? null : reportFolderWriter(o.reportDir, repoRoot);
+  // A flag that does not name a reviewer stops the run before any file is
+  // made, and before the scanner lists are read.
+  const choice = reviewerChoice(o.reviewer, o.reviewerEffort, config.reviewers);
   if (o.reportDir === undefined) announceRepoFiles(repoRoot);
   else keepRunStateOutOfRepo();
-  const settings = readReviewerSettings();
-  for (const w of settings.warnings) warn(`openqodex: ${w}`);
-  const web = o.web ?? settings.web;
+  for (const w of userConfigNotes(undefined, repoRoot)) warn(`openqodex: ${w}`);
+  // A retired personal reviewer_web: off still holds (settings.ts).
+  const web = o.web ?? (config.reviewerWeb === false || personalWebOff() ? false : true);
   const parts = laptopParts({ ...o, instructionsRef }, repoRoot, config);
-  const choice = o.reviewer ?? settings.reviewer;
-  // An unknown reviewer name stops the run before the scanner lists are read.
-  reviewerOrder(choice, parts.drivers);
+  if (typeof choice === "string") reviewerOrder(choice, parts.drivers);
   const only = scannerList("--only", o.only);
   const skip = scannerList("--skip", o.skip);
 
@@ -235,7 +251,7 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   // Every run folder records whether a reviewer started and its sessions.
   // A caller tells
   // a review that stopped from one that never began without reading stderr.
-  const noteReviewer = (record: { started: boolean; reasons?: string[]; driver?: string; version?: string; sessions?: ReviewerSessionRecord[] }): void => {
+  const noteReviewer = (record: { started: boolean; reasons?: string[]; driver?: string; version?: string; model?: string; effort?: string; passed?: string[]; sessions?: ReviewerSessionRecord[] }): void => {
     write({ "reviewer.json": `${JSON.stringify(redactStored(record, secrets))}\n` });
   };
   const sessions: ReviewerSessionRecord[] = [];
@@ -289,8 +305,11 @@ export async function runReview(o: ReviewOptions): Promise<number> {
         "unchecked-candidates.json": `${JSON.stringify({ label: "unchecked scanner candidates, not a review: no reviewer checked them", change_id: result.change.id, candidates: result.scan.candidates }, null, 2)}\n`,
         "report.html": renderUnavailableHtml({ changeId: result.change.id, reasons, candidatesPath: path, fallback, version: __OPENQODEX_VERSION__ }),
       });
-      noteReviewer({ started: false, reasons });
-      warn("Full review unavailable: openqodex could not start a reviewer.");
+      // A list whose entries all failed after one started: the record says
+      // a reviewer started, and the calls those runs made are kept.
+      noteReviewer({ started: result.started === true, reasons });
+      if (result.usage) write({ "usage.json": `${JSON.stringify(redactStored(result.usage, secrets), null, 2)}\n` });
+      warn(result.started ? "Full review unavailable: every reviewer of the project's list failed or was passed over." : "Full review unavailable: openqodex could not start a reviewer.");
       for (const line of reasons) warn(`- ${line}`);
       warn(`Unchecked scanner candidates, not a review: ${path}`);
       warn(`To review with the agent you are in instead, run \`${fallback}\` and follow the brief it prints.`);
@@ -303,7 +322,8 @@ export async function runReview(o: ReviewOptions): Promise<number> {
     if (result.ended === "model-reviewed") throw new OpenQodexError("the review core ended with a model reviewer, which the command never gives it");
     const { report, completion, change } = result;
     if (result.rounds) writeRounds(result.rounds);
-    noteReviewer({ started: completion.reviewer !== null, driver: completion.reviewer?.driver, version: completion.reviewer?.version, sessions: completion.reviewer?.sessions });
+    const served = completion.reviewer;
+    noteReviewer({ started: served !== null, driver: served?.driver, version: served?.version, model: served?.model, effort: served?.effort, ...(served?.passed?.length ? { passed: passedLines(served.passed) } : {}), sessions: served?.sessions });
     const shown = (folder as RunFolder | null)!.shown;
     // Every file, record and line printed from here on is drawn from `out`.
     const out = reviewOutputs({ report, display: result.display, dir, redact, version: __OPENQODEX_VERSION__ });
@@ -350,7 +370,7 @@ export async function runReview(o: ReviewOptions): Promise<number> {
       // The record the push hooks trust, in the developer's home: a branch
       // cannot plant it the way it can carry files under .openqodex/.
       try {
-        writeHomeReceipt(openqodexHomeDir(), repoRoot, gateReceipt(out.report, completion.status, shown, out.paths.html));
+        writeHomeReceipt(openqodexHomeDir(), repoRoot, gateReceipt(out.report, completion.status, shown, out.paths.html, config));
       } catch (error) {
         warn(`openqodex: could not record this review for the push hooks: ${(error as Error).message.split("\n")[0]}`);
       }
@@ -388,6 +408,22 @@ export async function runReview(o: ReviewOptions): Promise<number> {
               "brief.md": e.brief,
               "impact.json": `${JSON.stringify(e.impact, null, 2)}\n`,
             });
+          } else if (e.type === "staged-units") {
+            write({ "units.json": `${JSON.stringify(redactStored(e.units, secrets), null, 2)}\n` });
+            const digests = e.units.filter((unit) => unit.digest);
+            if (digests.length) {
+              const dir = join(folder!.dir, "digests");
+              const files = Object.fromEntries(digests.map((unit) => [`${unit.id}.md`, redact([
+                `# ${unit.id}: structural summary coverage (${unit.digest!.kind})`,
+                unit.digest!.text,
+                "Processed ranges:",
+                ...unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)).map((h) => `${h.id} ${h.path}:${h.start}-${h.end}`),
+                "Omissions:",
+                ...unit.digest!.omitted.map((o) => `${o.path}:${o.lines.join("-")}: ${o.why}`),
+              ].join("\n\n") + "\n")]));
+              if (reportWriter) reportFolderWriter(dir, repoRoot)(files);
+              else writeReportFiles(repoRoot, dir, files, PRIVATE);
+            }
           } else if (e.type === "staged-brief") {
             writeStagedBrief(e.role, e.brief);
           } else if (e.type === "started") {
@@ -402,6 +438,13 @@ export async function runReview(o: ReviewOptions): Promise<number> {
             noteReviewer({ started: true, ...reviewer!, sessions });
           } else if (e.type === "round") {
             rounds.push(e.round);
+            writeRounds();
+          } else if (e.type === "reviewer-restarted") {
+            // The next entry starts from nothing: the records of the runs
+            // before it are dropped, as their answers are.
+            warn(e.line);
+            sessions.length = 0;
+            rounds.length = 0;
             writeRounds();
           }
         },

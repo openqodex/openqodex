@@ -8,12 +8,13 @@ export { buildGraphRun, buildHotSpots, nothingToReviewLine, ruleCoverage, scanCh
 export type { GraphHost, GraphRun, PipelineResult, ScanHost } from "./pipeline.js";
 export { redactStored, redactWith } from "./redact.js";
 export { lfsPaths } from "./snapshot.js";
-export { reviewChange, reviewerOrder, runReviewCore } from "./review-change.js";
+export { entryCanStart, readinessCache, reviewChange, reviewerOrder, runReviewCore } from "./review-change.js";
+export type { ReadinessCache } from "./review-change.js";
 export type { ResolvedTarget, ReviewCoreResult, ReviewDeps, ReviewEvent, ReviewInputs, Snapshot, SnapshotMaker } from "./review-change.js";
-export { DEPTH_ENV, REVIEWER_NAMES, TIMED_OUT, findOnPath, hostAgent, killGroup, spawnGroup } from "./agents/driver.js";
-export type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./agents/driver.js";
+export { DEPTH_ENV, REVIEWER_NAMES, TIMED_OUT, cannotServe, findOnPath, hostAgent, killGroup, launch, reviewerError, spawnGroup, taskkillFailure, windowsStop } from "./agents/driver.js";
+export type { Detected, ReviewerDriver, ReviewerSession, StartOptions, Turn } from "./agents/driver.js";
 export { claudeArgs, claudeDriver, reviewerEnv } from "./agents/claude.js";
-export { CODEX_TESTED, PROBE_REFUSED, codexArgs, codexDriver, codexEnv, codexVersion, detectCodex, olderThanTested, probeSandbox, probeVerdict } from "./agents/codex.js";
+export { CODEX_TESTED, PROBE_REFUSED, codexArgs, codexCatalog, codexDriver, codexEnv, codexVersion, detectCodex, olderThanTested, probeSandbox, probeVerdict } from "./agents/codex.js";
 export { CURSOR_NOT_ENABLED, cursorDriver } from "./agents/cursor.js";
 export { classify } from "./agents/trace.js";
 export type { OwnFiles, ToolCall } from "./agents/trace.js";
@@ -41,7 +42,7 @@ export type { IncrementalDecision, ReviewScope } from "./incremental.js";
 export { serverScope } from "./scoped.js";
 export type { ScopedParts, ServerScope } from "./scoped.js";
 
-export { GROUP_DIFF_BYTES, MAX_UNIT_DIFF_BYTES, hunkRefs, unitsOf } from "./units.js";
+export { GROUP_DIFF_BYTES, MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES, obligations, hunkRefs, unitsOf } from "./units.js";
 export { checkEvidence, checkFindAnswer, checkVerifyAnswer } from "./evidence-check.js";
 export { FINDERS_CONCURRENCY, VERIFIERS_CONCURRENCY, runStagedReview } from "./stages.js";
 export type { StagedArgs, StagedResult, StagedSession, StagedSessionRecord } from "./stages.js";

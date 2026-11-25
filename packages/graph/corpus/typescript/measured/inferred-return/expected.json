@@ -1,0 +1,27 @@
+{
+  "guards": "binds a call on the result of a function with no return annotation, directly and through a destructured object literal, to the returned class's method",
+  "callers": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:13",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:18",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/use.ts",
+      "line": 13
+    },
+    {
+      "file": "src/use.ts",
+      "line": 18
+    }
+  ]
+}

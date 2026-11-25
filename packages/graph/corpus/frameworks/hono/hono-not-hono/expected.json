@@ -1,0 +1,8 @@
+{
+  "guards": "produces no Hono route from classes of the repository's own named Hono and OpenAPIHono, though the project declares hono",
+  "frameworks": {
+    "plugin": "hono",
+    "apps": 0,
+    "none": ["registration", "handles", "mounts", "applies_middleware", "tests", "role"]
+  }
+}

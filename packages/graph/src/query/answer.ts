@@ -4,6 +4,7 @@
 // build answered (`graph`). A count that cannot be known is null, never
 // zero; search hits are leads and are never counted.
 import type { Change, ImpactExportChange, ImpactSymbol } from "@openqodex/core";
+import type { GapPlace } from "../gap.js";
 import { toImpactUnknown } from "../impact.js";
 import { API_VERSION } from "../model/records.js";
 import type { Tier } from "../model/records.js";
@@ -46,8 +47,9 @@ export type Request = {
   target?: Target;
   to?: Target; // path: the other end
   text?: string; // search
+  excludeTests?: boolean; // routes: leave out the routes of applications built in test files
   tiers?: Tier[];
-  edges?: string[]; // path: the relations to walk; default calls and inherits
+  edges?: string[]; // path and callees: the relations to walk; path default calls, inherits and defines, callees default the calls profile
   depth?: number;
   level?: "files" | "projects"; // cycles
   limit?: number;
@@ -60,6 +62,12 @@ export type Request = {
 
 export type Candidate = { id: string; name: string; kind: string; file: string; line: number; project: string; score: number };
 
+// The gaps of one cause. `count`: the answer's `causes` value for it, null
+// when it cannot be counted. `places`: how many places (a file, a call)
+// hold gaps of the cause, where the question knows them one by one; a
+// place may stand for several (a file with three regions it could not read).
+export type FloorGroup = { cause: string; count: number | null; places?: number; examples: string[] };
+
 export type ErrorCode = "ambiguous" | "not-found" | "bad-request" | "generation-unavailable" | "unsupported" | "refused";
 
 export type Answer = {
@@ -70,8 +78,22 @@ export type Answer = {
   items: unknown[];
   counts: { certain: number | null; likely: number | null; possible: number | null };
   leads: Candidate[];
-  unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[] };
+  // `groups`: the gaps by cause, each with how many there are and at most
+  // two examples, beside the reasons and causes it sums up. `scope`, on a
+  // floor: "tests" when a callers list names every place that could hide a
+  // caller and each is a path `isTestPath` reads as a test (a fixtures
+  // folder among them), with `note`, the sentence that says so; "all" on
+  // any other floor. `gaps`, on a caller or callee list: each place the
+  // graph gave up that may hide a row, with its cause, its file and line
+  // (null for a whole file) and what to check next; at most 20, the
+  // reasons hold the counts.
+  unknown: { floor: boolean; reasons: string[]; causes: Record<string, number | null>; examples: ReturnType<typeof toImpactUnknown>[]; groups?: FloorGroup[]; scope?: "tests" | "all"; note?: string; gaps?: GapPlace[] };
   truncated: Truncated;
+  // True on a floor: each row holds its tier, but rows may be missing, so
+  // the counts are at least, never exactly. Set on every answer `query` gives.
+  listIncomplete?: boolean;
+  // Set when the rows alone could mislead: said first by every reader of the answer.
+  warning?: string;
   graph: { generation: string | null; treeSha: string | null; builtAt: string | null; status: "ok" | "partial"; reasons: string[]; mode: "fresh" | "retained"; freshness: { laterEditsKnown: boolean } };
 };
 
@@ -210,11 +232,14 @@ export function counts(items: readonly { site: { tier: Tier } }[]): Answer["coun
 // and how the work ended. `stopped`: the budget stopped it, `all` holds
 // what it had found, and running the same job again goes on from there.
 // `beyond`: the work is whole, and the depth asked left points with more
-// past them.
+// past them. `lead`: with `into` items, the entries of each page it is
+// true for go to `leads` instead (search: a hit that is not an exact or
+// prefix match).
 export type Listing = {
   answer: Answer;
   all: unknown[];
   into: "items" | "leads";
+  lead?: (entry: unknown) => boolean;
   beyond: { frontier: string[] } | null;
   stopped: { frontier: string[]; frontierTotal: number | null; note: string } | null;
 };
@@ -229,8 +254,8 @@ export function isAnswer<T>(v: T | Answer): v is Answer {
   return typeof v === "object" && v !== null && "apiVersion" in v;
 }
 
-export function listing(answer: Answer, all: unknown[], more: Partial<Pick<Listing, "into" | "beyond" | "stopped">> = {}): Listing {
-  return { answer, all, into: more.into ?? "items", beyond: more.beyond ?? null, stopped: more.stopped ?? null };
+export function listing(answer: Answer, all: unknown[], more: Partial<Pick<Listing, "into" | "lead" | "beyond" | "stopped">> = {}): Listing {
+  return { answer, all, into: more.into ?? "items", ...(more.lead ? { lead: more.lead } : {}), beyond: more.beyond ?? null, stopped: more.stopped ?? null };
 }
 
 export const STOPPED_NOTE = "the question stopped at its time budget; what lies past where it stopped is not counted, and its cursor goes on from there";

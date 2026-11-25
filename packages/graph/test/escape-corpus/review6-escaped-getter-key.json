@@ -1,0 +1,17 @@
+{
+  "covers": "a bracket key written with an escape (`c[\"\\u0074otal\"]`) may run the getter it names",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/cart.ts": "export class Cart {\n  get total(): number {\n    return 1;\n  }\n}\n",
+    "src/use.ts": "import { Cart } from \"./cart\";\nexport function show(c: Cart): unknown {\n  return c[\"\\u0074otal\"];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/cart.ts#Cart.total",
+      "reason": "by a computed key",
+      "at": "src/use.ts:3"
+    }
+  ]
+}

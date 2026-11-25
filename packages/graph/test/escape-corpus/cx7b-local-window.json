@@ -1,0 +1,11 @@
+{
+  "covers": "a local named window is not the global object (rule H2, the other side)",
+  "files": {
+    "src/a.ts": "const window = [1];\nwindow[0];\nexport function f() {}\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "src/a.ts#f"
+  ],
+  "floored": []
+}

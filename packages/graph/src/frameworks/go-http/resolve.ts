@@ -101,7 +101,7 @@ type FileIndex = {
 
 // The standard library's handler wrappers whose first argument is the handler they serve.
 const STDLIB_WRAPPERS = new Set(["TimeoutHandler", "MaxBytesHandler", "AllowQuerySemicolons"]);
-const METHOD_CONSTANTS: Record<string, string> = {
+export const METHOD_CONSTANTS: Record<string, string> = {
   MethodGet: "GET",
   MethodHead: "HEAD",
   MethodPost: "POST",
@@ -348,7 +348,11 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
     return v.value.t === "ref" ? muxOfRef(d.file, v.value, v.line, true, create, steps + 1) : null;
   };
   const muxOfRef = (file: string, e: Expr, line: number, strict: boolean, create: Site | null, steps: number): Mux | ParamMux | null => {
-    if (e.t !== "ref" || steps > MAX_VALUE_STEPS) return null;
+    if (e.t !== "ref") return null;
+    if (steps > MAX_VALUE_STEPS) {
+      gap({ plugin: PLUGIN, site: { file, line: e.line, column: e.column }, scope: { file }, affects: ["handles", "mounts"], cause: "fan-out-capped", name: show(e), note: `${show(e)} is reached through more than ${MAX_VALUE_STEPS} assignments (\`a := b\`), which the plugin does not follow; if it is a net/http mux, the routes on it are not listed`, count: null, exact: false });
+      return null;
+    }
     if (isPkg(file, e, "http", "DefaultServeMux")) return defaultMux(index.projectOf(file), create);
     const found = declPath(file, e.path, e.decl, line, strict);
     return found && found.rest.length === 0 ? muxOfDecl(found.decl, create, steps) : null;
@@ -477,7 +481,10 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
     const symbol = e.local ? null : lookup(file, e.path);
     if (symbol?.kind === "symbol") return fromLookup(symbol, e, what);
     const found = declPath(file, e.path, e.decl, line, false);
-    if (found && found.rest.length === 0 && found.decl.kind === "value" && steps < MAX_VALUE_STEPS) return { follow: found.decl };
+    if (found && found.rest.length === 0 && found.decl.kind === "value") {
+      if (steps < MAX_VALUE_STEPS) return { follow: found.decl };
+      return fail("unresolved", "fan-out-capped", `the ${what} ${show(e)} is reached through more than ${MAX_VALUE_STEPS} assignments (\`a := b\`), which the plugin does not follow, so the ${what} is not bound`, show(e), e);
+    }
     if (found && found.rest.length === 1) return methodValue(found.decl, found.rest[0] as string, e, what);
     if (found || e.local) return fail("dynamic", "dynamic", `the ${what} ${show(e)} is a value the code computes, not a definition`, show(e), e);
     return fromLookup(symbol ?? { kind: "none" }, e, what);
@@ -550,6 +557,7 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
         return done(fail("external", "external", `the handler is ${show(call)}, which the standard library builds`, show(call), call));
       }
       const w = wrapperOf(file, call, line);
+      if (!w && isCut(call.fn)) return done(fail("unresolved", "fan-out-capped", "the function this handler is wrapped by is longer than the plugin reads, so neither the handler nor any middleware it applies is listed", null, call, WRAPPED));
       if (!w) {
         // A call no rule binds as a wrapper may be middleware of its own: it
         // hides the middleware edge as well as the handler.
@@ -631,6 +639,10 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
       const r = resultOf(file, recv);
       return r === "mux" ? resultMux(file, recv, line) : r;
     }
+    if (isCut(recv)) {
+      gap({ plugin: PLUGIN, site: { file, line: recv.line, column: recv.column }, scope: { file }, affects: ["handles", "mounts"], cause: "fan-out-capped", name: null, note: "the receiver here is longer than the plugin reads; if it is a net/http mux, the route on it is not listed", count: null, exact: false });
+      return null;
+    }
     if (recv.t !== "ref") return null;
     const direct = muxOfRef(file, recv, line, false, create, 0);
     if (direct) return direct;
@@ -649,6 +661,10 @@ function run(index: PluginIndex<GoHttpFact>): Analysis {
       if (v.t === "call") {
         const r = resultOf(d.file, v);
         return r === "mux" ? resultMux(d.file, v, d.fact.line) : r;
+      }
+      if (isCut(v)) {
+        gap({ plugin: PLUGIN, site: { file: d.file, line: v.line, column: v.column }, scope: { file: d.file }, affects: ["handles", "mounts"], cause: "fan-out-capped", name: d.fact.name, note: `the value of ${d.fact.name} is longer than the plugin reads; if it is a net/http mux, the routes on it are not listed`, count: null, exact: false });
+        return null;
       }
       return v.t === "ref" || v.t === "other" ? null : "other";
     }

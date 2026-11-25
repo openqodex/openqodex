@@ -1,0 +1,18 @@
+{
+  "covers": "`declare const V` at the top of a `.d.mts` or `.d.cts` file declares a module's name, not a global: a read of the free name `V` keeps its file opaque",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/env.d.mts": "declare const V: string;\n",
+    "src/env2.d.cts": "declare const V: string;\n",
+    "src/use.ts": "export function f(): void {}\nexport function g(): unknown {\n  return V;\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/use.ts#f",
+      "reason": "reads the free name `V`",
+      "at": "src/use.ts:3"
+    }
+  ]
+}

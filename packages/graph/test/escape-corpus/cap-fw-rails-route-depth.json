@@ -1,0 +1,32 @@
+{
+  "covers": "a Rails action routed from a block nested deeper than the plugin reads; the action is named only by a string (rails MAX_ROUTE_DEPTH)",
+  "caps": [
+    "frameworks/rails/facts.ts#MAX_ROUTE_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "Gemfile": "source \"https://rubygems.org\"\n\ngem \"rails\"\n",
+    "app/controllers/users_controller.rb": "class UsersController < ApplicationController\n  def deep\n  end\n\n  def top\n  end\nend\n",
+    "config/routes.rb": "Rails.application.routes.draw do\nscope \"n9\" do\nscope \"n8\" do\nscope \"n7\" do\nscope \"n6\" do\nscope \"n5\" do\nscope \"n4\" do\nscope \"n3\" do\nscope \"n2\" do\nscope \"n1\" do\nget \"deep\", to: \"users#deep\"\nend\nend\nend\nend\nend\nend\nend\nend\nend\nget \"top\", to: \"users#top\"\nend\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/controllers/users_controller.rb#UsersController.deep",
+      "caller": null,
+      "file": "config/routes.rb",
+      "line": 11
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/controllers/users_controller.rb#UsersController.deep",
+      "reason": "route blocks nested deeper than eight levels are not read",
+      "at": "config/routes.rb:10",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "config/routes.rb:10"
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "guards": "lists the Hono routes of a repository that also holds a React package (engine-routes/synth/hono-react), where the graph answered an empty list with no floor",
+  "frameworks": {
+    "plugin": "hono",
+    "apps": 1,
+    "registrations": [
+      { "site": "src/app.ts:4", "methods": ["GET"], "pattern": "/healthz", "handler": "src/app.ts#<get /healthz>", "status": "bound", "mounted": true },
+      { "site": "src/users.ts:3", "methods": ["GET"], "pattern": "/api/v1/users/:id", "handler": "src/users.ts#<get /:id>", "status": "bound", "mounted": true },
+      { "site": "src/users.ts:4", "methods": ["POST"], "pattern": "/api/v1/users", "handler": "src/users.ts#<post />", "status": "bound", "mounted": true }
+    ],
+    "edges": [
+      { "kind": "mounts", "from": "fw:hono:app:src/app.ts:3", "to": "fw:hono:router:src/users.ts:2", "tier": "certain" }
+    ],
+    "notUnknowns": [{ "file": "src/app.ts", "line": 4, "cause": "unsupported-rule" }]
+  }
+}

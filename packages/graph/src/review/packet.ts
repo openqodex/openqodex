@@ -144,7 +144,7 @@ export async function writePacket(args: {
   for (const seed of seeds) {
     const f = floorOf.get(seed);
     const base = `callers/${symbolKey(seed)}`;
-    const about = `every caller of ${code(nameOf(seed) ?? seed)}`;
+    const about = `each caller of ${code(nameOf(seed) ?? seed)} the graph found`;
     const head = { symbol: seed, name: nameOf(seed), floor: f?.floor ?? true, reasons: f?.reasons ?? [] };
     const held = removedEdges.get(seed) ?? (graph.nodes.has(seed) ? (graph.in.get(seed) ?? []) : null);
     if (held !== null) {
@@ -187,7 +187,7 @@ export async function writePacket(args: {
     const incoming = (graph.in.get(caller) ?? []).filter((e) => e.from !== caller);
     if (incoming.length === 0) continue;
     const items = toItems(incoming, "from");
-    pages(`second-hop/${symbolKey(caller)}`, `every caller of ${code(nameOf(caller) ?? caller)}, a caller of the change`, { symbol: caller, name: nameOf(caller), counts: tiers(items) }, items);
+    pages(`second-hop/${symbolKey(caller)}`, `each caller of ${code(nameOf(caller) ?? caller)} the graph found, a caller of the change`, { symbol: caller, name: nameOf(caller), counts: tiers(items) }, items);
   }
   for (const seed of impact.touched) {
     const out = graph.out.get(seed) ?? [];

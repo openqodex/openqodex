@@ -1,0 +1,26 @@
+{
+  "covers": "code a test builds at run time may pass a function to product code that calls it, so the scope is all",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/run.ts": "export function run(cb: () => void): void {\n  cb();\n}\n",
+    "src/f.ts": "export function f(): void {}\n",
+    "src/f.test.ts": "import { f } from \"./f\";\nimport { run } from \"./run\";\neval(\"run(f)\");\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/f.ts#f",
+      "caller": "src/run.ts#run",
+      "file": "src/run.ts",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/f.ts#f",
+      "reason": "runs code by a name built at run time",
+      "at": "src/f.test.ts:3",
+      "scope": "all"
+    }
+  ]
+}

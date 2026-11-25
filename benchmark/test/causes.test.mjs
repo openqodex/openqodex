@@ -72,7 +72,7 @@ function review({ submitted = [], dropped = [], low = [], status = "complete", e
     dropped,
     scanners: [],
     impact: { status: "off" },
-    completion: { status, missing: status === "complete" ? [] : ["1 changed range was not read"], trace_complete: true, reviewer: { duration_ms: 1000, rounds: 1, usage: { turns: 1, input_tokens: 10, output_tokens: 5, cost_usd: 0.01 } } },
+    completion: { status, missing: status === "complete" ? [] : ["1 changed range was not examined", "scripts/deploy.sh:11-11"], trace_complete: true, reviewer: { duration_ms: 1000, rounds: 1, usage: { turns: 1, input_tokens: 10, output_tokens: 5, cost_usd: 0.01 } } },
     ...extra,
   };
   return { report, submission: { version: 2, change_id: "x", summary: "s", findings: submitted, dropped: dropped.map((d) => ({ candidate: d.candidate.id, reason: d.reason })) } };

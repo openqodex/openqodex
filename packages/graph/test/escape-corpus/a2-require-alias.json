@@ -1,0 +1,23 @@
+{
+  "covers": "require given to another name, then called with a path (audit amendment 2)",
+  "files": {
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.cjs": "const load = require;\nconst ns = load(\"./a.cjs\");\nns[\"f\"]();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.cjs",
+      "file": "src/use.cjs",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": "src/use.cjs:1"
+    }
+  ]
+}

@@ -1,3 +1,6 @@
+import type { LineSet } from "./line-set.js";
+import type { ReviewerEntry } from "./reviewers.js";
+import { entryLabel } from "./reviewers.js";
 // Shared contracts for every OpenQodex package. Code against these types;
 // a change here is agreed first, never made inside a feature branch.
 
@@ -168,6 +171,10 @@ export type ScanResult = {
 export type AdapterResult = {
   findings: StaticFinding[];
   error: string | null;
+  // Set when the error is a failure even beside findings, such as a Go
+  // module that could not type-check while another module gave findings.
+  // Without it, an error next to findings leaves the scanner ran.
+  failed?: boolean;
   secrets?: string[];
   // Set when the adapter chose not to run (for example dependency lookups
   // while offline). The runner records status "disabled" with this reason.
@@ -212,7 +219,7 @@ export type ResolveTool = (scanner: BuiltinScanner, call?: { probeHome?: string 
 // ---------- change ----------
 
 // Path to the set of new-side line numbers the developer added or changed.
-export type DiffCoverage = Map<string, Set<number>>;
+export type DiffCoverage = Map<string, LineSet>;
 
 // A place where the change only removed lines: `lines` lines were deleted
 // after new-side line `after` (0: at the top of the file). Its `anchors`, the
@@ -237,21 +244,24 @@ export type ChangedFile = {
   binary: boolean;
 };
 
+// Exactly one representation of a file's retained patch. Read through diffText.
+export type DiffEntry = { path: string } & ({ text: string; file?: never } | { text?: never; file: string });
+
 export type Change = {
   repoRoot: string;
   baseRef: string; // what the base was resolved from, for display
   baseSha: string;
-  id: string; // sha256 hex of baseSha + "\n" + `git diff --cached --raw -z --no-abbrev <base>`; covers binary files and anything past the diff cap
+  id: string; // sha256 hex of baseSha + "\n" + `git diff --cached --raw -z --no-abbrev <base>`; covers binary files and every patch size
   shortId: string;
   files: ChangedFile[]; // everything in the change, exclusions already applied
   changedPaths: string[]; // files that still exist (not deleted), what scanners receive
   coverage: DiffCoverage; // from the zero-context diff
   deletionPoints: Map<string, DeletionPoint[]>; // from the same diff, per file that still exists
-  diff: string; // the three-lines-of-context diff, capped
+  diff: string; // the in-memory portion of the three-lines-of-context diff
   // The same diff split per file, in the same order; absent where a caller built a Change by hand.
-  diffs?: { path: string; text: string }[];
-  notReviewed: string[]; // paths left out because the change was too large
-  // Changed text files past the coverage cap, whose changed lines are not
+  diffs?: DiffEntry[];
+  notReviewed: string[]; // empty for changes; whole-repo scope keeps its listing rule
+  // Hand-built changes may name text files whose changed lines are not
   // known: a review counts one as read only when the reviewer read all of it.
   // Absent where a caller built a Change by hand.
   uncovered?: string[];
@@ -303,6 +313,13 @@ export type Config = {
   // fresh verifier) when the tool starts its own reviewer; false runs one
   // pass as before. Always one pass for --agent and --all.
   stages: boolean;
+  // review.reviewers: the reviewers to try, top to bottom; absent when the
+  // file lists none (the agent running the command first, then Claude Code,
+  // then Codex). Part of the config hash, so a run briefed under another
+  // list is not finalized or trusted as this one.
+  reviewers?: ReviewerEntry[];
+  // review.reviewer_web: false when the file sets off; absent means on.
+  reviewerWeb?: boolean;
   disabledScanners: BuiltinScanner[];
   custom: CustomScanner[];
   // the code graph in the brief; enabled by default. maxFiles caps new parses per build.
@@ -356,9 +373,10 @@ export type ImpactSite = {
   tier: ImpactTier;
   // What proved it: same-scope, import, ts-paths, workspace-package,
   // py-root, go-module, receiver-constructor, receiver-annotation,
-  // receiver-result, receiver-field, receiver-self or autoload; for a
+  // receiver-result, receiver-field, receiver-self, autoload or
+  // fastapi-depends (a FastAPI dependency a route runs); for a
   // possible site, dispatch-implements, dispatch-override, method-set,
-  // invocation-summary, value-alias, value-table or returned-value.
+  // invocation-summary, value-alias, value-table, returned-value or by-shape.
   evidence: string;
   // The import line that proved a binding through a module.
   via: { file: string; line: number; spec: string | null } | null;
@@ -455,8 +473,10 @@ export type ImpactSummary = {
   exports: ImpactExportChange[];
   // What the graph could not see. `floor` is true when any listed caller
   // count may be short: a call of the same name was not bound, a file of
-  // the project was not read, a call through a value could reach it, or a
-  // walk was cut. Per seed, with its reasons.
+  // the project was not read, the symbol or its module is used as a value,
+  // code built at run time or a module loaded by a computed path may reach
+  // it, a call through a value could reach it, or a walk was cut. Per
+  // seed, with its reasons.
   unknown: {
     floor: boolean;
     seeds: { seed: string; floor: boolean; reasons: string[] }[];
@@ -582,7 +602,15 @@ export type FindingV2 = {
   suggested_change?: string | null;
   source: string | null;
   candidate?: string | null;
+  rule?: RuleCitation | null;
 };
+
+// A written rule of a supplied instruction file that a finding says the
+// change breaks: the file's path, the heading or rule id it sits under
+// (null when the file has none), and the rule's exact words. Finalize drops
+// a finding whose quote or heading is not in that file, and sets `source`
+// to where the file was read from (a commit, or "work tree").
+export type RuleCitation = { file: string; heading: string | null; quote: string; source?: string };
 
 export type DroppedV2 = { candidate: string; reason: string; file_path: string; line_number: number };
 
@@ -598,9 +626,26 @@ export type SubmissionV2 = {
 // comes from the model.
 export type ReviewerUsage = { turns: number; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
 
+// An entry of a project's reviewer list that did not review: `skipped`, it
+// could not start on this machine; `failed`, its model could not serve (a
+// limit, a model it does not have) and the review started again on the next
+// entry. `reason` is one line.
+export type PassedReviewer = { tool: string; model?: string; effort?: string; outcome: "skipped" | "failed"; reason: string };
+
+// The entries passed over, as the report lines print them.
+export function passedLines(passed: readonly PassedReviewer[] | undefined): string[] {
+  return (passed ?? []).map((p) => `${entryLabel(p)} ${p.outcome}: ${p.reason}`);
+}
+
 export type ReviewerRecord = {
   driver: string;
   version: string;
+  // The model and reasoning effort the reviewer was asked for, when the
+  // project's list or the command line set them; absent, its own default.
+  model?: string;
+  effort?: string;
+  // The entries of the project's list tried before this one, in order.
+  passed?: PassedReviewer[];
   pid: number | null;
   started_at: string;
   ended_at: string;
@@ -614,7 +659,8 @@ export type ReviewerRecord = {
 // One reviewer session of a staged review, as the tool measured it. `role`
 // is the ReviewerRole the session's call ids carry (`finder:<unit>:<pass>`
 // or `verifier:<n>`); `unit` names the find unit for a finder; `examined`
-// the hunk ids the finder's accepted answer listed; `failure` one plain
+// the distinct hunk or part ids the finder's answer listed, without path
+// or range labels; `failure` one plain
 // line when the session did not complete, else null.
 export type ReviewerSessionRecord = {
   role: string;
@@ -629,12 +675,30 @@ export type ReviewerSessionRecord = {
 
 // A changed hunk with the id the tool gave it (`h1`, `h2`, ...). `start` and
 // `end` are lines of the new file; a deletion's are its anchors.
-export type HunkRef = { id: string; path: string; start: number; end: number; deletion: boolean; point?: number };
+export type DeletionRef = { id: string; oldStart: number; oldEnd: number };
+export type HunkRef = {
+  id: string; path: string; start: number; end: number;
+  deletion: boolean | DeletionRef;
+  point?: number;
+  part?: { n: number; of: number; whole: string };
+  old?: [number, number] | null;
+  // Byte fragments always name one line. lineBytes excludes its final LF.
+  fragment?: { of?: string; from: number; to: number };
+  lineBytes?: number;
+  fromByte?: number;
+  removedIn?: number | number[];
+  rows?: number;
+  bytes?: number;
+  note?: string;
+};
 
 // A find unit: one changed file, or a group of small files whose diffs stay
 // under the unit size bound, or one slice of a large file. Every hunk of the
 // change belongs to exactly one unit.
-export type ReviewUnit = { id: string; files: string[]; hunks: HunkRef[]; diffBytes: number };
+export type ReviewUnit = {
+  id: string; files: string[]; hunks: HunkRef[]; diffBytes: number;
+  digest?: { id: string; kind: "json" | "store"; text: string; processed: string[]; omitted: { path: string; lines: [number, number]; why: string }[] };
+};
 
 // The two finder passes run on every unit, each in a fresh session.
 export type FindPass = "local" | "contracts";
@@ -700,6 +764,10 @@ export type VerifyVerdict = {
   fix: string;
   suggested_change?: string | null;
   tier: "finding" | "observation";
+  rule?: RuleCitation | null;
+  // For a confirmed finder candidate: the lines its evidence cites in other
+  // files that the verdict rests on. Only these stay on the finding.
+  relied_on?: { file_path: string; line_number: number }[] | null;
 };
 
 export type VerifyAnswer = { version: "verify-1"; change_id: string; verdicts: VerifyVerdict[] };
@@ -726,7 +794,15 @@ export type CompletionRecord = {
   coverage: {
     hunks: number;
     covered: number;
-    unread: { path: string; start: number; end: number; deletion: boolean }[];
+    unread: (Pick<HunkRef, "path" | "start" | "end" | "deletion"> & Partial<Omit<HunkRef, "path" | "start" | "end" | "deletion">>)[];
+    // A deletion's credited old lines are in `old`. `fragment` names bytes of
+    // one line only, and `lineBytes` is that line's length.
+    given?: { path: string; start: number; end: number; deletion?: string; by: "brief" | "page" | "digest" | "read"; old?: [number, number]; lineBytes?: number; fragment?: { of?: string; from: number; to: number }; part?: HunkRef["part"] }[];
+    // One entry per original obligation, before delivery splits it into pieces.
+    // by names the first source that contributed to its complete coverage.
+    inventory?: { path: string; start: number; end: number; deletion?: string; by?: "brief" | "page" | "digest" | "read" }[];
+    // Includes files with no line obligations, such as binaries and pure renames.
+    files?: ChangedFile[];
     files_read: string[];
     files_not_read: string[];
   };
@@ -841,6 +917,13 @@ export type ReportFinding = {
   fix?: string;
   // A model review only: the reviewers that raised it, the primary first.
   found_by?: string[];
+  // A staged review only: the lines in other files the finding's evidence
+  // rests on (a caller, a guard, a validator), as the finder cited them and
+  // the checks found them in the snapshot. Absent when all of it is in the
+  // finding's own file.
+  evidence?: { file_path: string; line_number: number }[];
+  // A finding that breaks a written rule of a supplied instruction file.
+  rule?: RuleCitation;
 };
 
 // "incomplete": a review `review` ran whose completion record is incomplete.
@@ -883,7 +966,7 @@ export type Report = {
   // The code graph's view of the change. Always present: status "off",
   // "skipped" or "failed" says why there is nothing in it.
   impact: ImpactSummary | null;
-  not_reviewed_paths: string[]; // Change.notReviewed
+  not_reviewed_paths: string[]; // Change.notReviewed, empty for a change review
   stats: { files: number; additions: number; deletions: number };
   // A review run by `review` itself: its completion record (a model
   // reviewer's has its own contract). Absent in a scan and in a review from

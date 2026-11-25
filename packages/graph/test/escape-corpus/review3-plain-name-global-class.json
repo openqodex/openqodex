@@ -1,0 +1,17 @@
+{
+  "covers": "a global class of the repository named `Buffer`, declared in a script, is no plain buffer: a read of it by a computed key may run its getter",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/buf.ts": "class Buffer {\n  get size(): number {\n    return 1;\n  }\n}\n",
+    "src/use.ts": "export function read(b: Buffer, k: string): unknown {\n  return b[k];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/buf.ts#Buffer.size",
+      "reason": "by a computed key",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

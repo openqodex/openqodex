@@ -15,7 +15,7 @@
 // previous commit, history unknown (a cut history or a commit the clone does
 // not hold), diverged (a rewritten branch), not a commit, or a git failure.
 import { readFileSync } from "node:fs";
-import { OpenQodexError, SERVER_GIT_ENV, getAdmittedTreeChange, safeGit } from "@openqodex/core";
+import { DiffStore, cleanupDiffs, diffHunks, diffIndex, LineSet, OpenQodexError, SERVER_GIT_ENV, getAdmittedTreeChange, safeGit } from "@openqodex/core";
 import type { Change, DeletionPoint } from "@openqodex/core";
 import type { Admit } from "./scopes.js";
 
@@ -166,53 +166,58 @@ export async function reviewChanges(args: {
   const { change: full, renamedIn } = await getAdmittedTreeChange({ repoRoot: clonePath, baseRef: args.baseRef, baseSha: args.mergeBaseSha, headSha: args.headSha, exclude, admit, ...temp });
   const previous = args.decision.previousReviewedSha;
   if (args.decision.scope.kind === "full" || previous === null) return { full, obligation: full, renamedIn };
-  const { change: since } = await getAdmittedTreeChange({ repoRoot: clonePath, baseRef: "the previously reviewed commit", baseSha: previous, headSha: args.headSha, exclude, admit, ...temp });
-  return { full, obligation: deltaChange(full, since), renamedIn };
+  try {
+    const { change: since } = await getAdmittedTreeChange({ repoRoot: clonePath, baseRef: "the previously reviewed commit", baseSha: previous, headSha: args.headSha, exclude, admit, ...temp });
+    try { return { full, obligation: deltaChange(full, since, args.tempRoot), renamedIn }; }
+    finally { try { cleanupDiffs(since); } catch { /* the delta is the result; a leftover private patch is not */ } }
+  } catch (error) {
+    try { cleanupDiffs(full); } catch { /* the original error is the one to report */ }
+    throw error;
+  }
+
 }
 
 // A hunk of a file's diff text: its header line's new-side range.
-type Hunk = { start: number; count: number; lines: string[] };
+type Hunk = { start: number; count: number };
 
-// One file's diff text cut to the hunks `keep` accepts, its header lines
-// kept; the '+' and '-' lines of what is kept, counted.
-function keptHunks(text: string, keep: (h: Hunk) => boolean): { text: string; additions: number; deletions: number; hunks: number } {
-  const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
-  const head: string[] = [];
-  const hunks: Hunk[] = [];
-  for (const line of lines) {
-    const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
-    if (m) hunks.push({ start: Number(m[1]), count: m[2] === undefined ? 1 : Number(m[2]), lines: [line] });
-    else if (hunks.length === 0) head.push(line);
-    else hunks[hunks.length - 1]!.lines.push(line);
-  }
-  if (hunks.length === 0) return { text, additions: 0, deletions: 0, hunks: 0 };
-  const kept = hunks.filter(keep);
-  let additions = 0;
-  let deletions = 0;
-  for (const h of kept) {
-    for (const l of h.lines.slice(1)) {
-      if (l.startsWith("+")) additions++;
-      else if (l.startsWith("-")) deletions++;
+// Decide once using each original hunk's complete range, then stream all
+// its pages. A large hunk must not be dropped just because its tail owns
+// the line in the delta, nor materialised as one unbounded string.
+function* keptHunks(change: Change, path: string, keep: (h: Hunk) => boolean): Generator<{ text: string; additions: number; deletions: number }> {
+  const index = diffIndex(change, path);
+  if (!index?.hunks.length) return;
+  const groups = new Set(index.wholeHunks.filter((h) => {
+    const count = h.nextEnd - h.next;
+    return keep({ start: h.next - Number(count === 0), count });
+  }).map((h) => h.group));
+  let inHunk = false;
+  for (const text of diffHunks(change, path, undefined, 512 * 1024, { original: true, sections: true, groups, onLimit: () => console.warn(`Incremental review: skipped a whole diff hunk in ${path} because a page exceeded the 512 KB byte budget.`) })) {
+    let additions = 0;
+    let deletions = 0;
+    for (const row of text.split("\n")) {
+      if (row.startsWith("@@")) inHunk = true;
+      else if (row.startsWith("diff --git ")) inHunk = false;
+      else if (inHunk && row.startsWith("+")) additions++;
+      else if (inHunk && row.startsWith("-")) deletions++;
     }
+    yield { text, additions, deletions };
   }
-  return { text: `${[...head, ...kept.flatMap((h) => h.lines)].join("\n")}\n`, additions, deletions, hunks: kept.length };
 }
 
 // The whole change cut to what `since` (previous..head over the same
 // admitted paths) also changed. Line numbers are the head's in both, so a
 // line is kept when both changed it; a deletion when both removed lines at
 // the same place. A file the change deletes is kept when `since` deletes it
-// too; a binary file, or one too large for coverage, when `since` changed
+// too; a binary file, or one without coverage, when `since` changed
 // it. The brief's diff keeps the whole change's hunks that hold a kept line
 // or deletion, so the reviewer reads the change against the merge base, and
 // its counts are the lines those hunks add and remove. The id is the whole
 // change's: the brief and the check name the same change.
-export function deltaChange(full: Change, since: Change): Change {
+export function deltaChange(full: Change, since: Change, tempRoot?: string): Change {
   const sinceFiles = new Map(since.files.map((f) => [f.path, f]));
-  // Files previous..head changed but could not cover (past the coverage
-  // limit, as a large merge of the base branch makes it happen).
+  // Hand-built changes may leave the lines of some files unknown.
   const sinceUncovered = new Set(since.uncovered ?? []);
-  const coverage = new Map<string, Set<number>>();
+  const coverage = new Map<string, LineSet>();
   const deletionPoints = new Map<string, DeletionPoint[]>();
   const files = full.files.filter((f) => {
     const s = sinceFiles.get(f.path);
@@ -232,8 +237,8 @@ export function deltaChange(full: Change, since: Change): Change {
       if (points.length > 0) deletionPoints.set(f.path, points);
       return true;
     }
-    const now = since.coverage.get(f.path) ?? new Set<number>();
-    const lines = new Set([...was].filter((n) => now.has(n)));
+    const now = since.coverage.get(f.path) ?? new LineSet();
+    const lines = was.intersect(now);
     const at = new Set((since.deletionPoints.get(f.path) ?? []).map((p) => p.after));
     const points = (full.deletionPoints.get(f.path) ?? []).filter((p) => at.has(p.after));
     if (lines.size === 0 && points.length === 0) return false;
@@ -244,24 +249,30 @@ export function deltaChange(full: Change, since: Change): Change {
   const kept = new Set(files.map((f) => f.path));
   let additions = 0;
   let deletions = 0;
-  const diffs: { path: string; text: string }[] = [];
-  for (const d of full.diffs ?? []) {
-    if (!kept.has(d.path)) continue;
-    const lines = coverage.get(d.path) ?? new Set<number>();
-    const points = deletionPoints.get(d.path) ?? [];
-    const cut = keptHunks(d.text, (h) => {
-      const last = h.start + Math.max(h.count, 1) - 1;
-      for (let n = h.start; n <= last; n++) if (lines.has(n)) return true;
-      return points.some((p) => p.after >= h.start - 1 && p.after <= last);
-    });
-    additions += cut.additions;
-    deletions += cut.deletions;
-    diffs.push({ path: d.path, text: cut.text });
-  }
+  const store = new DiffStore(full.id, tempRoot);
+  try {
+    for (const d of full.diffs ?? []) {
+      if (!kept.has(d.path)) continue;
+      const lines = coverage.get(d.path) ?? new LineSet();
+      const points = deletionPoints.get(d.path) ?? [];
+      store.push(d.path, Buffer.from(diffIndex(full, d.path)?.header ?? ""));
+      for (const cut of keptHunks(full, d.path, (h) => {
+        const last = h.start + Math.max(h.count, 1) - 1;
+        if (lines.overlaps(h.start, last)) return true;
+        return points.some((p) => p.after >= h.start - 1 && p.after <= last);
+      })) {
+        additions += cut.additions;
+        deletions += cut.deletions;
+        store.push(d.path, Buffer.from(cut.text, "utf8"));
+      }
+    }
+  } catch (error) { store.dispose(); throw error; }
+  const diffs = store.finish();
   // A kept file with no diff text (left out of the brief, or binary): its
   // kept lines and deletions are what it adds and removes here.
+  const diffPaths = new Set(diffs.map((d) => d.path));
   for (const f of files) {
-    if (diffs.some((d) => d.path === f.path)) continue;
+    if (diffPaths.has(f.path)) continue;
     additions += coverage.get(f.path)?.size ?? 0;
     deletions += (deletionPoints.get(f.path) ?? []).reduce((n, p) => n + p.lines, 0);
   }
@@ -271,7 +282,7 @@ export function deltaChange(full: Change, since: Change): Change {
     changedPaths: files.filter((f) => f.status !== "deleted").map((f) => f.path),
     coverage,
     deletionPoints,
-    diff: diffs.map((d) => d.text).join(""),
+    diff: diffs.map((d) => d.text ?? "").join(""),
     diffs,
     notReviewed: full.notReviewed.filter((p) => kept.has(p)),
     uncovered: (full.uncovered ?? []).filter((p) => kept.has(p)),

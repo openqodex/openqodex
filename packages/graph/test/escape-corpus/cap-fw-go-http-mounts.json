@@ -1,0 +1,47 @@
+{
+  "covers": "a net/http route on a mux mounted past the mounts the plugin follows in one build (go-http MAX_MOUNTS)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_MOUNTS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport n \"net/http\"\n\nvar m = n.NewServeMux()\n\nvar sub = n.NewServeMux()\n\nfunc h(w n.ResponseWriter, r *n.Request) {}\n\nfunc rega() {\n\tsub.HandleFunc(\"/x\", h)\n",
+      {
+        "repeat": "\tm.Handle(\"/a{{i}}/\", n.StripPrefix(\"/a{{i}}\", sub))\n",
+        "times": 1001
+      },
+      "}\n"
+    ],
+    "b.go": [
+      "package main\n\nimport n \"net/http\"\n\nfunc regb() {\n",
+      {
+        "repeat": "\tm.Handle(\"/b{{i}}/\", n.StripPrefix(\"/b{{i}}\", sub))\n",
+        "times": 1001
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tlast := n.NewServeMux()\n\tlast.HandleFunc(\"/y\", deep)\n\tm.Handle(\"/z/\", n.StripPrefix(\"/z\", last))\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped following mounted muxes after 2000",
+      "at": "b.go:1005",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "b.go:1005"
+      }
+    }
+  ]
+}

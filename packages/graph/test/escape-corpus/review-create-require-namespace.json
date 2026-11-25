@@ -1,0 +1,23 @@
+{
+  "covers": "`m.createRequire(...)` through a namespace import makes a loader",
+  "files": {
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/use.mjs": "import * as m from \"node:module\";\nconst load = m.createRequire(\"/repo/src/use.mjs\");\nconst key = \"f\";\nload(\"./a.cjs\")[key]();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.mjs",
+      "file": "src/use.mjs",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "may be any module of the repository",
+      "at": ""
+    }
+  ]
+}

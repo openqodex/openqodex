@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { getChange } from "@openqodex/core";
 import { buildGraph, detectImpact, openStore, renderImpactBlock } from "../src/index.js";
+import { declaredPlain } from "../src/build.js";
 import { at, callSites, commitAll, makeHome, makeRepo, symbol, writeFiles } from "./helpers.js";
 import { cpuMs, expectLinear, growthTests } from "../src/test-timing.js";
 import { removeTempDirs } from "../../../tests/temp-dirs.mjs";
@@ -124,6 +125,43 @@ describe("budget", () => {
     }, 120_000);
   });
 
+  // Every name read once fetched the node above it, which tree-sitter finds
+  // by a walk down from the root: a file of nested reads took time that grew
+  // with the square of its depth (issue 418).
+  const nestedReads = (depth: number) => repo({ "reads.ts": `export const v = 1;\n${"{ v; ".repeat(depth)}${"}".repeat(depth)}\n` });
+  growthTests("in time that grows with the depth of its name reads", () => {
+    it("reads 20,000 nested name reads in time that grows with the depth (418)", async () => {
+      const quarter = nestedReads(n / 4);
+      const root = nestedReads(n);
+      // Each build read the file whole: a parse cut by its time limit lists
+      // the file as not read, and a time that measures nothing.
+      const read = (at: string) => async () => expect((await buildGraph({ repoRoot: at, store: null, budgetMs: 60_000 })).status.notRead).toEqual([]);
+      const small = await cpuMs(read(quarter));
+      const large = await cpuMs(read(root));
+      expectLinear("a build of 5,000 and of 20,000 nested name reads", small, large);
+    }, 120_000);
+  });
+
+  // Every timer given one callback once read the whole file again to prove
+  // the callback a function: a file of many timers took time that grew
+  // with its square.
+  const timers = (count: number) => repo({ "timers.ts": `const tick = () => {};\nexport function f() {}\n${"setTimeout(tick, 1);\n".repeat(count)}` });
+  growthTests("in time that grows with the timers", () => {
+    it("reads 16,000 timers given one callback in time that grows with the count", async () => {
+      const quarter = timers(4_000);
+      const root = timers(16_000);
+      const small = await cpuMs(() => buildGraph({ repoRoot: quarter, store: null, budgetMs: 60_000 }));
+      const large = await cpuMs(() => buildGraph({ repoRoot: root, store: null, budgetMs: 60_000 }));
+      expectLinear("a build of 4,000 and of 16,000 timers given one callback", small, large);
+    }, 120_000);
+  });
+
+  it("starts no declaration file's parse once the build's budget is spent", async () => {
+    const files: [string, string][] = [["env.d.ts", "declare const V: string;\n"]];
+    expect(await declaredPlain(files, Number.POSITIVE_INFINITY)).toEqual([{ file: "env.d.ts", names: ["V"] }]);
+    expect(await declaredPlain(files, performance.now() - 1)).toEqual([]);
+  });
+
   it("caps the number of parses and parses the changed files first", async () => {
     const files: Record<string, string> = {};
     for (let i = 0; i < 20; i++) files[`src/f${String(i).padStart(2, "0")}.ts`] = `export function f${i}() {}\n`;
@@ -152,7 +190,8 @@ describe("cache", () => {
     const first = await buildGraph({ repoRoot: root, store });
     expect(first.status.parses).toBe(3);
 
-    const warm = await buildGraph({ repoRoot: root, store });
+    // Forced fresh on an unchanged tree: an unforced build would load the kept index, not the facts.
+    const warm = await buildGraph({ repoRoot: root, store, mode: "fresh" });
     expect(warm.status.parses).toBe(0);
     expect(warm.status.cacheHits).toBe(3);
     expect(callSites(warm, symbol(warm, "a.py", "a"))).toEqual(["c.py:4"]);
@@ -164,7 +203,7 @@ describe("cache", () => {
 
     // Every facts file corrupt: each one the build needs is parsed again and rewritten.
     for (const f of factsFiles(root)) writeFileSync(f, "{not json");
-    const repaired = await buildGraph({ repoRoot: root, store });
+    const repaired = await buildGraph({ repoRoot: root, store, mode: "fresh" });
     expect(repaired.status.parses).toBe(3);
     expect(callSites(repaired, symbol(repaired, "a.py", "a"))).toEqual(["c.py:5"]);
     expect(factsFiles(root).filter((f) => { try { JSON.parse(readFileSync(f, "utf8")); return true; } catch { return false; } })).toHaveLength(3);
@@ -201,7 +240,8 @@ describe("cache", () => {
   });
 
   // A blocked open would freeze this process, so the build runs in a child
-  // with a 20 second limit, from the built package.
+  // with a 20 second limit, from the built package. Forced fresh: the tree is
+  // unchanged, and an unforced build would load the kept index, not the facts.
   it("never blocks on a named pipe in place of a facts file", async () => {
     const root = repo(files);
     const store = await storeOf(root);
@@ -210,7 +250,7 @@ describe("cache", () => {
     unlinkSync(entry);
     execFileSync("mkfifo", [entry]);
     const built = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "../dist/index.js")).href;
-    const script = `const { buildGraph, openStore } = await import(${JSON.stringify(built)}); const s = await openStore(${JSON.stringify(root)}, { home: ${JSON.stringify(home)} }); const g = await buildGraph({ repoRoot: ${JSON.stringify(root)}, store: s.ok ? s.store : null }); process.stdout.write(String(g.status.parses));`;
+    const script = `const { buildGraph, openStore } = await import(${JSON.stringify(built)}); const s = await openStore(${JSON.stringify(root)}, { home: ${JSON.stringify(home)} }); const g = await buildGraph({ repoRoot: ${JSON.stringify(root)}, store: s.ok ? s.store : null, mode: "fresh" }); process.stdout.write(String(g.status.parses));`;
     const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", timeout: 20_000 });
     expect(child.status, child.stderr).toBe(0);
     expect(child.stdout).toBe("1");

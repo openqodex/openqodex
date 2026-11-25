@@ -1,0 +1,31 @@
+{
+  "covers": "a FastAPI route on a router included deeper than the plugin follows; the handler is named only by its decorator (fastapi MAX_INCLUDE_DEPTH)",
+  "caps": [
+    "frameworks/fastapi/resolve.ts#MAX_INCLUDE_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "fastapi\n",
+    "main.py": "from fastapi import APIRouter, FastAPI\n\napp = FastAPI()\nr1 = APIRouter()\nr2 = APIRouter()\nr3 = APIRouter()\nr4 = APIRouter()\nr5 = APIRouter()\nr6 = APIRouter()\nr7 = APIRouter()\nr8 = APIRouter()\nr9 = APIRouter()\nr10 = APIRouter()\n\n@r10.get(\"/x\")\ndef deep():\n    return 1\n\nr9.include_router(r10, prefix=\"/a\")\nr8.include_router(r9, prefix=\"/a\")\nr7.include_router(r8, prefix=\"/a\")\nr6.include_router(r7, prefix=\"/a\")\nr5.include_router(r6, prefix=\"/a\")\nr4.include_router(r5, prefix=\"/a\")\nr3.include_router(r4, prefix=\"/a\")\nr2.include_router(r3, prefix=\"/a\")\nr1.include_router(r2, prefix=\"/a\")\napp.include_router(r1, prefix=\"/a\")\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.py#deep",
+      "caller": null,
+      "file": "main.py",
+      "line": 15
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.py#deep",
+      "reason": "routers included more than 8 levels deep are not followed",
+      "at": "main.py:20",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.py:20"
+      }
+    }
+  ]
+}

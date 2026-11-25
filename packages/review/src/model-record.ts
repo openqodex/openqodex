@@ -3,7 +3,7 @@
 // the renderers a review result carries. Every value comes from what the
 // brain measured; nothing from what the reviewer said.
 import { modelCompletionRecord, renderJson, renderMarkdown, renderReview, renderSarif } from "@openqodex/core";
-import type { ModelAttempt, ModelCompletionRecord, ModelToolEntry, Report } from "@openqodex/core";
+import type { Change, ModelAttempt, ModelCompletionRecord, ModelToolEntry, Report } from "@openqodex/core";
 import { redactStored } from "./redact.js";
 import type { ReviewResult } from "./reviewer.js";
 import type { CallRecord, ModelReviewEvidence, ToolLogEntry } from "./usage.js";
@@ -37,8 +37,9 @@ function attempt(c: CallRecord, model: string): ModelAttempt {
   };
 }
 
-function build(e: ModelReviewEvidence, second?: ModelCompletionRecord): ModelCompletionRecord {
+function build(e: ModelReviewEvidence, second?: ModelCompletionRecord, deletionPoints?: Change["deletionPoints"]): ModelCompletionRecord {
   return modelCompletionRecord({
+    ...(deletionPoints ? { deletionPoints } : {}),
     changeId: e.changeId,
     model: e.model,
     snapshot: e.snapshot,
@@ -58,8 +59,9 @@ function build(e: ModelReviewEvidence, second?: ModelCompletionRecord): ModelCom
 // The record of the primary reviewer's conversation, with the second
 // reviewer's own record beside it when one ran. Redacted like the agent
 // record: a path or a reason may hold a secret the scanners found.
-export function modelRecord(evidence: ModelReviewEvidence, opts: { second?: ModelReviewEvidence | null; secrets?: string[] } = {}): ModelCompletionRecord {
-  return redactStored(build(evidence, opts.second ? build(opts.second) : undefined), opts.secrets ?? []);
+export function modelRecord(evidence: ModelReviewEvidence, opts: { second?: ModelReviewEvidence | null; secrets?: string[]; change?: Pick<Change, "deletionPoints"> } = {}): ModelCompletionRecord {
+  const points = opts.change?.deletionPoints;
+  return redactStored(build(evidence, opts.second ? build(opts.second, undefined, points) : undefined, points), opts.secrets ?? []);
 }
 
 // The checked report with the model record in it. An incomplete record

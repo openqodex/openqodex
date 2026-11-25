@@ -1,0 +1,22 @@
+{
+  "covers": "a value use the old reader skipped: a class field's value (test 6)",
+  "files": {
+    "src/a.ts": "export function f() {}\nexport class K {\n  handler = f;\n  run() {\n    this.handler();\n  }\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/a.ts#K.run",
+      "file": "src/a.ts",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "it is used as a value",
+      "at": "src/a.ts:3"
+    }
+  ]
+}

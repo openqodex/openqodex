@@ -1,0 +1,38 @@
+{
+  "covers": "a region the parser could not read with more distinct words than it keeps (MAX_UNREAD_NAMES): it reaches every definition of its project",
+  "caps": [
+    "types.ts#MAX_UNREAD_NAMES"
+  ],
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/lib.ts": "export function target(): number { return 1; }\n",
+    "src/bad.ts": [
+      "import { target } from \"./lib\";\nexport function c( {\n",
+      {
+        "repeat": "  w{{i}}();\n",
+        "times": 4100
+      },
+      "  target();\n}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/lib.ts#target",
+      "caller": null,
+      "file": "src/bad.ts",
+      "line": 4103
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/lib.ts#target",
+      "reason": "(file-not-parsed): the parser could not read the code here",
+      "at": "src/bad.ts:2",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "src/bad.ts:2"
+      }
+    }
+  ]
+}

@@ -13,7 +13,7 @@ export function stagedAnswer(brief: string, fixed: string, read: (file: string, 
   if (value.version !== 2 || !Array.isArray(value.findings) || !Array.isArray(value.dropped)) return fixed;
   // Extra keys must reach the real round storage and its redaction check.
   const extra = Object.fromEntries(Object.entries(value).filter(([key]) => !["version", "change_id", "summary", "findings", "dropped"].includes(key)));
-  const hunks = [...brief.matchAll(/^### (h\d+) (.+) (\d+)-(\d+)$/gm)].map((m) => ({ id: m[1]!, file: m[2]!, start: Number(m[3]), end: Number(m[4]) }));
+  const hunks = [...brief.matchAll(/^### (h\d+) (.+) (\d+)-(\d+)(?: \([^\n]*\))*$/gm)].map((m) => ({ id: m[1]!, file: m[2]!, start: Number(m[3]), end: Number(m[4]) }));
   if (brief.startsWith("# OpenQodex review brief: find")) {
     return JSON.stringify({ ...extra, version: "find-1", change_id: value.change_id, unit: /^Unit: (u\d+)$/m.exec(brief)?.[1], examined: hunks.map((h) => h.id), analysis: hunks.map((h) => ({ hunk: h.id, changed: "The operation changed.", could_break: "The changed behavior can fail." })), candidates: value.findings.filter((f) => hunks.some((h) => h.file === f.file_path && f.line_number >= h.start && f.line_number <= h.end)).map((f) => ({ ...f, claim: `${f.problem} ${f.consequence}`, lens: f.source?.startsWith("lens:") ? f.source.slice(5) : null, evidence: [{ file_path: f.file_path, line_number: f.line_number, quote: read(f.file_path, f.line_number) }] })) });
   }

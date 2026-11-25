@@ -32,6 +32,7 @@
 // 16. The judgement rule substitutes the default for a configured confidence
 //     floor, including zero, while the other brief rules use that floor.
 // 17. A full diff budget tells the reviewer to open a deleted binary file.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { buildBrief, buildReviewerBrief, buildWholeRepoBrief } from "./brief.js";
 import { selectLenses } from "./lenses.js";
@@ -240,7 +241,7 @@ describe("10. the reviewer brief's diff section", () => {
         { path: "logo.png", status: "deleted", oldPath: null, binary: true },
       ],
       changedPaths: ["app/big.py"],
-      coverage: new Map([["app/big.py", new Set(Array.from({ length: 205 }, (_, i) => i + 1))]]),
+      coverage: new Map([["app/big.py", makeLineSet(Array.from({ length: 205 }, (_, i) => i + 1))]]),
       deletionPoints: new Map([["logo.png", [{ after: 0, lines: 0, anchors: [1] }]]]),
       diff: big + deleted,
       diffs: [{ path: "app/big.py", text: big }, { path: "logo.png", text: deleted }],
@@ -258,7 +259,7 @@ describe("10. the reviewer brief's diff section", () => {
     const change = makeChange({
       files: [...makeChange().files, { path: "app/big.py", status: "modified", oldPath: null, binary: false }],
       changedPaths: [...makeChange().changedPaths, "app/big.py"],
-      coverage: new Map([...makeChange().coverage, ["app/big.py", new Set([3, 4])]]),
+      coverage: new Map([...makeChange().coverage, ["app/big.py", makeLineSet([3, 4])]]),
       deletionPoints: new Map([["app/big.py", [{ after: 9, lines: 2, anchors: [9, 10] }]]]),
       diffs: [{ path: "app/search.py", text: "diff --git a/app/search.py b/app/search.py\n+q\n" }, big],
     });

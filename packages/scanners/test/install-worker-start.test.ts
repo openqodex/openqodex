@@ -19,6 +19,9 @@
 //    line.
 // 7. A process that may not start an install also stops waiting on one that
 //    another process already runs (init-review.test.ts, case 12, guards it).
+// 8. The watcher counts the worker's brief copy of itself, made when it
+//    starts tar, as a second worker, so case 2 fails at random on a loaded
+//    machine (issue #331); or a fix for that hides a real second worker.
 //
 // Every run here is capped: the throwaway script ends at once on its fourth
 // start, the watcher kills every worker past the third and fails the test,
@@ -72,28 +75,49 @@ function throwaway(): { script: string; starts: string } {
   return { script, starts };
 }
 
+type Found = { pid: number; ppid: number; command: string };
+
 // The live processes whose environment holds every one of `vars`, with
-// their command lines. Linux keeps a process's environment in
-// /proc/<pid>/environ; macOS prints it after the command with `ps -E`.
-function processesWith(vars: string[]): Map<number, string> {
-  const found = new Map<number, string>();
+// their parents and command lines. Linux keeps a process's environment in
+// /proc/<pid>/environ and its parent in the fourth field of /proc/<pid>/stat,
+// after the name in brackets; macOS prints the environment after the command
+// with `ps -E`.
+function processesWith(vars: string[]): Found[] {
+  const found: Found[] = [];
   if (process.platform === "linux") {
     for (const pid of readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
       try {
         const env = readFileSync(`/proc/${pid}/environ`, "utf8").split("\0");
-        if (vars.every((v) => env.includes(v))) found.set(Number(pid), readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" "));
+        if (!vars.every((v) => env.includes(v))) continue;
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+        found.push({ pid: Number(pid), ppid, command: readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ") });
       } catch {
         // The process ended or is not ours.
       }
     }
     return found;
   }
-  const ps = execFileSync("ps", ["-A", "-E", "-ww", "-o", "pid=,command="], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  const ps = execFileSync("ps", ["-A", "-E", "-ww", "-o", "pid=,ppid=,command="], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   for (const line of ps.split("\n")) {
-    const m = /^\s*(\d+) (.*)$/.exec(line);
-    if (m && vars.every((v) => ` ${m[2]} `.includes(` ${v} `))) found.set(Number(m[1]), m[2]);
+    const m = /^\s*(\d+)\s+(\d+) (.*)$/.exec(line);
+    if (m && vars.every((v) => ` ${m[3]} `.includes(` ${v} `))) found.push({ pid: Number(m[1]), ppid: Number(m[2]), command: m[3] });
   }
   return found;
+}
+
+// The found processes without those whose parent was also found (issue
+// #331). The worker runs tar, and Node starts a program by copying the
+// worker first: until the copy turns into tar it still shows the worker's
+// command line and environment, so a scan that lands in that moment sees it
+// as a second worker. A copy's parent is the worker it came from. A second
+// worker that one install starts is a child of the script, which is never in
+// the list, so it stays and is counted. A worker started by a worker would
+// be dropped here; case 4 owns that fault, in its own test below, where the
+// script carries the marker and is taken out before this runs.
+function withoutChildren(found: Found[]): Found[] {
+  const pids = new Set(found.map((p) => p.pid));
+  return found.filter((p) => !pids.has(p.ppid));
 }
 
 function kill(pid: number): void {
@@ -126,7 +150,10 @@ async function runScript(env: Record<string, string>): Promise<Run> {
   void new Promise<void>((resolve) => child.once("exit", () => resolve())).then(() => (done = true));
   const workers = new Map<number, string>();
   while (!done) {
-    for (const [pid, command] of processesWith([MARKER, `OPENQODEX_HOME=${home}`])) if (pid !== child.pid) workers.set(pid, command);
+    // The script is taken out first: in case 4 it carries the marker itself,
+    // and a worker it starts must still count.
+    const found = processesWith([MARKER, `OPENQODEX_HOME=${home}`]).filter((p) => p.pid !== child.pid);
+    for (const { pid, command } of withoutChildren(found)) workers.set(pid, command);
     if (workers.size > MAX_STARTS) {
       for (const pid of workers.keys()) kill(pid);
       if (child.pid !== undefined) kill(child.pid);
@@ -137,6 +164,24 @@ async function runScript(env: Record<string, string>): Promise<Run> {
   if (out === "") throw new Error(`the script printed nothing: ${err}`);
   return { home, result: JSON.parse(out) as Record<string, unknown>, stderr: err, starts: readFileSync(starts, "utf8").trim().split("\n").length, workers };
 }
+
+describe("the watcher's count of workers (8)", () => {
+  it("drops the worker's copy of itself, a child of a found process", () => {
+    expect(withoutChildren([{ pid: 1, ppid: 100, command: "w" }, { pid: 2, ppid: 1, command: "w" }]).map((p) => p.pid)).toEqual([1]);
+  });
+
+  it("drops the copy when it is listed before its parent", () => {
+    expect(withoutChildren([{ pid: 2, ppid: 1, command: "w" }, { pid: 1, ppid: 100, command: "w" }]).map((p) => p.pid)).toEqual([1]);
+  });
+
+  it("keeps two unrelated processes", () => {
+    expect(withoutChildren([{ pid: 1, ppid: 100, command: "w" }, { pid: 2, ppid: 200, command: "w" }]).map((p) => p.pid)).toEqual([1, 2]);
+  });
+
+  it("keeps a second worker started by the same script, so case 2 still fails on it", () => {
+    expect(withoutChildren([{ pid: 1, ppid: 50, command: "w" }, { pid: 2, ppid: 50, command: "w" }]).map((p) => p.pid)).toEqual([1, 2]);
+  });
+});
 
 describe("the install worker", () => {
   it("is the openqodex bin with __install, started once, even for a script that tries to name itself (1, 2, 3, 5)", async () => {

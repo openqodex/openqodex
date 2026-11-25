@@ -121,3 +121,15 @@ it("accepts three verifier problem sentences but rejects four and three conseque
   expect(check({ problem: `${three} Results disappear.` }).join(" ")).toContain("has 4 sentences; the limit is 3");
   expect(check({ consequence: three }).join(" ")).toContain("has 3 sentences; the limit is 2");
 });
+
+// 7i. Digest units must examine the digest id and still cite snapshot text.
+it("accepts only the digest id and rejects summary text used as snapshot evidence", () => {
+  const { change } = fixture(["a.txt"]);
+  const unit = unitsOf(change, hunkRefs(change))[0]!;
+  unit.digest = { id: "d1", kind: "json", text: "array length 300", processed: unit.hunks.map((h) => h.id), omitted: [] };
+  const answer = { version: "find-1", change_id: change.id, unit: unit.id, examined: ["d1"], analysis: [{ hunk: "d1", changed: "Records changed.", could_break: "Values can be invalid." }], candidates: [] };
+  expect(checkFindAnswer(answer, unit, change, () => "unsafe operation").errors).toEqual([]);
+  expect(checkFindAnswer({ ...answer, examined: unit.hunks.map((h) => h.id) }, unit, change, () => "unsafe operation").answerErrors.join(" ")).toContain("d1");
+  const invented = { ...candidate("a.txt"), evidence: [{ file_path: "a.txt", line_number: 1, quote: "array length 300" }] };
+  expect(checkFindAnswer({ ...answer, candidates: [invented] }, unit, change, () => "unsafe operation").rejected).toHaveLength(1);
+});

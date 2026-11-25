@@ -144,6 +144,11 @@ export function candidateLocation(c: Candidate): string {
   return c.lineEnd > c.lineStart ? `${c.filePath}:${c.lineStart}-${c.lineEnd}` : `${c.filePath}:${c.lineStart}`;
 }
 
+// The written rule a finding breaks: `AGENTS.md > Data access: "quote"`.
+export function ruleLabel(rule: NonNullable<ReportFinding["rule"]>): string {
+  return `${rule.file}${rule.heading ? ` > ${rule.heading}` : ""}: "${rule.quote.replace(/\s+/g, " ").trim()}"`;
+}
+
 export function sourceLabel(f: ReportFinding): string {
   return f.source ?? (f.origin === "agent" ? "agent" : "scanner");
 }

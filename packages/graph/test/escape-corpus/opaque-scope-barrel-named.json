@@ -1,0 +1,27 @@
+{
+  "covers": "an opaque file with a named import from a barrel reaches the module that name comes from, not every module the barrel re-exports",
+  "files": {
+    "src/b.ts": "export function g() {}\n",
+    "src/c.ts": "export function h() {}\n",
+    "src/index.ts": "export * from \"./b\";\nexport * from \"./c\";\n",
+    "src/x.test.ts": "import { g } from \"./index\";\nfunction t() { return this; }\nt();\ng();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/b.ts#g",
+      "caller": null,
+      "file": "src/x.test.ts",
+      "line": 2
+    }
+  ],
+  "whole": [
+    "src/c.ts#h"
+  ],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "imports its module",
+      "at": "src/x.test.ts:2"
+    }
+  ]
+}

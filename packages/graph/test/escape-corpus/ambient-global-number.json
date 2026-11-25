@@ -1,0 +1,14 @@
+{
+  "covers": "a free name declared in `declare global` as a number holds plain data",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\n",
+    "app/b.ts": "import { f } from \"./a\";\nexport const v = VERSION;\nf();\n",
+    "app/env.ts": "export {};\ndeclare global {\n  const VERSION: number;\n}\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "app/a.ts#f"
+  ],
+  "floored": []
+}

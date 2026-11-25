@@ -36,6 +36,7 @@ import {
 } from "@openqodex/graph";
 import {
   defaultLensDir,
+  LineSet,
   loadConfig,
   loadLensCatalog,
   parseConfig,
@@ -99,6 +100,8 @@ export {
   selectLenses,
   selectLensesForDiff,
   defaultLensDir,
+  // changed-line intervals
+  LineSet,
   // the config parser
   parseConfig,
   loadConfig,
@@ -147,6 +150,7 @@ export type {
   Report,
   RunTimings,
   ReportFinding,
+  RuleCitation,
   Verdict,
   CompletionRecord,
   ModelCompletionRecord,

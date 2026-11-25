@@ -1,0 +1,17 @@
+{
+  "covers": "`const { 0: first } = row` reads the member `0`: a getter of that name runs there",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/c.ts": "export class C {\n  get 0(): number {\n    return 1;\n  }\n}\n",
+    "src/use.ts": "export function first(row: any) {\n  const { 0: first } = row;\n  return first;\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/c.ts#C.0",
+      "reason": "read of `.0` on a value of unknown type",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

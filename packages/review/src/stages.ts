@@ -1,11 +1,12 @@
-import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, matchesGlob, redactByFingerprint, VERIFY_BATCH_SIZE, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank } from "@openqodex/core";
-import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
+import { FINDER_CONFIDENCE_FLOOR, GLOBAL_CONFIDENCE_FLOOR, hunkFragmentLabel, matchesGlob, oldPathOf, redactByFingerprint, redactSecrets, VERIFY_BATCH_SIZE, verifyPartDistance, hunksBlock, checkSubmission, findingKey, modelCoverage, leftSnapshot, readCoverage, requiredCandidates, severityRank, stagedDiffCache } from "@openqodex/core";
+import type { Change, Config, FindAnswer, FindPass, FindingV2, Hunk, HunkRef, InstructionFile, Report, ReportFinding, ReviewerSessionRecord, ReviewerUsage, ReviewUnit, RunManifest, ScanResult, SubmissionV2, TraceEntry, VerifyAnswer, VerifyBatch, VerifyCandidate, VerifyVerdict } from "@openqodex/core";
 import { MAX_CORRECTIONS, converse, deliverRanges } from "./conversation.js";
 import { TIMED_OUT } from "./agents/driver.js";
 import type { Conversation, CorrectionRound, Speaker } from "./conversation.js";
 import { checkFindAnswer, checkVerifyAnswer } from "./evidence-check.js";
-import { snapshotText, lineCounter } from "./snapshot.js";
-import { MAX_UNIT_DIFF_BYTES, hunkRefs, unitsOf } from "./units.js";
+import { fragmentSnapshotText } from "./line-fragments.js";
+import { lineCounter } from "./snapshot.js";
+import { MAX_BRIEF_BYTES, longestBrief, obligations, unitsOf, citedDigest } from "./units.js";
 import { modelToolEntry } from "./model-loop.js";
 import { usageTotals } from "./usage.js";
 import type { CallRecord, ReviewerRole, ToolLogEntry } from "./usage.js";
@@ -14,8 +15,11 @@ export const FINDERS_CONCURRENCY = 4;
 export const VERIFIERS_CONCURRENCY = 3;
 export type StagedSession = Speaker & { close(): void | Promise<void>; kill?(): void; pid?: number | null; calls?: () => CallRecord[]; attempts?: readonly CallRecord[]; sentRounds?: number };
 export type StagedArgs = {
+  inventory?: HunkRef[];
+  units?: ReviewUnit[];
+  onUnits?: (units: ReviewUnit[]) => void;
   openSession: (role: ReviewerRole) => StagedSession;
-  findBrief: (unit: ReviewUnit, pass: FindPass) => { text: string; diffFiles: Set<string> };
+  findBrief: (unit: ReviewUnit, pass: FindPass) => { text: string; diffFiles: Set<string>; carried: HunkRef[] };
   verifyBrief: (batch: VerifyBatch) => { text: string };
   snapshotDir: string;
   change: Change;
@@ -36,6 +40,8 @@ export type StagedArgs = {
   // of TIMED_OUT, and the first missing line when any stage ran out of time.
   timedOut?: string;
   confidenceFloor?: number;
+  // The instruction files the briefs quoted: a finding's rule must quote one.
+  instructionFiles?: readonly InstructionFile[];
   say: (line: string) => void;
   onRound?: (round: CorrectionRound) => void;
   onStarted?: (role: ReviewerRole, pid: number | null) => void;
@@ -53,11 +59,13 @@ export type StagedResult = {
   missing: string[];
   required: number;
   disposed: number;
-  briefFiles: Set<string>;
+  obligations: HunkRef[];
+  briefCarried: HunkRef[];
+  digestCarried: HunkRef[];
   delivered: Hunk[];
 };
 export type StagedSessionRecord = ReviewerSessionRecord & { dropped?: { title: string; file_path: string; line_number: number; reason: string; confidence: number }[] };
-type Run = { order: number; name: string; dropped?: StagedSessionRecord["dropped"]; role: ReviewerRole; unit?: string; session: StagedSession; talk: Conversation; examined?: string[] };
+type Run = { order: number; name: string; dropped?: StagedSessionRecord["dropped"]; role: ReviewerRole; unit?: string; session: StagedSession; talk: Conversation; briefCarried: HunkRef[]; digestCarried: HunkRef[]; examined?: string[] };
 type Verified = { batch: VerifyBatch; run: Run; answer: VerifyAnswer; brief: string; number: number; corrections: number };
 const emptyUsage = (): ReviewerUsage => ({ turns: 0, input_tokens: null, output_tokens: null, cost_usd: null });
 const noDelivery = () => ({ text: "", delivered: [], left: [], later: 0, leak: false });
@@ -81,17 +89,23 @@ async function pool<T>(jobs: T[], limit: number, work: (job: T) => Promise<void>
 export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const { change, scan, config } = args;
   const citationChange = args.citationChange ?? change;
-  const read = snapshotText(args.snapshotDir);
+  const read = fragmentSnapshotText(args.snapshotDir);
   const lineCount = lineCounter(args.snapshotDir);
-  const hunks = hunkRefs(change);
-  const units = unitsOf(change, hunks);
+  const hunks = args.inventory ?? obligations(change, read, stagedDiffCache(change, args.secrets));
+  const units = args.units ?? unitsOf(change, hunks, (unit, both) => longestBrief(unit, args.findBrief, both));
+  for (const unit of units) if (unit.digest) {
+    unit.digest.text = redactSecrets(unit.digest.text, args.secrets);
+    unit.digest.omitted = unit.digest.omitted.map((o) => ({ ...o, why: redactSecrets(o.why, args.secrets) }));
+  }
+  args.onUnits?.(units);
   const startedAt = args.now();
   const findDeadline = startedAt + (args.deadline - startedAt) / 2;
   const runs: Run[] = [];
   const missing: string[] = [];
-  const notes = units.filter((u) => u.diffBytes > MAX_UNIT_DIFF_BYTES).map((u) => `Unit ${u.id} has ${u.diffBytes} bytes of diff in an indivisible hunk; it was kept as one unit.`);
+  // A fragment entry is named by its fragment label, never by a bare line.
+  const noteLine = (h: HunkRef, note: string) => `${h.id} ${h.fragment ? hunkFragmentLabel({ ...h, fragment: h.fragment }, oldPathOf(change, h.path)) : `${h.path}:${h.start}-${h.end}`}: ${note}`;
+  const notes = hunks.flatMap((h) => h.note ? [noteLine(h, h.note)] : []);
   const rounds: CorrectionRound[] = [];
-  const briefFiles = new Set<string>();
   const closedRuns = new Map<Run, Promise<void>>();
   let live = 0;
   let done = 0;
@@ -123,7 +137,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     emit(() => args.onBrief?.(role, brief));
     const session = args.openSession(role);
     const talk: Conversation = { rounds: 0, trace: [], usage: emptyUsage(), report: null, checked: null, errors: [], required: 0, disposed: 0, failure: null, submission: null, delivered: [], carried: [], startedAt: args.now(), endedAt: args.now() };
-    const run = { role, order, name, ...(unit ? { unit } : {}), session, talk };
+    const run = { role, order, name, ...(unit ? { unit } : {}), session, talk, briefCarried: [], digestCarried: [] };
     runs.push(run);
     live++;
     emit(() => args.onStarted?.(role, session.pid ?? null));
@@ -156,11 +170,12 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   // them out (a hunk over the diff budget, or without diff rows), no read
   // carried their lines and no earlier round delivered them. The same rule as
   // the single pass: coverage never rests on the finder's own `examined` list.
-  const undelivered = (unit: ReviewUnit, briefFiles: ReadonlySet<string>, trace: TraceEntry[], delivered: Hunk[]): Hunk[] => {
+  const undelivered = (unit: ReviewUnit, briefCarried: HunkRef[], trace: TraceEntry[], delivered: Hunk[]): Hunk[] => {
+    if (unit.digest) return [];
     const coverage = args.model
-      ? modelCoverage({ change, briefSent: true, briefFiles, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount })
-      : readCoverage({ change, briefFiles, trace: args.traced ? trace : [], lineCount, delivered });
-    return coverage.unread.filter((h) => unit.hunks.some((u) => u.path === h.path && u.deletion === h.deletion && u.start <= h.end && h.start <= u.end));
+      ? modelCoverage({ change, obligations: unit.hunks, fragmentParts: true, briefSent: true, briefCarried, toolLog: (trace as ToolLogEntry[]).map(modelToolEntry), delivered, lineCount })
+      : readCoverage({ change, obligations: unit.hunks, fragmentParts: true, briefCarried, trace: args.traced ? trace : [], lineCount, delivered });
+    return coverage.unread;
   };
   const findings: { run: Run; answer: FindAnswer; passRole: string }[] = [];
   const verified: Verified[] = [];
@@ -177,22 +192,28 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         let run: Run | null = null;
         try {
           const brief = args.findBrief(unit, pass);
+          if (Buffer.byteLength(brief.text, "utf8") > MAX_BRIEF_BYTES) {
+            last = "its finder brief exceeds MAX_BRIEF_BYTES";
+            for (const h of unit.hunks) { h.note = last; notes.push(noteLine(h, last)); }
+            break;
+          }
           run = start(attempt === 0 ? passRole : `${passRole}:retry1`, index * 10 + attempt, `Finder for unit ${unit.id} (${pass === "local" ? "correctness and safety" : "interfaces and conventions"})`, brief.text, unit.id);
+          run.briefCarried = unit.digest ? [] : brief.carried;
+          run.digestCarried = unit.digest ? unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)) : [];
           began = true;
           let checked: ReturnType<typeof checkFindAnswer> | null = null;
-          run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, deadline: findDeadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role),
+          run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, earlier: [...run.briefCarried, ...run.digestCarried], deadline: findDeadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role),
             check: (value, trace, delivered) => {
               const result = checkFindAnswer(value, unit, citationChange, read, args.manifest.lenses.map((lens) => lens.name));
               checked = result;
               run!.examined = result.answer.examined;
-              const unread: Hunk[] = result.parsed && pass === "local" ? unit.hunks.filter((h) => !result.answer.examined.includes(h.id)) : [];
-              if (result.parsed && pass === "local") for (const h of undelivered(unit, brief.diffFiles, trace, delivered)) if (!unread.some((u) => u.path === h.path && u.start === h.start && u.end === h.end && u.deletion === h.deletion)) unread.push(h);
+              const unread: Hunk[] = result.parsed && pass === "local" && !unit.digest ? unit.hunks.filter((h) => !result.answer.examined.includes(h.id)) : [];
+              if (result.parsed && pass === "local") for (const h of undelivered(unit, brief.carried, trace, delivered)) if (!unread.some((u) => u.path === h.path && u.start === h.start && u.end === h.end && JSON.stringify(u.deletion) === JSON.stringify(h.deletion))) unread.push(h);
               return { report: null, errors: result.errors, unread, required: 0, disposed: 0 };
             },
-            deliver: (unread, earlier) => deliverRanges({ snapshotDir: args.snapshotDir, unread, earlier, secrets: args.secrets, change }),
+            deliver: (unread, earlier) => deliverRanges({ snapshotDir: args.snapshotDir, unread: unread.filter((h) => unit.hunks.some((u) => u.id === h.id)), earlier, secrets: args.secrets, change }),
           });
-          // Model briefs count only after the transport received them.
-          if (run.session.sentRounds === undefined || run.session.sentRounds > 0) for (const file of brief.diffFiles) briefFiles.add(file);
+
           noteRefusal(run);
           last = failed(run.talk);
           const result = checked as ReturnType<typeof checkFindAnswer> | null;
@@ -214,7 +235,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       }
       if (answer === null) {
         missing.push(!began ? `unit ${unit.id} was not started: ${last ?? (stopped() ? "the review stopped" : ranOut("the finders' time ran out"))}` : `unit ${unit.id} was not examined by ${pass}: ${last ?? ranOut("the finders' time ran out")}`);
-        for (const h of unit.hunks) missing.push(`hunk ${h.id} of ${h.path} was not examined by the ${pass} pass`);
+        for (const h of unit.hunks) missing.push(`hunk ${h.id} of ${h.path}:${h.start}-${h.end} was not examined by the ${pass} pass`);
       }
     });
 
@@ -235,8 +256,16 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     allCandidates = candidates;
     const files = new Map<string, VerifyCandidate[]>();
     for (const c of candidates) files.set(candidateFile(c), [...(files.get(candidateFile(c)) ?? []), c]);
+    const abandon = (batch: VerifyBatch, reason: string) => {
+      batch.candidates.forEach((c) => unverified.add(c.id));
+      missing.push(`candidates ${batch.candidates.map((c) => c.id).join(", ")} were not verified: ${reason}`);
+    };
+    const briefs = new Map<VerifyBatch, string>();
     const batches: VerifyBatch[] = [];
     for (const [file, list] of files) {
+      const fileHunks = hunks.filter((h) => h.path === file);
+      const digestUnit = units.find((u) => u.digest && u.files.includes(file));
+      const sizes = new Map(fileHunks.map((h) => [h.id, digestUnit ? 0 : Buffer.byteLength(hunksBlock(change, [h], args.secrets).text, "utf8") + 2]));
       list.sort((a, b) => candidateLine(a) - candidateLine(b) || Number(a.kind === "finder") - Number(b.kind === "finder"));
       for (let i = 0; i < list.length;) {
         let end = Math.min(i + VERIFY_BATCH_SIZE, list.length);
@@ -249,7 +278,51 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           while (last < list.length && candidateLine(list[last]!) === candidateLine(list[end]!)) last++;
           if (list.slice(first, last).some((c) => c.kind !== list[first]!.kind)) end = last;
         }
-        batches.push({ file, hunks: hunks.filter((h) => h.path === file), candidates: list.slice(i, end) });
+        const addBatch = (selected: VerifyCandidate[]) => {
+          // Candidate parts come first, then cited old fragments, then
+          // neighbours. Sum isolated blocks conservatively: their repeated
+          // headers and the base's omitted headings only overestimate the join.
+          const parts = fileHunks.map((h) => ({ h, distance: verifyPartDistance(h, selected, change) }))
+            .sort((a, b) => (a.distance === 0 ? -2 : a.distance) - (b.distance === 0 ? -2 : b.distance));
+          // Selection runs nearest first; the brief keeps the file's own order.
+          const batch: VerifyBatch = { file, hunks: fileHunks, candidates: selected, shown: [], ...(digestUnit ? {
+            digest: citedDigest(units, file, selected.flatMap((c): [number, number][] => c.kind === "finder"
+              ? [[c.candidate.line_number, c.candidate.line_end ?? c.candidate.line_number], ...c.candidate.evidence.filter((e) => e.file_path === file && !e.removed).map((e): [number, number] => [e.line_number, e.line_number])]
+              : [[c.candidate.lineStart, c.candidate.lineEnd]]), selected.flatMap((c) => c.kind === "finder" ? c.candidate.evidence.map((e) => e.file_path) : [])),
+            citedText: selected.map((c) => {
+              const line = candidateLine(c);
+              const from = Math.max(1, line - 2);
+              const text = read.readLines?.(file, from, line + 2, 16 * 1024) ?? null;
+              return text === null ? `${file}:${line}: read the cited lines with your tools.` : `${file} lines ${from}-${line + 2} from the snapshot:\n${text.split("\n").map((row, i) => `${from + i}\t${row}`).join("\n")}`;
+            }).join("\n\n"),
+          } : {}) };
+          let bytes = Buffer.byteLength(args.verifyBrief(batch).text, "utf8");
+          const own = parts.filter((p) => p.distance === 0);
+          if (bytes + own.reduce((n, p) => n + sizes.get(p.h.id)!, 0) > MAX_BRIEF_BYTES) {
+            if (selected.length === 1) {
+              abandon(batch, "its candidate part and fixed blocks exceed MAX_BRIEF_BYTES");
+              return;
+            }
+            const middle = Math.ceil(selected.length / 2);
+            addBatch(selected.slice(0, middle));
+            addBatch(selected.slice(middle));
+            return;
+          }
+          for (const { h } of parts) {
+            const size = sizes.get(h.id)!;
+            if (bytes + size > MAX_BRIEF_BYTES) continue;
+            bytes += size;
+            batch.shown!.push(h.id);
+          }
+          const brief = args.verifyBrief(batch).text;
+          if (Buffer.byteLength(brief, "utf8") > MAX_BRIEF_BYTES) {
+            abandon(batch, "its rendered brief exceeds MAX_BRIEF_BYTES");
+            return;
+          }
+          briefs.set(batch, brief);
+          batches.push(batch);
+        };
+        addBatch(list.slice(i, end));
         i = end;
       }
     }
@@ -257,10 +330,6 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       const result = checkVerifyAnswer(value, batch, citationChange, read, lineCount, scan);
       accept(result.answer);
       return { report: null, errors: result.errors, unread: [], required: batch.candidates.length, disposed: result.errors.length === 0 ? batch.candidates.length : 0 };
-    };
-    const abandon = (batch: VerifyBatch, reason: string) => {
-      batch.candidates.forEach((c) => unverified.add(c.id));
-      missing.push(`candidates ${batch.candidates.map((c) => c.id).join(", ")} were not verified: ${reason}`);
     };
     // Only item errors can be isolated. A malformed or incomplete batch is retried.
     const isolate = (batch: VerifyBatch, answer: VerifyAnswer | null, errors: string[]): answer is VerifyAnswer => {
@@ -283,7 +352,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       for (let attempt = 0; attempt < 2 && !stopped() && args.now() < args.deadline; attempt++) {
         let run: Run | null = null;
         try {
-          const brief = args.verifyBrief(batch);
+          const brief = { text: briefs.get(batch)! };
           run = start(`verifier:${index + 1}${attempt ? ":retry1" : ""}`, jobs.length * 10 + index * 10 + attempt, `Verifier ${index + 1} for ${batch.file}`, brief.text);
           let answer: VerifyAnswer | null = null;
           run.talk = await converse({ session: run.session, snapshotDir: args.snapshotDir, brief: brief.text, deadline: args.deadline, traced: args.traced, heartbeat: false, staged: true, sessionName: run.name, say, now: args.now, timedOut: args.timedOut, onRound: roundFor(run.role), check: verifyCheck(batch, (a) => { answer = a; }), deliver: noDelivery });
@@ -308,7 +377,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     verified.sort((a, b) => a.number - b.number);
     const sourceOf = (c: VerifyCandidate) => c.kind === "scanner" ? c.candidate.token : c.candidate.lens ? `lens:${c.candidate.lens}` : null;
     const findingOf = (v: VerifyVerdict, c: VerifyCandidate): FindingV2 => {
-      return { severity: v.severity, category: v.category, confidence: v.confidence, file_path: v.file_path, line_number: v.line_number, ...(v.line_end !== undefined ? { line_end: v.line_end } : {}), title: v.title, problem: v.problem, consequence: v.consequence, fix: v.fix, suggested_change: v.suggested_change ?? null, source: sourceOf(c), candidate: c.kind === "scanner" ? c.id : null };
+      return { severity: v.severity, category: v.category, confidence: v.confidence, file_path: v.file_path, line_number: v.line_number, ...(v.line_end !== undefined ? { line_end: v.line_end } : {}), title: v.title, problem: v.problem, consequence: v.consequence, fix: v.fix, suggested_change: v.suggested_change ?? null, source: sourceOf(c), candidate: c.kind === "scanner" ? c.id : null, ...(v.rule ? { rule: v.rule } : {}) };
     };
     const analysis = findings.flatMap((f) => f.answer.analysis).map((a) => a.changed.trim().replace(/\s+/g, " ")).find(Boolean)?.split(/(?<=[.!?])\s+/)[0];
     const summary = `Reviewed ${findings.length === 0 ? "no completed finder units" : `units ${[...new Set(findings.map((f) => f.answer.unit))].join(", ")}`}.${analysis ? ` ${analysis}` : ""}`;
@@ -333,8 +402,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         }
       }
       const filteredScan = { ...scan, candidates: scan.candidates.filter((c) => !unverified.has(c.id)) };
-      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor });
-      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor }) : null;
+      const checked = checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles, verified: true });
+      const visible = checked.ok ? checkSubmission({ change: citationChange, scan: filteredScan, manifest: args.manifest, config: { ...config, severityThreshold: "info" }, submission, lineCount, confidenceFloor: args.confidenceFloor, instructionFiles: args.instructionFiles, verified: true }) : null;
       return { submission, findingOwners, droppedOwners, items, checked, visible };
     };
     let built = assemble();
@@ -381,8 +450,25 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     const report = built.checked.report;
     const shownKeys = new Set(report.findings.map(findingKey));
     const keyOf = (item: typeof built.items[number]) => findingKey({ ...item.finding, line_end: item.finding.line_end ?? item.finding.line_number, candidate: item.finding.candidate ?? null });
-    // A key a shown finding owns stays a finding, whatever tier another item with that key was given.
-    const shownFindingTierKeys = new Set(built.items.filter((item) => item.v.tier === "finding").map(keyOf).filter((key) => shownKeys.has(key)));
+    const lowConfidenceOf = (f: FindingV2) => {
+      if (f.source && config.disabledRules.some((glob) => matchesGlob(f.source!, glob))) return null;
+      const lens = f.source?.startsWith("lens:") ? args.manifest.lenses.find((l) => l.name === f.source!.slice("lens:".length)) : undefined;
+      const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lens?.confidenceFloor ?? 0);
+      if (f.confidence >= floor) return null;
+      return { title: redactByFingerprint(f.title, scan.secretFingerprints), file_path: redactByFingerprint(f.file_path, scan.secretFingerprints), confidence: f.confidence, floor };
+    };
+    // A key a shown finding owns stays a finding, whatever tier another item
+    // with that key was given, at the highest severity of its finding-tier
+    // items that count (at or above the floor): an observation sharing the
+    // key never sets it.
+    const countedSeverity = new Map<string, ReportFinding["severity"]>();
+    for (const item of built.items) {
+      const key = keyOf(item);
+      if (item.v.tier !== "finding" || !shownKeys.has(key) || lowConfidenceOf(item.finding) !== null) continue;
+      const best = countedSeverity.get(key);
+      if (best === undefined || severityRank(item.finding.severity) > severityRank(best)) countedSeverity.set(key, item.finding.severity);
+    }
+    const shownFindingTierKeys = new Set(countedSeverity.keys());
     const observationKeys = new Set(built.items.filter((item) => item.v.tier === "observation").map(keyOf).filter((key) => !shownFindingTierKeys.has(key)));
     const shownObservationKeys = new Set((built.visible?.ok ? built.visible.report.findings : report.findings)
       .filter((f) => observationKeys.has(findingKey(f)))
@@ -391,8 +477,13 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     // Survivors that are only observations while a kept duplicate is shown as a finding.
     const supersededKeys = new Set<string>();
     const byId = new Map(built.items.map((item) => [item.c.id, item]));
+    // The shown item each folded duplicate was folded into.
+    const foldedInto = new Map<string, typeof built.items[number]>();
     for (const item of built.items) {
       const key = keyOf(item);
+      // An observation never folds away a key a shown finding owns, so a
+      // shown finding folds only into another shown finding.
+      if (item.v.tier === "observation" && shownFindingTierKeys.has(key)) continue;
       // Along a chain of duplicates, the first link that is shown folds this item.
       let target = item;
       let folded = false;
@@ -403,20 +494,51 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         if (!next) break;
         target = next;
         const targetKey = keyOf(target);
-        const shown = target.v.tier === "finding" ? shownKeys.has(targetKey) : item.v.tier === "observation" && shownObservationKeys.has(targetKey);
+        // A finding-tier link is shown only when its key counts: a below-floor
+        // finding whose key an observation shares is no place to fold into.
+        const shown = target.v.tier === "finding" ? shownFindingTierKeys.has(targetKey) : item.v.tier === "observation" && shownObservationKeys.has(targetKey);
         if (targetKey !== key && shown) { folded = true; break; }
       }
-      if (folded) duplicateKeys.add(key);
+      if (folded) { duplicateKeys.add(key); foldedInto.set(key, target); }
       else if (target !== item) {
         const targetKey = keyOf(target);
         if (targetKey !== key && item.v.tier === "finding" && target.v.tier === "observation" && shownKeys.has(key) && observationKeys.has(targetKey)) supersededKeys.add(targetKey);
       }
     }
+    // Keys can fold in a cycle when two items share a key (A1 into B, B
+    // into A2), which would fold every key in it away: the cycle's first key
+    // the report shows stays.
+    for (const start of foldedInto.keys()) {
+      const path: string[] = [];
+      let key = start;
+      while (foldedInto.has(key) && !path.includes(key)) { path.push(key); key = keyOf(foldedInto.get(key)!); }
+      if (!path.includes(key)) continue;
+      const cycle = new Set(path.slice(path.indexOf(key)));
+      const keep = report.findings.map(findingKey).find((k) => cycle.has(k)) ?? key;
+      foldedInto.delete(keep);
+      duplicateKeys.delete(keep);
+    }
+    // A counted key folded into another gives the survivor its counted
+    // severity when higher, so a folded major still blocks.
+    const raised = new Map<string, ReportFinding["severity"]>();
+    for (const [key, into] of foldedInto) {
+      const severity = countedSeverity.get(key);
+      if (severity === undefined) continue;
+      let target = keyOf(into);
+      while (foldedInto.has(target)) target = keyOf(foldedInto.get(target)!);
+      const best = raised.get(target) ?? countedSeverity.get(target);
+      if (best === undefined || severityRank(severity) > severityRank(best)) raised.set(target, severity);
+    }
     const observations: ReportFinding[] = [];
+    // A counted finding an observation sharing its key lifted over the
+    // threshold is hidden at its own severity, and counted as hidden.
+    const listed = (severity: ReportFinding["severity"]) => severityRank(severity) >= severityRank(config.severityThreshold) || config.blockOnSeverity !== null && severityRank(severity) >= severityRank(config.blockOnSeverity);
     report.findings = report.findings.flatMap((f) => {
       const key = findingKey(f);
       if (duplicateKeys.has(key)) return [];
-      const entry = { ...f };
+      const severity = raised.get(key) ?? countedSeverity.get(key);
+      if (severity && severityRank(severity) < severityRank(f.severity) && !listed(severity)) { report.below_threshold++; return []; }
+      const entry = { ...f, ...(severity ? { severity } : {}) };
       if (observationKeys.has(key)) { if (!supersededKeys.has(key)) observations.push(entry); return []; }
       return [entry];
     });
@@ -451,13 +573,6 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       }
     };
     ownComponent(owned, [...owned]);
-    const lowConfidenceOf = (f: FindingV2) => {
-      if (f.source && config.disabledRules.some((glob) => matchesGlob(f.source!, glob))) return null;
-      const lens = f.source?.startsWith("lens:") ? args.manifest.lenses.find((l) => l.name === f.source!.slice("lens:".length)) : undefined;
-      const floor = Math.max(args.confidenceFloor ?? GLOBAL_CONFIDENCE_FLOOR, lens?.confidenceFloor ?? 0);
-      if (f.confidence >= floor) return null;
-      return { title: redactByFingerprint(f.title, scan.secretFingerprints), file_path: redactByFingerprint(f.file_path, scan.secretFingerprints), confidence: f.confidence, floor };
-    };
     const matchesLow = (low: Report["low_confidence"][number], entry: Report["low_confidence"][number]) => low.title === entry.title && low.file_path === entry.file_path && low.confidence === entry.confidence && low.floor === entry.floor;
     const removeLow = (entry: Report["low_confidence"][number]) => {
       const index = report.low_confidence.findIndex((low) => matchesLow(low, entry));
@@ -499,6 +614,23 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       const entry = lowConfidenceOf(item.finding);
       if (entry) removeLow(entry);
     }
+    // A confirmed finder candidate keeps the lines in other files its
+    // evidence cites and its verdict names in `relied_on`. A finding whose
+    // evidence is all in its own file, or on removed lines, is left as it was.
+    // A folded duplicate's lines go to the shown item it was folded into.
+    const crossFile = new Map<string, NonNullable<ReportFinding["evidence"]>>();
+    for (const item of built.items) {
+      if (item.c.kind !== "finder") continue;
+      const owner = foldedInto.get(keyOf(item)) ?? item;
+      const kept = crossFile.get(keyOf(owner)) ?? [];
+      const relied = item.v.relied_on ?? [];
+      for (const e of item.c.candidate.evidence) if (!e.removed && e.file_path !== owner.finding.file_path && relied.some((r) => r.file_path === e.file_path && r.line_number === e.line_number) && !kept.some((k) => k.file_path === e.file_path && k.line_number === e.line_number)) kept.push({ file_path: e.file_path, line_number: e.line_number });
+      if (kept.length) crossFile.set(keyOf(owner), kept);
+    }
+    const withEvidence = (f: ReportFinding): ReportFinding => { const evidence = crossFile.get(findingKey(f)); return evidence ? { ...f, evidence } : f; };
+    report.findings = report.findings.map(withEvidence);
+    report.possible = report.possible.map(withEvidence);
+    report.observations = report.observations?.map(withEvidence);
     report.not_reviewed = requiredCandidates(scan, config).filter((c) => unverified.has(c.id));
     for (const c of allCandidates) {
       const verdict = verified.flatMap((o) => o.answer.verdicts).find((v) => v.id === c.id);
@@ -524,8 +656,17 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       if (item.c.kind === "scanner") return true;
       const key = findingKey({ ...item.finding, line_end: item.finding.line_end ?? item.finding.line_number, candidate: null });
       return item.v.tier === "finding" && !duplicateKeys.has(key);
+    }).map((finding) => {
+      // A survivor keeps the severity it was raised to, so a replay blocks too.
+      const severity = raised.get(findingKey({ ...finding, line_end: finding.line_end ?? finding.line_number, candidate: finding.candidate ?? null }));
+      return severity ? { ...finding, severity } : finding;
     }) };
-    return { report, submission, sessions, trace, usage: { calls, totals: usageTotals(calls) }, rounds, missing: [...new Set(missing)], required: requiredCandidates(scan, config).length, disposed: requiredCandidates(scan, config).filter((c) => !unverified.has(c.id)).length, briefFiles, delivered: runs.flatMap((r) => r.session.sentRounds === undefined ? r.talk.delivered : r.talk.carried.slice(0, Math.max(0, r.session.sentRounds - 1)).flat()) };
+    const sent = runs.filter((r) => (r.session.sentRounds ?? r.talk.rounds) > 0);
+    const digested = new Set(sent.filter((r) => r.digestCarried.length).map((r) => r.unit));
+    for (const unit of units) if (unit.digest && digested.has(unit.id)) {
+      (report.notes ??= []).push(`structural summary coverage (${unit.digest.kind}): ${unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)).map((h) => `${h.path}:${h.start}-${h.end}`).join(", ")}`);
+    }
+    return { report, submission, sessions, trace, usage: { calls, totals: usageTotals(calls) }, rounds, missing: [...new Set(missing)], required: requiredCandidates(scan, config).length, disposed: requiredCandidates(scan, config).filter((c) => !unverified.has(c.id)).length, obligations: hunks, briefCarried: sent.flatMap((r) => r.briefCarried), digestCarried: sent.flatMap((r) => r.digestCarried), delivered: runs.flatMap((r) => r.talk.carried.slice(0, Math.max(0, (r.session.sentRounds ?? r.talk.rounds) - 1)).flat()) };
   } finally {
     clearInterval(heartbeat);
     await Promise.all(runs.map(close));

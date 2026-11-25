@@ -1,0 +1,70 @@
+{
+  "covers": "a Django view or signal receiver past the plugin's fan-out: an instance view whose name binds more classes than it keeps, a receiver of more signals than it links (django MAX_FAN_OUT)",
+  "caps": [
+    "frameworks/django/resolve.ts#MAX_FAN_OUT"
+  ],
+  "commit": true,
+  "files": {
+    "requirements.txt": "django\n",
+    "manage.py": "import django\n",
+    "proj/__init__.py": "",
+    "proj/settings.py": "ROOT_URLCONF = \"proj.urls\"\nINSTALLED_APPS = [\"proj\"]\n",
+    "proj/urls.py": "from django.urls import path\nfrom proj import views\n\nurlpatterns = [path(\"x/\", views.V())]\n",
+    "proj/views.py": [
+      "import os\n\nX = os.environ.get(\"X\")\n\nif X == \"0\":\n    pass\n",
+      {
+        "repeat": "elif X == \"{{i}}\":\n    class V:\n        pass\n",
+        "times": 32
+      },
+      "else:\n    class V:\n        def __call__(self, request):\n            return None\n"
+    ],
+    "proj/signals.py": [
+      "from django.dispatch import Signal, receiver\n\n",
+      {
+        "repeat": "s{{i}} = Signal()\n",
+        "times": 33
+      },
+      "\n\n@receiver([",
+      {
+        "repeat": "s{{i}}, ",
+        "times": 33
+      },
+      "])\ndef handler(sender, **kwargs):\n    return None\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "proj/views.py#V.__call__",
+      "caller": null,
+      "file": "proj/urls.py",
+      "line": 4
+    },
+    {
+      "target": "proj/signals.py#handler",
+      "caller": null,
+      "file": "proj/signals.py",
+      "line": 38
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "proj/views.py#V.__call__",
+      "reason": "views.V names 33 classes; the first 32 are kept",
+      "at": "proj/urls.py:4",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "proj/urls.py:4"
+      }
+    },
+    {
+      "target": "proj/signals.py#handler",
+      "reason": "the django plugin gave up at 2 places (fan-out-capped)",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "proj/signals.py:38"
+      }
+    }
+  ]
+}

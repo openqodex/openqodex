@@ -99,8 +99,9 @@ function optionLit(key: string, x: Lit): Lit {
   return x;
 }
 
-// Route blocks nested deeper than MAX_ROUTE_DEPTH are not read.
-export type RouteCapFact = FrameworkFactBase & { kind: "route-cap"; draw: number; parent: number };
+// Route blocks nested deeper than MAX_ROUTE_DEPTH (`by` "blocks"), or a
+// route call more than MAX_NODE_DEPTH syntax levels deep (`by` "syntax"), are not read.
+export type RouteCapFact = FrameworkFactBase & { kind: "route-cap"; draw: number; parent: number; by: "blocks" | "syntax" };
 
 // A class or module, with its name qualified by the lexical nesting.
 // `base` is the superclass as written (`ActiveRecord::Migration` for
@@ -174,7 +175,7 @@ export type RailsFact =
 // The deepest nesting of route blocks read (PLAN.md 3.2.3, include depth 8).
 export const MAX_ROUTE_DEPTH = 8;
 // The deepest syntax nesting walked inside one draw block.
-const MAX_NODE_DEPTH = 200;
+export const MAX_NODE_DEPTH = 200;
 
 const CALLBACKS = new Set([
   "before_action",
@@ -460,7 +461,7 @@ export function railsFacts(root: Node): RailsFact[] {
   const routeFacts: RouteFact[] = [];
   const walkRoutes = (n: Node, draw: number, parent: number, depth: number, nodeDepth: number) => {
     if (nodeDepth > MAX_NODE_DEPTH) {
-      out.push({ kind: "route-cap", line: line(n), column: col(n), draw, parent });
+      out.push({ kind: "route-cap", line: line(n), column: col(n), draw, parent, by: "syntax" });
       return;
     }
     if (n.type === "call" && !n.childForFieldName("receiver")) {
@@ -488,7 +489,7 @@ export function railsFacts(root: Node): RailsFact[] {
         routeFacts.push(fact);
         out.push(fact);
         if (block) {
-          if (depth + 1 > MAX_ROUTE_DEPTH) out.push({ kind: "route-cap", line: line(block), column: col(block), draw, parent: index });
+          if (depth + 1 > MAX_ROUTE_DEPTH) out.push({ kind: "route-cap", line: line(block), column: col(block), draw, parent: index, by: "blocks" });
           else for (const c of block.namedChildren) walkRoutes(c, draw, index, depth + 1, nodeDepth + 1);
         }
         return;
@@ -916,7 +917,7 @@ export function isRailsFact(v: unknown): v is RailsFact {
         typeof r.block === "boolean"
       );
     case "route-cap":
-      return isInt(r.draw) && isInt(r.parent);
+      return isInt(r.draw) && isInt(r.parent) && (r.by === "blocks" || r.by === "syntax");
     case "class":
       return isStr(r.name) && typeof r.module === "boolean" && isStrOrNull(r.base) && isStrList(r.includes) && isInt(r.endLine);
     case "callback":

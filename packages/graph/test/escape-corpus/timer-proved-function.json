@@ -1,0 +1,14 @@
+{
+  "covers": "a timer given a name proved a function (a Promise executor's parameter, a local or exported function, arrow or function-typed const, a function-typed parameter, the window and globalThis forms) runs no string, so it loads nothing",
+  "files": {
+    "app/package.json": "{\"name\": \"app\"}\n",
+    "app/a.ts": "export function f() {}\n",
+    "tools/package.json": "{\"name\": \"tools\"}\n",
+    "tools/t.ts": "export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));\nexport const later = (ms: number) => new Promise<void>((done, fail) => setTimeout(fail, ms));\nfunction tick() {}\nsetInterval(tick, 10);\nconst go = () => {};\nsetImmediate(go);\nfunction make(): () => void { return tick; }\nconst typed: () => void = make();\nqueueMicrotask(typed);\nexport function every(fn: () => void) { setTimeout(fn, 1); }\nexport function inParens(fn: ((x: number) => void)) { setTimeout(fn, 1); }\nwindow.setTimeout(tick, 5);\nglobalThis.setInterval(go, 5);\nexport const done = () => {};\nsetTimeout(done, 1);\n"
+  },
+  "mustReach": [],
+  "whole": [
+    "app/a.ts#f"
+  ],
+  "floored": []
+}

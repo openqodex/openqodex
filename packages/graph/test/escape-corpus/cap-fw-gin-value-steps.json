@@ -1,0 +1,46 @@
+{
+  "covers": "a gin router and a handler each reached through more than the `a := b` steps the plugin follows (gin MAX_VALUE_STEPS)",
+  "caps": [
+    "frameworks/gin/resolve.ts#MAX_VALUE_STEPS"
+  ],
+  "commit": true,
+  "files": {
+    "go.mod": "module example.com/app\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc deep2(c *gin.Context) {}\n\nfunc main() {\n\tr0 := gin.Default()\n\tr1 := r0\n\tr2 := r1\n\tr3 := r2\n\tr4 := r3\n\tr5 := r4\n\tr6 := r5\n\tr7 := r6\n\tr8 := r7\n\tr9 := r8\n\tr10 := r9\n\tr10.GET(\"/x\", deep)\n\th1 := deep2\n\th2 := h1\n\th3 := h2\n\th4 := h3\n\th5 := h4\n\th6 := h5\n\th7 := h6\n\th8 := h7\n\th9 := h8\n\th10 := h9\n\tr0.GET(\"/y\", h10)\n\tr0.Run()\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 21
+    },
+    {
+      "target": "main.go#deep2",
+      "caller": null,
+      "file": "main.go",
+      "line": 32
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "more than 8 assignments",
+      "at": "main.go:12",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.go:12"
+      }
+    },
+    {
+      "target": "main.go#deep2",
+      "reason": "more than 8 assignments",
+      "at": "",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "main.go:24"
+      }
+    }
+  ]
+}

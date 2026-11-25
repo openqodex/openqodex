@@ -1,0 +1,47 @@
+{
+  "covers": "a net/http route met after the plugin's composing budget for one build ran out (go-http MAX_COMPOSE_STEPS)",
+  "caps": [
+    "frameworks/go-http/resolve.ts#MAX_COMPOSE_STEPS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport n \"net/http\"\n\nvar sub = n.NewServeMux()\n\nfunc h(w n.ResponseWriter, r *n.Request) {}\n\nfunc rega(p string) {\n",
+      {
+        "repeat": "\tsub.HandleFunc(p, h)\n",
+        "times": 1001
+      },
+      "}\n"
+    ],
+    "b.go": [
+      "package main\n\nimport n \"net/http\"\n\nvar m = n.NewServeMux()\n\nfunc regb() {\n",
+      {
+        "repeat": "\tm.Handle(\"/b{{i}}/\", n.StripPrefix(\"/b{{i}}\", sub))\n",
+        "times": 1000
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm.HandleFunc(\"/y\", deep)\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 8
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped composing muxes after 1000000 steps",
+      "at": "a.go:14",
+      "gap": {
+        "cause": "budget",
+        "at": "a.go:14"
+      }
+    }
+  ]
+}

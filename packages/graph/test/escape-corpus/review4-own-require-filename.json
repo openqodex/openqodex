@@ -1,0 +1,21 @@
+{
+  "covers": "`createRequire(__filename)` called at once with a literal path loads that module only: the repository stays whole",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.cjs": "const { createRequire } = require(\"node:module\");\nconst lib = createRequire(__filename)(\"./a.cjs\");\nlib.f();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.cjs#f",
+      "caller": "src/use.cjs",
+      "file": "src/use.cjs",
+      "line": 3
+    }
+  ],
+  "whole": [
+    "src/b.ts#g"
+  ],
+  "floored": []
+}

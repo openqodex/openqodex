@@ -50,3 +50,33 @@ it("caps extracted Java arguments and refuses cached arguments past the shared t
   tree.delete();
   parser.delete();
 });
+
+// A file of many loads by a computed path is read back from the cache, not
+// dropped as unreadable; and a cached plain-type list that is no list of
+// names is refused, since the resolver reads it as one.
+const keyedFacts = async () => {
+  const parser = await parserFor("typescript");
+  const tree = parser.parse("export function read(n: number, k: number): unknown {\n  return n[k];\n}\nrequire(globalThis.x);\n");
+  if (!tree) throw new Error("no tree");
+  const facts = extract(tree, "typescript");
+  tree.delete();
+  parser.delete();
+  return facts;
+};
+
+it("keeps cached facts with more than 20,000 escapes", async () => {
+  const facts = await keyedFacts();
+  const load = facts.escapes?.find((e) => e.kind === "load");
+  expect(load).toBeDefined();
+  facts.escapes = Array.from({ length: 20_001 }, (_, i) => ({ ...(load as object), line: i + 1 }) as typeof load & object);
+  expect(isFileFacts(facts)).toBe(true);
+});
+
+it("refuses a cached looseMembers plain that is no list of names", async () => {
+  const facts = await keyedFacts();
+  const member = facts.looseMembers?.find((m) => m.plain !== undefined);
+  expect(member).toBeDefined();
+  expect(isFileFacts(facts)).toBe(true);
+  Object.assign(member as object, { plain: "Number" });
+  expect(isFileFacts(facts)).toBe(false);
+});

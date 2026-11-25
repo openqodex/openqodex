@@ -29,7 +29,7 @@
       ]
     }
   ],
-  "unknowns": [
+  "noUnknown": [
     {
       "file": "src/service.ts",
       "line": 7,

@@ -191,3 +191,15 @@ describe("the change over the admitted paths", () => {
     expect(change.files.find((f) => f.path === "services/api/moved.ts")?.status).toBe("added");
   });
 });
+
+describe("the identity-only admitted change", () => {
+  it("forwards idOnly, so no patch is retained and no coverage is built", async () => {
+    const r = repo();
+    const args = { repoRoot: r.dir, baseRef: "main", baseSha: r.base, headSha: r.head, exclude: ["**/generated/**"] };
+    const plain = await getTreeChange({ ...args, idOnly: true });
+    const { change } = await getAdmittedTreeChange({ ...args, admit: () => true, idOnly: true });
+    expect(change.id).toBe(plain.id);
+    expect(change.files).toEqual([]);
+    expect(change.diffs ?? []).toEqual([]);
+  });
+});

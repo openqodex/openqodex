@@ -1,0 +1,48 @@
+{
+  "guards": "keeps 20 classes that match an interface by shape at one call, and discloses the 2 left out as a gap that sets the floor",
+  "callers": [
+    {
+      "to": "src/handler.ts#Handler.handle",
+      "site": "src/run.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/impl/s01.ts#S01.handle",
+      "site": "src/run.ts:4",
+      "tier": "possible",
+      "kind": "dispatches_to",
+      "note": "by shape"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/impl/s22.ts#S22.handle",
+      "site": "src/run.ts:4"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/run.ts:4",
+      "count": 20,
+      "omitted": 2
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/run.ts",
+      "line": 4,
+      "cause": "fan-out-capped"
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/run.ts",
+      "line": 4,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "floor": {
+    "src/impl/s22.ts#S22.handle": true
+  }
+}

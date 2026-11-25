@@ -1,6 +1,7 @@
 // Real binaries on tiny planted inputs, one case per builtin scanner: each
 // guards that scanner's invocation, output parser, changed-line filter and tool
 // resolution together. Run by the end-to-end config, not the unit config.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -122,6 +123,27 @@ describe("builtin scanner subprocesses", () => {
     expect(result.scan.candidates).toEqual([]);
   }, 300_000);
 
+  // Issue 307: a module that cannot type-check keeps the scan failed when
+  // another module of the change yields a finding, and that finding stays.
+  it("golangci stays failed on one module's type-check error next to another module's finding", async () => {
+    const result = await scan({
+      scanner: "golangci",
+      rule: "",
+      files: {
+        "good/go.mod": "module example.com/good\n\ngo 1.22\n",
+        "good/main.go": "package main\nimport \"crypto/md5\"\nfunc main() { _ = md5.New() }\n",
+        "broken/go.mod": "module example.com/broken\n\ngo 1.22\n",
+        "broken/main.go": "package main\nimport \"fmt\"\nfunc main() { fmt.Println(undefinedName) }\n",
+      },
+      anchor: "good/main.go",
+    });
+    if (result.scan.scanners[0]!.status === "not_installed") { process.stdout.write(`golangci: ${result.scan.scanners[0]!.reason}\n`); return; }
+    expect(result.scan.scanners[0]!.status).toBe("failed");
+    expect(result.scan.scanners[0]!.reason).toContain("could not type-check");
+    expect(result.scan.scanners[0]!.reason).toContain("undefinedName");
+    expect(result.scan.candidates).toContainEqual(expect.objectContaining({ source: "golangci", ruleId: "gosec", filePath: "good/main.go" }));
+  }, 300_000);
+
   // Issues 289 and 290: two states of the developer's machine read as a
   // golangci failure, "failed for a reason not listed". A Go file with no
   // go.mod above it, and a module whose dependencies are not in the Go module
@@ -154,7 +176,7 @@ describe("builtin scanner subprocesses", () => {
     const result = await runScanners({
       repoDir: repo,
       changedPaths: paths,
-      coverage: new Map(paths.map((p) => [p, new Set(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))])),
+      coverage: new Map(paths.map((p) => [p, makeLineSet(readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))])),
       config: parseConfig("").config,
       resolveTool: installedOnly(),
       only: ["golangci"],

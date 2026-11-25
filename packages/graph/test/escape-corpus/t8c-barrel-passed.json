@@ -1,0 +1,27 @@
+{
+  "covers": "a barrel re-exporting a module, imported as a namespace and passed on (test 8)",
+  "files": {
+    "src/a.ts": "export function a1() {}\n",
+    "src/index.ts": "export * from \"./a\";\n",
+    "src/use.ts": "import * as all from \"./index\";\nexport function go() { keep(all); }\nfunction keep(x: unknown) { (x as { a1(): void }).a1(); }\n",
+    "src/z.ts": "export function z() {}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#a1",
+      "caller": "src/use.ts#keep",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [
+    "src/z.ts#z"
+  ],
+  "floored": [
+    {
+      "target": "src/a.ts#a1",
+      "reason": "its module is used as a value at",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

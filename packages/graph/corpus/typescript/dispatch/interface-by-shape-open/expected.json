@@ -1,0 +1,43 @@
+{
+  "guards": "keeps the gap of a call through an interface when a class may get the interface's members from a package, or the interface itself extends one, and lists neither class by shape",
+  "callers": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#Remote.fetch",
+      "site": "src/use.ts:5",
+      "tier": "certain",
+      "kind": "calls"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/cached.ts#Cached.get",
+      "site": "src/use.ts:4"
+    },
+    {
+      "to": "src/fetcher.ts#Fetcher.fetch",
+      "site": "src/use.ts:5"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 4,
+      "cause": "unsupported-rule"
+    },
+    {
+      "file": "src/use.ts",
+      "line": 5,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "floor": {
+    "src/cached.ts#Cached.get": true,
+    "src/fetcher.ts#Fetcher.fetch": true
+  }
+}

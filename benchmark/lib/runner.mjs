@@ -385,8 +385,33 @@ export function failureOf(result, report) {
     return { cause: unavailable ? `no reviewer could start: ${last}` : `no report.json (exit ${result.code ?? result.signal}): ${last}`, infra: true, unavailable };
   }
   if (reviewerFailed) return { cause: reviewerFailed, infra: true, unavailable: false };
-  if (report.completion?.status !== "complete") return { cause: missing.join("; ") || "incomplete", infra: false, unavailable: false };
+  if (report.completion?.status !== "complete") return { cause: shortenedMissing(missing).join("; ") || "incomplete", infra: false, unavailable: false };
   return null;
+}
+
+// Benchmarks also run from standalone copies without the core package.
+// Match the receipt's unread-block shortening, keeping other failures.
+const RANGE_ROW = /^(?: {2})?(?:(?:(?!: ).)+:\d+(?:-\d+)?|(?:(?!: ).)+: (?:old )?line \d+, bytes [\d,]+ to [\d,]+ of [\d,]+)(?: \(deletion(?: [^)]+)?\))?(?: \(part \d+ of \d+\))?$/;
+function shortenedMissing(missing) {
+  const out = [];
+  for (let i = 0; i < missing.length; i++) {
+    const line = missing[i];
+    out.push(line);
+    const heading = /^(\d+) changed (?:range was|ranges were) not examined$/.exec(line);
+    if (!heading) continue;
+    // A split range is one unindented row followed by indented gap rows;
+    // the heading's count names ranges, not rows.
+    let end = i + 1;
+    let ranges = 0;
+    while (end < missing.length && RANGE_ROW.test(missing[end])) {
+      if (!missing[end].startsWith("  ")) ranges++;
+      if (ranges <= 10) out.push(missing[end]);
+      end++;
+    }
+    if (ranges > 10) out.push(`and ${ranges - 10} more; the report names each one`);
+    i = end - 1;
+  }
+  return out;
 }
 
 // Failure list: requested models replace served ones, mixed usage looks single,

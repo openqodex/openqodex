@@ -1,0 +1,19 @@
+{
+  "covers": "`createRequire(import.meta.url)(\"./a.cjs\")` read by a computed key marks that module as used as a value",
+  "files": {
+    "package.json": "{\"name\":\"app\",\"private\":true,\"type\":\"module\"}",
+    "src/lib/a.cjs": "exports.f = function () {};\n",
+    "src/a.cjs": "exports.f = function () {};\n",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.mjs": "import { createRequire } from \"node:module\";\nconst lib = createRequire(import.meta.url)(\"./a.cjs\");\nconst k = \"f\";\nlib[k]();\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.cjs#f",
+      "reason": "its module is used as a value",
+      "at": ""
+    }
+  ]
+}

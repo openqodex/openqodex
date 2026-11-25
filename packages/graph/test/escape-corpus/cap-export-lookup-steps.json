@@ -1,0 +1,670 @@
+{
+  "covers": "a name looked up through a web of `export *` cycles past the lookup's step budget is bound as possible, never certain (resolve EXPORT_LOOKUP_STEPS)",
+  "caps": [
+    "resolve.ts#EXPORT_LOOKUP_STEPS"
+  ],
+  "build": {
+    "budgetMs": 120000
+  },
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/x.ts": "export function f() {\n  return 1;\n}\n",
+    "src/l1b1.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b2.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b3.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b4.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b5.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b6.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b7.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b8.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b9.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b10.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b11.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b12.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b13.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b14.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b15.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b16.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b17.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b18.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b19.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l1b20.ts": [
+      "export * from \"./x\";\n",
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b1.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b2.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b3.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b4.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b5.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b6.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b7.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b8.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b9.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b10.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b11.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b12.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b13.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b14.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b15.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b16.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b17.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b18.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b19.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l2b20.ts": [
+      {
+        "repeat": "export * from \"./l1b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b1.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b2.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b3.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b4.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b5.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b6.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b7.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b8.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b9.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b10.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b11.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b12.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b13.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b14.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b15.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b16.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b17.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b18.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b19.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l3b20.ts": [
+      {
+        "repeat": "export * from \"./l2b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b1.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b2.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b3.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b4.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b5.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b6.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b7.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b8.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b9.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b10.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b11.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b12.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b13.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b14.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b15.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b16.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b17.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b18.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b19.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l4b20.ts": [
+      {
+        "repeat": "export * from \"./l3b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b1.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b2.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b3.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b4.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b5.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b6.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b7.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b8.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b9.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b10.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b11.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b12.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b13.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b14.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b15.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b16.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b17.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b18.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b19.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/l5b20.ts": [
+      {
+        "repeat": "export * from \"./l4b{{i}}\";\n",
+        "times": 20
+      },
+      "export * from \"./l5b1\";\n"
+    ],
+    "src/use.ts": "import { f } from \"./l5b1\";\nexport function run() {\n  return f();\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/x.ts#f",
+      "caller": "src/use.ts#run",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/x.ts#f",
+      "reason": "may reach it through an interface, a base type or a function value, and none is proved to",
+      "at": ""
+    }
+  ]
+}

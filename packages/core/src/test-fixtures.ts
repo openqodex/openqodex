@@ -1,5 +1,6 @@
 // Plain values of the frozen types, built by hand for the review-brain tests.
 // They are real input to the functions under test, not stand-ins for code.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { fingerprintSecrets } from "./redact.js";
 import type { Candidate, Change, Config, RunManifest, ScanResult } from "./types.js";
 
@@ -41,8 +42,8 @@ export function makeChange(over: Partial<Change> = {}): Change {
     ],
     changedPaths: ["app/search.py", "app/settings.py"],
     coverage: new Map([
-      ["app/search.py", new Set([14, 15])],
-      ["app/settings.py", new Set([1, 2, 3])],
+      ["app/search.py", makeLineSet([14, 15])],
+      ["app/settings.py", makeLineSet([1, 2, 3])],
     ]),
     deletionPoints: new Map(),
     diff: DIFF,

@@ -1,0 +1,30 @@
+{
+  "covers": "a TypeScript call on a line the parser could not read (a syntax error): the region names the target",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/lib.ts": "export function target(): number { return 1; }\nexport function other(): number { return 2; }\n",
+    "src/bad.ts": "import { target } from \"./lib\";\nexport function a() { return target(); }\nexport function c( { target(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/lib.ts#target",
+      "caller": null,
+      "file": "src/bad.ts",
+      "line": 3
+    }
+  ],
+  "whole": [
+    "src/lib.ts#other"
+  ],
+  "floored": [
+    {
+      "target": "src/lib.ts#target",
+      "reason": "region of code the parser could not read (a syntax error) names `target`",
+      "at": "src/bad.ts:3",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "src/bad.ts:3"
+      }
+    }
+  ]
+}

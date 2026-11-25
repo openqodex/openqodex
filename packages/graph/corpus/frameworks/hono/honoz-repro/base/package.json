@@ -1,0 +1,1 @@
+{"name":"honoz-demo","version":"1.0.0","dependencies":{"hono":"^4.0.0","@hono/zod-openapi":"^1.0.0"}}

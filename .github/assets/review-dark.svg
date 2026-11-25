@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 483" width="1200" height="483" role="img" aria-label="Passed with warnings: 15 findings (3 critical, 7 major, 5 minor). Two findings from a review of the demo repository." font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<rect x="0.5" y="0.5" width="1199" height="56" rx="10" fill="#151b23" stroke="#3d444d"/>
+<text x="20" y="35" font-size="20" font-weight="650" fill="#f0f6fc">Passed with warnings: 15 findings (3 critical, 7 major, 5 minor)</text>
+<text x="1180" y="35" font-size="14" text-anchor="end" fill="#9198a1">No block threshold set</text>
+<rect x="0.5" y="76.5" width="587" height="345.8" rx="10" fill="#151b23" stroke="#3d444d"/>
+<rect x="20" y="96" width="75.5" height="22" rx="11" fill="#ff7b72" fill-opacity="0.14" stroke="#ff7b72" stroke-opacity="0.5"/>
+<text x="57.8" y="111.5" font-size="12" font-weight="600" text-anchor="middle" fill="#ff7b72">critical</text>
+<text x="105.5" y="111.5" font-size="13" fill="#9198a1">security</text>
+<text x="568" y="111.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#d1d7e0">app/search.py:14</text>
+<text x="20" y="154" font-size="18" font-weight="650" fill="#f0f6fc">SQL injection in the search endpoint</text>
+<text x="20" y="178" font-size="13" fill="#9198a1">Found by semgrep, then checked by the reviewer</text>
+<rect x="20" y="192" width="548" height="112.8" rx="6" fill="#212830"/>
+<rect x="20" y="198" width="548" height="20.2" fill="#3fb950" fill-opacity="0.13"/>
+<text x="52.2" y="212.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1"></text>
+<text x="84.4" y="212.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">11</text>
+<text x="90.4" y="212.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#3fb950">+</text>
+<text x="102.4" y="212.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc" xml:space="preserve">    conn = sqlite3.connect(&quot;items.db&quot;)</text>
+<rect x="20" y="218.2" width="548" height="20.2" fill="#3fb950" fill-opacity="0.13"/>
+<text x="52.2" y="232.7" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1"></text>
+<text x="84.4" y="232.7" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">12</text>
+<text x="90.4" y="232.7" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#3fb950">+</text>
+<text x="102.4" y="232.7" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc" xml:space="preserve">    conn.row_factory = sqlite3.Row</text>
+<rect x="20" y="238.3" width="548" height="20.2" fill="#3fb950" fill-opacity="0.13"/>
+<text x="52.2" y="252.8" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1"></text>
+<text x="84.4" y="252.8" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">13</text>
+<text x="90.4" y="252.8" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#3fb950">+</text>
+<text x="102.4" y="252.8" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc" xml:space="preserve">    cur = conn.cursor()</text>
+<rect x="20" y="258.5" width="548" height="20.2" fill="#3fb950" fill-opacity="0.13"/>
+<rect x="20" y="258.5" width="3" height="20.2" fill="#a98bf5"/>
+<text x="52.2" y="273" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1"></text>
+<text x="84.4" y="273" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">14</text>
+<text x="90.4" y="273" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#3fb950">+</text>
+<text x="102.4" y="273" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc" xml:space="preserve">    cur.execute(f&quot;SELECT id, name, price FROM items </text>
+<rect x="20" y="278.6" width="548" height="20.2" fill="#3fb950" fill-opacity="0.13"/>
+<rect x="20" y="278.6" width="3" height="20.2" fill="#a98bf5"/>
+<text x="102.4" y="293.1" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc">WHERE name = '{q}'&quot;)</text>
+<text x="20" y="334.8" font-size="14.5" fill="#d1d7e0">search_items reads q from request.args at line 10. The</text>
+<text x="20" y="355.8" font-size="14.5" fill="#d1d7e0">cur.execute call at line 14 then puts q into the SQL string</text>
+<text x="20" y="376.8" font-size="14.5" fill="#d1d7e0">with an f-string. A value such as ' OR '1'='1 changes the</text>
+<text x="20" y="397.8" font-size="14.5" fill="#d1d7e0">WHERE clause.</text>
+<rect x="612.5" y="76.5" width="587" height="345.8" rx="10" fill="#151b23" stroke="#3d444d"/>
+<rect x="632" y="96" width="53.2" height="22" rx="11" fill="#d29922" fill-opacity="0.14" stroke="#d29922" stroke-opacity="0.5"/>
+<text x="658.6" y="111.5" font-size="12" font-weight="600" text-anchor="middle" fill="#d29922">major</text>
+<text x="695.2" y="111.5" font-size="13" fill="#9198a1">bug</text>
+<text x="1180" y="111.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#d1d7e0">app/server.py:23</text>
+<text x="632" y="154" font-size="18" font-weight="650" fill="#f0f6fc">Pagination offset skips the first page</text>
+<text x="632" y="178" font-size="13" fill="#9198a1">Found by the reviewer, Claude Code</text>
+<rect x="632" y="192" width="548" height="112.8" rx="6" fill="#212830"/>
+<text x="664.2" y="212.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">17</text>
+<text x="696.4" y="212.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">20</text>
+<text x="702.4" y="212.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#9198a1"></text>
+<text x="714.4" y="212.5" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc">@app.get(&quot;/items&quot;)</text>
+<text x="664.2" y="232.7" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">18</text>
+<text x="696.4" y="232.7" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">21</text>
+<text x="702.4" y="232.7" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#9198a1"></text>
+<text x="714.4" y="232.7" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc">def list_items():</text>
+<text x="664.2" y="252.8" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">19</text>
+<text x="696.4" y="252.8" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">22</text>
+<text x="702.4" y="252.8" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#9198a1"></text>
+<text x="714.4" y="252.8" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc" xml:space="preserve">    page = max(int(request.args.get(&quot;page&quot;, &quot;1&quot;)), 1)</text>
+<rect x="632" y="258.5" width="548" height="20.2" fill="#f85149" fill-opacity="0.13"/>
+<text x="664.2" y="273" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">20</text>
+<text x="696.4" y="273" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1"></text>
+<text x="702.4" y="273" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f85149">-</text>
+<text x="714.4" y="273" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc" xml:space="preserve">    offset = (page - 1) * PAGE_SIZE</text>
+<rect x="632" y="278.6" width="548" height="20.2" fill="#3fb950" fill-opacity="0.13"/>
+<rect x="632" y="278.6" width="3" height="20.2" fill="#a98bf5"/>
+<text x="664.2" y="293.1" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1"></text>
+<text x="696.4" y="293.1" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end" fill="#9198a1">23</text>
+<text x="702.4" y="293.1" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#3fb950">+</text>
+<text x="714.4" y="293.1" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f0f6fc" xml:space="preserve">    offset = page * PAGE_SIZE</text>
+<text x="632" y="334.8" font-size="14.5" fill="#d1d7e0">list_items clamps page to at least 1 on line 22. Line 23</text>
+<text x="632" y="355.8" font-size="14.5" fill="#d1d7e0">computes offset as page * PAGE_SIZE. The default page 1</text>
+<text x="632" y="376.8" font-size="14.5" fill="#d1d7e0">therefore passes OFFSET 20 to the SELECT query.</text>
+<text x="4" y="454.8" font-size="13.5" fill="#9198a1">Report of a review of examples/demo-repo in openqodex/openqodex. openqodex 0.22.0, Claude Code 2.1.330 on claude-opus-5-5, 2026-11-21. Findings 1 and 4 of 15.</text>
+</svg>

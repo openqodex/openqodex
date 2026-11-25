@@ -1,0 +1,27 @@
+{
+  "covers": "a Python call in a region the parser could not read (a syntax error)",
+  "files": {
+    "lib.py": "def target():\n    return 1\n",
+    "bad.py": "from lib import target\n\ndef c(:\n    target(\n\ndef d():\n    return 2\n"
+  },
+  "mustReach": [
+    {
+      "target": "lib.py#target",
+      "caller": null,
+      "file": "bad.py",
+      "line": 4
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "lib.py#target",
+      "reason": "region of code the parser could not read (a syntax error) names `target`",
+      "at": "bad.py:4",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "bad.py:4"
+      }
+    }
+  ]
+}

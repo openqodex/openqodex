@@ -1,0 +1,40 @@
+{
+  "covers": "a Next.js route handler in a file over the size any framework plugin reads, with the build's own size bound raised past it (facts.ts MAX_PLUGIN_SOURCE_BYTES)",
+  "caps": [
+    "frameworks/facts.ts#MAX_PLUGIN_SOURCE_BYTES"
+  ],
+  "commit": true,
+  "build": {
+    "maxFileBytes": 2000000
+  },
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"next\": \"^14.0.0\", \"react\": \"^18.0.0\"}}",
+    "app/api/big/route.ts": [
+      "export async function GET() {\n  return new Response(\"ok\");\n}\n",
+      {
+        "repeat": "// padding past the size bound every framework plugin reads\n",
+        "times": 19000
+      }
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "app/api/big/route.ts#GET",
+      "caller": null,
+      "file": "app/api/big/route.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/api/big/route.ts#GET",
+      "reason": "bytes a framework plugin reads",
+      "at": "",
+      "gap": {
+        "cause": "file-not-parsed",
+        "at": "app/api/big/route.ts:1"
+      }
+    }
+  ]
+}

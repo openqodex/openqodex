@@ -1,0 +1,51 @@
+{
+  "guards": "lists a class that has every member of an interface by name, without declaring implements, as a possible callee of a call through the interface",
+  "callers": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:4",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/db.ts#DbStore.get",
+      "site": "src/use.ts:4",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/mem.ts#MemStore.get",
+      "site": "src/use.ts:4",
+      "tier": "possible",
+      "kind": "dispatches_to",
+      "note": "by shape"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/half.ts#Half.get",
+      "site": "src/use.ts:4"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/use.ts:4",
+      "candidates": ["src/db.ts#DbStore.get"]
+    },
+    {
+      "site": "src/use.ts:4",
+      "candidates": ["src/mem.ts#MemStore.get"],
+      "omitted": 0
+    }
+  ],
+  "noUnknown": [
+    {
+      "file": "src/use.ts",
+      "line": 4,
+      "cause": "unsupported-rule"
+    }
+  ],
+  "floor": {
+    "src/mem.ts#MemStore.get": true
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "guards": "a call on a local copied or destructured from a member typed by an interface still reaches every implementer as possible, and a copy assigned again has no type",
+  "callers": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:12",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#MemStore.get",
+      "site": "src/use.ts:12",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#DiskStore.get",
+      "site": "src/use.ts:12",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:18",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#MemStore.get",
+      "site": "src/use.ts:18",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#DiskStore.get",
+      "site": "src/use.ts:18",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:23",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#MemStore.get",
+      "site": "src/use.ts:23",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#DiskStore.get",
+      "site": "src/use.ts:23",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#BaseStore.get",
+      "site": "src/use.ts:38",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#CachedStore.get",
+      "site": "src/use.ts:38",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#BaseStore.get",
+      "site": "src/use.ts:43",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#CachedStore.get",
+      "site": "src/use.ts:43",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:48",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#MemStore.get",
+      "site": "src/use.ts:48",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#DiskStore.get",
+      "site": "src/use.ts:48",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    },
+    {
+      "to": "src/store.ts#BaseStore.get",
+      "site": "src/use.ts:56",
+      "tier": "certain",
+      "kind": "calls"
+    },
+    {
+      "to": "src/store.ts#CachedStore.get",
+      "site": "src/use.ts:56",
+      "tier": "possible",
+      "kind": "dispatches_to"
+    }
+  ],
+  "dispatch": [
+    {
+      "site": "src/use.ts:12",
+      "candidates": [
+        "src/store.ts#MemStore.get",
+        "src/store.ts#DiskStore.get"
+      ]
+    },
+    {
+      "site": "src/use.ts:18",
+      "candidates": [
+        "src/store.ts#MemStore.get",
+        "src/store.ts#DiskStore.get"
+      ]
+    },
+    {
+      "site": "src/use.ts:23",
+      "candidates": [
+        "src/store.ts#MemStore.get",
+        "src/store.ts#DiskStore.get"
+      ]
+    },
+    {
+      "site": "src/use.ts:48",
+      "candidates": [
+        "src/store.ts#MemStore.get",
+        "src/store.ts#DiskStore.get"
+      ]
+    }
+  ],
+  "notCertain": [
+    {
+      "to": "src/store.ts#Store.get",
+      "site": "src/use.ts:29"
+    }
+  ],
+  "notReached": [
+    {
+      "to": "src/store.ts#MemStore.get",
+      "site": "src/use.ts:29"
+    },
+    {
+      "to": "src/store.ts#DiskStore.get",
+      "site": "src/use.ts:29"
+    }
+  ],
+  "unknowns": [
+    {
+      "file": "src/use.ts",
+      "line": 29,
+      "cause": "no-receiver-type"
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "covers": "Express routes whose handler, path or receiver lies past a limit of the plugin's reader: an expression deeper than it reads (js.ts MAX_DEPTH), a name chain longer (MAX_NAME_PARTS), a string longer (MAX_STRING), a computed string of more pieces (MAX_PARTS), an argument of more nodes (MAX_NODES), a function nested deeper than bindings are followed (facts.ts MAX_SCOPE_CHAIN), a function declaring more names than kept (MAX_SCOPE_NAMES). The plugin drops the route or leaves its handler unbound; the handler is written as a value at the route, and that value use floors its callers",
+  "caps": [
+    "frameworks/express/facts.ts#MAX_SCOPE_CHAIN",
+    "frameworks/express/facts.ts#MAX_SCOPE_NAMES",
+    "frameworks/express/js.ts#MAX_DEPTH",
+    "frameworks/express/js.ts#MAX_NAME_PARTS",
+    "frameworks/express/js.ts#MAX_NODES",
+    "frameworks/express/js.ts#MAX_PARTS",
+    "frameworks/express/js.ts#MAX_STRING"
+  ],
+  "commit": true,
+  "files": {
+    "package.json": "{\"name\": \"app\", \"dependencies\": {\"express\": \"^4.18.0\"}}",
+    "src/h.ts": "export function h1(req: unknown, res: unknown): void {}\nexport function h3(req: unknown, res: unknown): void {}\nexport function h4(req: unknown, res: unknown): void {}\nexport function h5(req: unknown, res: unknown): void {}\nexport function h6(req: unknown, res: unknown): void {}\nexport function h7(req: unknown, res: unknown): void {}\n",
+    "src/ns.ts": "export function h2(req: unknown, res: unknown): void {}\nexport const ns = { a: { b: { c: { d: { e: { f: { g: { i: { j: { k: { l: { m: { n: { o: { p: { h2 } } } } } } } } } } } } } } } };\n",
+    "src/app.ts": [
+      "import express from \"express\";\n",
+      "import { h1, h3, h4, h5, h6, h7 } from \"./h\";\n",
+      "import { ns } from \"./ns\";\n",
+      "export const app = express();\n",
+      "app.get(\"/d\", [[[[[[[h1]]]]]]]);\n",
+      "app.get(\"/n\", ns.a.b.c.d.e.f.g.i.j.k.l.m.n.o.p.h2);\n",
+      "app.get(\"/",
+      {
+        "repeat": "x",
+        "times": 2100
+      },
+      "\", h3);\n",
+      "app.get(",
+      {
+        "repeat": "\"/a\" + ",
+        "times": 33
+      },
+      "\"/a\", h4);\n",
+      "app.get(\"/m\", [",
+      {
+        "repeat": "[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ",
+        "times": 11
+      },
+      "h5]);\n",
+      {
+        "repeat": "function c{{i}}() {\n",
+        "times": 66
+      },
+      "app.get(\"/c\", h6);\n",
+      {
+        "repeat": "}\n",
+        "times": 66
+      },
+      "export function s() {\n",
+      {
+        "repeat": "  const v{{i}} = {{i}};\n",
+        "times": 260
+      },
+      "  app.get(\"/s\", h7);\n",
+      "}\n"
+    ]
+  },
+  "mustReach": [
+    {
+      "target": "src/h.ts#h1",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 5
+    },
+    {
+      "target": "src/ns.ts#h2",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 6
+    },
+    {
+      "target": "src/h.ts#h3",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 7
+    },
+    {
+      "target": "src/h.ts#h4",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 8
+    },
+    {
+      "target": "src/h.ts#h5",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 9
+    },
+    {
+      "target": "src/h.ts#h6",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 76
+    },
+    {
+      "target": "src/h.ts#h7",
+      "caller": null,
+      "file": "src/app.ts",
+      "line": 404
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/h.ts#h1",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:5",
+      "at": "src/app.ts:5",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:5"
+      }
+    },
+    {
+      "target": "src/ns.ts#h2",
+      "reason": "it is used as a value in 1 place, first at src/ns.ts:2",
+      "at": "src/ns.ts:2",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/ns.ts:2"
+      }
+    },
+    {
+      "target": "src/h.ts#h3",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:7",
+      "at": "src/app.ts:7",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:7"
+      }
+    },
+    {
+      "target": "src/h.ts#h4",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:8",
+      "at": "src/app.ts:8",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:8"
+      }
+    },
+    {
+      "target": "src/h.ts#h5",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:9",
+      "at": "src/app.ts:9",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:9"
+      }
+    },
+    {
+      "target": "src/h.ts#h6",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:76",
+      "at": "src/app.ts:76",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:76"
+      }
+    },
+    {
+      "target": "src/h.ts#h7",
+      "reason": "it is used as a value in 1 place, first at src/app.ts:404",
+      "at": "src/app.ts:404",
+      "gap": {
+        "cause": "dynamic",
+        "at": "src/app.ts:404"
+      }
+    }
+  ]
+}

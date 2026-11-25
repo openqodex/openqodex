@@ -99,6 +99,7 @@
 // 38. --timeout no longer wins over the default, for a change or for --all;
 //     or a --timeout longer than a timer holds stops the reviewer at once
 //     and reports a cap it never reached.
+// 40. Temporary streamed patches survive review cleanup.
 // 39. A review stopped at its cap does not say which cap it hit and which
 //     flag raises it, on the terminal or in the report; or a reviewer that
 //     never answers is not stopped at the cap it was given.
@@ -106,6 +107,12 @@
 //     shell may redirect to, ends the review incomplete as a read outside
 //     the snapshot (issue 299): classify() now reads neither as a path of
 //     the snapshot or of anything outside it.
+// 42. A reviewer that stopped on a usage or plan limit reads as "stopped with
+//     an error (success)": the reason in its result is dropped.
+// 43. A secret in the reviewer's own error survives into the receipt,
+//     because the message was cut or folded onto one line before redaction.
+// 41. On Windows the reviewer loses its path (named `Path` there), its home
+//     folder or what starts a program.
 import { stagedFake, stagedAnswer } from "../../review/test/staged-fake.js";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -696,6 +703,14 @@ describe("what leaves the process", () => {
     expect(Object.keys(env).sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "HOME", DEPTH_ENV, "PATH", "USER"].sort());
     expect(reviewerEnv({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "r", GITHUB_TOKEN: "g" })).toMatchObject({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "r" });
   });
+  it("41. on Windows the path, the home folder and what starts a program reach the reviewer, under any case", () => {
+    const windows = { Path: "C:\\Windows\\system32;C:\\Program Files\\nodejs", USERPROFILE: "C:\\Users\\u", AppData: "C:\\Users\\u\\AppData\\Roaming", LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local", SystemRoot: "C:\\Windows", PATHEXT: ".COM;.EXE;.CMD", ComSpec: "C:\\Windows\\system32\\cmd.exe", USERNAME: "u", GITHUB_TOKEN: "g" };
+    const env = reviewerEnv(windows, "win32");
+    expect(Object.keys(env).sort()).toEqual(["AppData", "ComSpec", DEPTH_ENV, "LOCALAPPDATA", "PATHEXT", "Path", "SystemRoot", "USERPROFILE"].sort());
+    expect(env.Path).toBe(windows.Path);
+    // Elsewhere a name keeps its case and the Windows variables stay out.
+    expect(Object.keys(reviewerEnv(windows, "linux"))).toEqual([DEPTH_ENV]);
+  });
   it("15. every file of the run folder is readable by its owner only", async () => {
     const dir = repo();
     expect(await review(dir, fake([good]))).toBe(0);
@@ -875,12 +890,12 @@ describe("28, 29. a reviewer whose trace is not complete (Codex)", () => {
     expect(readFileSync(join(runDir(dir), "trace.json"), "utf8")).toContain("cat /etc/hosts");
   });
 
-  it("29. ranges the rounds could not carry leave it incomplete, named as not given to the reviewer", async () => {
+  it("29. ranges the rounds could not carry leave it incomplete, each named as not examined", async () => {
     const dir = bigChange(DELIVER_LINES * 3);
     expect(await review(dir, untraced([claims]))).toBe(2);
     const report = JSON.parse(out) as Report;
     expect(report.completion?.status).toBe("incomplete");
-    expect(report.completion?.missing.join("\n")).toMatch(/not given to the reviewer: big\.txt:\d+-\d+/);
+    expect(report.completion?.missing).toEqual(["1 changed range was not examined", expect.stringMatching(/^big\.txt:\d+-\d+$/)]);
   });
 });
 
@@ -898,7 +913,7 @@ describe("25. what a correction message may carry", () => {
     expect(r.delivered).toEqual([]);
   });
 
-  it("never delivers a deletion whose removed lines the change does not hold, a dropped file, a binary file or a line over the byte budget, and promises none for a later round", () => {
+  it("never delivers a deletion whose removed lines the change does not hold or a dropped file, but delivers a binary file and a long changed line as labelled bytes", () => {
     const dir = snap();
     writeFileSync(join(dir, "bin.dat"), Buffer.from([0, 1, 2, 10, 3, 10]));
     writeFileSync(join(dir, "long.js"), `${"a".repeat(220_000)}\n`);
@@ -909,10 +924,16 @@ describe("25. what a correction message may carry", () => {
       { path: "bin.dat", start: 3, end: 4, deletion: true },
     ];
     const r = deliverRanges({ snapshotDir: dir, unread, secrets: [], change: { files: [], deletionPoints: new Map([["bin.dat", [{ after: 3, lines: 1, anchors: [3, 4] }]]]), diffs: [] } });
-    expect(r.delivered).toEqual([]);
-    expect(r.left).toHaveLength(4);
+    // Fragments are bytes, so a file that is not text is paged by bytes too.
+    // A route without inventory ids names no fragment owner.
+    expect(r.delivered).toEqual([
+      { ...unread[1], end: 1, lineBytes: 3, fragment: { from: 1, to: 3 } },
+      { ...unread[1], start: 2, lineBytes: 1, fragment: { from: 1, to: 1 } },
+      unread[2],
+    ]);
+    expect(r.left).toEqual([unread[0], unread[3]]);
     expect(r.later).toBe(0);
-    expect(r.text).toBe("");
+    expect(r.text).toContain("long.js: line 1, bytes 1 to 2,000 of 220,000");
   });
 
   it("a range whose lines pass the byte bound before the line bound is sent in a part that fits, not promised for a round that could never carry it", () => {
@@ -921,9 +942,11 @@ describe("25. what a correction message may carry", () => {
     const r = deliverRanges({ snapshotDir: dir, unread: [{ path: "wide.txt", start: 1, end: 1000, deletion: false }], secrets: [] });
     expect(r.delivered.length).toBeGreaterThan(0);
     expect(Buffer.byteLength(r.text, "utf8")).toBeLessThanOrEqual(512 * 1024);
-    expect(r.text).toContain("wide.txt: line 1, part 1 of 2\t");
-    expect(r.text).toContain("wide.txt: line 1, part 2 of 2\t");
-    expect(r.left).toEqual([{ path: "wide.txt", start: r.delivered.at(-1)!.end + 1, end: 1000, deletion: false }]);
+    expect(r.text).toContain("wide.txt: line 1, bytes 1 to 2,000 of 2,502\t");
+    expect(r.text).toContain("wide.txt: line 1, bytes 2,001 to 2,502 of 2,502\t");
+    // Lines 1 to 198 fit whole with their context; the rest waits for a page.
+    expect(r.delivered).toEqual([{ path: "wide.txt", start: 1, end: 198, deletion: false }]);
+    expect(r.left).toEqual([{ path: "wide.txt", start: 199, end: 1000, deletion: false }]);
     expect(r.later).toBe(1);
   });
 
@@ -981,7 +1004,7 @@ describe("the snapshot", () => {
     writeFileSync(join(dir, "app/config.py"), `KEY = "${secret}"\n`);
     writeFileSync(join(dir, "app/other.py"), `# copied: ${secret}\nx = 1\n`);
     writeFileSync(join(dir, ".git"), "gitdir: /somewhere\n");
-    expect(redactSnapshot(dir, [secret])).toEqual({ redacted: 2, removed: [], named: 0 });
+    expect(redactSnapshot(dir, [secret])).toEqual({ redacted: 2, named: 0 });
     expect(readFileSync(join(dir, "app/config.py"), "utf8")).not.toContain(secret);
     expect(readFileSync(join(dir, "app/other.py"), "utf8")).toBe("# copied: [redacted]\nx = 1\n");
   });
@@ -1009,6 +1032,53 @@ describe("the snapshot", () => {
 });
 
 describe("the reviewer process", () => {
+  it("42. a reviewer that ends with an error shows its own message, and says so plainly for a usage limit", async () => {
+    // The result event of Claude Code 2.1.x on a login past its plan limit
+    // (#416): is_error true, subtype "success", the reason in result.
+    const claudeSays = (result: unknown) => {
+      const bin = join(tempDir("oq-claude-error-"), "claude");
+      const event = { type: "result", subtype: "success", is_error: true, terminal_reason: "api_error", result, num_turns: 1, total_cost_usd: 0, modelUsage: {} };
+      writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(event)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+      chmodSync(bin, 0o755);
+      return bin;
+    };
+    const failure = async (bin: string) => {
+      const session = claudeDriver.start({ snapshotDir: tempDir("oq-claude-error-snap-"), deadline: Date.now() + 20_000, bin, web: false });
+      const turn = await session.send("Review this.");
+      await session.close();
+      return turn.failure;
+    };
+    expect(await failure(claudeSays("You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model\nmore"))).toBe("the reviewer hit its usage or plan limit (You've hit your Fable limit · resets Nov 23 at 2:30am (Asia/Calcutta). Switch to another model more)");
+    // A reset time on a later line is kept.
+    expect(await failure(claudeSays("Claude usage limit reached.\n\n  Your limit resets at 5pm."))).toBe("the reviewer hit its usage or plan limit (Claude usage limit reached. Your limit resets at 5pm.)");
+    // A rate limit is a short wait, not a used-up plan.
+    expect(await failure(claudeSays("API Error: Rate limit reached for requests"))).toBe("the reviewer hit a rate limit (API Error: Rate limit reached for requests)");
+    expect(await failure(claudeSays("API Error: 500 Internal server error"))).toBe("the reviewer stopped with an error (API Error: 500 Internal server error)");
+    // With no message, the subtype is all there is.
+    expect(await failure(claudeSays(""))).toBe("the reviewer stopped with an error (success)");
+  });
+  it("43. a secret in the reviewer's error is removed before the message is cut or put on one line", async () => {
+    const secret = "sk-live-0123456789abcdef0123456789";
+    const key = "-----BEGIN KEY-----\nAAAABBBBCCCCDDDD\n-----END KEY-----";
+    const bin = join(tempDir("oq-claude-secret-"), "claude");
+    // The secret starts at character 190, so a cut at 200 splits it.
+    const event = { type: "result", subtype: "success", is_error: true, result: `${"x".repeat(190)}${secret} ${key}`, num_turns: 1, modelUsage: {} };
+    writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(event)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+    chmodSync(bin, 0o755);
+    const session = claudeDriver.start({ snapshotDir: tempDir("oq-claude-secret-snap-"), deadline: Date.now() + 20_000, bin, web: false, secrets: [secret, key] });
+    const turn = await session.send("Review this.");
+    await session.close();
+    expect(turn.failure).toMatch(/^the reviewer stopped with an error \(x+/);
+    expect(turn.failure).not.toContain(secret.slice(0, 8));
+    // A short message keeps all of it, the multi-line secret removed before the lines are joined.
+    const short = { ...event, result: `failed: ${key} ${secret}` };
+    writeFileSync(bin, `#!${process.execPath}\nprocess.stdin.once('data', () => process.stdout.write(${JSON.stringify(`${JSON.stringify(short)}\n`)}));\nprocess.stdin.on('end', () => process.exit(0));\n`);
+    const again = claudeDriver.start({ snapshotDir: tempDir("oq-claude-secret-snap-"), deadline: Date.now() + 20_000, bin, web: false, secrets: [secret, key] });
+    const second = await again.send("Review this.");
+    await again.close();
+    expect(second.failure).not.toContain("AAAABBBB");
+    expect(second.failure).not.toContain(secret);
+  });
   it("20. never runs a claude that resolves inside the repository, however PATH reaches it", async () => {
     const dir = repo();
     const marker = join(tempDir("oq-marker-"), "ran");
@@ -1144,7 +1214,7 @@ describe("the Action's review flags", () => {
     writeFileSync(join(planted, "report.md"), "# PLANTED\n");
     const folder = join(tempDir("oq-report-dir-"), "review");
     expect(await withOptions(dir, fake([good]), { reportDir: folder })).toBe(0);
-    expect(readdirSync(folder).sort()).toEqual(["brief.md", "briefs", "impact.json", "manifest.json", "report.html", "report.json", "report.md", "report.sarif", "reviewer.json", "rounds.json", "scan.json", "submission.json", "trace.json", "usage.json"]);
+    expect(readdirSync(folder).sort()).toEqual(["brief.md", "briefs", "impact.json", "manifest.json", "report.html", "report.json", "report.md", "report.sarif", "reviewer.json", "rounds.json", "scan.json", "submission.json", "trace.json", "units.json", "usage.json"]);
     const report = JSON.parse(readFileSync(join(folder, "report.json"), "utf8")) as Report;
     expect(report.completion?.status).toBe("complete");
     expect(report).toEqual(JSON.parse(out) as Report);
@@ -1366,4 +1436,22 @@ describe("37, 38, 39. the review's time cap", () => {
     expect(report.completion?.missing).toContain(capLine("1 second"));
     expect(out).toContain(`Missing: ${capLine("1 second")}`);
   });
+});
+
+it("40. removes streamed patches after the review ends or the reviewer fails", async () => {
+  for (const failed of [false, true]) {
+    const dir = repo();
+    writeFileSync(join(dir, "big.txt"), `${"x".repeat(6299)}\n`.repeat(1000));
+    let patches: string[] = [];
+    const answer: Answer = (text) => {
+      const root = join(home, "tmp");
+      patches = existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((p) => p.endsWith(".patch")) : [];
+      if (failed) throw new Error("reviewer failed");
+      return { finalText: submission(text) };
+    };
+    expect(await review(dir, fake([answer]))).toBe(failed ? 2 : 0);
+    expect(patches.length).toBeGreaterThan(0);
+    const root = join(home, "tmp");
+    expect(existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((p) => p.endsWith(".patch") || p.endsWith("/diff")) : []).toEqual([]);
+  }
 });

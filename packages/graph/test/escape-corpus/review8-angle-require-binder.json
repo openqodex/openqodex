@@ -1,0 +1,17 @@
+{
+  "covers": "a `require` given a call's value through an angle-bracket cast (`<any>k.make()`) stays a loader: passing it on loads any module",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.ts": "export function make(k: any) {\n  const require = <any>k.make();\n  return [require];\n}\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "may be any module of the repository",
+      "at": "src/use.ts:3"
+    }
+  ]
+}

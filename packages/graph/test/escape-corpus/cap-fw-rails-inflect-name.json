@@ -1,0 +1,33 @@
+{
+  "covers": "a Rails singular resource whose name is longer than the plugin inflects, so its plural controller is not found (rails MAX_NAME)",
+  "caps": [
+    "frameworks/rails/inflect.ts#MAX_NAME"
+  ],
+  "commit": true,
+  "files": {
+    "Gemfile": "source \"https://rubygems.org\"\n\ngem \"rails\"\n",
+    "config/routes.rb": "Rails.application.routes.draw do\n  resource :aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, only: [:show]\nend\n",
+    "app/controllers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaas_controller.rb": "class AaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaasController < ApplicationController\n  def show\n  end\nend\n",
+    "app/controllers/application_controller.rb": "class ApplicationController < ActionController::Base\nend\n"
+  },
+  "mustReach": [
+    {
+      "target": "app/controllers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaas_controller.rb#AaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaasController.show",
+      "caller": null,
+      "file": "config/routes.rb",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "app/controllers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaas_controller.rb#AaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaasController.show",
+      "reason": "the resource name is longer than 128 characters",
+      "at": "config/routes.rb:2",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "config/routes.rb:2"
+      }
+    }
+  ]
+}

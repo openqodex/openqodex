@@ -12,6 +12,8 @@
 // 3. The graph read back does not know its repository root.
 // 4. A question needs an index the loaded graph has not prepared, so the
 //    first question after a load throws or answers from nothing.
+// 5. A program calls `assemble` the way 0.22.0 allowed, without the escape
+//    facts: it throws, or every caller list it answers says complete.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -159,9 +161,9 @@ describe("a graph kept outside the graph folder through the library", () => {
 
     const search = await ask(loaded, { kind: "search", text: "charge" });
     expect(search.error).toBeNull();
-    // Search results are leads, never items: nothing counts them as callers.
-    expect(search.items).toEqual([]);
-    expect(search.leads.map((l) => l.name).sort()).toEqual(["chargeCard", "charge_card"]);
+    // Prefix matches are items, never certain and never counted as callers.
+    expect((search.items as { name: string; tier: string }[]).map((l) => `${l.name} ${l.tier}`).sort()).toEqual(["chargeCard possible", "charge_card possible"]);
+    expect(search.counts).toEqual({ certain: null, likely: null, possible: null });
 
     const python = await ask(loaded, { kind: "callers", target: { name: "charge_card" } });
     expect((python.items as Item[]).map(where)).toEqual(["billing.py:6"]);
@@ -173,6 +175,33 @@ describe("a graph kept outside the graph folder through the library", () => {
       const a = await lib.graph.querySliced(fresh, req);
       const b = await lib.graph.querySliced(loaded, req);
       expect(b, `operation ${kind}`).toEqual(a);
+    }
+  });
+
+  it("assembles a graph called the 0.22.0 way, with no escape facts, and keeps every floor (5)", async () => {
+    const g = fresh.graph;
+    const whole = await ask(fresh, { kind: "callers", target: { name: "chargeCard" } });
+    expect(whole.unknown.floor, "the graph built whole should know every caller of chargeCard").toBe(false);
+    const args = [[...g.nodes.values()], g.edges, [...g.importers.values()].flat(), g.misses, g.unknowns, g.status, g.model, g.goModules] as const;
+    // The 0.22.0 signature: eight arguments, or a ninth without `escapes`.
+    const assembled = [
+      (lib.graph.assemble as (...a: unknown[]) => ReturnType<Lib["graph"]["assemble"]>)(...args),
+      (lib.graph.assemble as (...a: unknown[]) => ReturnType<Lib["graph"]["assemble"]>)(...args, { references: g.references, dispatch: g.dispatch, summaries: g.summaries }),
+    ];
+    for (const a of assembled) {
+      a.repoRoot = root;
+      lib.graph.prepareIndexes(a);
+      const s: Session = { graph: a, generation: null, treeSha: null, builtAt: null, laterEditsKnown: false };
+      const callers = await ask(s, { kind: "callers", target: { name: "chargeCard" } });
+      expect(callers.error).toBeNull();
+      expect(callers.unknown.floor).toBe(true);
+      expect(callers.unknown.reasons.join(" ")).toMatch(/escape facts were not given/);
+      const seed = g.nodes.get((callers.target as { id: string }).id);
+      if (!seed) throw new Error("no seed");
+      expect(lib.graph.floorReasons(a, { id: seed.id, name: seed.name, file: seed.file, kind: seed.kind as "function" }, new Set())).toContainEqual(expect.stringMatching(/escape facts were not given/));
+      // Saved and read back, it never loads as a graph that knows its escapes.
+      const kept = lib.graph.writeIndex(a);
+      expect(lib.graph.readIndexFrom((name) => kept[name] ?? null, root)).toBeNull();
     }
   });
 });

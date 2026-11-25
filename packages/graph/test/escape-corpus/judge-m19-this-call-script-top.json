@@ -1,0 +1,16 @@
+{
+  "covers": "an adversarial case from the review of piece A: this call script top",
+  "files": {
+    "public/app.js": "function f() {}\nthis.f();\n"
+  },
+  "mustReach": [
+    {
+      "target": "public/app.js#f",
+      "caller": null,
+      "file": "public/app.js",
+      "line": 2
+    }
+  ],
+  "whole": [],
+  "floored": []
+}

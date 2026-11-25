@@ -2,6 +2,8 @@
 
 `openqodex` is also a library. A Node program, on Node 22 or newer, imports the scanners, the code graph, the lenses, the config parser and the renderers from the same package the command comes from, with TypeScript types.
 
+The package has no runtime dependencies. The build bundles the workspace packages under `packages/` into it. This repository does not publish them to npm.
+
 ```
 npm install openqodex
 ```
@@ -16,6 +18,10 @@ Every function is a named export. The four namespaces `scanners`, `graph`, `lens
 Importing the library runs nothing. No command starts, nothing is printed, no environment variable is set, no signal handler is added and no update check runs. A function does its work only when it is called.
 
 `reviewChange` reviews one change with the same brain as `openqodex review`: the scanners, the code graph, the lenses, the brief, the checked answer with its correction rounds, and the completion record. A server product calls it with its own model and gets back findings, the reviewer's dispositions, coverage, a completion record, the usage of every model call, the scan record and the time each phase took.
+
+Callers that build a `Change` directly with `getChange`, `getTreeChange` or `getAdmittedTreeChange` own its retained patches. Call `cleanupDiffs(change)` in a `finally` block after the last consumer, including when work fails or is cancelled. Without `tempRoot`, spilled patches use the host temporary folder. `reviewChange` owns this cleanup for changes it builds. Identity checks may pass `idOnly: true` to avoid retaining patches or building coverage.
+
+Read small per-file patches with `diffText(change, path)`. It returns null for a disk patch over 5 MB; walk `diffHunks(change, path, range?)` for larger patches. The optional range is `{ start, end, side?: "old" | "new" }`, with inclusive line numbers. Each yielded string is a hunk or a bounded page of one, with its line cursors. The byte index is built once per patch.
 
 ## Two profiles
 
@@ -50,7 +56,7 @@ const result = await reviewChange(
 - `mergeBaseSha`: the merge base of the pull request, as the host's comparison gives it. It is not the target branch's tip. The library proves that both ids are full commit ids of commits in the clone and that the merge base is an ancestor of the head, then works out the change itself. A diff from the host is never an input.
 - `headSha`: the commit under review.
 - `config` (optional): a parsed `Config` (`parseConfig`). The defaults when left out. The library reads no config or custom-instructions file from the clone. `config.instructionsFiles`, parsed from `review.instructions_files`, names the convention files to read from the merge base's git objects. It defaults to `[]`. Only paths inside `scopes` are supplied. `review.paths.exclude` filters code, not chosen settings files. A hand-built `Config` may omit `instructionsFiles`; it defaults to `[]`. Each omitted path is named in `result.notes`.
-- `instructions` (optional): the repository owners' own rules for the review, as text of at most 32 KB (more is refused, never cut). The brief quotes them under the owners' heading with the framing the laptop gives `.openqodex/custom-instructions.md`: they decide what to flag and what not to, and they never switch a check off, skip a candidate or change the answer's shape. Give advisory material, such as earlier comments, as `context`.
+- `instructions` (optional): the repository owners' own rules for the review, as text of at most 128 KB (more is refused, never cut). They share each finder brief's 256 KB with the context items and the diff, so long instructions leave less room for the change, and a part that cannot fit is named as unread. The brief quotes them under the owners' heading with the framing the laptop gives `.openqodex/custom-instructions.md`: they decide what to flag and what not to, and they never switch a check off, skip a candidate or change the answer's shape. Give advisory material, such as earlier comments, as `context`.
 - `previousReviewedSha`, `fullReviewRequested`, `scopes` and `context` (optional): an incremental review, a review limited to folders, and context items such as lessons and earlier comments. See "Incremental, scoped and context" below.
 
 ### Options
@@ -67,7 +73,7 @@ const result = await reviewChange(
 ### Result
 
 - `status`: `complete`, `complete_blocking` (complete, with a finding at or above `block_on_severity`) or `incomplete`.
-- `reason`: why the review is incomplete, one line per missing proof. A complete review has a reason only when there was nothing to review.
+- `reason`: why the review is incomplete. Unexamined ranges are shortened to their heading, the first ten entries and a count pointing to the report for the rest. A complete review has a reason only when there was nothing to review.
 - `findings`: counted findings that passed every check, in the finding shape below.
 - `possible`: confirmed issues with confidence at least 0.5 and below their effective floor. Each uses the same finding shape. This array is always present, including when empty. These issues never affect the verdict.
 - `dispositions`: what the reviewer did with each scanner candidate: `raised` with the finding's file and line, or `dropped` with the reason and the line that shows why.
@@ -78,7 +84,7 @@ const result = await reviewChange(
 - `trace`: every tool call the reviewer made, as the brain ran it.
 - `usage`: `{ calls, totals }`. One record per model attempt: `callId`, `reviewer`, `purpose`, the model asked for and the model that answered, input, output, cache-read and cache-write tokens, the cost when the host reported one, the outcome (`ok`, `failed` or `refused`) and the measured duration. The totals add them up; a sum the host could not report is null, never zero.
 - `rounds`: every correction round sent, the second reviewer's after the primary's, each `{ by, round, errors, delivered, later, answer }`: the reviewer it went to (`primary` or `second`), the answer it corrects (1 for the answer to the brief), every check that answer failed, the changed ranges the round carried, how many more it promised for a next round, and the answer the checks judged (null when it was not JSON). A finding a check rejected and the next answer left out shows here. Redacted like the report.
-- `completion`: the model completion record, contract `openqodex-model-review-1`. Its proof is the brain's own data: the snapshot before and after, every changed range with how it was delivered, every tool call, every candidate raised or dropped, and every model attempt with its authorization and usage. Nothing in it comes from the reviewer.
+- `completion`: the model completion record, contract `openqodex-model-review-1`. Its `missing` array keeps one line per missing proof, including every unexamined range without shortening. Its proof is the brain's own data: the snapshot before and after, every changed range with how it was delivered, every tool call, every candidate raised or dropped, and every model attempt with its authorization and usage. Nothing in it comes from the reviewer.
 - `scope`: `{ kind, reason }`. `kind` is `delta` when only what changed since `previousReviewedSha` was the reviewer's to review, else `full`; `reason` says why. Null when a proof failed first.
 - `notes`: the convention files supplied, their sources, transformations and omissions, plus what the review could not hold, one plain line each: a file renamed into the scopes from outside them (reviewed as a new file), a link or a submodule the snapshot left out, a base version outside the scopes that was asked for and not read, and a second reviewer's failure that left the review complete.
 - `context`: every context item given, in order, with its hash, and why the brief left one out.
@@ -92,7 +98,7 @@ Observations remain outside `ReviewResult.findings` and `ReviewResult.possible`.
 
 ### The finding shape
 
-Each finding has `file`, `lineStart`, `lineEnd`, `title`, `problem`, `consequence`, `fix`, `suggestedChange` (the reviewer's literal replacement for the cited lines, or null), `severity` (`critical`, `major`, `minor`, `nitpick` or `info`), `category`, `confidence` (0 to 1), `foundBy` (the reviewers that raised it), `source` (null for the reviewer's own finding, a scanner rule such as `semgrep:<rule>`, or `lens:<name>`) and `candidate` (the scanner candidate's id, or null).
+Each finding has `file`, `lineStart`, `lineEnd`, `title`, `problem`, `consequence`, `fix`, `suggestedChange` (the reviewer's literal replacement for the cited lines, or null), `severity` (`critical`, `major`, `minor`, `nitpick` or `info`), `category`, `confidence` (0 to 1), `foundBy` (the reviewers that raised it), `source` (null for the reviewer's own finding, a scanner rule such as `semgrep:<rule>`, or `lens:<name>`) and `candidate` (the scanner candidate's id, or null). A finding whose evidence rests on lines in other files, such as a caller or a guard, also has `evidence`: those lines as `{ file, line }`. It is absent when all the evidence is in the finding's own file. A finding that breaks a written rule of a chosen convention file also has `rule`: `{ file, heading, quote, source }`, the file's path, the heading or rule label the rule sits under (null when it has none), the rule's exact words, and the merge base commit the file was read from. When the quote or heading is not in that file, or the quote is under three words, the check keeps the finding without its `rule`, and a note on the finding gives the reason.
 
 ### Status reasons
 
@@ -105,7 +111,14 @@ A proof that fails ends the review as incomplete before any model call, with a r
 - `git failed`: git itself failed in the clone.
 - `missing objects`: a tree or a file of the head is not in the clone, as in a partial clone. Fetch them; OpenQodex fetches nothing.
 
-After the review ran, an incomplete review names what is missing: a changed range the reviewer was never shown, a candidate it neither raised nor dropped, an answer that failed its checks after the correction rounds, a budget refusal, a failed model call, or the deadline.
+Every file of the snapshot is redacted and stays readable at any size.
+Time and budget are the two bounds on the review.
+An incomplete review names what is missing.
+Reasons include a changed range the reviewer was never shown.
+Others are a scanner candidate with no disposition, or an answer still failing its checks after the correction rounds.
+Others are a budget refusal, a failed model call, no model call at all, or the deadline.
+Others are a read outside the snapshot or the review's scopes, or a call to an undefined tool.
+[What complete means](claude-code-review.md#what-complete-means) lists every reason.
 
 ### Incremental, scoped and context
 
@@ -252,7 +265,7 @@ The library finds its files from where it is installed: the lenses in `lenses/`,
 
 - `repoDir`: the folder the scanners read.
 - `changedPaths`: the changed files, relative to `repoDir`.
-- `coverage` (optional): a `Map` from each path to the set of its changed line numbers. With it, only findings on changed lines are kept. Without it, every finding in a changed file is kept.
+- `coverage` (optional): a `Map<string, LineSet>` from each path to its changed lines. `LineSet` stores inclusive intervals with no line-count ceiling. Build one with `new LineSet().addRange(start, end)` or `.add(line)`. With it, only findings on changed lines are kept. Without it, every finding in a changed file is kept.
 - `baseText` (optional): `(path) => Promise<string | null>`, the base version of a file. With it, a change to what a scanner reads from a shared settings file, such as `pyproject.toml`, is reported.
 - `config`: a `Config`, from `parseConfig` or `loadConfig`.
 - `resolveTool`: from `createToolResolver`.
@@ -330,4 +343,4 @@ Each renderer takes a `Report`, the shape `report.json` holds, and returns a str
 
 ## Types
 
-The library exports the types its functions take and return. The finding, report and completion types are `Report`, `ReportFinding`, `Verdict`, `CompletionRecord`, `ReviewerRecord`, `StaticFinding`, `Candidate`, `Severity` and `Category`. A review by a model reviewer has its own completion record, `ModelCompletionRecord` (contract `openqodex-model-review-1`). Its parts are `ModelToolEntry`, `ModelAttempt` and `ModelCallUsage`. `Report.completion` holds either record; its type is `AnyCompletionRecord`. `Report.timings` and `ReviewResult.timings` are `RunTimings`; `ReviewResult.scan` is a `ScanResult` without `secretFingerprints`. The others are `ScannerSource`, `ScannerRunSummary`, `ScanResult`, `RunScannersResult`, `ResolveTool`, `ToolResolution`, `Toolchain`, `Recipe`, `PreinstallOptions`, `PreinstallResult`, `PreinstallTool`, `DiffCoverage`, `Change`, `ChangedFile`, `Config`, `LoadedConfig`, `ParseOptions`, `Lens`, `SelectedLens`, `ImpactSummary`, `Graph`, `BuildArgs`, `FileFacts` and `Lang`. The graph's questions use `Session`, `Request`, `Answer`, `Operation`, `Target`, `Item`, `Extra` and `ErrorCode`. An edge's evidence is a `Tier` and an `Evidence`; what the graph could not bind is an `Unknown` with its `Cause`. A kept build is a `GenerationManifest`, read through an `OpenGeneration` of a `GraphStore`. Its files hold a `ProjectModel` and are read back through a `ReadIndexFile`.
+The library exports the types its functions take and return. The finding, report and completion types are `Report`, `ReportFinding`, `RuleCitation`, `Verdict`, `CompletionRecord`, `ReviewerRecord`, `StaticFinding`, `Candidate`, `Severity` and `Category`. A review by a model reviewer has its own completion record, `ModelCompletionRecord` (contract `openqodex-model-review-1`). Its parts are `ModelToolEntry`, `ModelAttempt` and `ModelCallUsage`. `Report.completion` holds either record; its type is `AnyCompletionRecord`. `Report.timings` and `ReviewResult.timings` are `RunTimings`; `ReviewResult.scan` is a `ScanResult` without `secretFingerprints`. The others are `ScannerSource`, `ScannerRunSummary`, `ScanResult`, `RunScannersResult`, `ResolveTool`, `ToolResolution`, `Toolchain`, `Recipe`, `PreinstallOptions`, `PreinstallResult`, `PreinstallTool`, `DiffCoverage`, `Change`, `ChangedFile`, `Config`, `LoadedConfig`, `ParseOptions`, `Lens`, `SelectedLens`, `ImpactSummary`, `Graph`, `BuildArgs`, `FileFacts` and `Lang`. The graph's questions use `Session`, `Request`, `Answer`, `Operation`, `Target`, `Item`, `Extra` and `ErrorCode`. An edge's evidence is a `Tier` and an `Evidence`; what the graph could not bind is an `Unknown` with its `Cause`. A kept build is a `GenerationManifest`, read through an `OpenGeneration` of a `GraphStore`. Its files hold a `ProjectModel` and are read back through a `ReadIndexFile`.

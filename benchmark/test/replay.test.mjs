@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFi
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, expect, it } from "vitest";
-import { buildReviewerBrief, checkSubmission, DEFAULT_CONFIG } from "../../packages/core/dist/index.js";
+import { buildReviewerBrief, checkSubmission, DEFAULT_CONFIG, LineSet } from "../../packages/core/dist/index.js";
+
+const lineSet = (...numbers) => { const s = new LineSet(); for (const n of numbers) s.add(n); return s; };
 import { hashFolder } from "../lib/index.mjs";
 import { buildCase, caseHash } from "../lib/cases.mjs";
 import { CLASSES } from "../lib/classes.mjs";
@@ -18,10 +20,10 @@ const brief = "## Changed files\n\n| Status | Path |\n|---|---|\n| modified | a.
 const manifest = { version: 3, change_id: "abcdef", lenses: [{ name: "division", confidenceFloor: 0.85 }] };
 const scan = { candidates: [], scanners: [], secretFingerprints: [] };
 const submission = (findings) => ({ version: 2, change_id: "abcdef", summary: "Check division.", findings, dropped: [] });
-const input = (findings) => ({ change: { id: "abcdef", shortId: "abcdef", files: [{ path: "a.py" }], coverage: new Map([["a.py", new Set([2])]]), deletionPoints: new Map(), baseRef: "HEAD", baseSha: "123", notReviewed: [], stats: {} }, scan, manifest, config: DEFAULT_CONFIG, submission: submission(findings), lineCount: (path) => path === "a.py" ? 3 : null });
+const input = (findings) => ({ change: { id: "abcdef", shortId: "abcdef", files: [{ path: "a.py" }], coverage: new Map([["a.py", lineSet(2)]]), deletionPoints: new Map(), baseRef: "HEAD", baseSha: "123", notReviewed: [], stats: {} }, scan, manifest, config: DEFAULT_CONFIG, submission: submission(findings), lineCount: (path) => path === "a.py" ? 3 : null });
 const write = (path, data) => writeFileSync(path, typeof data === "string" ? data : JSON.stringify(data));
 
-function savedRun(findingsByRepeat, { savedBrief = brief, argsFor = input, inventory = [{ path: "a.py", size: 30, lines: 3, language: "python", candidates: 0 }] } = {}) {
+function savedRun(findingsByRepeat, { savedBrief = brief, argsFor = input, inventory = [{ path: "a.py", size: 30, lines: 3, language: "python", candidates: 0 }], completion = { status: "complete" } } = {}) {
   const root = tempDir("oq-replay-");
   const run = join(root, "run");
   mkdirSync(join(run, "cases"), { recursive: true });
@@ -39,7 +41,7 @@ function savedRun(findingsByRepeat, { savedBrief = brief, argsFor = input, inven
     write(join(dir, "report", "submission.json"), args.submission);
     const checked = checkSubmission(args);
     expect(checked.ok).toBe(true);
-    write(join(dir, "report", "report.json"), { ...checked.report, completion: { status: "complete" } });
+    write(join(dir, "report", "report.json"), { ...checked.report, completion });
   }
   return { root, run };
 }
@@ -78,7 +80,7 @@ it("replays and scores a finding on an omitted file's saved changed ranges", () 
   for (const withShownDiff of [true, false]) {
     const omitted = { path: "a.py", text: `diff --git a/a.py b/a.py\n${"+x\n".repeat(120_000)}` };
     const shown = { path: "b.py", text: "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1 +1 @@\n-old\n+new\n" };
-    const change = { ...input([]).change, changedPaths: ["a.py"], coverage: new Map([["a.py", new Set([2, 3, 5])]]), diffs: withShownDiff ? [shown, omitted] : [omitted] };
+    const change = { ...input([]).change, changedPaths: ["a.py"], coverage: new Map([["a.py", lineSet(2, 3, 5)]]), diffs: withShownDiff ? [shown, omitted] : [omitted] };
     const { text: savedBrief, diffFiles } = buildReviewerBrief({ change, scan, lenses: [], config: DEFAULT_CONFIG, secrets: [] });
     expect(diffFiles.has("a.py")).toBe(false);
     expect(savedBrief).toContain("- a.py: lines 2-3, 5");
@@ -191,7 +193,7 @@ it("replays accepted submissions with missing dropped citations as unresolved an
   const missingFinding = f({ file_path: "missing.py", title: "Missing divisor check" });
   const argsFor = (fs) => {
     const args = input(fs);
-    return { ...args, change: { ...args.change, files: [...args.change.files, { path: "missing.py" }], coverage: new Map([...args.change.coverage, ["missing.py", new Set([2])]]) }, scan: { ...scan, candidates: [candidate] }, submission: { ...submission(fs), dropped: [dropped] }, lineCount: (path) => path === "tests/test_money.py" ? 30 : 3 };
+    return { ...args, change: { ...args.change, files: [...args.change.files, { path: "missing.py" }], coverage: new Map([...args.change.coverage, ["missing.py", lineSet(2)]]) }, scan: { ...scan, candidates: [candidate] }, submission: { ...submission(fs), dropped: [dropped] }, lineCount: (path) => path === "tests/test_money.py" ? 30 : 3 };
   };
   const { run } = savedRun([[f({ confidence: 1 }), missingFinding], [f({ confidence: 1 }), missingFinding]], { argsFor });
   const before = hashFolder(run);
@@ -213,7 +215,7 @@ it("uses core's saved deletion anchors for deletion-only hunks", () => {
   const savedBrief = brief.replace("@@ -1,3 +1,3 @@\n # context\n-return 1\n+return 1 / 0\n # context", "@@ -5 +4,0 @@\n-return 1").replace("## Diff", "## Deleted lines\n\n- 1 line deleted after line 4 of a.py (cite line 4 or 5)\n\n## Diff");
   const argsFor = (fs) => {
     const args = input(fs);
-    return { ...args, change: { ...args.change, coverage: new Map([["a.py", new Set()]]), deletionPoints: new Map([["a.py", [{ after: 4, lines: 1, anchors: [4, 5] }]]]) }, lineCount: () => 10 };
+    return { ...args, change: { ...args.change, coverage: new Map([["a.py", lineSet()]]), deletionPoints: new Map([["a.py", [{ after: 4, lines: 1, anchors: [4, 5] }]]]) }, lineCount: () => 10 };
   };
   for (const line_number of [4, 5]) {
     const { run } = savedRun([[f({ line_number })]], { savedBrief, argsFor, inventory: [{ path: "a.py", lines: 10 }] });
@@ -267,8 +269,9 @@ it("a replay changes a saved run", () => {
 });
 
 it("the union counts one bug found in two repeats twice", () => {
-  // Two titles about one truth item survive product dedup, but recall is one.
-  const { run } = savedRun([[f()], [f(), f({ title: "Zero divisor crashes" })]]);
+  // Two findings about one truth item survive product dedup (another
+  // source), but recall is one.
+  const { run } = savedRun([[f()], [f(), f({ title: "Zero divisor crashes", source: "lens:division", confidence: 0.9 })]]);
   const row = replayRun(run, { mode: "union" }).rows[0];
   expect(row.beforeHits).toBe(1);
   expect(row.hits).toBe(1);
@@ -276,6 +279,20 @@ it("the union counts one bug found in two repeats twice", () => {
   expect(row.findings).toBe(2);
   const single = savedRun([[f()]]);
   expect(replayRun(single.run, { mode: "union" }).rows[0].status).toBe("insufficient repeats");
+});
+
+// Issue 315: the product merges one defect under two titles in a single-pass
+// review, and keeps them apart in a staged one, whose verifier rules on
+// duplicates. A replay that merges a staged run's findings undercounts them.
+it("replays a staged run's two titles on one line as two findings, and a single-pass run's as one", () => {
+  const twoTitles = [[f(), f({ title: "Zero divisor crashes" })]];
+  const staged = savedRun(twoTitles, { completion: { status: "complete", reviewer: { sessions: [{ role: "finder:u1:local" }, { role: "verifier:b1" }] } } });
+  expect(replayRun(staged.run, { mode: "threshold" }).rows[0].findings).toBe(2);
+  // The model review's completion record keeps its sessions at the top.
+  const model = savedRun(twoTitles, { completion: { contract: "openqodex-model-review-1", status: "complete", reviewer: { kind: "model", model: "fixture" }, sessions: [{ role: "finder:u1:local" }, { role: "verifier:b1" }] } });
+  expect(replayRun(model.run, { mode: "threshold" }).rows[0].findings).toBe(2);
+  const single = savedRun(twoTitles, { completion: { status: "complete", reviewer: { sessions: [{ role: "primary" }] } } });
+  expect(replayRun(single.run, { mode: "threshold" }).rows[0].findings).toBe(1);
 });
 
 it("a saved submission rejected by core is scored as a successful replay", () => {

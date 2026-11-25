@@ -8,6 +8,7 @@
 //  2. A server floor reaches the brief but not the check, or the other way.
 //  3. A server floor below a lens's floor lowers that lens's floor.
 //  4. A floor below 0.7 is clamped back to 0.7.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, buildReviewerBrief, checkSubmission } from "@openqodex/core";
 import type { Change, RunManifest, ScanResult } from "@openqodex/core";
@@ -20,7 +21,7 @@ const change: Change = {
   shortId: "bbbbbbbbbbbb",
   files: [{ path: "src/a.ts", oldPath: null, status: "modified", binary: false }],
   changedPaths: ["src/a.ts"],
-  coverage: new Map([["src/a.ts", new Set([2])]]),
+  coverage: new Map([["src/a.ts", makeLineSet([2])]]),
   deletionPoints: new Map(),
   diff: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -2 +2 @@\n-x\n+y\n",
   notReviewed: [],

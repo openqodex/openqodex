@@ -18,10 +18,11 @@
 // hash. Secrets are redacted in the display model before this runs.
 import { createHash } from "node:crypto";
 import type { Candidate, ImpactEdge, ImpactSummary, Report, ReportFinding } from "../types.js";
+import { passedLines } from "../types.js";
 import type { Display, DisplayFile, DisplayHunk } from "./display.js";
-import { coverageLine, lowConfidenceReason, observationsOmittedLine, orderObservations, orderPossible, verdictLine } from "./common.js";
+import { coverageLine, lowConfidenceReason, observationsOmittedLine, orderObservations, orderPossible, ruleLabel, verdictLine } from "./common.js";
 import { REPORT_CSS } from "./html-style.js";
-import { modelReviewerLine, product } from "./review.js";
+import { fileCoverageLines, modelReviewerLine, product } from "./review.js";
 
 export type HtmlInput = {
   report: Report;
@@ -220,12 +221,16 @@ function reviewerSentence(report: Report): string {
   const r = report.completion?.reviewer;
   if (!r) return "not recorded in this report";
   const usage = r.usage ?? { turns: 0, input_tokens: null, output_tokens: null, cost_usd: null };
-  const parts = [`${r.driver} ${r.version}`, `${fixed((r.duration_ms ?? 0) / 1000, 0)} s`, plural(usage.turns ?? 0, "turn")];
+  const parts = [`${r.driver} ${r.version}`];
+  if (typeof r.model === "string") parts.push(`model ${r.model}`);
+  if (typeof r.effort === "string") parts.push(`effort ${r.effort}`);
+  parts.push(`${fixed((r.duration_ms ?? 0) / 1000, 0)} s`, plural(usage.turns ?? 0, "turn"));
   if ((r.rounds ?? 1) > 1) parts.push(plural(r.rounds - 1, "correction round"));
   if (usage.input_tokens !== null) parts.push(`${grouped(usage.input_tokens, 0)} tokens in`);
   if (usage.output_tokens !== null) parts.push(`${grouped(usage.output_tokens, 0)} out`);
   if (usage.cost_usd !== null) parts.push(`$${fixed(usage.cost_usd, 2)}`);
-  return parts.join(", ");
+  const passed = passedLines(r.passed);
+  return `${parts.join(", ")}${passed.length > 0 ? `; tried first: ${passed.join("; ")}` : ""}`;
 }
 
 function location(f: { file_path: string; line_number: number; line_end?: number | null }): string {
@@ -278,7 +283,9 @@ function findingCard(f: ReportFinding, n: number | string, section: "observation
   if (problem) rows.push(`<dt>Problem</dt><dd>${paragraphs(problem)}</dd>`);
   if (f.consequence) rows.push(`<dt>Why it matters</dt><dd>${paragraphs(f.consequence)}</dd>`);
   if (f.fix) rows.push(`<dt>Fix</dt><dd>${paragraphs(f.fix)}</dd>`);
+  if (f.rule) rows.push(`<dt>Rule</dt><dd><p>${text(ruleLabel(f.rule))}</p></dd>`);
   for (const note of f.notes ?? []) rows.push(`<dt>Note</dt><dd><p>${text(note)}</p></dd>`);
+  if (f.evidence?.length) rows.push(`<dt>Evidence in other files</dt><dd><p>${text(f.evidence.map((e) => `${e.file_path}:${e.line_number}`).join(", "))}</p></dd>`);
   const suggested = f.suggested_change ? `<details class="suggested"><summary>Suggested change</summary><pre>${block(f.suggested_change)}</pre></details>` : "";
   const conf = typeof f.confidence === "number" ? `<span class="finding-confidence">confidence ${num(f.confidence)}</span>` : "";
   const candidate = f.candidate ? `<span class="finding-candidate">raises ${text(f.candidate)}</span>` : "";
@@ -410,9 +417,10 @@ function fileSection(entry: Entry, index: number, findings: Numbered[], dropped:
   }
 
   const body: string[] = [];
-  if (entry.omitted) body.push(`<p class="file-omitted">Diff not shown: ${text(entry.omitted)}</p>`);
-  else if (hunks.length > 0) body.push(diffTable(hunks, cardsByLine, droppedByLine, byCandidate, flagged));
-  else body.push('<p class="file-omitted">No lines to show.</p>');
+  // A budget note may accompany excerpts that were already read.
+  if (entry.omitted) body.push(`<p class="file-omitted">${hunks.length > 0 ? "Some lines not shown" : "Diff not shown"}: ${text(entry.omitted)}</p>`);
+  if (hunks.length > 0) body.push(diffTable(hunks, cardsByLine, droppedByLine, byCandidate, flagged));
+  else if (!entry.omitted) body.push('<p class="file-omitted">No lines to show.</p>');
   const leftovers = [...unanchored, ...[...cardsByLine.values()].flat()];
   const rest = [...droppedUnanchored, ...[...droppedByLine.values()].flat()];
   if (leftovers.length > 0 || rest.length > 0) {
@@ -541,7 +549,7 @@ function coverage(report: Report): string {
   const excluded = out.length === 0 ? "none" : out.map((s) => `${text(s.scanner)}: ${text(s.reason || s.status.replace(/_/g, " "))}`).join("; ");
 
   const items: [string, string][] = [
-    ["Changed ranges given to the reviewer", ranges],
+    ["Changed ranges given to the reviewer", `${ranges}${completion ? fileCoverageLines(completion.coverage).map((line) => `<p>${text(line)}</p>`).join("") : ""}`],
     ["Files the reviewer opened", read],
     ...(notOpened ? [notOpened] : []),
     ["Scanner candidates", esc(candidates)],
@@ -618,7 +626,7 @@ function accounting(report: Report): string {
     ["Below the severity threshold", num(report.below_threshold || 0), esc("left out of the findings, never counted")],
     ["Outside the changed lines", num(outsideChange.length), outsideChange.length > 0 ? esc("shown for information, never counted") : esc("none")],
     ["Scanner results not kept", num(notKept.reduce((n, [, k]) => n + k, 0)), notKept.length > 0 ? esc(`a result is kept only when it sits on a changed line; ${notKept.map(([name, k]) => `${name} ${k}`).join(", ")}`) : esc("none")],
-    ["Left out, change too large", num(leftOut.length), leftOut.length === 0 ? esc("none") : leftOut.map((p) => text(p)).join(", ")],
+    ...(report.base.ref === "all" && leftOut.length > 0 ? [[`Not reviewed: ${leftOut.length} ${leftOut.length === 1 ? "file" : "files"}, over 5 MB, links or unreadable`, num(leftOut.length), leftOut.map((p) => text(p)).join(", ")]] : []),
   ];
   const outside =
     outsideChange.length > 0

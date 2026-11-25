@@ -1,0 +1,184 @@
+{
+  "covers": "a gin or net/http expression nested deeper than the Go fact reader reads (go-http/facts MAX_EXPR_DEPTH)",
+  "caps": [
+    "frameworks/go-http/facts.ts#MAX_EXPR_DEPTH"
+  ],
+  "commit": true,
+  "files": {
+    "handler/go.mod": "module example.com/handler\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "handler/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/x\", (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((deep))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\n\tr.Run()\n}\n",
+    "recv/go.mod": "module example.com/recv\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "recv/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\t(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((r))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))).GET(\"/x\", deep)\n\tr.Run()\n}\n",
+    "router/go.mod": "module example.com/router\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "router/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tgin.SetMode(gin.ReleaseMode)\n\tq := (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((gin.Default())))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\n\tq.GET(\"/x\", deep)\n\tq.Run()\n}\n",
+    "value/go.mod": "module example.com/value\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "value/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\th := (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((deep)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\n\tr.GET(\"/x\", h)\n\tr.Run()\n}\n",
+    "method/go.mod": "module example.com/method\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "method/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.Handle((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((\"GET\"))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), \"/x\", deep)\n\tr.Run()\n}\n",
+    "mwcall/go.mod": "module example.com/mwcall\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "mwcall/main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep() gin.HandlerFunc { return func(c *gin.Context) {} }\n\nfunc m(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.Use((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((deep)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))())\n\tr.GET(\"/x\", m)\n\tr.Run()\n}\n",
+    "muxwrapper/go.mod": "module example.com/muxwrapper\n\ngo 1.22\n",
+    "muxwrapper/main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(h n.Handler) n.Handler { return h }\n\nfunc main() {\n\tm := n.NewServeMux()\n\tm.Handle(\"/x\", (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((deep)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))(nil))\n\tn.ListenAndServe(\":8080\", m)\n}\n",
+    "muxhandler/go.mod": "module example.com/muxhandler\n\ngo 1.22\n",
+    "muxhandler/main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm := n.NewServeMux()\n\tm.HandleFunc(\"/x\", (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((deep))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\n\tn.ListenAndServe(\":8080\", m)\n}\n",
+    "muxrecv/go.mod": "module example.com/muxrecv\n\ngo 1.22\n",
+    "muxrecv/main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm := n.NewServeMux()\n\t(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((m))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))).HandleFunc(\"/x\", deep)\n\tn.ListenAndServe(\":8080\", m)\n}\n",
+    "muxvalue/go.mod": "module example.com/muxvalue\n\ngo 1.22\n",
+    "muxvalue/main.go": "package main\n\nimport n \"net/http\"\n\nfunc deep(w n.ResponseWriter, r *n.Request) {}\n\nfunc main() {\n\tm := n.NewServeMux()\n\tq := (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((n.NewServeMux())))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))\n\tq.HandleFunc(\"/x\", deep)\n\tn.ListenAndServe(\":8081\", q)\n\tn.ListenAndServe(\":8080\", m)\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "handler/main.go#deep",
+      "caller": null,
+      "file": "handler/main.go",
+      "line": 11
+    },
+    {
+      "target": "recv/main.go#deep",
+      "caller": null,
+      "file": "recv/main.go",
+      "line": 11
+    },
+    {
+      "target": "router/main.go#deep",
+      "caller": null,
+      "file": "router/main.go",
+      "line": 12
+    },
+    {
+      "target": "value/main.go#deep",
+      "caller": null,
+      "file": "value/main.go",
+      "line": 11
+    },
+    {
+      "target": "method/main.go#deep",
+      "caller": null,
+      "file": "method/main.go",
+      "line": 11
+    },
+    {
+      "target": "mwcall/main.go#deep",
+      "caller": null,
+      "file": "mwcall/main.go",
+      "line": 11
+    },
+    {
+      "target": "muxwrapper/main.go#deep",
+      "caller": null,
+      "file": "muxwrapper/main.go",
+      "line": 9
+    },
+    {
+      "target": "muxhandler/main.go#deep",
+      "caller": null,
+      "file": "muxhandler/main.go",
+      "line": 9
+    },
+    {
+      "target": "muxrecv/main.go#deep",
+      "caller": null,
+      "file": "muxrecv/main.go",
+      "line": 9
+    },
+    {
+      "target": "muxvalue/main.go#deep",
+      "caller": null,
+      "file": "muxvalue/main.go",
+      "line": 10
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "handler/main.go#deep",
+      "reason": "the handler expression is longer than the plugin reads",
+      "at": "handler/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "handler/main.go:11"
+      }
+    },
+    {
+      "target": "recv/main.go#deep",
+      "reason": "is longer than the plugin reads",
+      "at": "recv/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "recv/main.go:11"
+      }
+    },
+    {
+      "target": "router/main.go#deep",
+      "reason": "is longer than the plugin reads",
+      "at": "router/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "router/main.go:11"
+      }
+    },
+    {
+      "target": "value/main.go#deep",
+      "reason": "holds an expression longer than the plugin reads",
+      "at": "value/main.go:12",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "value/main.go:12"
+      }
+    },
+    {
+      "target": "method/main.go#deep",
+      "reason": "is longer than the plugin reads",
+      "at": "method/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "method/main.go:11"
+      }
+    },
+    {
+      "target": "mwcall/main.go#deep",
+      "reason": "the function this middleware is made by is longer than the plugin reads",
+      "at": "mwcall/main.go:11",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "mwcall/main.go:11"
+      }
+    },
+    {
+      "target": "muxwrapper/main.go#deep",
+      "reason": "the function this handler is wrapped by is longer than the plugin reads",
+      "at": "muxwrapper/main.go:9",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "muxwrapper/main.go:9"
+      }
+    },
+    {
+      "target": "muxhandler/main.go#deep",
+      "reason": "the handler expression is longer than the plugin reads",
+      "at": "muxhandler/main.go:9",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "muxhandler/main.go:9"
+      }
+    },
+    {
+      "target": "muxrecv/main.go#deep",
+      "reason": "is longer than the plugin reads",
+      "at": "muxrecv/main.go:9",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "muxrecv/main.go:9"
+      }
+    },
+    {
+      "target": "muxvalue/main.go#deep",
+      "reason": "is longer than the plugin reads",
+      "at": "muxvalue/main.go:9",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "muxvalue/main.go:9"
+      }
+    }
+  ]
+}

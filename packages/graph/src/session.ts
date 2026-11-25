@@ -4,7 +4,9 @@
 // test/session.test.ts checks), and it needs no source byte: the bytes of a
 // capture stay readable through `git show <tree>:<path>` while the build is
 // kept (refs/openqodex/graph/<tree>).
-import { createWorld } from "./resolve.js";
+import { foldInline } from "./inline-fold.js";
+import { EXTRACTOR_VERSION } from "./extract.js";
+import { RESOLVER_VERSION, createWorld } from "./resolve.js";
 import { assemble, deserializeModel, readIndex } from "./store/graph-files.js";
 import type { GenerationManifest, GraphStore, OpenGeneration } from "./store/types.js";
 import type { FileFacts, Graph, GraphStatus, NotRead } from "./types.js";
@@ -15,9 +17,14 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
   const indexed = readIndex(gen);
   // The index was written before its build had an id: the manifest names it.
   if (indexed) return { ...indexed, repoRoot: store.repoRoot, status: { ...indexed.status, generation: gen.manifest.id } };
+  // Facts another reader wrote lack what this resolver needs (the value
+  // uses and escapes a list floor rests on), so a caller list built from
+  // them would read as whole where callers hide: such a build is not read.
+  const v = gen.manifest.versions;
+  if (v.extractor !== EXTRACTOR_VERSION || v.resolver !== RESOLVER_VERSION) return null;
   let inventory: { files: Record<string, { key: string; lang: string }> };
-  let projects: { model: Record<string, unknown>; goModules: [string, string][] };
-  let coverage: { notRead: NotRead[]; budgetFiles: string[] };
+  let projects: { model: Record<string, unknown>; goModules: [string, string][]; declared?: { file: string; names: string[] }[] };
+  let coverage: { notRead: NotRead[]; budgetFiles: string[]; unreadLanguages?: { language: string; files: number }[] };
   try {
     inventory = JSON.parse(gen.read("inventory.json") ?? "null") as typeof inventory;
     projects = JSON.parse(gen.read("projects.json") ?? "null") as typeof projects;
@@ -35,7 +42,9 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
   }
   const model = deserializeModel(projects.model);
   const known = new Set(Object.keys(inventory.files));
-  const resolved = createWorld({ files, known, model, goModules: projects.goModules }).resolveAll();
+  const resolved = createWorld({ files, known, model, goModules: projects.goModules, declared: declaredOf(projects.declared) }).resolveAll();
+  // No framework data is kept without the index: no function written in place stays bound.
+  foldInline(resolved, files, new Set());
   const m = gen.manifest;
   const notRead = [...coverage.notRead, ...missing];
   const reasons = [...m.reasons, ...(missing.length > 0 ? [`the facts of ${missing.length} files of this build are no longer kept`] : [])];
@@ -57,11 +66,20 @@ export function graphOf(store: GraphStore, gen: OpenGeneration): Graph | null {
     stages: m.stages,
     cuts: [],
     notRead,
+    ...(coverage.unreadLanguages ? { unreadLanguages: coverage.unreadLanguages } : {}),
   };
   const graph = assemble([...resolved.nodes.values()], resolved.edges, [...resolved.importers.values()].flat(), resolved.misses, resolved.unknowns, status, model, projects.goModules, {
     references: resolved.references,
     dispatch: resolved.dispatch,
     summaries: resolved.summaries,
+    escapes: resolved.escapes,
   });
   return { ...graph, repoRoot: store.repoRoot };
+}
+
+// What the declaration files of a kept build declare, as it was written:
+// anything else is read as nothing declared, so no name is vouched for.
+function declaredOf(v: unknown): { file: string; names: string[] }[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((d): d is { file: string; names: string[] } => typeof d?.file === "string" && Array.isArray(d.names) && d.names.every((n: unknown) => typeof n === "string"));
 }

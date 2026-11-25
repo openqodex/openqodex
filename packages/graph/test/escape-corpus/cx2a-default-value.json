@@ -1,0 +1,28 @@
+{
+  "covers": "an import pattern with a default value marks the module (flaw 2)",
+  "files": {
+    "src/a.ts": "export function f() {}\nexport function h() {}\n",
+    "src/b.ts": "export async function main() { const { f: g = null } = await import(\"./a\"); g?.(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/b.ts#main",
+      "file": "src/b.ts",
+      "line": 1
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "its module is used as a value at src/b.ts:1",
+      "at": "src/b.ts:1"
+    },
+    {
+      "target": "src/a.ts#h",
+      "reason": "its module is used as a value at",
+      "at": "src/b.ts:1"
+    }
+  ]
+}

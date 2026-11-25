@@ -1,0 +1,23 @@
+{
+  "covers": "a default export reached through a namespace passed on (flaw 3)",
+  "files": {
+    "src/a.ts": "function f() {}\nexport default f;\n",
+    "src/use.ts": "import * as ns from \"./a\";\nkeep(ns);\nfunction keep(x: unknown) { (x as { default(): void }).default(); }\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/use.ts#keep",
+      "file": "src/use.ts",
+      "line": 3
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.ts#f",
+      "reason": "its module is used as a value at",
+      "at": "src/use.ts:2"
+    }
+  ]
+}

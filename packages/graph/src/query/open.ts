@@ -10,7 +10,7 @@
 // file and followed config with its content or its absence. A later
 // question computes the digest of the work tree again, with no parse, and
 // says that files changed since (`laterEditsKnown`) when the two differ.
-import { getChange } from "@openqodex/core";
+import { cleanupDiffs, getChange } from "@openqodex/core";
 import type { Change } from "@openqodex/core";
 import { buildGraph, workTreeDigest } from "../build.js";
 import { detectImpact } from "../impact.js";
@@ -84,34 +84,41 @@ export type PinArgs = {
 // A capture of the work tree, built or reused, held by a lease.
 export async function pinWorkTree(args: PinArgs): Promise<Pinned> {
   const { repoRoot, store, settings } = args;
-  // Read before the build: an edit made while it runs shows as a later edit.
-  const reference: Reference = { digest: await workTreeDigest(repoRoot, settings.maxFileBytes) };
   let change: Change | undefined;
   if (args.compare) change = await getChange({ repoRoot, scope: args.compare.base !== undefined ? { base: args.compare.base } : {}, exclude: args.compare.exclude, defaultBase: args.compare.defaultBase });
-  const graph = await buildGraph({
-    repoRoot,
-    store,
-    storeRefused: args.storeRefused,
-    capture: "working-tree",
-    files: change?.changedPaths,
-    base: change ? { sha: change.baseSha, files: change.files } : undefined,
-    budgetMs: args.whole ? BUILD_ALL_MS : settings.budgetMs,
-    maxFiles: args.whole ? Number.MAX_SAFE_INTEGER : settings.maxFiles,
-    maxFileBytes: settings.maxFileBytes,
-    maxHeapMb: settings.maxHeapMb,
-    mode: args.full ? "fresh" : undefined,
-    onProgress: args.onProgress,
-  });
-  let changes: ChangesExtra | undefined;
-  if (change) {
-    const impact = detectImpact(graph, change);
-    const removed = impact.symbols.filter((s) => impact.removed.includes(s.id));
-    // Every consumer of each changed public name: the summary's cap is for the brief only.
-    changes = { exports: graph.exportChanges, removed: removed.filter((s) => !s.movedTo), moved: removed.filter((s) => s.movedTo) };
+  try {
+    const graph = await buildGraph({
+      repoRoot,
+      store,
+      storeRefused: args.storeRefused,
+      capture: "working-tree",
+      files: change?.changedPaths,
+      base: change ? { sha: change.baseSha, files: change.files } : undefined,
+      budgetMs: args.whole ? BUILD_ALL_MS : settings.budgetMs,
+      maxFiles: args.whole ? Number.MAX_SAFE_INTEGER : settings.maxFiles,
+      maxFileBytes: settings.maxFileBytes,
+      maxHeapMb: settings.maxHeapMb,
+      mode: args.full ? "fresh" : undefined,
+      onProgress: args.onProgress,
+    });
+    let changes: ChangesExtra | undefined;
+    if (change) {
+      const impact = detectImpact(graph, change);
+      const removed = impact.symbols.filter((s) => impact.removed.includes(s.id));
+      // Every consumer of each changed public name: the summary's cap is for the brief only.
+      changes = { exports: graph.exportChanges, removed: removed.filter((s) => !s.movedTo), moved: removed.filter((s) => s.movedTo) };
+    }
+    // What the build listed before it read a file: an edit made after
+    // that shows as a later edit. Only a graph with no digest of its own
+    // (none is made by this build) needs the work tree read again.
+    const reference: Reference = { digest: graph.digest ?? (await workTreeDigest(repoRoot, settings.maxFileBytes)) };
+    const lease = await leaseOf(store, graph, args.purpose);
+    const scope = change ? `${change.baseSha}:${reference.digest}` : undefined;
+    return { session: sessionOf(store, graph), lease, changes, change, scope, reference, release: () => lease?.release() };
+  } finally {
+    // A leftover temporary patch never hides the graph answer.
+    if (change) try { cleanupDiffs(change); } catch { /* reported nowhere: the file is private to this user */ }
   }
-  const lease = await leaseOf(store, graph, args.purpose);
-  const scope = change ? `${change.baseSha}:${reference.digest}` : undefined;
-  return { session: sessionOf(store, graph), lease, changes, change, scope, reference, release: () => lease?.release() };
 }
 
 export type PinnedOrError = Pinned | { error: "generation-unavailable" | "unreadable"; message: string };

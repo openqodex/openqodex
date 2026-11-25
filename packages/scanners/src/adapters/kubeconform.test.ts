@@ -18,6 +18,7 @@
 //   7. The schema location floats (the default master URL) instead of the
 //      commit and Kubernetes version the table pins.
 //   8. A change to another field of an object with a schema error reports it.
+import { makeLineSet } from "../../../../tests/line-set.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -75,9 +76,9 @@ describe("parseKubeconformJson", () => {
   it("a change to another field of an object with a schema error reports nothing (8)", () => {
     const { findings } = parse(fixture("report.json"));
     // The change bumps the image tag on line 22.
-    expect(filterToChangedLines(findings, new Map([["k8s/app.yaml", new Set([22])]]))).toEqual([]);
+    expect(filterToChangedLines(findings, new Map([["k8s/app.yaml", makeLineSet([22])]]))).toEqual([]);
     // The change sets replicas.
-    expect(filterToChangedLines(findings, new Map([["k8s/app.yaml", new Set([10])]])).map((f) => f.lineStart)).toEqual([10]);
+    expect(filterToChangedLines(findings, new Map([["k8s/app.yaml", makeLineSet([10])]])).map((f) => f.lineStart)).toEqual([10]);
   });
 });
 

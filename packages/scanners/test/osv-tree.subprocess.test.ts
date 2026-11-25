@@ -11,6 +11,7 @@
 // a two-line script before the binary adds the one flag after `scan source`.
 // That nothing but osv.dev is opened in the adapter's own mode stays with
 // adapters.subprocess.test.ts.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -137,7 +138,7 @@ it("keeps the pre-change scan without inventory when coverage misses advisories"
   // both advisories of the fixed database stop at the changed-lines stage.
   const repoDir = plant();
   writeFileSync(join(repoDir, "package-lock.json"), JSON.stringify(JSON.parse(lock), null, 2));
-  const { scan } = await runScanners({ repoDir, changedPaths: ["package-lock.json"], coverage: new Map([["package-lock.json", new Set([1])]]), config: parseConfig("").config, resolveTool: installedOnly(), only: ["osv-scanner"] });
+  const { scan } = await runScanners({ repoDir, changedPaths: ["package-lock.json"], coverage: new Map([["package-lock.json", makeLineSet([1])]]), config: parseConfig("").config, resolveTool: installedOnly(), only: ["osv-scanner"] });
   expect(scan.trail).toEqual(ADVISORIES.map((id) => ({ token: `osv-scanner:${id}`, file: "package-lock.json", lineStart: 8, lineEnd: 9, severity: "high", stage: "changed-lines" })));
   expect(scan).not.toHaveProperty("outside");
   const { durationMs: _duration, resolveMs: _resolve, ...row } = scan.scanners[0]!;
@@ -146,7 +147,7 @@ it("keeps the pre-change scan without inventory when coverage misses advisories"
 });
 
 it("keeps changed-lockfile candidates when inventory discovery throws", async () => {
-  const { scan } = await runScanners({ repoDir: plant(), changedPaths: ["package-lock.json"], coverage: new Map([["package-lock.json", new Set([1])]]), config: parseConfig("").config, resolveTool: installedOnly(), only: ["osv-scanner"],
+  const { scan } = await runScanners({ repoDir: plant(), changedPaths: ["package-lock.json"], coverage: new Map([["package-lock.json", makeLineSet([1])]]), config: parseConfig("").config, resolveTool: installedOnly(), only: ["osv-scanner"],
     inventory: async () => { throw new Error("git ls-files failed: inventory unavailable"); } });
   expect(scan.scanners[0]).toMatchObject({ status: "ran", reason: expect.stringContaining("Repository lockfiles: git ls-files failed: inventory unavailable") });
   expect(scan.candidates).toContainEqual(expect.objectContaining({ ruleId: "GHSA-35jh-r3h4-6jhm" }));

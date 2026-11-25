@@ -13,6 +13,7 @@
 // fail: a server run whose temporary folder is too long for TFLint's plugin
 // socket falls back to /tmp, outside its scratch root, instead of refusing
 // to start TFLint.
+import { makeLineSet } from "../../../tests/line-set.mjs";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -93,7 +94,7 @@ async function scanLines(scanner: BuiltinScanner, files: Record<string, string>,
     writeFileSync(join(repo, name), body);
   }
   const paths = Object.keys(files);
-  const coverage = new Map(paths.map((p) => [p, new Set(changed[p] ?? readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))]));
+  const coverage = new Map(paths.map((p) => [p, makeLineSet(changed[p] ?? readFileSync(join(repo, p), "utf8").split("\n").map((_, i) => i + 1))]));
   const result = await runScanners({ repoDir: repo, changedPaths: paths, coverage, config: parseConfig("").config, resolveTool: createToolResolver({ allowInstall: false, installBudgetMs: null }), only: [scanner, ...also] });
   const status = result.scan.scanners[0]!;
   return { repo, result, status };
@@ -472,7 +473,7 @@ describe("tflint", () => {
     const result = await runScanners({
       repoDir: repo,
       changedPaths: ["main.tf"],
-      coverage: new Map([["main.tf", new Set([1, 2, 3])]]),
+      coverage: new Map([["main.tf", makeLineSet([1, 2, 3])]]),
       config: parseConfig("").config,
       resolveTool: createToolResolver({ allowInstall: false, installBudgetMs: null }),
       only: ["tflint"],

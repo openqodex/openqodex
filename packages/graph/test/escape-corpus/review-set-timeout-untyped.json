@@ -1,0 +1,23 @@
+{
+  "covers": "`setTimeout` given an untyped value may run a string as code: the floor stays beside the `queueMicrotask` case",
+  "files": {
+    "src/a.js": "export function f() {}\n",
+    "src/b.js": "import { f } from \"./a.js\";\nexport function later(cb) {\n  setTimeout(cb);\n}\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.js#f",
+      "caller": "src/b.js",
+      "file": "src/b.js",
+      "line": 5
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/a.js#f",
+      "reason": "runs code given to a timer",
+      "at": "src/b.js:3"
+    }
+  ]
+}

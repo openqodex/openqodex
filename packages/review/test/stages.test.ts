@@ -1,3 +1,10 @@
+// 7n. An over-cap change loses removed rows from its last file.
+// 6. A code deletion beside store digests loses its brief credit.
+// 5. Thousands of unsplit hunks abandon a verifiable candidate.
+// 1. Part sessions receive other parts; verifier briefs grow to a whole file.
+// 2. Wide neighbouring parts overflow a single-candidate verifier brief.
+// 4. Cited deletions overflow, fixed blocks throw, renders grow per part and examined loses ids.
+// 3. Two candidates lose their own parts instead of splitting a full batch.
 // Round 1 failures: one bad quote discards good candidates, an oversized hunk
 // blocks completion, unknown lenses fail assembly, neighbours split batches,
 // invalid duplicates hide scanners, idle verifiers accumulate, one bad item
@@ -8,18 +15,41 @@
 // open, verifier abandon reasons lose either attempt, and finders use the verifier's reserved time.
 // Round 2 failures: a missing file or inverted range discards a good answer,
 // a line tie splits duplicate candidates, and refutation prose waits for assembly.
-import { writeFileSync } from "node:fs";
+// Cross-file evidence review: a finder candidate folded into a scanner
+// candidate as its duplicate loses the lines in other files its verifier
+// relied on, so the shown scanner finding carries none of them.
+// Issue 315 follow-up: finalize merges a finding and an observation on the
+// same lines that the verifier did not link, and the merged finding is moved
+// out of the counted findings into the observations.
+// Duplicate folding: a folded major duplicate leaves its minor survivor
+// minor, so the review passes; the saved submission keeps it minor too; two
+// items sharing a key folded through a third fold each other away; an
+// observation sharing a counted finding's key folds that finding away; an
+// observation's severity reaches a counted finding through a shared key.
+// Every fold combination and its test: counted into counted (raises the
+// survivor, also along a chain), counted into an observation (never folds),
+// observation into counted (never raises it), observation into observation
+// (never raises it), an observation sharing a counted key (never folds it,
+// never raises it, folded or not, and never lists it when only the
+// observation's severity clears the threshold), counted into a below-floor
+// finding whose key an observation shares (never folds: that key does not
+// count), a key cycle (one key stays), an id cycle (rejected by the
+// verifier answer check, evidence-check.test.ts).
+import { makeLineSet } from "../../../tests/line-set.mjs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
-import { buildFindBrief, buildVerifyBrief, completionRecord, readCoverage } from "@openqodex/core";
-import type { FindAnswer, ReviewUnit, VerifyAnswer, VerifyBatch } from "@openqodex/core";
+import { buildFindBrief, buildVerifyBrief, completionRecord, getChange, readCoverage } from "@openqodex/core";
+import type { FindAnswer, ReviewUnit, VerifyAnswer, VerifyBatch, VerifyVerdict } from "@openqodex/core";
+import { deliverRanges } from "../src/conversation.js";
 import { runStagedReview } from "../src/stages.js";
 import { TIMED_OUT } from "../src/agents/driver.js";
 import type { StagedArgs } from "../src/stages.js";
 import { modelSession } from "../src/model-loop.js";
 import type { ModelSession } from "../src/model-loop.js";
 import type { ModelRequest, ModelReviewer } from "../src/reviewer.js";
-import { hunkRefs, unitsOf } from "../src/units.js";
+import { hunkRefs, obligations, MAX_BRIEF_BYTES, unitsOf } from "../src/units.js";
 import { cleanupFixtures, candidate, fixture, reply, scanner, verdict } from "./staged-fixture.js";
 
 afterAll(cleanupFixtures);
@@ -47,7 +77,7 @@ function setup(answerer?: Answerer, files?: string[]) {
   } };
   const args: StagedArgs = {
     snapshotDir: f.dir, change: f.change, scan: f.scan, config: f.config, manifest: f.manifest, secrets: [], deadline: clock + 60_000, now: () => clock, traced: true, model: true, say: () => {}, stopped: () => stopped,
-    findBrief: (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(unit.files) }),
+    findBrief: (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(unit.files), carried: unit.hunks }),
     verifyBrief: (batch) => ({ text: JSON.stringify({ batch }) }),
     openSession: (role) => {
       const session = modelSession({ reviewer: model, role, shared, budgetState, box: { snapshotDir: f.dir, change: f.change, secrets: [], graph: null, graphNote: null }, now: () => clock, budget: { deadlineMs: 60_000, authorize: async (call) => { budgets.push(call); await new Promise((resolve) => setTimeout(resolve, 0)); return allow; } } });
@@ -58,8 +88,45 @@ function setup(answerer?: Answerer, files?: string[]) {
   return { ...f, args, requests, realBriefs, opened, budgets, closed, refuse: () => { allow = false; }, advance: (ms: number) => { clock += ms; }, stop: () => { stopped = true; opened.forEach((s) => s.kill()); } };
 }
 function completion(r: Awaited<ReturnType<typeof runStagedReview>>, f: ReturnType<typeof setup>) {
-  return completionRecord({ change: f.change, reviewer: { driver: "model", version: "fixture", pid: null, started_at: "now", ended_at: "now", duration_ms: 0, rounds: r.sessions.reduce((n, s) => n + s.rounds, 0), usage: r.sessions[0]!.usage, sessions: r.sessions }, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: r.required, disposed: r.disposed }, coverage: readCoverage({ change: f.change, trace: [], briefFiles: r.briefFiles }), trace: [], submissionErrors: [], wholeRepo: false, missing: r.missing });
+  return completionRecord({ change: f.change, reviewer: { driver: "model", version: "fixture", pid: null, started_at: "now", ended_at: "now", duration_ms: 0, rounds: r.sessions.reduce((n, s) => n + s.rounds, 0), usage: r.sessions[0]!.usage, sessions: r.sessions }, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: r.required, disposed: r.disposed }, coverage: readCoverage({ change: f.change, trace: [], obligations: r.obligations, briefCarried: r.briefCarried, delivered: r.delivered }), trace: [], submissionErrors: [], wholeRepo: false, missing: r.missing });
 }
+it("credits a code deletion's brief beside an oversized store root", async () => {
+  const store = ".pnpm-store/v11/files/fixture";
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") {
+      const ids = brief.unit!.digest ? ["d1"] : brief.unit!.hunks.map((h) => h.id);
+      answer.examined = ids;
+      answer.analysis = ids.map((hunk) => ({ hunk, changed: "The operation changed.", could_break: "Inputs can be unsafe." }));
+      answer.candidates = [];
+    }
+    return answer;
+  }, ["Dockerfile"]);
+  const code = "FROM python:latest\n\nRUN apt-get update && apt-get install curl\n\nWORKDIR /app\nADD requirements.txt .\nRUN pip install -r requirements.txt\nCOPY app ./app\n\nEXPOSE 5000\nCMD python\n";
+  writeFileSync(join(f.dir, "Dockerfile"), code);
+  mkdirSync(join(f.dir, ".pnpm-store/v11/files"), { recursive: true });
+  writeFileSync(join(f.dir, store), "module.exports = 1;\n".repeat(5000));
+  f.change.files.push({ path: store, status: "added", oldPath: null, binary: false });
+  f.change.changedPaths.push(store);
+  f.change.coverage = new Map([["Dockerfile", makeLineSet([1, 3, 5, 6, 7])], [store, makeLineSet(Array.from({ length: 5000 }, (_, i) => i + 1))]]);
+  f.change.deletionPoints.set("Dockerfile", [{ after: 9, lines: 1, anchors: [9, 10] }]);
+  // The retained patch is the control for the diff-cap fix on C4.2.
+  f.change.diffs = [{ path: "Dockerfile", text: "@@ -9,3 +9,2 @@\n \n-USER app\n EXPOSE 5000\n" }];
+  f.args.findBrief = (unit, pass) => {
+    const brief = buildFindBrief({ ...f, lenses: [], secrets: [] }, unit, pass);
+    f.realBriefs.set(brief.text, { unit, pass });
+    return brief;
+  };
+  let units: ReviewUnit[] = [];
+  f.args.onUnits = (value) => { units = value; };
+  const r = await runStagedReview(f.args);
+  expect(units.some((u) => u.digest?.kind === "store")).toBe(true);
+  expect(units.some((u) => !u.digest && u.files.includes("Dockerfile"))).toBe(true);
+  expect(r.sessions.filter((s) => s.role.startsWith("finder:"))).toHaveLength(units.length * 2);
+  const coverage = readCoverage({ change: f.change, obligations: r.obligations, briefCarried: r.briefCarried, digestCarried: r.digestCarried, delivered: r.delivered, trace: [] });
+  expect(coverage.given).toContainEqual(expect.objectContaining({ path: "Dockerfile", start: 9, end: 10, by: "brief" }));
+  expect(coverage.unread).toEqual([]);
+  expect(r.missing).toEqual([]);
+});
 it("sends an invented quote back and never verifies the rejected candidate", async () => {
   const f = setup((answer, request) => {
     if (answer.version === "find-1" && answer.candidates.length) {
@@ -92,7 +159,7 @@ it("retries a failed finder once and keeps other units' checked findings", async
   const f = setup((answer, request) => { if (request.callId.startsWith("finder:u1:local")) throw new Error("provider failed"); return answer; });
   const r = await runStagedReview(f.args);
   expect(r.sessions.filter((s) => s.role.startsWith("finder:u1:local"))).toHaveLength(2);
-  expect(r.missing).toContain("hunk h1 of a.txt was not examined by the local pass");
+  expect(r.missing).toContain("hunk h1 of a.txt:1-1 was not examined by the local pass");
   expect(completion(r, f).status).toBe("incomplete");
   expect(r.report.findings.some((f) => f.file_path === "b.txt")).toBe(true);
 });
@@ -192,6 +259,22 @@ it("keeps a duplicate finding when its confirmed survivor is only an observation
   expect(r.report.observations).toHaveLength(0);
   expect(r.report.verdict).toBe("blocked");
 });
+it("keeps a finding counted beside an observation on its lines that the verifier did not link (315)", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = [candidate("a.txt", brief.pass === "local" ? "Counted" : "Style note")];
+    if (answer.version === "verify-1") {
+      const note = answer.verdicts.find((v) => v.title === "Style note")!;
+      note.tier = "observation";
+      note.problem = "The changed operation accepts unsafe input, and its name does not say so.";
+    }
+    return answer;
+  }, ["a.txt"]);
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings.map((finding) => finding.title)).toEqual(["Counted"]);
+  expect((r.report.observations ?? []).map((o) => o.title)).toEqual(["Style note"]);
+  expect(r.report.verdict).toBe("blocked");
+});
 it("keeps a finding whose key an observation below the floor shares", async () => {
   // Two lens candidates on one range share a key whatever their titles say.
   const f = setup((answer, _request, brief) => {
@@ -232,10 +315,176 @@ it("folds a duplicate into the first shown link of its chain when the chain's en
     return answer;
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
-  f.change.coverage.set("a.txt", new Set([1, 2, 3]));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
   f.args.confidenceFloor = 0.7;
   const r = await runStagedReview(f.args);
   expect(r.report.findings.map((finding) => finding.title)).toEqual(["Claim 2"]);
+});
+it("carries a folded major duplicate's severity to its minor survivor, so the review still blocks", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [{ ...candidate("a.txt", "Survivor"), line_number: 1 }]
+      : [{ ...candidate("a.txt", "Major duplicate"), line_number: 2, evidence: [{ file_path: "a.txt", line_number: 2, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const survivor = answer.verdicts.find((v) => v.title === "Survivor")!;
+      survivor.severity = "minor";
+      const duplicate = answer.verdicts.find((v) => v.title === "Major duplicate")!;
+      duplicate.line_number = 2;
+      duplicate.duplicate_of = survivor.id;
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(2));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Survivor", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+  // The saved submission a replay finalizes again carries the same severity.
+  expect(r.submission.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Survivor", "major"]]);
+});
+it("keeps one finding when duplicate links fold two items sharing a key through another, so the review still blocks", async () => {
+  // A1 folds into B and B into A2, and A1 and A2 share a finding key.
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [1, 2].map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }))
+      : [{ ...candidate("a.txt", "Claim 3"), line_number: 3, evidence: [{ file_path: "a.txt", line_number: 3, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const byLine = new Map(brief.batch!.candidates.map((c) => [c.kind === "finder" ? c.candidate.line_number : 0, c.id]));
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        const line = c.kind === "finder" ? c.candidate.line_number : 0;
+        // The Twin key survives the cycle at minor, so only the transfer from Other blocks.
+        if (line === 1) { v.title = "Twin"; v.line_number = 1; v.severity = "minor"; v.duplicate_of = byLine.get(2); }
+        if (line === 2) { v.title = "Other"; v.line_number = 2; v.duplicate_of = byLine.get(3); }
+        if (line === 3) { v.title = "Twin"; v.line_number = 1; v.severity = "minor"; }
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Twin", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+  expect(r.submission.findings.length).toBeGreaterThan(0);
+  expect(r.submission.findings.every((finding) => finding.title === "Twin" && finding.severity === "major")).toBe(true);
+});
+it("keeps a major finding whose key an observation shares when that observation is a duplicate of another observation", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local"
+      ? [1, 2].map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }))
+      : [{ ...candidate("a.txt", "Claim 3"), line_number: 3, evidence: [{ file_path: "a.txt", line_number: 3, quote: "unsafe operation" }] }];
+    if (answer.version === "verify-1") {
+      const byLine = new Map(brief.batch!.candidates.map((c) => [c.kind === "finder" ? c.candidate.line_number : 0, c.id]));
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        const line = c.kind === "finder" ? c.candidate.line_number : 0;
+        if (line === 1) { v.title = "Shared"; v.line_number = 1; }
+        if (line === 2) { v.title = "Note"; v.line_number = 2; v.severity = "minor"; v.tier = "observation"; }
+        if (line === 3) { v.title = "Shared"; v.line_number = 1; v.severity = "minor"; v.tier = "observation"; v.duplicate_of = byLine.get(2); }
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
+  f.config.severityThreshold = "minor";
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.map((finding) => [finding.title, finding.severity])).toEqual([["Shared", "major"]]);
+  expect((r.report.observations ?? []).map((o) => [o.title, o.severity])).toEqual([["Note", "minor"]]);
+  expect(r.report.verdict).toBe("blocked");
+});
+// Three finder candidates on lines 1 to 3 of a.txt, verified in one batch.
+// Each verdict starts as a hidden nitpick finding titled by its line; `edit`
+// shapes it, with `id` giving the verdict id of another line.
+async function foldCase(edit: (v: VerifyVerdict, line: number, id: (line: number) => string) => void, threshold: "minor" | "major" = "minor") {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = (brief.pass === "local" ? [1, 2] : [3]).map((line) => ({ ...candidate("a.txt", `Claim ${line}`), line_number: line, evidence: [{ file_path: "a.txt", line_number: line, quote: "unsafe operation" }] }));
+    if (answer.version === "verify-1") {
+      const byLine = new Map(brief.batch!.candidates.map((c) => [c.kind === "finder" ? c.candidate.line_number : 0, c.id]));
+      for (const v of answer.verdicts) {
+        const c = brief.batch!.candidates.find((c) => c.id === v.id)!;
+        const line = c.kind === "finder" ? c.candidate.line_number : 0;
+        Object.assign(v, { line_number: line, title: `Claim ${line}`, severity: "nitpick" });
+        edit(v, line, (other) => byLine.get(other)!);
+      }
+    }
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
+  f.config.severityThreshold = threshold;
+  f.config.blockOnSeverity = "major";
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  const shown = (list: { title: string; severity: string }[] | undefined) => (list ?? []).map((x) => [x.title, x.severity]);
+  return { r, findings: shown(r.report.findings), observations: shown(r.report.observations), saved: shown(r.submission.findings.filter((x) => x.severity !== "nitpick")) };
+}
+it("carries a major along a chain of counted duplicates to the last survivor", async () => {
+  const { r, findings, saved } = await foldCase((v, line, id) => {
+    if (line === 1) { v.severity = "major"; v.duplicate_of = id(2); }
+    if (line === 2) { v.severity = "minor"; v.duplicate_of = id(3); }
+    if (line === 3) v.severity = "minor";
+  });
+  expect(findings).toEqual([["Claim 3", "major"]]);
+  expect(saved).toEqual([["Claim 3", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+});
+it("never raises a counted finding with the severity of an observation folded into it", async () => {
+  const { r, findings, observations } = await foldCase((v, line, id) => {
+    if (line === 1) v.severity = "minor";
+    if (line === 2) { v.severity = "major"; v.tier = "observation"; v.duplicate_of = id(1); }
+  });
+  expect(findings).toEqual([["Claim 1", "minor"]]);
+  expect(observations).toEqual([]);
+  expect(r.report.verdict).toBe("passed");
+});
+it("never raises an observation with the severity of an observation folded into it", async () => {
+  const { r, findings, observations } = await foldCase((v, line, id) => {
+    if (line === 1) { v.severity = "minor"; v.tier = "observation"; }
+    if (line === 2) { v.severity = "major"; v.tier = "observation"; v.duplicate_of = id(1); }
+  });
+  expect(findings).toEqual([]);
+  expect(observations).toEqual([["Claim 1", "minor"]]);
+  expect(r.report.verdict).toBe("passed");
+});
+it.each([false, true])("never raises a counted finding with the severity of an observation sharing its key, folded: %s", async (folded) => {
+  const { r, findings, observations, saved } = await foldCase((v, line, id) => {
+    if (line === 1) { v.title = "Shared"; v.severity = "minor"; if (folded) v.duplicate_of = id(2); }
+    if (line === 2 && folded) v.severity = "minor";
+    if (line === 3) { v.title = "Shared"; v.line_number = 1; v.severity = "major"; v.tier = "observation"; }
+  });
+  expect(findings).toEqual(folded ? [["Claim 2", "minor"]] : [["Shared", "minor"]]);
+  expect(observations).toEqual([]);
+  expect(saved).toEqual(folded ? [["Claim 2", "minor"]] : [["Shared", "minor"]]);
+  expect(r.report.verdict).toBe("passed");
+});
+it("never folds a counted major into a below-floor finding whose key an observation shares", async () => {
+  const { r, findings } = await foldCase((v, line, id) => {
+    if (line === 1) { v.severity = "major"; v.duplicate_of = id(2); }
+    if (line === 2) { v.title = "Shared"; v.severity = "minor"; v.confidence = 0.6; }
+    if (line === 3) { v.title = "Shared"; v.line_number = 2; v.severity = "minor"; v.tier = "observation"; }
+  });
+  expect(findings).toEqual([["Claim 1", "major"]]);
+  expect(r.report.verdict).toBe("blocked");
+});
+it("hides a counted minor finding that only a major observation sharing its key lifted over the threshold", async () => {
+  const { r, findings, observations } = await foldCase((v, line) => {
+    if (line === 1) { v.title = "Shared"; v.severity = "minor"; }
+    if (line === 3) { v.title = "Shared"; v.line_number = 1; v.severity = "major"; v.tier = "observation"; }
+  }, "major");
+  expect(findings).toEqual([]);
+  expect(observations).toEqual([]);
+  // The hidden minor finding and the nitpick on line 2, as a replay counts them.
+  expect(r.report.below_threshold).toBe(2);
+  expect(r.report.verdict).toBe("passed");
 });
 it("lets a stopped session leave the budget queue while another session holds the lock", async () => {
   const budgetState = { pending: Promise.resolve(), refused: false };
@@ -301,7 +550,7 @@ it.skipIf(!briefsBuilt)("accepts the real find and verify briefs through a model
 it("delivers a hunk the brief left out when the finder did not read it, whatever the finder says it examined", async () => {
   const f = setup();
   // The brief carries b.txt but not a.txt, as a hunk over the diff budget leaves the brief.
-  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(unit.files.filter((file) => file !== "a.txt")) });
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(unit.files.filter((file) => file !== "a.txt")), carried: unit.hunks.filter((h) => h.path !== "a.txt") });
   const r = await runStagedReview(f.args);
   const finderRounds = r.rounds.filter((round) => round.by.startsWith("finder:") && round.by.endsWith(":local"));
   expect(finderRounds.length).toBeGreaterThan(0);
@@ -436,13 +685,20 @@ it("drops one unmatched evidence candidate and keeps the other with a complete r
   expect(r.sessions[0]!.dropped).toContainEqual(expect.objectContaining({ title: "Unproved defect", line_number: 1, reason: "evidence not found" }));
   expect(r.report.low_confidence).toContainEqual(expect.objectContaining({ title: "Unproved defect", reason: "evidence not found" }));
 });
-it("reviews a 130 KB indivisible hunk completely and records its size as a note", async () => {
-  const f = setup(undefined, ["a.txt"]);
-  f.change.diffs![0]!.text += "x".repeat(130 * 1024);
+it("reviews a 130 KB hunk in two parts without an indivisible note", async () => {
+  const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["a.txt"]);
+  f.change.coverage.set("a.txt", makeLineSet(Array.from({ length: 2000 }, (_, i) => i + 1)));
+  const text = Array.from({ length: 2000 }, (_, i) => `line_${i}_${"x".repeat(61)}`).join("\n") + "\n";
+  writeFileSync(join(f.dir, "a.txt"), text);
+  f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1,2000 @@\n" + text.trimEnd().split("\n").map((row) => `+${row}`).join("\n") + "\n" }];
+  f.args.findBrief = (unit, pass) => { const b = buildFindBrief({ change: f.change, scan: f.scan, config: f.config, lenses: [], secrets: [] }, unit, pass); f.realBriefs.set(b.text, { unit, pass }); return b; };
   const r = await runStagedReview(f.args);
+  expect(r.sessions.filter((session) => session.role.startsWith("finder:"))).toHaveLength(4);
+  expect(r.report.notes ?? []).toEqual([]);
+  expect(r.briefCarried.map((h) => h.part?.of)).toEqual([2, 2, 2, 2]);
   expect(completion(r, f).status).toBe("complete");
-  expect(r.report.notes!.join(" ")).toContain("bytes of diff in an indivisible hunk");
 });
+
 it("keeps a candidate with an unknown lens without failing its verifier batch", async () => {
   const f = setup((answer) => { if (answer.version === "find-1") answer.candidates.forEach((c) => { c.lens = "unknown"; }); return answer; }, ["a.txt"]);
   const r = await runStagedReview(f.args);
@@ -551,7 +807,7 @@ it("keeps seven candidates in one batch when the sixth and seventh share a line,
     return answer;
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(6));
-  f.change.coverage.set("a.txt", new Set([1, 2, 3, 4, 5, 6]));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3, 4, 5, 6]));
   f.scan.candidates.push({ ...scanner("a.txt"), lineStart: 6, lineEnd: 6 });
   const r = await runStagedReview(f.args);
   const briefs = f.requests.filter((request) => request.purpose === "verify").map((request) => JSON.parse(request.messages[1]!.text).batch as VerifyBatch);
@@ -771,7 +1027,7 @@ it.each(["finding", "observation"] as const)("keeps the twin hidden item's trace
     return answer;
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
-  f.change.coverage.set("a.txt", new Set([1, 2, 3]));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
   f.config.severityThreshold = "major";
   const r = await runStagedReview(f.args);
   expect(r.missing).toEqual([]);
@@ -795,11 +1051,301 @@ it.each([false, true])("a shown possible item leaves a same-looking hidden item'
     return answer;
   }, ["a.txt"]);
   writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(3));
-  f.change.coverage.set("a.txt", new Set([1, 2, 3]));
+  f.change.coverage.set("a.txt", makeLineSet([1, 2, 3]));
   f.config.severityThreshold = "major";
   const r = await runStagedReview(f.args);
   expect(r.missing).toEqual([]);
   expect(r.report.findings.map((f) => f.title)).toEqual(["Counted"]);
   expect(r.report.possible.map((f) => f.line_number)).toEqual(folded ? [] : [1]);
   expect(r.report.low_confidence).toEqual([{ title: "Twin", file_path: "a.txt", confidence: 0.6, floor: 0.7 }]);
+});
+
+it("clips a snapshot-only file's delivery to its own measured part", async () => {
+  const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["a.txt"]);
+  const text = Array.from({ length: 9000 }, (_, i) => `distinct_${i + 1}`).join("\n") + "\n";
+  writeFileSync(join(f.dir, "a.txt"), text);
+  f.change.coverage.set("a.txt", makeLineSet(Array.from({ length: 9000 }, (_, i) => i + 1)));
+  f.change.diffs = [];
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: [] });
+  const r = await runStagedReview(f.args);
+  const refs = obligations(f.change, () => text);
+  expect(refs.length).toBeGreaterThanOrEqual(3);
+  const second = r.rounds.filter((round) => round.by === "finder:u2:local");
+  expect(second).toHaveLength(1);
+  expect(second[0]!.delivered).toHaveLength(1);
+  expect(second[0]!.delivered[0]).toMatchObject({ start: refs[1]!.start, end: refs[1]!.end });
+  const coverage = readCoverage({ change: f.change, obligations: refs, briefCarried: r.briefCarried, delivered: r.delivered, trace: [] });
+  expect(coverage.unread).toEqual([]);
+  expect(coverage.given).toHaveLength(refs.length);
+  expect(coverage.given!.every((g) => g.by === "page")).toBe(true);
+});
+it("carries only nearby parts in a verifier brief for part three", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.unit!.hunks.some((h) => h.start <= 8500 && h.end >= 8500)
+      ? [{ ...candidate("a.txt"), line_number: 8500, evidence: [{ file_path: "a.txt", line_number: 8500, quote: "unsafe operation" }] }] : [];
+    if (answer.version === "verify-1") answer.verdicts.forEach((v) => { v.line_number = 8500; });
+    return answer;
+  }, ["a.txt"]);
+  const row = "unsafe operation".padEnd(28);
+  const text = `${row}\n`.repeat(18000);
+  writeFileSync(join(f.dir, "a.txt"), text);
+  f.change.coverage.set("a.txt", makeLineSet(Array.from({ length: 18000 }, (_, i) => i + 1)));
+  f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1,18000 @@\n" + `+${row}\n`.repeat(18000) }];
+  // Only one of the five parts fits after these fixed convention blocks.
+  const shared = { change: f.change, scan: f.scan, config: f.config, lenses: [], secrets: [], instructions: "Repository convention.\n".repeat(4600) };
+  f.args.verifyBrief = (batch) => { const b = buildVerifyBrief(shared, batch); f.realBriefs.set(b.text, { batch }); return b; };
+  const r = await runStagedReview(f.args);
+  expect(r.report.findings).toHaveLength(1);
+  const briefs = f.requests.filter((request) => request.purpose === "verify").map((request) => request.messages[1]!.text);
+  expect(briefs).toHaveLength(1);
+  expect(briefs[0]!.match(/not shown; read with your tools/g)).toHaveLength(4);
+  expect(briefs[0]!.match(/^\+unsafe operation *$/gm)).toHaveLength(3999);
+  expect(briefs[0]).toContain("(part 3 of 5)\n\n```diff");
+  for (const n of [1, 2, 4, 5]) expect(briefs[0]).toMatch(new RegExp(`part ${n}, lines \\d+ to \\d+, not shown; read with your tools`));
+  expect(Buffer.byteLength(briefs[0]!)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
+});
+
+it("does not credit a built page when the deadline prevents sending it", async () => {
+  const f = setup((answer) => {
+    if (answer.version === "find-1") { answer.candidates = []; f.advance(31_000); }
+    return answer;
+  }, ["a.txt"]);
+  f.change.diffs = [];
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: [] });
+  const r = await runStagedReview(f.args);
+  expect(r.rounds.some((round) => round.delivered.length > 0)).toBe(true);
+  expect(r.delivered).toEqual([]);
+  const coverage = readCoverage({ change: f.change, obligations: r.obligations, briefCarried: r.briefCarried, delivered: r.delivered, trace: [] });
+  expect(coverage.given).toEqual([]);
+  expect(coverage.unread).toHaveLength(1);
+});
+
+function wideVerifier(lines: number[], instructions = "") {
+  const rows = Array.from({ length: 121 }, (_, i) => `wide_${i + 1}_`.padEnd(6200, "x"));
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = lines.filter((line) => brief.pass === "local" && brief.unit!.hunks.some((h) => h.start <= line && h.end >= line)).map((line) => ({
+      ...candidate("a.txt", `Defect at ${line}`), line_number: line,
+      evidence: [{ file_path: "a.txt", line_number: line, quote: rows[line - 1]! }],
+    }));
+    return answer;
+  }, ["a.txt"]);
+  const text = rows.join("\n") + "\n";
+  writeFileSync(join(f.dir, "a.txt"), text);
+  f.change.coverage.set("a.txt", makeLineSet(rows.map((_, i) => i + 1)));
+  f.change.diffs = [{ path: "a.txt", text: "@@ -0,0 +1,121 @@\n" + rows.map((row) => `+${row}`).join("\n") + "\n" }];
+  const shared = { change: f.change, scan: f.scan, config: f.config, lenses: [], secrets: [], instructions };
+  f.args.verifyBrief = (batch) => { const b = buildVerifyBrief(shared, batch); f.realBriefs.set(b.text, { batch }); return b; };
+  return { ...f, rows };
+}
+
+// Reconstruct only labelled added bytes, independently of the renderer.
+function addedBytes(brief: string, line: number): string {
+  return brief.split("\n").filter((row) => row.startsWith(`+a.txt: line ${line}, bytes `)).map((row) => row.slice(row.indexOf("\t") + 1)).join("");
+}
+
+it("bounds wide verifier neighbours and names every part it cannot carry", async () => {
+  const f = wideVerifier([61]);
+  const r = await runStagedReview(f.args);
+  const refs = r.obligations;
+  expect(refs).toHaveLength(7);
+  expect(r.missing).toEqual([]);
+  const briefs = f.requests.filter((request) => request.purpose === "verify").map((request) => request.messages[1]!.text);
+  expect(briefs).toHaveLength(1);
+  const brief = briefs[0]!;
+  expect(Buffer.byteLength(brief)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
+  const shown = refs.filter((h) => addedBytes(brief, h.start) === f.rows[h.start - 1]);
+  expect(shown.map((h) => h.part!.n)).toEqual([3, 4]);
+  // Selection is nearest first; the brief still shows the parts in file order.
+  expect(brief.indexOf("+a.txt: line 39, bytes ")).toBeLessThan(brief.indexOf("+a.txt: line 58, bytes "));
+  for (const h of refs.filter((h) => !shown.includes(h))) {
+    expect(brief).toContain(`part ${h.part!.n}, lines ${h.start} to ${h.end}, not shown; read with your tools`);
+    expect(addedBytes(brief, h.start)).toBe("");
+  }
+});
+
+it("splits wide verifier candidates when their distance-zero parts cannot share a brief", async () => {
+  // Leave room for either candidate's part, but not both, after fixed brief blocks.
+  const f = wideVerifier([5, 115], "Repository convention.\n".repeat(4600));
+  const r = await runStagedReview(f.args);
+  expect(r.obligations).toHaveLength(7);
+  expect(r.missing).toEqual([]);
+  const briefs = f.requests.filter((request) => request.purpose === "verify").map((request) => request.messages[1]!.text);
+  expect(briefs).toHaveLength(2);
+  expect(briefs.map((brief) => [...f.realBriefs.get(brief)!.batch!.candidates].map((c) => c.kind === "finder" ? c.candidate.line_number : 0))).toEqual([[5], [115]]);
+  for (const [i, brief] of briefs.entries()) {
+    expect(Buffer.byteLength(brief)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
+    const own = r.obligations.find((h) => h.start <= [5, 115][i]! && h.end >= [5, 115][i]!)!;
+    expect(addedBytes(brief, own.start)).toBe(f.rows[own.start - 1]);
+    for (const h of r.obligations) if (addedBytes(brief, h.start) !== f.rows[h.start - 1]) expect(brief).toContain(`part ${h.part!.n}, lines ${h.start} to ${h.end}, not shown; read with your tools`);
+  }
+});
+
+it("records examined as distinct hunk ids", async () => {
+  const f = setup(undefined, ["a.txt"]);
+  const r = await runStagedReview(f.args);
+  expect(r.sessions.filter((s) => s.role.startsWith("finder:")).map((s) => s.examined)).toEqual([["h1"], ["h1"]]);
+});
+
+it("bounds a candidate's own part before its two cited 120 KB removal fragments", async () => {
+  const old = ["old_a", "old_b"].map((s) => s.padEnd(119 * 1024, "x"));
+  const next = "unsafe operation".padEnd(119 * 1024, "y");
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") answer.candidates = brief.pass === "local" && brief.unit!.hunks.some((h) => !h.deletion)
+      ? [{ ...candidate("a.txt"), evidence: old.map((quote, i) => ({ file_path: "a.txt", line_number: i + 1, quote: quote.slice(0, 5), removed: true as const })) }] : [];
+    return answer;
+  }, ["a.txt"]);
+  writeFileSync(join(f.dir, "a.txt"), next + "\n");
+  f.change.diffs = [{ path: "a.txt", text: "@@ -1,2 +1 @@\n" + old.map((s) => "-" + s).join("\n") + "\n+" + next + "\n" }];
+  const shared = { change: f.change, scan: f.scan, config: f.config, lenses: [], secrets: [] };
+  f.args.verifyBrief = (batch) => { const b = buildVerifyBrief(shared, batch); f.realBriefs.set(b.text, { batch }); return b; };
+  const r = await runStagedReview(f.args);
+  const briefs = f.requests.filter((r) => r.purpose === "verify").map((r) => r.messages[1]!.text);
+  expect(briefs).toHaveLength(1);
+  expect(Buffer.byteLength(briefs[0]!)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
+  expect(addedBytes(briefs[0]!, 1)).toBe(next);
+  expect(briefs[0]).toContain("not shown; read with your tools");
+  expect(completion(r, f).status).toBe("complete");
+});
+
+it("abandons one candidate when its own part and fixed verifier blocks exceed the bound", async () => {
+  const f = wideVerifier([61], "convention\n".repeat(14000));
+  const r = await runStagedReview(f.args);
+  expect(completion(r, f).status).toBe("incomplete");
+  expect(r.missing.join(" ")).toContain("MAX_BRIEF_BYTES");
+  expect(f.requests.filter((r) => r.purpose === "verify")).toEqual([]);
+});
+
+it("renders a 300-part verifier batch a constant number of times", async () => {
+  const f = setup((answer) => answer, ["a.txt"]);
+  const refs = Array.from({ length: 300 }, (_, i) => ({ id: `h${i + 1}`, path: "a.txt", start: i * 2 + 1, end: i * 2 + 1, deletion: false, old: null, part: { n: 1, of: 1, whole: `a.txt:${i * 2 + 1}` } }));
+  f.args.inventory = refs;
+  f.args.units = [{ id: "u1", files: ["a.txt"], hunks: refs, diffBytes: 0 }];
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(600));
+  f.change.coverage.set("a.txt", makeLineSet(refs.map((h) => h.start)));
+  f.change.diffs = [{ path: "a.txt", text: "diff --git a/a.txt b/a.txt\n" + refs.map((h) => `@@ -0,0 +${h.start} @@\n+unsafe operation\n`).join("") }];
+  let renders = 0;
+  f.args.verifyBrief = (batch) => {
+    renders++;
+    const b = buildVerifyBrief({ change: f.change, scan: f.scan, config: f.config, lenses: [], secrets: [] }, batch);
+    f.realBriefs.set(b.text, { batch });
+    return b;
+  };
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(renders).toBeLessThanOrEqual(3);
+  const brief = f.requests.find((r) => r.purpose === "verify")!.messages[1]!.text;
+  expect(brief.match(/^diff --git /gm)).toHaveLength(1);
+});
+
+it("verifies one candidate among 3000 single-part hunks without abandoning its batch", async () => {
+  const f = setup(undefined, ["a.txt"]);
+  const lines = Array.from({ length: 3000 }, (_, i) => i * 2 + 1);
+  const refs = lines.map((n, i) => ({ id: `h${i + 1}`, path: "a.txt", start: n, end: n, deletion: false, old: null, part: { n: 1, of: 1, whole: `a.txt:${n}` } }));
+  f.args.inventory = refs;
+  f.args.units = Array.from({ length: 30 }, (_, i) => ({ id: `u${i + 1}`, files: ["a.txt"], hunks: refs.slice(i * 100, (i + 1) * 100), diffBytes: 0 }));
+  writeFileSync(join(f.dir, "a.txt"), "unsafe operation\n".repeat(6000));
+  f.change.coverage.set("a.txt", makeLineSet([...lines]));
+  f.change.diffs = [{ path: "a.txt", text: lines.map((n) => `@@ -${n} +${n} @@\n-old\n+unsafe operation\n`).join("") }];
+  f.args.verifyBrief = (batch) => { const b = buildVerifyBrief({ ...f, lenses: [], secrets: [] }, batch); f.realBriefs.set(b.text, { batch }); return b; };
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings).toHaveLength(1);
+  const briefs = f.requests.filter((r) => r.purpose === "verify");
+  expect(briefs).toHaveLength(1);
+  expect(Buffer.byteLength(briefs[0]!.messages[1]!.text)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
+});
+
+it("7n. delivers the removed rows in the last file of a 6 MB change", async () => {
+  const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["zz-last.txt"]);
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@openqodex.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: f.dir });
+  git("init", "-q");
+  writeFileSync(join(f.dir, "zz-last.txt"), "before\nremoved tail\nafter\n");
+  git("add", "zz-last.txt");
+  git("commit", "-qm", "Base");
+  const content = `${"x".repeat(1049)}\n`.repeat(3000);
+  writeFileSync(join(f.dir, "b-large.txt"), content);
+  writeFileSync(join(f.dir, "zz-last.txt"), "before\nafter\n" + content);
+  Object.assign(f.change, await getChange({ repoRoot: f.dir, scope: {}, exclude: [], tempRoot: join(f.dir, ".openqodex/tmp") }));
+  const deletion = { path: "zz-last.txt", start: 1, end: 2, deletion: true };
+  const page = deliverRanges({ change: f.change, snapshotDir: f.dir, unread: [deletion], secrets: [] });
+  expect(page.delivered).toEqual([deletion]);
+  expect(page.text).toContain("-\tremoved tail");
+  expect(f.change.diffs!.at(-1)!.file).toBeDefined();
+  expect(f.change.notReviewed).toEqual([]);
+  const refs = obligations(f.change, (path) => readFileSync(join(f.dir, path), "utf8"));
+  f.args.inventory = refs;
+  f.args.units = unitsOf(f.change, refs);
+  // Omit this deletion from the brief to exercise the correction's removedBlock.
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: unit.hunks.filter((h) => !h.deletion) });
+  const result = await runStagedReview(f.args);
+  expect(result.delivered).toContainEqual(expect.objectContaining({ path: "zz-last.txt", deletion: expect.any(Object) }));
+  expect(f.requests.some((r) => r.messages.some((m) => m.text.includes("-\tremoved tail")))).toBe(true);
+  expect(result.missing).toEqual([]);
+});
+
+// 7j. A stored or unsent digest must never credit a changed range.
+it.each([false, true])("credits digest ranges only after a brief was sent, refused: %s", async (refused) => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") {
+      answer.examined = ["d1"];
+      answer.analysis = [{ hunk: "d1", changed: "Records changed.", could_break: "Values can be invalid." }];
+      answer.candidates = [];
+      expect(brief.unit!.digest?.kind).toBe("json");
+    }
+    return answer;
+  }, ["a.txt"]);
+  const hunks = hunkRefs(f.change);
+  f.args.inventory = hunks;
+  f.args.units = [{ id: "u1", files: ["a.txt"], hunks, diffBytes: 0, digest: { id: "d1", kind: "json", text: "array length 300", processed: hunks.map((h) => h.id), omitted: [] } }];
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: [] });
+  if (refused) f.refuse();
+  const r = await runStagedReview(f.args);
+  const coverage = readCoverage({ change: f.change, obligations: hunks, trace: [], digestCarried: r.digestCarried, briefCarried: r.briefCarried, delivered: r.delivered });
+  expect(coverage.given).toEqual(refused ? [] : [expect.objectContaining({ path: "a.txt", by: "digest" })]);
+  expect(coverage.unread).toHaveLength(refused ? 1 : 0);
+  expect(r.rounds.flatMap((round) => round.delivered)).toEqual([]);
+  if (!refused) expect(r.missing).toEqual([]);
+});
+
+
+it("R2.3 completes a fragmented one MB replacement in staged sessions", async () => {
+  const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["a.txt"]);
+  const text = "n".repeat(1024 * 1024);
+  writeFileSync(join(f.dir, "a.txt"), text + "\n");
+  f.change.diffs = [{ path: "a.txt", text: `@@ -1 +1 @@\n-${"o".repeat(text.length)}\n+${text}\n` }];
+  const shared = { ...f, lenses: [], secrets: [] };
+  f.args.findBrief = (unit, pass) => { const b = buildFindBrief(shared, unit, pass); f.realBriefs.set(b.text, { unit, pass }); return b; };
+  const result = await runStagedReview(f.args);
+  expect(result.missing).toEqual([]);
+  expect(result.obligations.filter((h) => h.deletion).every((h) => h.fragment)).toBe(true);
+  const coverage = readCoverage({ change: f.change, obligations: result.obligations, briefCarried: result.briefCarried, delivered: result.delivered, trace: [] });
+  expect(coverage.unread).toEqual([]);
+});
+
+
+it("R2.12 credits staged pages when briefs leave a long line for delivery", async () => {
+  const f = setup((answer) => { if (answer.version === "find-1") answer.candidates = []; return answer; }, ["a.txt"]);
+  const text = "x".repeat(600000);
+  writeFileSync(join(f.dir, "a.txt"), text + "\n");
+  f.change.diffs = [{ path: "a.txt", text: `@@ -0,0 +1 @@\n+${text}\n` }];
+  f.args.findBrief = (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(), carried: [] });
+  const result = await runStagedReview(f.args);
+  const coverage = readCoverage({ change: f.change, obligations: result.obligations, briefCarried: result.briefCarried, delivered: result.delivered, trace: [] });
+  expect(coverage.unread).toEqual([]);
+  expect(coverage.given).toEqual([expect.objectContaining({ by: "page", fragment: expect.objectContaining({ from: 1, to: text.length }) })]);
+});
+
+it("gives the shown scanner finding the relied-on lines of a finder duplicate folded into it", async () => {
+  const f = setup((answer, _request, brief) => {
+    if (answer.version === "find-1") for (const c of answer.candidates) if (c.file_path === "a.txt") c.evidence.push({ file_path: "b.txt", line_number: 1, quote: "unsafe operation" });
+    if (answer.version === "verify-1") for (const v of answer.verdicts) {
+      const c = brief.batch!.candidates.find((x) => x.id === v.id)!;
+      if (c.kind === "finder" && c.candidate.file_path === "a.txt") { v.duplicate_of = "c1"; v.relied_on = [{ file_path: "b.txt", line_number: 1 }]; }
+    }
+    return answer;
+  }, ["a.txt", "b.txt"]);
+  f.scan.candidates.push(scanner("a.txt"));
+  const r = await runStagedReview(f.args);
+  expect(r.missing).toEqual([]);
+  expect(r.report.findings.filter((x) => x.file_path === "a.txt")).toEqual([expect.objectContaining({ candidate: "c1", evidence: [{ file_path: "b.txt", line_number: 1 }] })]);
 });

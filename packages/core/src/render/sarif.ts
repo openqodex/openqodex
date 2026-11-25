@@ -2,6 +2,7 @@
 // one per scanner, so a code scanning view groups them by tool. Observations
 // have note level and a tier property, separate from counted results.
 import type { Candidate, Report, ReportFinding, Severity } from "../types.js";
+import { shortenedMissing } from "../completion.js";
 import { orderObservations, orderPossible } from "./common.js";
 
 type SarifResult = {
@@ -97,7 +98,7 @@ function completionOf(report: Report): Record<string, unknown> {
         executionSuccessful: complete,
         toolExecutionNotifications: complete
           ? []
-          : [{ level: "error", message: { text: `The review is incomplete, so it is not a clean result: ${c.missing.join("; ") || "no completion record"}` } }],
+          : [{ level: "error", message: { text: `The review is incomplete, so it is not a clean result: ${shortenedMissing(c.missing).join("; ") || "no completion record"}` } }],
       },
     ],
     properties: { completion: c },

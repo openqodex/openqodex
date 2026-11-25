@@ -21,6 +21,7 @@ import { FolderReader, matchesGlob, type Id } from "@openqodex/core";
 import type { Relation } from "../model/records.js";
 import type { RepoReader } from "../safe-fs.js";
 import type { UnknownSite } from "../types.js";
+import { NEXT, gap } from "../gap.js";
 import { keptText } from "../frameworks/shared/kept.js";
 import { LOCKFILE_BYTES, MANIFEST_BYTES, gemfileGems, goModRequires, normalisePy, parseJsonc, pnpmLinks, pnpmPackages, pyprojectDeps, requirementsDeps, requirementsIncludes, setupCfgRequires, yarnLock } from "./manifests.js";
 import type { Linkage } from "./manifests.js";
@@ -146,8 +147,12 @@ function includeShown(spec: string): string {
   return keptText(t) ?? "a file";
 }
 
+// A gap that can hide a relation reaches every definition of its project
+// (the build is partial then too); one that can hide none only makes a
+// binding less sure, so it reaches no definition.
 export function metadataUnknown(g: MetadataGap): UnknownSite {
-  return { file: g.file, line: 0, column: 0, name: "", cause: "metadata-unreadable", shape: "other", caller: g.file, scope: "project", note: g.note };
+  const hides = g.affects.length > 0;
+  return gap({ cause: "metadata-unreadable", place: { file: g.file, line: 0 }, reaches: hides ? "scope" : { ids: [] }, next: hides ? NEXT.metadata : NEXT.noCall, scope: "project", note: g.note });
 }
 
 // A file the model reads: its text, why it could not be read, or null

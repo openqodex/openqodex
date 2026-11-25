@@ -558,7 +558,7 @@
     {
       "scanner": "ruff",
       "status": "ran",
-      "version": "0.8.4",
+      "version": "0.17.3",
       "rawCount": 0,
       "keptCount": 0,
       "durationMs": "<DURATION_MS>",

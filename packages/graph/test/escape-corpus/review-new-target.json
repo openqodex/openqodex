@@ -1,0 +1,19 @@
+{
+  "covers": "`new.target` names the class a constructor runs for, not `import.meta`: the file stays readable",
+  "files": {
+    "src/a.ts": "export function f() {}\n",
+    "src/b.ts": "import { f } from \"./a\";\nexport class Base {\n  constructor() {\n    if (new.target === Base) throw new Error(\"abstract\");\n  }\n}\nf();\n"
+  },
+  "mustReach": [
+    {
+      "target": "src/a.ts#f",
+      "caller": "src/b.ts",
+      "file": "src/b.ts",
+      "line": 7
+    }
+  ],
+  "whole": [
+    "src/a.ts#f"
+  ],
+  "floored": []
+}

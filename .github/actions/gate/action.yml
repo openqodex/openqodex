@@ -5,8 +5,8 @@ description: >-
   and the macOS gate jobs in ci.yml. The calling job checks the repository
   out first. With full set to "true" it is the real-programs tier, pnpm gate:
   every step, the growth tests, and the required scanners checked before the
-  unit tests. With full set to "false" (the fast gate an ordinary pull
-  request and its merge queue run get) the scanner check, the end-to-end
+  unit tests. With full set to "false" (the fast gate pull requests, the
+  merge queue and pushes to main get) the scanner check, the end-to-end
   tests, the golden run, the growth tests, the scanner cache and the Rust
   install are left out, and every unit test still runs; ci.yml says where
   each gate runs. Neither runs the cases that call a real model: that is
@@ -40,14 +40,23 @@ runs:
       run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
     - shell: bash
       run: pnpm install --frozen-lockfile
+    # The Ruby gems' launchers (brakeman, rubocop) start the Ruby that
+    # installed them by its full path, so a cached folder works only with
+    # that Ruby. The runner image's Ruby goes into the cache key: when
+    # ubuntu-latest moved to 26.04 (Ruby 3.2 to 3.3) the old key restored
+    # launchers naming a Ruby that was gone, and they failed with ENOENT.
+    - id: ruby
+      if: inputs.full == 'true'
+      shell: bash
+      run: echo "key=$(ruby -e 'print "#{RUBY_VERSION}#{Gem.ruby}".tr("^A-Za-z0-9.", "-")' 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
     # The end-to-end tests install the pinned scanners once into this folder.
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: inputs.full == 'true'
       with:
         path: ${{ runner.temp }}/openqodex-e2e-home
-        key: scanners-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/scanners/toolchain.json', 'packages/scanners/locks/**') }}
+        key: scanners-${{ runner.os }}-${{ runner.arch }}-ruby${{ steps.ruby.outputs.key }}-${{ hashFiles('packages/scanners/toolchain.json', 'packages/scanners/locks/**') }}
     # The steps below mirror scripts/gate.sh one for one; the fast gate
-    # skips the three steps marked full.
+    # skips the three steps gate.sh marks full_step.
     - name: Shipped instruction templates
       shell: bash
       run: node scripts/instruction-sections.mjs --check

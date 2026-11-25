@@ -1,0 +1,79 @@
+{
+  "covers": "gaps of the gin plugin past the unknowns it lists in one build (gin MAX_UNKNOWNS)",
+  "caps": [
+    "frameworks/gin/resolve.ts#MAX_UNKNOWNS"
+  ],
+  "commit": true,
+  "files": {
+    "a.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc h(c *gin.Context) {}\n\nfunc rega() {\n",
+      {
+        "repeat": "\tx.GET(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "b.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc regb() {\n",
+      {
+        "repeat": "\tx.GET(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "c.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc regc() {\n",
+      {
+        "repeat": "\tx.GET(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "d.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc regd() {\n",
+      {
+        "repeat": "\tx.GET(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "e.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc rege() {\n",
+      {
+        "repeat": "\tx.GET(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "f.go": [
+      "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc regf() {\n",
+      {
+        "repeat": "\tx.GET(\"/x\", h)\n",
+        "times": 1667
+      },
+      "}\n"
+    ],
+    "go.mod": "module example.com/app\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+    "main.go": "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc deep(c *gin.Context) {}\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/y\", deep)\n\tr.Run()\n}\n"
+  },
+  "mustReach": [
+    {
+      "target": "main.go#deep",
+      "caller": null,
+      "file": "main.go",
+      "line": 9
+    }
+  ],
+  "whole": [],
+  "floored": [
+    {
+      "target": "main.go#deep",
+      "reason": "stopped listing unknowns after 10000",
+      "at": "f.go:1671",
+      "gap": {
+        "cause": "fan-out-capped",
+        "at": "f.go:1671"
+      }
+    }
+  ]
+}

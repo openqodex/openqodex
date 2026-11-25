@@ -1,0 +1,17 @@
+{
+  "covers": "a method named `createRequire` on a class of the repository counts as a loader: the rule catches `m.createRequire` on any value and accepts this cost",
+  "files": {
+    "package.json": "{\"name\": \"app\", \"private\": true, \"type\": \"module\"}",
+    "src/b.ts": "export function g(): void {}\n",
+    "src/use.ts": "class Kit {\n  createRequire(o: string): string {\n    return o;\n  }\n}\nexport const v = [new Kit().createRequire(\"a\")];\n"
+  },
+  "mustReach": [],
+  "whole": [],
+  "floored": [
+    {
+      "target": "src/b.ts#g",
+      "reason": "may be any module of the repository",
+      "at": "src/use.ts:6"
+    }
+  ]
+}

@@ -12,7 +12,7 @@
 import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { parseConfig } from "@openqodex/core";
+import { LineSet, parseConfig } from "@openqodex/core";
 import type { BuiltinScanner, ScannerSource } from "@openqodex/core";
 import { ADAPTERS, IN_PROCESS } from "../adapters/index.js";
 import { runScanners } from "../run.js";
@@ -161,7 +161,7 @@ async function runCheckCase(c: CheckCase, root: string): Promise<{ ok: boolean; 
       writeFileSync(join(repo, name), body);
     }
     const paths = Object.keys(files);
-    const coverage = new Map(paths.map((p) => [p, new Set(files[p]!.split("\n").map((_, i) => i + 1))]));
+    const coverage = new Map(paths.map((p) => [p, new LineSet().addRange(1, files[p]!.split("\n").length)]));
     const { scan } = await runScanners({
       repoDir: repo,
       changedPaths: paths,
