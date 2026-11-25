@@ -460,6 +460,8 @@ describe("an unpacked package edited after it was unpacked runs under the tarbal
       ["a file dropped from its list", (r) => delete r.files["package/dist/lib.js"]],
       ["no file list", (r) => delete r.files],
       ["another version", (r) => (r.version = "9.9.9")],
+      // The run reads the release gate from the record's spec.
+      ["a spec of its own", (r) => (r.spec = "file:other.tgz")],
     ];
     for (const [why, edit] of edits) {
       const edited = readJson(recordPath);
@@ -467,7 +469,7 @@ describe("an unpacked package edited after it was unpacked runs under the tarbal
       writeFileSync(recordPath, JSON.stringify(edited, null, 2));
       const again = await preparePackage(`file:${tarball}`, { cache });
       expect(again.extracted, `a record with ${why} was reused`).toBe("again");
-      expect(again.record, `a record with ${why} was reported`).toMatchObject({ version: first.record.version, files: first.record.files });
+      expect(again.record, `a record with ${why} was reported`).toMatchObject({ spec: first.record.spec, version: first.record.version, files: first.record.files });
     }
   });
 });

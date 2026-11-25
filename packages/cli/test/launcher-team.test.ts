@@ -28,6 +28,9 @@
 // 14. A re-run of init leaves the longer, version-pinned team section an
 //     earlier version wrote, recorded or not (a teammate's checkout), or
 //     replaces one the developer edited.
+// 15. The team section lets a teammate's agent push on a blocked verdict
+//     without the developer's say: a teammate with nothing installed has no
+//     skill to say so.
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -141,7 +144,7 @@ describe("the user-scope skill calls the launcher", () => {
 });
 
 describe("the team section in the repo", () => {
-  it("is written into CLAUDE.md and AGENTS.md once, shows in git status, never names the skill (failures 6, 7, 11)", () => {
+  it("is written into CLAUDE.md and AGENTS.md once, shows in git status, never names the skill, and stops on a blocked verdict (failures 6, 7, 11, 15)", () => {
     const s = sandbox();
     const first = cli(s, ["init", "--yes", "--agent", "claude-code"]);
     expect(first.status, first.stderr).toBe(0);
@@ -152,6 +155,7 @@ describe("the team section in the repo", () => {
       expect(text).not.toContain("openqodex@");
       expect(text.split("\n").filter((l) => l !== "" && !l.startsWith("<!-- openqodex:"))).toHaveLength(1);
       expect(text.toLowerCase()).not.toContain("skill");
+      expect(text).toContain("Do not push on a blocked verdict unless the developer says so after seeing the findings.");
       expect(text).not.toContain(String.fromCodePoint(0x2014));
     }
     expect(status(s)).toContain("?? AGENTS.md\n");

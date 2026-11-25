@@ -454,6 +454,9 @@ function parseArgs(argv) {
   o.graph ??= o.control ? ["off"] : server ? ["on"] : ["off", "on"];
   if (o.control && (o.graph.some((g) => g !== "off") || o.web !== "off")) throw new Error("the control reviewer uses no OpenQodex graph or web tools: use --graph off --web off");
   if (o.release && (o.smoke || o.draft || (o.package !== "local" && !o.package.startsWith("npm:")) || o.split !== "test" || !o.real)) throw new Error("--release requires a comparison's local build or a published npm package and a real suite's test split, without --smoke or --draft");
+  // The Greptile judge checks the run's build against the comparison's local
+  // build (lib/comparison.mjs validateRunManifest); an npm package has none.
+  if (o.release && o.package.startsWith("npm:") && SUITES[o.suite]?.board === "greptile") throw new Error("--release with an npm package runs only where its judge reads an npm build: the Greptile judge reads a comparison's local build, so use --package local");
   if (o.release && !scan && SUITES[o.suite]?.board && o.repeat < BOARD_REPEATS) throw new Error(`--repeat ${o.repeat}: a release review run of a board suite attaches with ${BOARD_REPEATS} repeats (the comparison record's pin), so a run of fewer is refused before it spends`);
   // Model reviews wait on the endpoint, not this machine, so two run at once.
   o.concurrency ??= server ? 2 : 1;

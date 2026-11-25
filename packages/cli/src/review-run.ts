@@ -216,6 +216,12 @@ export async function runReview(o: ReviewOptions): Promise<number> {
   const repoRoot = loaded.repoRoot;
   const instructionsRef = o.instructionsRef === undefined ? undefined : await resolveInstructionRef(repoRoot, o.instructionsRef);
   const config: Config = o.blockOn === undefined ? loaded.config : { ...loaded.config, blockOnSeverity: o.blockOn };
+  // A project with no reviewer list, reviewed without --reviewer: one note
+  // in the receipt and the report names the pick and how to pin the list.
+  // Not with --report-dir or --config, which read another settings file.
+  // Read now, not at the end: the settings file may be edited, even broken,
+  // while the reviewer works, and the finished review must still be saved.
+  const unlisted = o.reviewer === undefined && o.reportDir === undefined && o.flags.config === undefined && config.reviewers === undefined && !projectNamesReviewers(repoRoot);
   if (o.reportDir === undefined) {
     const hint = conventionHint(repoRoot, config.instructionsFiles);
     if (hint) warn(hint);
@@ -329,10 +335,6 @@ export async function runReview(o: ReviewOptions): Promise<number> {
     const { completion, change } = result;
     if (result.rounds) writeRounds(result.rounds);
     const served = completion.reviewer;
-    // A project with no reviewer list, reviewed without --reviewer: one note
-    // in the receipt and the report names the pick and how to pin the list.
-    // Not with --report-dir or --config, which read another settings file.
-    const unlisted = o.reviewer === undefined && o.reportDir === undefined && o.flags.config === undefined && config.reviewers === undefined && !projectNamesReviewers(repoRoot);
     const picked = unlisted && served !== null ? (REVIEWER_LABELS[served.driver] ?? served.driver) : null;
     const report = picked === null ? result.report : { ...result.report, notes: [...(result.report.notes ?? []), `Reviewer list: none set for this project, so the automatic order picked ${picked}. Run \`openqodex init\` to pin the reviewers for the whole team.`] };
     noteReviewer({ started: served !== null, driver: served?.driver, version: served?.version, model: served?.model, effort: served?.effort, ...(served?.passed?.length ? { passed: passedLines(served.passed) } : {}), sessions: served?.sessions });

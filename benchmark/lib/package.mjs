@@ -230,6 +230,9 @@ function treeOf(dir) {
 // vouches for. Every field of record.json must equal it, since the run
 // reports the record it returns.
 function folderProblem(dir, record, expected) {
+  // A field the unpacking never writes (a `spec`, say) would override what
+  // the run reports and the release gate it picks.
+  if (Object.keys(record).sort().join() !== "bytes,files,integrity,name,sha256,version") return "its record holds other fields";
   if (record.sha256 !== expected.sha256 || record.integrity !== expected.integrity || record.bytes !== expected.bytes) return "its record names another tarball";
   if (record.name !== expected.name || record.version !== expected.version) return "its record names another package";
   const named = Object.keys(record.files ?? {});

@@ -493,6 +493,13 @@ describe("the note of a project with no list", () => {
       expect(runFile("report.md")).not.toContain("Reviewer list:");
     }
   });
+
+  it("14. a settings file saved broken while the reviewer works does not lose the finished review", async () => {
+    const claude = fake("claude", { answered: () => writeFileSync(join(lastRepo, ".openqodex", "config.yaml"), "review: [unclosed\n") });
+    expect(await review([claude], `version: 1\nreview:\n${SINGLE}`, { format: "terminal" })).toBe(0);
+    expect(out.split("\n")).toContain(NOTE);
+    expect(runFile("report.md")).not.toBeNull();
+  });
 });
 
 describe("the list a terminal init writes", () => {

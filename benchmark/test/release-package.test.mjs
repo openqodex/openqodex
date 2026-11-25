@@ -9,6 +9,8 @@
 //    package and its integrity first, and the truth is read only after.
 // 5. An npm release run runs the cached package's code (its CLI's --version) before its record is checked
 //    against the release and the registry, so a tampered cache runs before it is refused.
+// 6. An npm release run of the Greptile suite spends its reviews, then the Greptile judge refuses it: that judge
+//    checks the run's build against the comparison's local build, which an npm package has none of.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -53,6 +55,13 @@ it("a release run with --package npm:<version> passes the argument check, and a 
   expect(existsSync(marker), "the package's CLI ran before its record was checked").toBe(false);
   expect(run(cache, "9.9.9", "--package", "file:/nowhere/openqodex-9.9.9.tgz"), "a packed file was admitted under --release").toContain(AT_ARGS);
   expect(run(cache, "9.9.9", "--package", "npm:9.9.9", "--smoke"), "a smoke run was admitted under --release").toContain("--smoke runs development cases only");
+});
+
+it("an npm release run of the Greptile suite is refused at the argument check, before anything is spent", () => {
+  const marker = join(tempDir("oq-release-package-marker-"), "ran");
+  const cache = cacheWithPackage(marker);
+  expect(run(cache, "9.9.9", "--package", "npm:9.9.9", "--suite", "greptile"), "an npm Greptile release run passed the argument check").toContain("--release with an npm package runs only where its judge reads an npm build");
+  expect(existsSync(marker), "the package's CLI ran").toBe(false);
 });
 
 // The package record run.mjs makes of npm:0.23.0 (lib/package.mjs preparePackage), and the registry's answer for it.
