@@ -37,6 +37,7 @@ import {
   checkSubmission,
   REVIEWER_TOOLS,
   REVIEWER_WEB_TOOLS,
+  changedHunks,
   cleanupDiffs,
   completionRecord,
   crossedBoundary,
@@ -108,7 +109,7 @@ import { runStagedReview } from "./stages.js";
 import { modelEvidence } from "./evidence.js";
 import { modelRecord, modelReport, reviewRender } from "./model-record.js";
 import { agentReviewer } from "./reviewer.js";
-import type { Budget, Disposition, IncompleteCause, ModelReviewer, NeighbourhoodStatus, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult } from "./reviewer.js";
+import type { Budget, Disposition, IncompleteCause, IncompleteDetail, ModelReviewer, NeighbourhoodStatus, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult, ReviewStatus } from "./reviewer.js";
 import { incompleteDetail, stoppedDetail } from "./outcome.js";
 import type { StagedCause } from "./outcome.js";
 import { disagreementsOf, mergeFindings, possibleAfterSecond, runSecondReviewer, withSecondReviewer } from "./second.js";
@@ -289,7 +290,9 @@ export type ReviewDeps = {
 
 export type ReviewCoreResult =
   // Nothing to review: the change is empty, or the repository has no files.
-  | { ended: "nothing" }
+  // `lineless`: a model review's change has files but no line a reviewer
+  // can read (binary files, renames or mode changes only).
+  | { ended: "nothing"; lineless?: true }
   // No reviewer could start, or its boundary could not be shown for this
   // run: the scan's candidates stay unchecked.
   // `started` and `usage`: a list whose every entry failed or was passed
@@ -480,7 +483,12 @@ async function headOf(repoRoot: string): Promise<string> {
 // The change and its snapshot, then the scan, each timed on `clock`. `keep`
 // receives the snapshot as soon as it exists, so the caller removes it
 // whatever fails later.
-async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHost, clock: PhaseClock, keep: (s: Snapshot) => void, keepChange: (c: Change) => void): Promise<Prepared | null> {
+// A model review (reviewChange) of a change with files but no changed line,
+// no deletion and no whole file to read: a reviewer would read nothing, so
+// it is not given one and the review has nothing to review.
+const lineless = (deps: ReviewDeps, change: Change): boolean => deps.model !== undefined && changedHunks(change).length === 0 && (change.uncovered ?? []).length === 0;
+
+async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHost, clock: PhaseClock, keep: (s: Snapshot) => void, keepChange: (c: Change) => void, noLines: () => void): Promise<Prepared | null> {
   const { repoRoot, config, only, skip } = inputs;
   const say = (line: string) => deps.onEvent({ type: "progress", line });
   const warn = (line: string) => deps.onEvent({ type: "warning", line });
@@ -497,6 +505,10 @@ async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHos
       if (scoped) keepChange(scoped.full);
       if (change.files.length === 0) {
         warn(nothingToReviewLine(change));
+        return null;
+      }
+      if (lineless(deps, change)) {
+        noLines();
         return null;
       }
       const snapshot = await deps.snapshots.make(repoRoot, t.headSha, `${change.shortId}-`);
@@ -554,6 +566,10 @@ async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHos
   }
   if (change.files.length === 0) {
     warn(nothingToReviewLine(change));
+    return null;
+  }
+  if (lineless(deps, change)) {
+    noLines();
     return null;
   }
   say(`Reviewing the change against ${change.baseRef}: ${change.stats.files} ${change.stats.files === 1 ? "file" : "files"}, +${change.stats.additions} -${change.stats.deletions}`);
@@ -623,10 +639,11 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
   };
   const graphHost: GraphHost = { store: deps.graphStore, onProgress: say, warn, ...(deps.scoped ? { inventory: deps.scoped.inventory, readBase: deps.scoped.readBase } : {}) };
   try {
-    const prep = await prepare(inputs, deps, scanHost, clock, (s) => (snapshot = s), (c) => { changes.add(c); });
+    let noLines = false;
+    const prep = await prepare(inputs, deps, scanHost, clock, (s) => (snapshot = s), (c) => { changes.add(c); }, () => { noLines = true; });
     if (prep === null) {
       if (inputs.all) warn("Nothing to review: the repository has no files");
-      return await finish({ ended: "nothing" });
+      return await finish(noLines ? { ended: "nothing", lineless: true } : { ended: "nothing" });
     }
     clock.enter("brief");
     const { p } = prep;
@@ -1138,13 +1155,13 @@ function refuseSecond(second: Reviewer | undefined): void {
 // the code of an incomplete stop. `scope`: the decision, when the proofs got
 // that far. `scan`: the scan record, when the scanners ran before it stopped.
 function stoppedResult(stop: "nothing_to_review" | IncompleteCause, reason: string, scope: ReviewScope | null = null, notes: string[] = [], scan: ReviewResult["scan"] = null): Untimed {
-  const status = stop === "nothing_to_review" ? "nothing_to_review" : "incomplete";
+  const outcome = stop === "nothing_to_review" ? { status: "nothing_to_review" as const } : { status: "incomplete" as const, incomplete: stoppedDetail(stop) };
+  const { status } = outcome;
   const lead = status === "nothing_to_review" ? "Nothing to review" : "Review incomplete";
   return {
-    status,
+    ...outcome,
     reason,
     reasonCode: stop,
-    ...(stop === "nothing_to_review" ? {} : { incomplete: stoppedDetail(stop) }),
     filesExamined: 0,
     hunksExamined: 0,
     neighbourhood: null,
@@ -1264,7 +1281,10 @@ export async function reviewChange(input: ReviewChangeInput, reviewer: Reviewer,
 // A result before the clock is read, and the report its renderers draw
 // from (null for a review that stopped before a reviewer was given the
 // change).
-type Untimed = Omit<ReviewResult, "timings">;
+// An incomplete result carries its structured cause, and no other result
+// does: a new result path that leaves it out, or sets it on a complete
+// review, does not compile. Every count is required by ReviewResult itself.
+type Untimed = Omit<ReviewResult, "timings" | "status" | "incomplete"> & ({ status: "incomplete"; incomplete: IncompleteDetail } | { status: Exclude<ReviewStatus, "incomplete">; incomplete?: never });
 type Reviewed = { result: Untimed; report: Report | null };
 
 // The result with the clock read now, once the result is built and the
@@ -1355,6 +1375,7 @@ async function reviewInScope(
   }
   if (r.ended === "nothing") {
     const since = decision.scope.kind === "delta" ? "since the previously reviewed commit" : "since the merge base";
+    if (r.lineless) return { result: stoppedResult("nothing_to_review", `nothing to review: the head changes no line a reviewer can read ${since} (only binary files, renames or mode changes)`, decision.scope, stoppedNotes()), report: null };
     return { result: stoppedResult("nothing_to_review", `nothing to review: the head adds no change ${since}${input.scopes !== undefined ? " inside the review's scopes" : ""}`, decision.scope, stoppedNotes()), report: null };
   }
   if (r.ended !== "model-reviewed") return { result: stoppedResult(r.ended === "unavailable" ? "reviewer_unavailable" : "setup_failed", r.ended === "unavailable" ? r.reasons.join("; ") : "an agent reviewer ran where a model reviewer was given", decision.scope, stoppedNotes(), scan), report: null };
@@ -1408,13 +1429,12 @@ async function reviewInScope(
   const incomplete = complete ? null : incompleteDetail({ evidence: r.evidence, calls: r.usage.calls, staged: r.causes });
   // The changed ranges a reviewer was shown or read, and their files.
   const examined = (r.evidence.coverage.inventory ?? []).filter((h) => h.by !== undefined);
+  const outcome = incomplete ? { status: "incomplete" as const, reason: shortenedMissing(completion.missing).join("; "), incomplete } : { status: report.verdict === "blocked" ? "complete_blocking" as const : "complete" as const };
   const result: Untimed = {
-    status: complete ? (report.verdict === "blocked" ? "complete_blocking" : "complete") : "incomplete",
-    ...(complete ? {} : { reason: shortenedMissing(completion.missing).join("; ") }),
+    ...outcome,
     reasonCode: incomplete?.cause ?? null,
-    ...(incomplete ? { incomplete } : {}),
     filesExamined: new Set(examined.map((h) => h.path)).size,
-    hunksExamined: r.evidence.coverage.inventory ? examined.length : r.evidence.coverage.covered,
+    hunksExamined: r.evidence.coverage.covered,
     neighbourhood: r.neighbourhood,
     scope: decision.scope,
     findings: resultFindings(report.findings, foundBy),
