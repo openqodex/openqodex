@@ -12,6 +12,7 @@ import { assetPath } from "../assets.js";
 import { EXIT_OK } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
 import { warn } from "../pipeline.js";
+import { noteFolder } from "../telemetry/dispatch.js";
 import { runScan } from "./scan.js";
 
 const git$ = promisify(execFile);
@@ -74,6 +75,7 @@ export async function run(args: string[]): Promise<number> {
   }
   const source = assetPath("demo");
   const dir = targetDir(positionals[0]);
+  noteFolder(dir);
 
   cpSync(join(source, "baseline"), dir, { recursive: true });
   await git(dir, ["init", "--quiet"]);
@@ -90,7 +92,7 @@ export async function run(args: string[]): Promise<number> {
   }
 
   warn(`Demo repo built in ${dir}`);
-  const outcome = await runScan({ flags: { ...global, cwd: dir }, scope: {} });
+  const outcome = await runScan({ flags: { ...global, cwd: dir }, scope: {}, demo: true });
   warn("");
   warn(`The demo repo is in ${dir}`);
   const installing = outcome.report?.scanners.filter((s) => s.status === "installing").length ?? 0;

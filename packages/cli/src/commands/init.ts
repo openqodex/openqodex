@@ -12,8 +12,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
-import { CONFIG_MAX_BYTES, DEFAULT_CONFIG_YAML, REVIEWERS_SINCE, entryLabel, readRepoFile, FOLDER_CONFIG, INSTRUCTIONS_FILE, STATE_DIR, loadConfig, repoStat } from "@openqodex/core";
-import type { BuiltinScanner } from "@openqodex/core";
+import { CONFIG_MAX_BYTES, DEFAULT_CONFIG_YAML, REVIEWERS_SINCE, readRepoFile, FOLDER_CONFIG, INSTRUCTIONS_FILE, STATE_DIR, loadConfig, repoStat } from "@openqodex/core";
+import type { BuiltinScanner, ReviewerEntry } from "@openqodex/core";
 import { AGENT_NAMES, AGENTS, detectAgents, type AgentId } from "../agents/detect.js";
 import { readText, sha256 } from "../agents/files.js";
 import { Guard } from "../agents/guarded-fs.js";
@@ -27,11 +27,13 @@ import { clineCliData, targetsFor, teamSection, teamTargets, type Scope, type Ta
 import { runningContract } from "../contract.js";
 import { EXIT_OK, EXIT_TOOL_FAILED } from "../exit-codes.js";
 import { claudeDriver, codexDriver, hostAgent } from "@openqodex/review";
-import { defaultReviewerList, insertReviewerList } from "../reviewers/list.js";
+import { chooseReviewerList, defaultReviewerList, insertReviewerList, plannedLabel } from "../reviewers/list.js";
 import { launcherPath, launcherRunner, launcherUsers, oldLocks, openqodexHomeDir, planRuntime, planRuntimeRemoval, pruneRuntimes, removeOldLocks, staleRuntimes } from "../launcher.js";
 import { planGitHook, planGitHookRemoval, setHookChoice } from "./hook.js";
 import { instructionCandidates, mergeInstructionChoice, writeInstructionChoice } from "../instructions.js";
 import { firstReviewLine, reviewAfterInit } from "./init-review.js";
+import type { FirstReview } from "./init-review.js";
+import { dispatch, permitId, record as recordEvent } from "../telemetry/dispatch.js";
 import { REVIEWER_LABELS, reviewerReadiness, type Readiness } from "../review-run.js";
 import { pruneHomeReceipts, staleReceipts } from "../receipts.js";
 
@@ -247,6 +249,8 @@ type Setup = {
   // Where init may write, and the repository whose links it never follows:
   // every write, rename and delete goes through it (guarded-fs.ts).
   guard: Guard;
+  // The git hook and MCP choices this run planned, for the usage data.
+  chosen?: { hook: HookChoice | null; mcp: boolean };
 };
 
 // On uninstall: the files this run would remove that an agent staying set up
@@ -421,6 +425,7 @@ async function runLocked(s: Setup): Promise<Outcome> {
   const teamActions: Action[] = [];
   let failed = false;
 
+  s.chosen = { hook: null, mcp: mcp.on };
   const agentActions = await planAgents(s, record, targets, mcp.on, kept);
   let rootConfig = false;
   let hookChoice: HookChoice | null = null;
@@ -458,6 +463,7 @@ async function runLocked(s: Setup): Promise<Outcome> {
       await planReviewerList(s, team, record);
       const hook = hookChoiceFor(s, record);
       hookChoice = hook.hook;
+      s.chosen.hook = hookChoice;
       if (!s.flags.dryRun) setHookChoice(record, s.repoRoot, hookChoice);
       if (hookChoice === "pre-push") {
         if (runtimeActions.size === 0) {
@@ -686,10 +692,19 @@ async function planConventionChoice(s: Setup, actions: Action[]): Promise<void> 
   }
 }
 
+// One answer from a list for the reviewer list, or null when the developer cancels.
+async function pickOne(message: string, options: { value: string; label: string }[]): Promise<string | null> {
+  const prompts = await import("@clack/prompts");
+  const answer = await prompts.select<string>({ message, options });
+  return prompts.isCancel(answer) ? null : answer;
+}
+
 // The project's reviewer list, when its config has none (review.reviewers
 // absent; an empty list is the team's choice and stays): the agent running
 // init first, then the other one when it can start here (defaultReviewerList).
-// It asks nothing, so the agent and --yes path writes it too. It is written
+// In a terminal (not --yes, not --dry-run) the developer keeps it, reorders
+// it, leaves entries out or writes none; the agent and --yes path asks
+// nothing and writes it as planned. It is written
 // after whatever else the plan writes to the file, read back from disk, so a
 // convention choice and the file's own comments stay; init's record of a
 // file it created follows the new bytes, so uninstall still knows it.
@@ -709,12 +724,23 @@ async function planReviewerList(s: Setup, actions: Action[], record: InstallReco
   if (insertReviewerList(before ?? DEFAULT_CONFIG_YAML, []) === null) return;
   const planned = actions.find((a) => a.path === path && a.apply !== undefined);
   if (before === null && planned === undefined) return;
-  const { entries, ready } = await defaultReviewerList([claudeDriver, codexDriver], repoRoot);
-  if (entries.length === 0) {
+  const proposed = await defaultReviewerList([claudeDriver, codexDriver], repoRoot);
+  if (proposed.entries.length === 0) {
     out("Reviewer list: none written, since neither Claude Code nor Codex can start here; a review tries the agent it runs from, then Claude Code, then Codex. Set review.reviewers in .openqodex/config.yaml to choose.");
     return;
   }
-  out(`Reviewer list for ${shown(s, path)}, tried top to bottom, shared by the whole team: ${entries.map((e, i) => `${i + 1}. ${entryLabel(e)} (${ready[i] ? "can start here" : "cannot start here yet"})`).join("; ")}. An entry that cannot start on a teammate's machine is passed over with its reason.`);
+  const numbered = (entries: ReviewerEntry[], ready: boolean[]): string => entries.map((e, i) => `${i + 1}. ${plannedLabel(e, ready[i]!)}`).join("; ");
+  out(`Reviewer list for ${shown(s, path)}, tried top to bottom, shared by the whole team: ${numbered(proposed.entries, proposed.ready)}. An entry that cannot start on a teammate's machine is passed over with its reason.`);
+  let entries = proposed.entries;
+  if (interactive() && !s.flags.yes && !s.flags.dryRun) {
+    const kept = await chooseReviewerList(proposed.entries, proposed.ready, pickOne);
+    if (kept.length === 0) {
+      out(`Reviewer list: none written, as you chose; a review tries the agent it runs from, then Claude Code, then Codex. Run ${s.runner} init again, or set review.reviewers in ${shown(s, path)}, to choose.`);
+      return;
+    }
+    entries = kept.map((i) => proposed.entries[i]!);
+    if (kept.join() !== proposed.entries.map((_, i) => i).join()) out(`Reviewer list as you chose it: ${numbered(entries, kept.map((i) => proposed.ready[i]!))}.`);
+  }
   const write = (): void => {
     const now = readRepoFile(repoRoot, path, CONFIG_MAX_BYTES);
     if (now === null) return;
@@ -851,14 +877,37 @@ export async function run(args: string[]): Promise<number> {
     // After the boundary is released, so the review holds no install lock.
     // A declined or stopped install reviews nothing.
     const installed = outcome.ended === "written" || outcome.ended === "unchanged";
+    // The setup's usage data leaves now, before the first review starts, so
+    // an install whose review is abandoned still counts. Only an install
+    // the developer agreed to may create the install id.
+    if (installed) permitId();
+    if (outcome.ended !== "dry-run" && outcome.ended !== "removed") {
+      recordEvent("init.completed", () => ({ ended: outcome.ended, agents, scope: setup.scope, hook: setup.chosen?.hook ?? "none", mcp: setup.chosen?.mcp ?? false, inRepo: repoRoot !== null, interactive: interactive(), exitCode: outcome.code }));
+      dispatch();
+    }
     if (outcome.code === EXIT_OK && installed) {
       // Whether a reviewer can start, checked whatever comes next, so "set up"
       // never hides a review that cannot run.
       const ready = await reviewerCheck(setup);
-      if (flags.noReview) firstReviewLine("skipped", "--no-review");
-      else if (repoRoot === null) firstReviewLine("skipped", "not inside a git repository");
-      else if (!ready) firstReviewLine("unavailable");
-      else await reviewAfterInit({ repoRoot, runner: setup.runner, interactive: interactive() && !flags.yes, initFiles: setup.before });
+      const end: { why?: string } = {};
+      let result: FirstReview;
+      let skipReason: string | undefined;
+      if (flags.noReview) {
+        firstReviewLine("skipped", "--no-review");
+        result = "skipped";
+        skipReason = "flag";
+      } else if (repoRoot === null) {
+        firstReviewLine("skipped", "not inside a git repository");
+        result = "skipped";
+        skipReason = "no_repo";
+      } else if (!ready) {
+        firstReviewLine("unavailable");
+        result = "unavailable";
+      } else {
+        result = await reviewAfterInit({ repoRoot, runner: setup.runner, interactive: interactive() && !flags.yes, initFiles: setup.before, end });
+        if (result === "skipped") skipReason = end.why === "not now" ? "declined" : "no_change";
+      }
+      recordEvent("init.first_review", () => ({ result, reviewerReady: ready, ...(skipReason !== undefined ? { skipReason } : {}) }));
       // The command to run next, by the launcher's full path: an npx install
       // puts no `openqodex` on PATH, and init never edits a shell profile.
       out();

@@ -2,19 +2,19 @@
 
 Each file here is copied or merged by `openqodex init`. Three placeholders are filled at install time and no others exist:
 
-- `{{VERSION}}`: the version of the running `openqodex` package.
+- `{{VERSION}}`: the version of the running `openqodex` package (in the project-scope rules, and in the earlier team sections in `previous/`).
 - `{{LAUNCHER}}`: the absolute path of the launcher, `~/.openqodex/bin/openqodex` expanded.
 - `{{INSTRUCTIONS}}`: the instruction section, `instructions-section.md`, markers included.
 
 ## The instruction section
 
-`instructions-section.md` is the marked section (between `<!-- openqodex:start -->` and `<!-- openqodex:end -->`) that tells an agent to review with the openqodex skill when a feature or fix is done; OpenQodex starts its own reviewer process. `init` prints it before writing, records it, and `--uninstall` removes exactly that section. It goes into the repo's `CLAUDE.md` and `AGENTS.md` in project scope, and inside the Cursor and Cline rules.
+`instructions-section.md` is the one-line marked section (between `<!-- openqodex:start -->` and `<!-- openqodex:end -->`) that tells an agent to review with the openqodex skill before any push in a repository that has an OpenQodex settings file (`.openqodex/config.yaml`, or `.openqodex.yaml` at its root). OpenQodex is opt-in per repository: every instruction text is one line, the settings file holds the rules, and the skill holds the procedure. `init` prints it before writing, records it, and `--uninstall` removes exactly that section. It goes into the repo's `CLAUDE.md` and `AGENTS.md` in project scope, and inside the Cursor and Cline rules.
 
-`global-section.md` is the one-line marked section for each agent's global instruction file in user scope (`CLAUDE.md` in Claude Code's folder, `AGENTS.md` in Codex's, `.goosehints` in Goose's): "Before any push, review the change with the openqodex skill." The global file is read in every repository, so it holds the trigger only. It replaces the longer section an earlier `init` wrote there while that one is still as recorded.
+`global-section.md` is the one-line marked section for each agent's global instruction file in user scope (`CLAUDE.md` in Claude Code's folder, `AGENTS.md` in Codex's, `.goosehints` in Goose's), with the same line. The global file is read in every repository, so it holds the trigger only, for a repository with a settings file. It replaces the section an earlier `init` wrote there while that one is still as recorded, and the one-line note of 0.9.0 to 0.24.0 (`previous/global-0.9.0.md`) recorded or not.
 
 ## The team section
 
-`repo/team-section.md` is the marked section a user-scope `init` writes into the repository's own `CLAUDE.md` and `AGENTS.md` (creating a file that is not there), unless `--no-repo`, given now or recorded for that repository, says otherwise (`--yes` keeps a recorded "no"). It is for a teammate with nothing installed: it names only `npx -y openqodex@{{VERSION}} review` and never the skill or the launcher. Unlike other repository files in user scope, it is not added to `.git/info/exclude`: the developer commits it. It replaces an instruction section found there exactly as written, is recorded with `createdFile`, and `--uninstall` removes exactly it. In project scope the same two files get the instruction section instead.
+`repo/team-section.md` is the marked section a user-scope `init` writes into the repository's own `CLAUDE.md` and `AGENTS.md` (creating a file that is not there), unless `--no-repo`, given now or recorded for that repository, says otherwise (`--yes` keeps a recorded "no"). It is for a teammate with nothing installed: one line that names only `npx -y openqodex review`, with no version so it never goes stale, and never the skill or the launcher. Unlike other repository files in user scope, it is not added to `.git/info/exclude`: the developer commits it. It replaces an instruction section found there exactly as written, and an earlier team section in `previous/` as some version wrote it (its `{{VERSION}}` filled with the version its pin names), recorded or not. It is recorded with `createdFile`, and `--uninstall` removes exactly it. In project scope the same two files get the instruction section instead.
 
 ## The skill and rules in user scope
 
@@ -23,7 +23,7 @@ Nothing `init` writes in user scope names a version, a review command or who rev
 - `skill-stub.md` is the user-scope skill: its frontmatter, when to run, then a procedure that says to run `{{LAUNCHER}} guide skill` and follow what it prints. `guide skill` prints the shipped skill with every `npx -y openqodex@<version>` written as the launcher.
 - `cursor/openqodex-user.mdc` and `cline/openqodex-user.md` are the user-scope Cursor and Cline rules: the instruction section, then the same `{{LAUNCHER}} guide skill` line.
 
-These files, the global section, the instruction section, the hook and permission rules and the MCP server entries a user-scope `init` writes change only with a new `agentContract` in `package.json` (`src/contract.ts`). `test/agent-contract.test.ts` holds them to the copy checked in under `test/fixtures/agent-contract/<number>/`, and fails when one changes under the same number.
+These files, the global section, the instruction section, the hook and permission rules and the MCP server entries a user-scope `init` writes change only with a new `agentContract` in `package.json` (`src/contract.ts`), or with a revision of the running one when a file an older `init` wrote still works beside the new binary. `test/agent-contract.test.ts` holds them to the copy checked in under `test/fixtures/agent-contract/<number>/` (or `<number>.<revision>/`), and fails when one changes with no new copy. Revision 3.1 made every trigger ask for a review only in a repository with a settings file: an older file asks in more repositories, and the review still runs there.
 
 Project scope copies the shipped skill with its pinned version, and the Cursor and Cline rules `cursor/openqodex.mdc` and `cline/openqodex.md` as written. Both scopes drop the paragraph that tells a skill installed by `npx skills add` to prefer the launcher.
 
@@ -125,6 +125,6 @@ Read on 2026-11-11. Goose was not installed: none of this was run against Goose.
 
 `{{VERSION}}` is the running package version. `{{LAUNCHER}}` is the absolute launcher path, and `init` must substitute it already quoted for a POSIX shell (single quotes, with any single quote inside escaped), because a home folder can contain a space and the hook command is run through a shell.
 
-The team and instruction sections tell agents to ask the developer before setting `review.instructions_files`. Custom instructions add to the files the owners chose.
+The skill tells agents to ask the developer before setting `review.instructions_files`. Custom instructions add to the files the owners chose.
 
 Previous team and instruction sections live in `previous/`. Whole historical Cursor and Cline rules live in `previous/rules/`, with their instruction sections filled from the same released tag. Init replaces only the previous instruction sections listed in `targets.ts`. `scripts/instruction-sections.mjs` builds the exact section and whole-file catalogue from these templates. Run it after changing a template. Build never regenerates it; `--check` guards the committed catalogue in the local and CI gates. Tests pin released section hashes, so a shallow checkout needs no release tags.

@@ -18,12 +18,12 @@ Open source code review that runs inside your coding agent, before you push. A s
 npx openqodex init
 ```
 
-Then say to your agent: "review my change with openqodex". `init` finds the agents on your machine, lists the files it will write and asks you once. In your own terminal, run `~/.openqodex/bin/openqodex review`. An `npx` install puts no `openqodex` on your `PATH`.
+Then say to your agent: "review my change with openqodex". `init` finds the agents on your machine, lists the files it will write and the reviewers it plans for your team, and asks you. In your own terminal, run `~/.openqodex/bin/openqodex review`. An `npx` install puts no `openqodex` on your `PATH`.
 
 For agents, the same install with no question:
 
 ```
-npx -y openqodex@0.24.0 init --yes --agent <host>
+npx -y openqodex@0.25.0 init --yes --agent <host>
 ```
 
 `<host>` is `claude-code`, `codex`, `cursor`, `cline` or `goose`. In its default sandbox, Codex gives commands no network, so run this line in your own terminal. The [quickstart](https://github.com/openqodex/openqodex/blob/main/docs/quickstart.md) has a prompt to paste into your agent. AI agents: read the [agent guide](https://github.com/openqodex/openqodex/blob/main/docs/for-agents.md).
@@ -49,6 +49,7 @@ Looking for hosted pull request review? [Sign up for Qodex](https://agents.qodex
 - At the end, it prints a receipt: the verdict, one line per finding and the path of `report.html`. It also writes `report.md`, `report.json` and `report.sarif`. Here is an [example report](https://github.com/openqodex/openqodex/blob/main/tests/golden/expected/claude/run/report.md).
 - You choose what gets fixed. Your agent asks "Fix all, or tell me which?" and fixes only the findings you name.
 - The push gate warns by default. It blocks only when `.openqodex/config.yaml` sets `review.block_on_severity`.
+- It runs only in repositories you opt in. A repository opts in with `.openqodex/config.yaml`, which `openqodex init` writes there. Elsewhere your agents do not review before a push, and the push gate says nothing.
 
 ## What you get: a code graph
 
@@ -126,9 +127,11 @@ AACR-Bench is a set of real pull requests. Its own evaluator gives the board num
 
 ## Privacy
 
-OpenQodex itself collects no usage data and sends no telemetry. The built-in scanners, as OpenQodex runs them, send no code. OpenQodex starts semgrep with its metrics switched off. The reviewer sends your change to the model service of your Claude Code or Codex login.
+The built-in scanners, as OpenQodex runs them, send no code. OpenQodex starts semgrep with its metrics switched off. The reviewer sends your change to the model service of your Claude Code or Codex login.
 
 `--offline` skips semgrep, osv-scanner, kubeconform and cargo-deny, the built-in scanners that use the network. It also stops scanner downloads. The reviewer still sends your change to its model service. An approved custom scanner still runs its own command. The [privacy page](https://github.com/openqodex/openqodex/blob/main/docs/privacy.md) lists each network use of this version. The [telemetry page](https://github.com/openqodex/openqodex/blob/main/docs/telemetry.md) says more.
+
+OpenQodex sends anonymous usage data, never code. `openqodex_telemetry: 0` in `.openqodex/config.yaml`, `OPENQODEX_TELEMETRY=0` or `DO_NOT_TRACK=1` turns it off ([details](https://github.com/openqodex/openqodex/blob/main/docs/telemetry.md)).
 
 ## Built-in scanners
 

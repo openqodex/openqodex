@@ -49,6 +49,11 @@ export const NOTICES: readonly Notice[] = [
     kind: "blocks a push",
     text: "A review made under another review.reviewers or review.reviewer_web no longer counts for the push hooks, so a push under block_on_severity needs a new review after either changes.",
   },
+  {
+    version: "0.25.0",
+    kind: "blocks a push",
+    text: "Agents review before a push only in a repository with an OpenQodex settings file (.openqodex/config.yaml, or .openqodex.yaml at its root), and the agent push hooks say nothing anywhere else. Run openqodex init once to refresh the note your agents read, and run it in each repository you want reviewed.",
+  },
 ];
 
 type Version = [number, number, number];

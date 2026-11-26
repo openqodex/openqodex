@@ -113,6 +113,15 @@ describe("the environment of what the check runs", () => {
     expect(cleanEnv(job, { HOME: "/tmp/box/home" })).toEqual({ PATH: "/usr/bin:/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", HOME: "/tmp/box/home" });
   });
 
+  it("switches usage data off: the published package it runs must send nothing (telemetry T11)", async () => {
+    const { boxEnv, cleanEnv } = (await import(join(root, "scripts/self-update-check-lib.mjs"))) as { boxEnv: (home: string, oqHome: string) => Record<string, string>; cleanEnv: (base: NodeJS.ProcessEnv, set: Record<string, string>) => NodeJS.ProcessEnv };
+    expect(cleanEnv({ PATH: "/usr/bin:/bin", OPENQODEX_TELEMETRY: "1" }, boxEnv("/tmp/box/home", "/tmp/box/home/.openqodex"))).toEqual({ PATH: "/usr/bin:/bin", HOME: "/tmp/box/home", OPENQODEX_HOME: "/tmp/box/home/.openqodex", OPENQODEX_TELEMETRY: "0" });
+    const script = readFileSync(join(root, "scripts/check-self-update.mjs"), "utf8");
+    expect(script).toContain("b.set = boxEnv(b.home, b.oqHome);");
+    // The script fails when a run of it created the install id.
+    expect(script).toMatch(/existsSync\(join\(box\.oqHome, "telemetry"\)\)\) fail\(/);
+  });
+
   it("is the one every process the script starts gets: the script never passes its own environment on (failure 4)", () => {
     const script = readFileSync(join(root, "scripts/check-self-update.mjs"), "utf8");
     expect(script).not.toMatch(/\.\.\.process\.env/);

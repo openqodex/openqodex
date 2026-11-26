@@ -27,6 +27,8 @@
 # its setup (.github/actions/bench-setup) and is not a pull request check.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# No usage data from any run of the gate (packages/cli/src/telemetry).
+export OPENQODEX_TELEMETRY=0
 
 full=0
 for arg in "$@"; do

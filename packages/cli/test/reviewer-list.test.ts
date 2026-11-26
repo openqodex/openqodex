@@ -42,6 +42,12 @@
 //     team set (even an empty one), changes a min_version already there,
 //     writes a second review block beside a hosted pr_review one, or writes
 //     a min_version the running build itself refuses.
+// 14. A review of a project with no list does not say which reviewer the
+//     automatic order picked, or how to pin the list for the team; or says
+//     so when the project has a list, or when --reviewer chose.
+// 15. init in a terminal writes a list the developer did not see, or not
+//     the one chosen (kept, reordered, one left out, none); or asks on the
+//     agent path, or writes there anything but the planned list.
 import { stagedFake } from "../../review/test/staged-fake.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -52,7 +58,9 @@ import type { Report } from "@openqodex/core";
 import { REVIEWERS_SINCE, parseConfig, reviewerLine } from "@openqodex/core";
 import { parseFlags } from "../src/flags.js";
 import { runReview } from "../src/review-run.js";
-import { defaultReviewerList, insertReviewerList, listReadiness } from "../src/reviewers/list.js";
+import { chooseReviewerList, defaultReviewerList, insertReviewerList, listReadiness } from "../src/reviewers/list.js";
+import type { PickOne } from "../src/reviewers/list.js";
+import { cli, inTerminal, promptsAsked, sandbox } from "./init-helpers.js";
 import { projectFile, retiredReviewerWarning, userConfigNotes } from "../src/reviewers/settings.js";
 import { readUserConfig, unknownKeys } from "../src/user-config.js";
 import { updatesAllowed } from "../src/update/state.js";
@@ -174,9 +182,9 @@ const runFile = (name: string): string | null => {
   return null;
 };
 
-function review(drivers: ReviewerDriver[], config: string, more: { reviewer?: string; reviewerEffort?: string; web?: boolean } = {}): Promise<number> {
+function review(drivers: ReviewerDriver[], config: string, more: { reviewer?: string; reviewerEffort?: string; web?: boolean; format?: string } = {}): Promise<number> {
   lastRepo = repo(config);
-  const { global } = parseFlags(["--cwd", lastRepo, "--no-color", "--format", "json"], {});
+  const { global } = parseFlags(["--cwd", lastRepo, "--no-color", "--format", more.format ?? "json"], {});
   return runReview({ flags: global, scope: {}, noGraph: true, only: "sqllint", timeoutMs: 60_000, drivers, ...more });
 }
 
@@ -455,5 +463,112 @@ describe("the list init writes", () => {
     const unreleased = insertReviewerList("version: 1\n", [{ tool: "claude" }], "0.0.1")!.text;
     expect(unreleased).not.toContain("min_version");
     expect(parseConfig(unreleased, undefined, { runtimeVersion: "0.0.1" }).config.reviewers).toEqual([{ tool: "claude" }]);
+  });
+});
+
+describe("the note of a project with no list", () => {
+  const NOTE = "Reviewer list: none set for this project, so the automatic order picked Claude Code. Run `openqodex init` to pin the reviewers for the whole team.";
+
+  it("14. names the pick and init in the receipt, report.md, report.html and report.json", async () => {
+    expect(await review([fake("claude"), fake("codex")], `version: 1\nreview:\n${SINGLE}`, { format: "terminal" })).toBe(0);
+    expect(out.split("\n")).toContain(NOTE);
+    expect(runFile("report.md")!.split("\n")).toContain(NOTE.replace(/`/g, "\\`"));
+    expect(runFile("report.html")).toContain(`<section class="coverage" aria-label="Review notes"><h2>Review notes</h2><ul><li>${NOTE}</li>`);
+    out = "";
+    expect(await review([fake("claude", { available: false }), fake("codex")], "version: 1\n")).toBe(0);
+    expect((JSON.parse(out) as Report).notes).toContain(NOTE.replace("Claude Code", "Codex"));
+  });
+
+  it("14. is left out when the project has a list, even an empty one, and when --reviewer chose", async () => {
+    const runs: [string, { reviewer?: string }][] = [
+      [listing(["tool: claude"], SINGLE), {}],
+      [`version: 1\nreview:\n${SINGLE}  reviewers: []\n`, {}],
+      [`version: 1\nreview:\n${SINGLE}`, { reviewer: "auto" }],
+      [`version: 1\nreview:\n${SINGLE}`, { reviewer: "claude" }],
+    ];
+    for (const [config, more] of runs) {
+      out = "";
+      expect(await review([fake("claude"), fake("codex")], config, { ...more, format: "terminal" })).toBe(0);
+      expect(out).not.toContain("Reviewer list:");
+      expect(runFile("report.md")).not.toContain("Reviewer list:");
+    }
+  });
+
+  it("14. a settings file saved broken while the reviewer works does not lose the finished review", async () => {
+    const claude = fake("claude", { answered: () => writeFileSync(join(lastRepo, ".openqodex", "config.yaml"), "review: [unclosed\n") });
+    expect(await review([claude], `version: 1\nreview:\n${SINGLE}`, { format: "terminal" })).toBe(0);
+    expect(out.split("\n")).toContain(NOTE);
+    expect(runFile("report.md")).not.toBeNull();
+  });
+});
+
+describe("the list a terminal init writes", () => {
+  const TWO = [{ tool: "claude", model: "opus", effort: "high" }, { tool: "codex", model: "gpt-top", effort: "high" }];
+  // Answers each question in turn and keeps what was asked and offered.
+  const script = (...answers: (string | null)[]): PickOne & { asked: { message: string; offered: string[] }[] } => {
+    const asked: { message: string; offered: string[] }[] = [];
+    const pick = (async (message, options) => {
+      asked.push({ message, offered: options.map((o) => o.label) });
+      if (answers.length === 0) throw new Error(`asked more than scripted: ${message}`);
+      const answer = answers.shift()!;
+      if (answer !== null && !options.some((o) => o.value === answer)) throw new Error(`${answer} is not offered for ${message}`);
+      return answer;
+    }) as PickOne & { asked: typeof asked };
+    pick.asked = asked;
+    return pick;
+  };
+
+  it("15. keeps the list as shown, reorders it, leaves one out, or writes none", async () => {
+    const keep = script("keep");
+    expect(await chooseReviewerList(TWO, [true, false], keep)).toEqual([0, 1]);
+    expect(keep.asked.map((a) => a.message)).toEqual(["Write this reviewer list for the whole team?"]);
+
+    const reorder = script("change", "1", "0");
+    expect(await chooseReviewerList(TWO, [true, false], reorder)).toEqual([1, 0]);
+    expect(reorder.asked[1]!.offered).toEqual(["claude, model opus, effort high (can start here)", "codex, model gpt-top, effort high (cannot start here yet)", "None: write no list"]);
+    // The last place offers only what is left: the one not yet picked.
+    expect(reorder.asked[2]!.offered).toEqual(["claude, model opus, effort high (can start here)", "No more"]);
+
+    expect(await chooseReviewerList(TWO, [true, true], script("change", "1", "stop"))).toEqual([1]);
+    expect(await chooseReviewerList(TWO, [true, true], script("change", "stop"))).toEqual([]);
+    expect(await chooseReviewerList(TWO, [true, true], script("none"))).toEqual([]);
+    // A cancel at any question writes no list.
+    expect(await chooseReviewerList(TWO, [true, true], script(null))).toEqual([]);
+    expect(await chooseReviewerList(TWO, [true, true], script("change", "0", null))).toEqual([]);
+  });
+
+  // The built CLI in a repo whose settings file has no list (a project set
+  // up before lists), with Claude Code as the agent running init, so the
+  // planned list is that one entry; nothing can start on the test's PATH.
+  const ARGS = ["init", "--project", "--agent", "codex", "--no-mcp", "--hook", "none"];
+  const SHOWN = "Reviewer list for .openqodex/config.yaml, tried top to bottom, shared by the whole team: 1. claude, model opus, effort high (cannot start here yet).";
+  const reviewersIn = (repo: string): unknown => parseYaml(readFileSync(join(repo, ".openqodex/config.yaml"), "utf8"))?.review?.reviewers;
+
+  it("15. in a terminal, shows the list, asks, and writes it when kept", () => {
+    const s = sandbox({ ".openqodex/config.yaml": "version: 1\n" });
+    const r = inTerminal(s, ARGS, [["Write this reviewer list for the whole team?", "\r"], ["Write these files?", "\r"]], { env: { CLAUDECODE: "1" } });
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain(SHOWN);
+    expect(r.stdout.indexOf(SHOWN)).toBeLessThan(r.stdout.indexOf("Write this reviewer list for the whole team?"));
+    expect(promptsAsked(r.stdout)).toEqual(["Write this reviewer list for the whole team?", "Write these files?"]);
+    expect(reviewersIn(s.repo)).toEqual([{ tool: "claude", model: "opus", effort: "high" }]);
+  });
+
+  it("15. in a terminal, writes no list when the developer leaves every reviewer out", () => {
+    const s = sandbox({ ".openqodex/config.yaml": "version: 1\n" });
+    // Down to "Change the order", then "None: write no list" below the one entry.
+    const r = inTerminal(s, ARGS, [["Write this reviewer list for the whole team?", "\x1b[B\r"], ["Reviewer 1 of the list", "\x1b[B\r"], ["Write these files?", "\r"]], { env: { CLAUDECODE: "1" } });
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain("Reviewer list: none written, as you chose");
+    expect(readFileSync(join(s.repo, ".openqodex/config.yaml"), "utf8")).toBe("version: 1\n");
+  });
+
+  it("15. on the agent path, asks nothing and writes the planned list", () => {
+    const s = sandbox({ ".openqodex/config.yaml": "version: 1\n" });
+    const r = cli(s, ARGS, { env: { CLAUDECODE: "1" } });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(SHOWN);
+    expect(r.stdout).not.toContain("Write this reviewer list");
+    expect(reviewersIn(s.repo)).toEqual([{ tool: "claude", model: "opus", effort: "high" }]);
   });
 });

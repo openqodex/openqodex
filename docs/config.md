@@ -1,6 +1,6 @@
 # Configuration
 
-OpenQodex reads `.openqodex/config.yaml` in the repository. Every key is optional. With no file, the defaults apply, and OpenQodex warns but never blocks.
+OpenQodex reads `.openqodex/config.yaml` in the repository. Every key is optional. With no file, the defaults apply, and OpenQodex warns but never blocks. The file is also what opts a repository in: the line `init` adds to each agent's global instructions, and the push checks inside Claude Code and Codex, act only in a repository that has it (or `.openqodex.yaml`).
 
 - `.openqodex.yaml` at the root, the 0.1.0 location, is still read when `.openqodex/config.yaml` does not exist. With both, OpenQodex reads `.openqodex/config.yaml` only and warns.
 - `--config <path>` reads another file instead of either.
@@ -34,7 +34,10 @@ An unknown key prints a warning and is ignored. A name in `scanners.disable` tha
 | `graph.max_file_bytes` | `524288` | Files larger than this, in bytes, are left out of the code graph. |
 | `graph.max_cache_mb` | `512` | The size bound of .openqodex/graph/, in MB; the oldest builds and facts no kept build names are removed first. |
 | `graph.max_heap_mb` | `1536` | The memory the code graph may use, in MB; files past it are left out and the graph says so. |
+| `openqodex_telemetry` | `1` | 0 stops the anonymous usage data for this repository: nothing is sent. `openqodex guide telemetry` lists what is sent. |
 <!-- config-keys:end -->
+
+`openqodex_telemetry` is not in the config file `init` writes; add the line yourself. `telemetry` lists the other ways to turn usage data off.
 
 ## A full example
 
@@ -319,9 +322,11 @@ How `review` tries the list:
 
 With no list, or `reviewers: []`, `review` picks the agent you run it from, then Claude Code, then Codex, as before lists existed.
 
+With no `review.reviewers` key at all, a review adds one line to its receipt and to the report's notes: the reviewer the automatic order picked, and that `openqodex init` pins the reviewers for the whole team. The line is left out with `reviewers: []`, which is the team's choice, with `--reviewer`, `--report-dir` or `--config`.
+
 On the command line, `--reviewer <tool>` or `--reviewer <tool>:<model>`, with `--reviewer-effort`, replaces the list for one run, with no fallback. `--reviewer auto` ignores the list.
 
-`init` writes a list when the file has none: the agent running `init` first, then the other one when it can start on this machine. Claude Code gets `model: opus` and `effort: high`. Codex gets the first model its login lists, and `effort: high`. `init` keeps the rest of the file and its comments, and leaves a list the team already set, even an empty one. It also sets `min_version` to the release that reads the list (0.24.0) when the file has none, or sets it in place when it is empty, so an older openqodex stops and names the version it needs instead of ignoring the list. A `min_version` already there is never changed: a lower one is named, a higher one is kept.
+`init` writes a list when the file has none: the agent running `init` first, then the other one when it can start on this machine. Claude Code gets `model: opus` and `effort: high`. Codex gets the first model its login lists, and `effort: high`. In your own terminal, `init` shows that list and asks before writing it: keep it as shown, change it (it asks for the reviewer in each place in turn, so you can reorder it or leave reviewers out), or write no list. The models and effort stay as shown; to change one, edit the file afterwards. With `--yes`, with `--dry-run`, or from an agent with no terminal, `init` asks nothing and writes the list as shown. Running `init` again in a project whose file has no list offers the same choice. `init` keeps the rest of the file and its comments, and leaves a list the team already set, even an empty one. It also sets `min_version` to the release that reads the list (0.24.0) when the file has none, or sets it in place when it is empty, so an older openqodex stops and names the version it needs instead of ignoring the list. A `min_version` already there is never changed: a lower one is named, a higher one is kept.
 
 `review.reviewer_web` is `on` or `off`. The default is `on`: the reviewer gets Claude Code's WebSearch and WebFetch, or Codex's cached web search. `off` removes them. A reviewer that reads private code and untrusted text and can open web addresses can be talked into sending the code out, so set `off` if you do not accept that (`security`). `--reviewer-web` on the command line wins for one run.
 

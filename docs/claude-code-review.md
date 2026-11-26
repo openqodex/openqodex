@@ -158,7 +158,7 @@ Or ask Claude Code to run `npx -y openqodex@<version> init --yes --agent claude-
 
 - the skill, in `~/.claude/skills/openqodex/SKILL.md`.
 - the push gate hook, merged into `~/.claude/settings.json`.
-- one line in `~/.claude/CLAUDE.md`: before any push, review the change with the openqodex skill.
+- one line in `~/.claude/CLAUDE.md`: before any push in a repository that has an OpenQodex settings file, review the change with the openqodex skill.
 - permission rules in `~/.claude/settings.json`, so Claude Code runs `review` and `review --all` without asking you.
 
 `agents` lists every file, the project scope and the uninstall.

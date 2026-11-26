@@ -30,8 +30,8 @@ These pages ship inside the npm package. `npx openqodex guide <topic>` prints on
 - `github-action`: run the scan on pull requests.
 - `library`: review a change with your own model (`reviewChange`), preinstall the scanners for a server image, and import the scanners, the code graph, the lenses, the config parser and the renderers into a Node program.
 - `security`: what runs, what is sent where, and where files go.
-- `telemetry`: there is none.
-- `privacy`: the privacy policy: what OpenQodex collects (nothing) and every network call it makes.
+- `telemetry`: the anonymous usage data, every field, and how to turn it off.
+- `privacy`: the privacy policy: what OpenQodex collects and every network call it makes.
 - `plumbing`: the hidden commands that hooks, the skill and the Action call.
 - `internal-reviewer-drivers`: how the Claude Code and Codex reviewers are started and held to reading.
 - `faq`: short answers.

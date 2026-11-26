@@ -3,9 +3,16 @@ name: Outside benchmark image
 # Builds the outside benchmark's linux/amd64 image and proves it: every
 # built-in scanner installed and reporting its check case, and a build
 # without Ruby or without Rust refused, naming the scanners that need it.
-# Started by hand only. Nothing is pushed to a registry.
+# Started by hand only. The image is pushed to the GitHub container registry
+# only when the run is started with "push" ticked and the check passed; the
+# digest goes to the run's summary. The package's visibility is not changed.
 on:
   workflow_dispatch:
+    inputs:
+      push:
+        description: Push the checked image to ghcr.io
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -15,16 +22,46 @@ jobs:
     name: Build and check the image
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Name the image by the commit
+        id: name
+        run: echo "image=ghcr.io/openqodex/openqodex-reviewbench:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       # Three builds: the full image, one without Ruby, one without Rust.
+      # The full image is kept under the name above.
       - name: Build the image and check every scanner is ready
         run: bash benchmark/outside/image/check-build.sh
         env:
           REQUIRE_DOCKER: "1"
           OUT: ${{ runner.temp }}/outside-image
+          IMAGE_TAG: ${{ steps.name.outputs.image }}
+      # Only a run started by hand with "push" ticked, after the check passed.
+      - name: Push the image and write its digest to the summary
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.push
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker push "$IMAGE"
+          repo=${IMAGE%:*}
+          digest=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE" | grep -m1 "^$repo@sha256:" || true)
+          if [ -z "$digest" ]; then
+            echo "the push finished, but docker names no digest for $repo" >&2
+            exit 1
+          fi
+          {
+            echo "Pushed $IMAGE"
+            echo ""
+            echo "Digest: \`$digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "digest: $digest"
       # The preinstall lines of each build, for reading after the run.
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

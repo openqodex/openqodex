@@ -74,9 +74,12 @@ export async function reviewAfterInit(o: {
   ask?: () => Promise<Choice>;
   // FIRST_REVIEW_INSTALL_WAIT_MS unless a test asks for less.
   installWaitMs?: number;
+  // Filled with why the review was skipped, for the usage data.
+  end?: { why?: string };
 }): Promise<FirstReview> {
   const ended = await firstReview(o);
   firstReviewLine(ended.ended, ended.why);
+  if (o.end) o.end.why = ended.why;
   return ended.ended;
 }
 
@@ -86,7 +89,7 @@ async function firstReview(o: Parameters<typeof reviewAfterInit>[0]): Promise<{ 
     const installBudgetMs = o.installWaitMs ?? FIRST_REVIEW_INSTALL_WAIT_MS;
     const review = async (extra: Partial<ReviewOptions>): Promise<{ ended: FirstReview; why?: string }> => {
       const end: ReviewEnd = { ended: "nothing", installing: [] };
-      await runReview({ flags: global, scope: {}, noGraph: false, timeoutMs: CHANGE_TIMEOUT_SECONDS * 1000, drivers: o.drivers, end, installBudgetMs, ...extra });
+      await runReview({ flags: global, scope: {}, noGraph: false, timeoutMs: CHANGE_TIMEOUT_SECONDS * 1000, drivers: o.drivers, end, installBudgetMs, fromInit: true, ...extra });
       if (end.installing.length > 0) out(`Still downloading: ${end.installing.join(", ")}. The next review includes them once they finish.`);
       return end.ended === "nothing" ? { ended: "skipped", why: "nothing to review" } : { ended: end.ended, why: end.why };
     };

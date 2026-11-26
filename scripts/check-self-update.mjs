@@ -44,7 +44,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirS
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanEnv, loadVerifier, verifiedRelease } from "./self-update-check-lib.mjs";
+import { boxEnv, cleanEnv, loadVerifier, verifiedRelease } from "./self-update-check-lib.mjs";
 
 const args = process.argv.slice(2);
 const value = (flag) => {
@@ -110,7 +110,7 @@ function setup(name) {
   const b = { top, home: join(top, "home"), oqHome: join(top, "home", ".openqodex"), user: join(top, "user-repo"), project: join(top, "project-repo") };
   for (const dir of [b.home, b.user, b.project]) mkdirSync(dir, { recursive: true });
   // What the check sets on top of the allowlist (self-update-check-lib.mjs).
-  b.set = { HOME: b.home, OPENQODEX_HOME: b.oqHome };
+  b.set = boxEnv(b.home, b.oqHome);
   b.launcher = join(b.oqHome, "bin", "openqodex");
   return b;
 }
@@ -307,6 +307,8 @@ async function check(name) {
 
 for (const name of route === "both" ? ["daily", "now"] : [route]) {
   await check(name);
+  // No run of the check may create the usage data's install id.
+  if (existsSync(join(box.oqHome, "telemetry"))) fail(`${name}: a run created ${join(box.oqHome, "telemetry")}; the check must send no usage data`);
   rmSync(box.top, { recursive: true, force: true });
   box = null;
 }

@@ -37,6 +37,11 @@ export function createRepoFiles(repoRoot: string): RepoFiles {
 export const INSTRUCTIONS_LINE =
   "Write in .openqodex/custom-instructions.md what a reviewer of this repo must know: conventions, what never to flag, what always to check. It adds to the files the owners chose in review.instructions_files.";
 
+// A scan or review run by hand where the repo had no settings file: the file
+// it creates is what opts the repo in to agent reviews (the global note and
+// the push hooks look for it).
+export const OPT_IN_LINE = `The new ${STATE_DIR}/${FOLDER_CONFIG} opts this repo in: agents now review here before a push. Run openqodex init here to set it up for your team.`;
+
 export const ROOT_CONFIG_NOTE =
   "This repo has .openqodex.yaml at its root; it is still read. To move it into the folder: git mv .openqodex.yaml .openqodex/config.yaml";
 
@@ -72,6 +77,7 @@ export function repoFilesLines(repoRoot: string, files: RepoFiles): string[] {
     ...commitLines(repoRoot, files.created),
     ...(files.created.some((p) => p.endsWith(INSTRUCTIONS_FILE)) ? [INSTRUCTIONS_LINE] : []),
     ...(files.rootConfig ? [ROOT_CONFIG_NOTE] : []),
+    ...(files.created.includes(`${STATE_DIR}/${FOLDER_CONFIG}`) ? [OPT_IN_LINE] : []),
   ];
 }
 

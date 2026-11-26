@@ -3,6 +3,7 @@ import { Command, CommanderError } from "commander";
 import { OpenQodexError } from "@openqodex/core";
 import { EXIT_TOOL_FAILED } from "./exit-codes.js";
 import { noteInternalError, offer, takePending } from "./feedback.js";
+import { begin, dispatch, recordCommand } from "./telemetry/dispatch.js";
 
 type CommandModule = { run: (args: string[]) => Promise<number> };
 
@@ -75,13 +76,25 @@ export async function main(argv: string[]): Promise<void> {
       .allowUnknownOption()
       .allowExcessArguments()
       .action(async (_options: unknown, command: Command) => {
+        begin(name, command.args);
         let threw = false;
+        let caught: unknown;
         try {
           const mod = await entry.load();
           process.exitCode = await mod.run(command.args);
         } catch (error) {
           threw = true;
+          caught = error;
           process.exitCode = reportError(error, name, command.args);
+        }
+        // The usage data of this command leaves now, before the feedback
+        // question, so the question is not in its duration and closing the
+        // terminal during it loses nothing.
+        try {
+          recordCommand({ exitCode: Number(process.exitCode ?? 0), error: caught, threw, interrupted: false });
+          dispatch();
+        } catch {
+          // never a reason to fail
         }
         // At most one offer per run, after the command's own output.
         const problem = takePending();
@@ -121,6 +134,15 @@ export async function main(argv: string[]): Promise<void> {
     // it, this worker gives up and the next daily check tries again.
     const result = await runUpdateWorker({ anyAge: false, daily: true, wait: 0 });
     process.exit(result.outcome === "failed" ? EXIT_TOOL_FAILED : 0);
+  });
+
+  // Hidden: the usage data worker, run as a detached process by a command
+  // with its events. It ends by itself; the exit is explicit so no open
+  // socket keeps it.
+  program.command("__telemetry", { hidden: true }).action(async () => {
+    const { runTelemetryWorker } = await import("./telemetry/worker.js");
+    await runTelemetryWorker();
+    process.exit(0);
   });
 
   try {

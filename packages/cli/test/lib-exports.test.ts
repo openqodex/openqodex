@@ -24,6 +24,9 @@
 //    toolchain table, grammars) is looked for beside the bundle.
 // 10. A host's code scan cannot tell a security lens from the others: the
 //     `security: true` of a lens file is not on the lens it loads.
+// 11. The library sends usage data, or the bundle carries a second token:
+//     the host and the token reach dist/lib.js, or dist/bin.js holds more
+//     than one PostHog project token.
 import { stagedAnswer } from "../../review/test/staged-fake.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -306,6 +309,16 @@ beforeAll(() => {
   installed = join(project, "node_modules", "openqodex");
   // pnpm pack and npm install take longer than the default limit on a CI runner.
 }, 180_000);
+
+describe("the usage data in the bundles", () => {
+  it("leaves the library without the host or the token, and the command with exactly one token (failure 11)", () => {
+    const lib = readFileSync(join(cliRoot, "dist", "lib.js"), "utf8");
+    expect(lib).not.toMatch(/posthog/i);
+    expect(lib).not.toContain("phc_");
+    const bin = readFileSync(join(cliRoot, "dist", "bin.js"), "utf8");
+    expect(bin.match(/phc_[A-Za-z0-9]+/g)).toHaveLength(1);
+  });
+});
 
 describe("the installed package as a library", () => {
   it("importing it prints nothing and exits at once (no command starts, no update check)", () => {

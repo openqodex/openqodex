@@ -209,7 +209,7 @@ async function describeBuild(spec) {
 const BUILD_ENV = ["HOME", "OPENQODEX_HOME", "OPENQODEX_BENCH_CACHE", "GOROOT", "GOPATH", "GOTOOLCHAIN", "CARGO_HOME", "RUSTUP_HOME", "GEM_HOME", "GEM_PATH"];
 export function buildEnv(base = process.env) {
   const kept = Object.fromEntries(BUILD_ENV.filter((k) => base[k] !== undefined).map((k) => [k, base[k]]));
-  return cleanEnv(base, { ...kept, OPENQODEX_AUTO_UPDATE: "0", NO_COLOR: "1" });
+  return cleanEnv(base, { ...kept, OPENQODEX_AUTO_UPDATE: "0", OPENQODEX_TELEMETRY: "0", NO_COLOR: "1" });
 }
 
 // One run.mjs invocation: its output goes to the log file and to stderr. A

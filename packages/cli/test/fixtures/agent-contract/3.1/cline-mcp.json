@@ -1,0 +1,6 @@
+{
+  "command": "/home/dev/.openqodex/bin/openqodex",
+  "args": [
+    "mcp"
+  ]
+}

@@ -188,7 +188,7 @@ describe("init, user scope, all agents", () => {
 
   it("20. writes one line into each agent's global instruction file", () => {
     for (const file of [join(s.home, ".claude/CLAUDE.md"), join(s.home, ".codex/AGENTS.md")]) {
-      expect(sectionOf(file)).toEqual(["Before any push, review the change with the openqodex skill."]);
+      expect(sectionOf(file)).toEqual(["Before any push in a repository that has an OpenQodex settings file (`.openqodex/config.yaml`, or `.openqodex.yaml` at its root), review the change with the openqodex skill."]);
     }
   });
 
@@ -552,7 +552,7 @@ describe("init, project scope", () => {
     const s = sandbox();
     expect(cli(s, ["init", "--yes", "--project", "--agent", "codex"]).status).toBe(0);
     const agents = join(s.repo, "AGENTS.md");
-    const edited = readFileSync(agents, "utf8").replace("## Review with OpenQodex", "## Review with OpenQodex, our way");
+    const edited = readFileSync(agents, "utf8").replace("review the change", "review the change our way");
     writeFileSync(agents, edited);
     const again = cli(s, ["init", "--yes", "--project", "--agent", "codex"]);
     expect(again.status, again.stderr).toBe(0);
@@ -605,6 +605,25 @@ describe("20. the global section and what init says it wrote", () => {
     expect(cli(s, ["init", "--yes", "--agent", "claude-code"]).status).toBe(0);
     expect(sectionOf(claudeMd)).toHaveLength(1);
     expect(readFileSync(claudeMd, "utf8").startsWith("# Mine\n")).toBe(true);
+  });
+
+  // The one-line note of 0.9.0 to 0.24.0 asked for a review in every
+  // repository; the current one only where a settings file opts in.
+  const ONE_LINE = [START, "Before any push, review the change with the openqodex skill.", "<!-- openqodex:end -->"].join("\n");
+
+  it("replaces the one-line note of an earlier version in place, recorded or not, and keeps an edited one", () => {
+    const s = sandbox();
+    const claudeMd = join(s.home, ".claude/CLAUDE.md");
+    const codexMd = join(s.home, ".codex/AGENTS.md");
+    mkdirSync(join(s.home, ".claude"), { recursive: true });
+    mkdirSync(join(s.home, ".codex"), { recursive: true });
+    writeFileSync(claudeMd, `# Mine\n\n${ONE_LINE}\n\nAfter.\n`);
+    const edited = ONE_LINE.replace("openqodex skill.", "openqodex skill, always.");
+    writeFileSync(codexMd, `${edited}\n`);
+    const r = cli(s, ["init", "--yes", "--agent", "claude-code", "--agent", "codex"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(claudeMd, "utf8")).toMatch(/^# Mine\n\n<!-- openqodex:start -->\nBefore any push in a repository that has an OpenQodex settings file [^\n]*\n<!-- openqodex:end -->\n\nAfter\.\n$/);
+    expect(readFileSync(codexMd, "utf8")).toBe(`${edited}\n`);
   });
 });
 

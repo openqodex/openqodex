@@ -172,7 +172,7 @@ function known(command) {
   if (!helpCache.has(command)) {
     let out = "";
     try {
-      out = execFileSync(process.execPath, [BIN, command, "--help"], { encoding: "utf8", env: { ...process.env, CI: "1", OPENQODEX_AUTO_UPDATE: "0" } });
+      out = execFileSync(process.execPath, [BIN, command, "--help"], { encoding: "utf8", env: { ...process.env, CI: "1", OPENQODEX_AUTO_UPDATE: "0", OPENQODEX_TELEMETRY: "0" } });
     } catch (error) {
       out = String(error.stdout ?? "");
     }
@@ -469,7 +469,7 @@ else {
   else if (!same(listed, languages)) fail(GRAPH_PAGE, `"At a glance" lists the languages ${listed.join(", ") || "nowhere"}; the graph parses ${languages.join(", ")}`);
   let help = "";
   try {
-    help = execFileSync(process.execPath, [BIN, "graph", "help"], { encoding: "utf8", env: { ...process.env, CI: "1", OPENQODEX_AUTO_UPDATE: "0" } });
+    help = execFileSync(process.execPath, [BIN, "graph", "help"], { encoding: "utf8", env: { ...process.env, CI: "1", OPENQODEX_AUTO_UPDATE: "0", OPENQODEX_TELEMETRY: "0" } });
   } catch (error) {
     help = String(error.stdout ?? "");
   }

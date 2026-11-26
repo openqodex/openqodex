@@ -7,6 +7,7 @@
 import { applyMigration, findRepoRoot, OpenQodexError, planMigration } from "@openqodex/core";
 import { EXIT_OK } from "../exit-codes.js";
 import { parseFlags } from "../flags.js";
+import { noteSub } from "../telemetry/dispatch.js";
 
 const USAGE = "usage: openqodex config migrate [--write] [--cwd <dir>]";
 
@@ -17,6 +18,7 @@ function out(line = ""): void {
 export async function run(args: string[]): Promise<number> {
   const { global, bools, positionals } = parseFlags(args, { bools: ["--write"], positionals: 1, globals: ["--cwd"] });
   if (positionals[0] !== "migrate") throw new OpenQodexError(`${positionals[0] === undefined ? "name what to do" : `unknown: ${positionals[0]}`}\n${USAGE}`);
+  noteSub("migrate");
   const repoRoot = await findRepoRoot(global.cwd);
   const m = planMigration(repoRoot);
   if (m.file === null) {

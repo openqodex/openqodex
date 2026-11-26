@@ -3,7 +3,7 @@
 ## Paste this prompt into your agent
 
 ```
-Install OpenQodex for yourself with `npx -y openqodex@0.24.0 init --yes --agent <host>`. Use the agent you are as <host>: claude-code, codex, cursor, cline or goose. Run the command from this repository. Run it in the background and wait until it exits. It ends with a review of my current change when a reviewer can start. Tell me the verdict and the findings. If there was no review, tell me what its last lines say is missing.
+Install OpenQodex for yourself with `npx -y openqodex@0.25.0 init --yes --agent <host>`. Use the agent you are as <host>: claude-code, codex, cursor, cline or goose. Run the command from this repository. Run it in the background and wait until it exits. It ends with a review of my current change when a reviewer can start. Tell me the verdict and the findings. If there was no review, tell me what its last lines say is missing.
 ```
 
 The agent runs `init` for itself: the same install as the steps below, the push gate included, with no question (`--yes`). Then `init` reviews your change and the agent tells you the result. The steps below do the same by hand.
@@ -27,14 +27,14 @@ In your own terminal:
 npx openqodex init
 ```
 
-From inside an agent, the line is `npx -y openqodex@0.24.0 init --yes --agent <host>`, as in the prompt above.
+From inside an agent, the line is `npx -y openqodex@0.25.0 init --yes --agent <host>`, as in the prompt above.
 
 `init` finds Claude Code, Cursor, Codex CLI, Cline and Goose on your machine. It prints each file it will write, for you and for the team, then asks once: "Write these files?". `--yes` skips the question. `agents` lists every file for each agent.
 
 Inside a repository, `init` also:
 
 - adds the git pre-push hook, so every push from that repository is checked for a review, from an agent or by hand. `--hook none` leaves it out.
-- adds one line to each agent's global instruction file, such as `~/.claude/CLAUDE.md` for Claude Code: before any push, review the change with the openqodex skill. It prints the line before writing it.
+- adds one line to each agent's global instruction file, such as `~/.claude/CLAUDE.md` for Claude Code: before any push in a repository that has an OpenQodex settings file (`.openqodex/config.yaml`), review the change with the openqodex skill. It prints the line before writing it. A repository without that file is never reviewed unless you ask.
 - adds a review section to the repository's `CLAUDE.md` and `AGENTS.md`, so a teammate's agent reviews before it pushes too. `--no-repo` leaves it out.
 - creates `.openqodex/config.yaml` and `.openqodex/custom-instructions.md`. Commit both. Write in `custom-instructions.md` what a reviewer of your repository must know: conventions, what never to flag, what always to check. The review brief carries it word for word. You can also choose [convention files](config.md#convention-files) for the brief.
 
