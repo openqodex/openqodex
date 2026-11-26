@@ -7,6 +7,25 @@ import { DELIVER_LINES, pageRows } from "./conversation.js";
 export const GROUP_DIFF_BYTES = 30 * 1024;
 export const MAX_UNIT_DIFF_BYTES = 120 * 1024;
 export const MAX_BRIEF_BYTES = 256 * 1024;
+// Room a part leaves in its brief for the unit's file list, its headings and
+// its answer rows.
+const PART_SLACK_BYTES = 8 * 1024;
+
+// The most a unit's interfaces brief can hold over its local brief: the
+// code around the change and the callers of its declarations share one
+// 24 KB cap (review-change.ts), and each pass adds its own text.
+const PASS_SPREAD_BYTES = 32 * 1024;
+
+// The most diff one part may carry so that a unit holding only that part
+// fits MAX_BRIEF_BYTES: `fixed` is what every finder brief of the unit holds
+// besides its diff (the shared blocks, the instructions and the context
+// items, measured on a unit with no file, plus the most the unit's own
+// blocks, such as the code around its files, can add). Never over
+// MAX_UNIT_DIFF_BYTES, and never under two delivery rows: fixed blocks that
+// leave no room cannot be helped by cutting, and the units say so.
+export function partBudget(fixed: number): number {
+  return Math.max(2 * DELIVERY_ROW_BYTES, Math.min(MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES - fixed - PART_SLACK_BYTES));
+}
 
 type Read = ((path: string) => string | null) & { byteLines?: ByteLines };
 type JsonPage = { start: number; end: number; entries: JsonEntry[]; omitted: Digest["omitted"] };
@@ -42,12 +61,14 @@ function previousText(file: Change["files"][number], diff: string | undefined, t
 // One inventory owns scheduling and coverage. Its parts retain the whole
 // obligation's identity, and deletions retain their distinct old intervals.
 // A change that already has a secrets list keeps it; see setFragmentSource.
-export function obligations(change: Change, read: Read, cache = stagedDiffCache(change, registeredSecrets(change) ?? [])): HunkRef[] {
-  return inventoryOf(change, read, cache, true);
+// `partBytes`: the most diff one part carries (partBudget), so that every
+// part fits a brief beside the brief's fixed blocks.
+export function obligations(change: Change, read: Read, cache = stagedDiffCache(change, registeredSecrets(change) ?? []), partBytes = MAX_UNIT_DIFF_BYTES): HunkRef[] {
+  return inventoryOf(change, read, cache, true, partBytes);
 }
 
 // `register`: whether this inventory registers its byte source and secrets list.
-function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof stagedDiffCache>, register: boolean): HunkRef[] {
+function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof stagedDiffCache>, register: boolean, partBytes = MAX_UNIT_DIFF_BYTES): HunkRef[] {
   let snapshotPath: string | null = null;
   let snapshotLines: string[] | null = null;
   const snapshotOf = (path: string) => {
@@ -104,7 +125,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
     const size = { rows: rendered?.length ?? Infinity, bytes: rendered === null ? Infinity : Buffer.byteLength(rendered.join("\n"), "utf8") };
     const prior = measured.get(h.path) ?? { rows: 0, bytes: 0 };
     measured.set(h.path, { rows: prior.rows + size.rows, bytes: prior.bytes + size.bytes });
-    if (size.rows > DELIVER_LINES || size.bytes > MAX_UNIT_DIFF_BYTES) over.add(h.path);
+    if (size.rows > DELIVER_LINES || size.bytes > partBytes) over.add(h.path);
   }
   for (const path of measured.keys()) {
     const store = storeRoot(path);
@@ -144,7 +165,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
   }
   for (const [path, input] of candidates) {
     const size = stores.get(input.root);
-    if (input.kind === "json" ? over.has(path) : size!.rows > DELIVER_LINES || size!.bytes > MAX_UNIT_DIFF_BYTES) routes.set(path, input);
+    if (input.kind === "json" ? over.has(path) : size!.rows > DELIVER_LINES || size!.bytes > partBytes) routes.set(path, input);
   }
   const wholeByPath = new Map<string, HunkRef[]>();
   for (const h of whole) {
@@ -156,7 +177,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
   for (const [path, input] of routes) if (input.kind === "json") {
     const sections = jsonSections(path, input.text!, wholeByPath.get(path)!, input.previous, input.secrets, input.oldUnavailable);
     const fixedBytes = Buffer.byteLength(sections.fixed + "\n", "utf8") + 1024;
-    if (fixedBytes >= MAX_UNIT_DIFF_BYTES / 2) { routes.delete(path); continue; }
+    if (fixedBytes >= partBytes / 2) { routes.delete(path); continue; }
     const groups: { start: number; end: number; entries: JsonEntry[]; bytes: number }[] = [];
     const refs = wholeByPath.get(path)!;
     const metadata = [
@@ -188,13 +209,13 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
       else groups.push({ start: entry.lines[0], end: entry.lines[1], entries: entry.text ? [entry] : [], bytes });
     }
     for (const group of groups) group.bytes += through(starts, group.end) - through(ends, group.start - 1);
-    if (groups.some((group) => fixedBytes + group.bytes > MAX_UNIT_DIFF_BYTES)) { routes.delete(path); continue; }
+    if (groups.some((group) => fixedBytes + group.bytes > partBytes)) { routes.delete(path); continue; }
     const pages: JsonPage[] = [];
     let entries: JsonEntry[] = [];
     let bytes = fixedBytes;
     let start = 1;
     for (const group of groups) {
-      if (bytes > fixedBytes && bytes + group.bytes > MAX_UNIT_DIFF_BYTES) {
+      if (bytes > fixedBytes && bytes + group.bytes > partBytes) {
         pages.push({ start, end: group.start - 1, entries, omitted: [] });
         start = group.start;
         entries = [];
@@ -235,10 +256,11 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
     }
     for (const page of active) page.entries = entriesByPage.get(page)!;
     // Folding can concentrate an entire file's anomalies on one changed line.
-    // Keep that look bounded too, falling back to parts when it cannot fit.
+    // Keep that look bounded too, falling back to parts when it cannot fit;
+    // a smaller part budget leaves less room by as much.
     if ([...active].some((page) => fixedBytes + page.entries.reduce((sum, e) => sum + Buffer.byteLength(e.text + "\n", "utf8"), 0)
       + page.omitted.reduce((sum, o) => sum + Buffer.byteLength(`${o.path}:${o.lines[0]}-${o.lines[1]}: ${o.why}\n`, "utf8"), 0)
-      + through(starts, page.end) - through(ends, page.start - 1) > MAX_BRIEF_BYTES - MAX_UNIT_DIFF_BYTES)) { routes.delete(path); continue; }
+      + through(starts, page.end) - through(ends, page.start - 1) > MAX_BRIEF_BYTES - 2 * MAX_UNIT_DIFF_BYTES + partBytes)) { routes.delete(path); continue; }
     input.sections = sections;
     input.pages = [...active].sort((a, b) => a.start - b.start);
   }
@@ -279,7 +301,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
       const rendered = rows.length ? rows : !ref.deletion && snapshot ? pageRows(ref.path, ref.start, ref.end, snapshot) : [];
       return { ...ref, rows: rendered.length, bytes: Buffer.byteLength(rendered.join("\n"), "utf8") + (rows.length ? 0 : 1) };
     };
-    const fits = (ref: HunkRef) => ref.rows! <= DELIVER_LINES && ref.bytes! <= MAX_UNIT_DIFF_BYTES;
+    const fits = (ref: HunkRef) => ref.rows! <= DELIVER_LINES && ref.bytes! <= partBytes;
     const parts: HunkRef[] = [];
     // The old side of an oversized replacement is an explicit obligation,
     // rather than repeated in each slice of its new side.
@@ -328,7 +350,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
             // Sizes come from the line's one measuring pass where it has one.
             for (const fragment of fragmentSizes(source)) {
               const size = Buffer.byteLength(`${oldSide ? "-" : "+"}${fragmentLabel(path, at, fragment.from, fragment.to, source.bytes, oldSide ? "old" : "new")}\t\n`) + fragment.size;
-              if (rows && (bytes + size > MAX_UNIT_DIFF_BYTES || rows + 1 > DELIVER_LINES)) flush();
+              if (rows && (bytes + size > partBytes || rows + 1 > DELIVER_LINES)) flush();
               to = fragment.to;
               bytes += size;
               rows++;
@@ -463,6 +485,14 @@ export function unitsOf(change: Change, hunks: HunkRef[], brief?: (unit: ReviewU
     recut.forEach((h, i) => { h.id = `h${i + 1}`; if (h.fragment) h.fragment = { ...h.fragment, of: h.id }; });
     hunks.splice(0, hunks.length, ...recut);
   }
+  // Whether a unit's finder briefs pass MAX_BRIEF_BYTES. The local brief
+  // is measured; the interfaces brief only when the local one is near the
+  // bound, since it can be longer by its callers block and its pass's text
+  // alone (PASS_SPREAD_BYTES).
+  const overBrief = (u: ReviewUnit): boolean => {
+    const local = Buffer.byteLength(brief!(u), "utf8");
+    return local > MAX_BRIEF_BYTES || (local > MAX_BRIEF_BYTES - PASS_SPREAD_BYTES && Buffer.byteLength(brief!(u, true), "utf8") > MAX_BRIEF_BYTES);
+  };
   let unit: ReviewUnit | null = null;
   let rows = 0;
   let estimate = base;
@@ -472,7 +502,14 @@ export function unitsOf(change: Change, hunks: HunkRef[], brief?: (unit: ReviewU
     if (!unit) return;
     // Estimates avoid growing trial renders. Check the real serialization only
     // at closure, and move the last entry out if metadata was underestimated.
-    if (brief && Buffer.byteLength(brief(unit), "utf8") > MAX_BRIEF_BYTES) {
+    if (brief && overBrief(unit)) {
+      // One entry whose local brief fits keeps its unit: only its interfaces
+      // brief is over, and the staged review notes that pass alone.
+      if (unit.hunks.length === 1 && Buffer.byteLength(brief(unit), "utf8") <= MAX_BRIEF_BYTES) {
+        out.push(unit);
+        unit = null;
+        return;
+      }
       const last = unit.hunks.pop()!;
       unit.diffBytes -= last.bytes!;
       unit.files = [...new Set(unit.hunks.map((h) => h.path))];

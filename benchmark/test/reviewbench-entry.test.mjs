@@ -23,7 +23,8 @@
 //    holds no finding) is written as clean on the first attempt; or, from
 //    the second, fails again, so one pull request fails the whole run.
 // 6. A pull request with nothing to review fails instead of writing an
-//    empty findings file.
+//    empty findings file; for the model review, one its report marks
+//    nothing_to_review is retried.
 // 7. One finding ReviewBench's validator refuses (a path with "..", a
 //    backslash or a colon) fails the whole pull request instead of being
 //    left out; a finding with no line (below 1) or an end before its start
@@ -211,6 +212,11 @@ describe("ReviewBench entrypoint", () => {
     const r = run({ ...pr, base: pr.head });
     expect(r.code, r.stderr).toBe(0);
     expect(r.out).toMatchObject({ pr: { head: pr.head, pr_number: 7 }, findings: [] });
+  });
+
+  it("6. writes an empty findings file, with no retry, for a model review that had nothing to review", () => {
+    const report = { status: "nothing_to_review", reason: "nothing to review: the head changes no line a reviewer can read since the merge base" };
+    expect(decide({ code: 0, report, usage: { calls: [] }, attempt: 1, agent: "openqodex" })).toEqual({ write: [], note: report.reason });
   });
 
   it("8. reviews a mounted clone it cannot write, and leaves it unchanged", () => {

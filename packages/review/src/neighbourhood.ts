@@ -20,11 +20,17 @@ export type NeighbourhoodSymbol = { name: string; changedIn: string[]; files: nu
 
 // The packet: the symbols, where the packet was written inside the snapshot
 // (a path relative to the snapshot root, null when nothing was written), and
-// whether the time or size cap cut it (`partial` with the reason).
+// whether the time or size cap cut it (`partial` with the reason, `cause`
+// with its kind). `droppedLinked` and `droppedOther`: the symbols the byte
+// cap cut that the code graph links to the change, and the others. Only a
+// linked one cut makes the packet partial; the others are counted alone.
 export type Neighbourhood = {
   symbols: NeighbourhoodSymbol[];
   packetPath: string | null;
   partial: string | null;
+  cause?: "bytes" | "time" | "error" | null;
+  droppedLinked?: number;
+  droppedOther?: number;
   durationMs: number;
   contracts?: Contract[];
   // Per declaring file, the changed declarations past CONTRACT_SYMBOLS that
@@ -90,6 +96,70 @@ const PACKET_PATH = `${PACKET_ROOT}/neighbourhood.md`;
 
 type Collected = { name: string; files: number; graph: NeighbourhoodSite[]; declared: NeighbourhoodSite[]; used: NeighbourhoodSite[] };
 type GraphSites = Map<string, Map<number, Set<string>>>;
+
+// Files whose changed lines are prose or generated, never code: no name on
+// them is searched for.
+const PROSE = /\.(?:md|markdown|mdx|txt|text|rst|adoc|asciidoc|org)$|(?:^|\/)(?:LICEN[CS]E|COPYING|NOTICE|AUTHORS|CHANGELOG|README)(?:\.[^/]*)?$/i;
+const LOCKFILE = /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|Gemfile\.lock|poetry\.lock|Pipfile\.lock|composer\.lock|go\.sum|mix\.lock|pubspec\.lock|packages\.lock\.json|flake\.lock|uv\.lock)$|\.lock$/;
+// Config files: only the key a line sets is a name. Code reads a key by its
+// name, so the code that reads a changed key is the code around it; the
+// value and the comments are data.
+const CONFIG = /\.(?:json|jsonc|json5|ya?ml|toml|ini|cfg|conf|properties|env)$/i;
+const CONFIG_KEY = /^\s*(?:-\s+)?(?:"([^"\\]+)"|'([^'\\]+)'|([A-Za-z_][\w.-]*))\s*[:=]/;
+// Comment syntax by file kind; a file of any other kind is read whole.
+const SLASH_COMMENTS = /\.(?:[cm]?[jt]sx?|java|kts?|scala|groovy|go|rs|swift|c|cc|cpp|cxx|h|hh|hpp|cs|php|dart|mm|proto|zig|sol)$/i;
+const HASH_COMMENTS = /\.(?:py|pyi|rb|sh|bash|zsh|fish|pl|pm|r|ex|exs|nim|cr|jl|ps1|tcl|mk|cmake)$|(?:^|\/)(?:Makefile|Dockerfile|Rakefile|Gemfile)$/i;
+const DASH_COMMENTS = /\.(?:sql|lua|hs|elm)$/i;
+
+// The part of a changed line its names are read from: the code, without its
+// comments and its string literals (a template's interpolations stay); a
+// config line's key; nothing for a prose file or a lock file. A changed
+// line inside a block comment that its leading star marks is a comment.
+export function codeOf(path: string, line: string): string {
+  if (PROSE.test(path) || LOCKFILE.test(path)) return "";
+  if (CONFIG.test(path)) {
+    const key = CONFIG_KEY.exec(line);
+    return key ? (key[1] ?? key[2] ?? key[3])! : "";
+  }
+  const slash = SLASH_COMMENTS.test(path);
+  const hash = HASH_COMMENTS.test(path);
+  const dash = DASH_COMMENTS.test(path);
+  if (!slash && !hash && !dash) return line;
+  if (slash && /^\s*\*(?:\s|\/|$)/.test(line)) return "";
+  // A Rust apostrophe opens a lifetime more often than a character.
+  const apostrophe = !/\.rs$/i.test(path);
+  let out = "";
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (slash && c === "/" && line[i + 1] === "/") break;
+    if (slash && c === "/" && line[i + 1] === "*") {
+      const end = line.indexOf("*/", i + 2);
+      if (end < 0) break;
+      out += " ";
+      i = end + 1;
+      continue;
+    }
+    if (hash && c === "#") break;
+    if (dash && c === "-" && line[i + 1] === "-") break;
+    if (c === '"' || c === "`" || (c === "'" && apostrophe)) {
+      let j = i + 1;
+      for (; j < line.length && line[j] !== c; j++) {
+        if (line[j] === "\\") j++;
+        else if (c === "`" && line[j] === "$" && line[j + 1] === "{") {
+          const end = line.indexOf("}", j + 2);
+          if (end < 0) { j = line.length; break; }
+          out += ` ${line.slice(j + 2, end)} `;
+          j = end;
+        }
+      }
+      out += " ";
+      i = j;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
 
 function eligible(path: string): boolean {
   return !path.split("/").some((part) => IGNORED.has(part));
@@ -164,12 +234,13 @@ function renderSymbol(symbol: NeighbourhoodSymbol): string {
 }
 
 // Both budgets keep whole symbols, including all their changed-file headings.
-function capped(symbols: NeighbourhoodSymbol[], maxBytes: number, tail: (kept: number) => string[], forFiles?: ReadonlySet<string>): { symbols: NeighbourhoodSymbol[]; text: string } {
+// `tail` is given the symbols kept.
+function capped(symbols: NeighbourhoodSymbol[], maxBytes: number, tail: (kept: readonly NeighbourhoodSymbol[]) => string[], forFiles?: ReadonlySet<string>): { symbols: NeighbourhoodSymbol[]; text: string } {
   const kept: NeighbourhoodSymbol[] = [];
   const files = new Map<string, { heading: string; entries: string[] }>();
   // Reserve the longest omission note. Its count can only shrink as we keep
   // symbols. The last byte is the final newline.
-  const notes = tail(0);
+  const notes = tail([]);
   const reserved = notes.length > 0 ? Buffer.byteLength(notes.join("\n\n")) + 2 : 0;
   let bytes = Buffer.byteLength(HEADER) + reserved + 1;
   for (const symbol of symbols) {
@@ -190,7 +261,7 @@ function capped(symbols: NeighbourhoodSymbol[], maxBytes: number, tail: (kept: n
   }
   const out = [HEADER];
   for (const group of files.values()) out.push(group.heading, ...group.entries);
-  out.push(...tail(kept.length));
+  out.push(...tail(kept));
   return { symbols: kept, text: out.join("\n\n") + "\n" };
 }
 
@@ -278,9 +349,10 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
       inFile.add(name);
       if (!names.has(name)) names.set(name, { name, files: 0, graph: [], declared: [], used: [] });
     };
+    // Only the code of a changed line seeds names (codeOf).
     const add = (file: string, line: string): void => {
       if (binary.has(file)) return;
-      for (const [name] of line.matchAll(IDENTIFIER)) {
+      for (const [name] of codeOf(file, line).matchAll(IDENTIFIER)) {
         if (STOP_WORDS.has(name)) continue;
         addName(file, name);
       }
@@ -308,8 +380,19 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     // A body edit need not spell its enclosing symbol's name. The graph
     // knows which declarations were touched or removed, even without text.
     const touched = new Set([...(args.impact?.touched ?? []), ...(args.impact?.removed ?? [])]);
+    // The names the code graph links to the change: each touched or removed
+    // declaration, and each certain callee of one. They go before the names
+    // found by text alone, and only one of them cut makes the packet partial.
+    const linked = new Set<string>();
+    const impactSymbols = new Map((args.impact?.symbols ?? []).map((s) => [s.id, s]));
+    for (const path of args.impact?.callees ?? []) {
+      const edge = path.edges[0];
+      const callee = impactSymbols.get(edge.to);
+      if (callee && touched.has(path.seed) && edge.sites.some((site) => site.tier === "certain")) linked.add(callee.name);
+    }
     for (const symbol of args.impact?.symbols ?? []) {
       if (!touched.has(symbol.id)) continue;
+      linked.add(symbol.name);
       addName(symbol.file, symbol.name);
       if (symbol.kind !== "file" && symbol.kind !== "module") seed(symbol.name, symbol.file, symbol.snapshot === "current" ? { line: symbol.startLine, end: symbol.endLine } : null);
     }
@@ -422,11 +505,15 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
         }
       }
     }
+    const isLinked = (s: Collected) => linked.has(s.name) || s.graph.length > 0;
     const selected = new Map<string, NeighbourhoodSymbol>();
     for (const [file, candidates] of byFile) {
       const ranked = [...candidates].map((name) => names.get(name)!)
         .filter((s) => s.graph.length > 0 || (s.files <= maxFiles && s.declared.length + s.used.length > 0))
-        .sort((a, b) => a.files - b.files || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, NEIGHBOURHOOD_SYMBOLS_PER_FILE);
+        .sort((a, b) => Number(!isLinked(a)) - Number(!isLinked(b)) || a.files - b.files || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        // Every linked name stays, so only the byte cap, which counts it,
+        // can cut one; names found by text alone fill the file's places.
+        .filter((s, i) => isLinked(s) || i < NEIGHBOURHOOD_SYMBOLS_PER_FILE);
       for (const symbol of ranked) {
         let kept = selected.get(symbol.name);
         if (!kept) {
@@ -441,7 +528,9 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
       }
     }
     duration();
-    const symbols = redactStored([...selected.values()], args.secrets);
+    // Linked symbols first, so the byte cap cuts the others before them.
+    const linkedNames = new Set([...selected.keys()].filter((name) => isLinked(names.get(name)!)));
+    const symbols = redactStored([...selected.values()].sort((a, b) => Number(!linkedNames.has(a.name)) - Number(!linkedNames.has(b.name))), args.secrets);
     const leftOutCounts = new Map<string, number>();
     for (const path of leftOut.values()) leftOutCounts.set(path, (leftOutCounts.get(path) ?? 0) + 1);
     const contractsLeftOut = leftOutCounts.size ? { contractsLeftOut: redactStored([...leftOutCounts].map(([path, count]) => ({ path, count })), args.secrets) } : {};
@@ -450,17 +539,30 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     const declaredAt = (c: Seed): ContractSite | null => c.declared ?? (c.at ? { path: c.at.path, line: c.at.line, from: "text", context: "" } : null);
     const found: Contract[] = redactStored([...contracts.values()].filter((c) => c.sites > 0).map((c) => ({ name: c.name, declaredIn: [...c.declaredIn], declared: declaredAt(c), callers: [...c.graph, ...c.text].slice(0, CONTRACT_CALLERS), sites: c.sites, files: c.files })), args.secrets);
     const timeReason = [timedOut ? `Time cap reached after ${filesRead} of ${totalFiles} files; file counts and sites are partial.` : null, skippedPages ? `Skipped ${skippedPages} diff pages over the 512 KB byte budget.` : null].filter(Boolean).join(" ") || null;
-    if (symbols.length === 0) return { symbols, packetPath: null, partial: timeReason, durationMs: elapsed, contracts: found, ...contractsLeftOut };
-    const sizeReason = (kept: number) => kept < symbols.length ? `${symbols.length - kept} symbols cut at the packet byte cap.` : null;
+    const causeOf = (cut: boolean) => timedOut ? "time" as const : skippedPages || cut ? "bytes" as const : null;
+    if (symbols.length === 0) return { symbols, packetPath: null, partial: timeReason, cause: causeOf(false), droppedLinked: 0, droppedOther: 0, durationMs: elapsed, contracts: found, ...contractsLeftOut };
+    // The symbols the byte cap cut, linked and other. The note names the
+    // cut only when a linked one is among them, and then counts them all.
+    const dropped = (kept: readonly NeighbourhoodSymbol[]) => {
+      const keptNames = new Set(kept.map((s) => s.name));
+      const cut = symbols.filter((s) => !keptNames.has(s.name));
+      const linkedCut = cut.filter((s) => linkedNames.has(s.name)).length;
+      return { linked: linkedCut, other: cut.length - linkedCut };
+    };
+    const sizeReason = (kept: readonly NeighbourhoodSymbol[]) => {
+      const cut = dropped(kept);
+      return cut.linked > 0 ? `${cut.linked + cut.other} symbols cut at the packet byte cap.` : null;
+    };
     const fit = capped(symbols, NEIGHBOURHOOD_MAX_BYTES, (kept) => [timeReason, sizeReason(kept)].filter((x): x is string => x !== null));
     const text = redactSecrets(fit.text, args.secrets);
     if (secretTexts(args.secrets).some((secret) => PACKET_PATH.includes(secret) || text.includes(secret))) throw new Error("A secret remains in the neighbourhood packet or its path");
     writePacket(args.snapshotDir, args.impact, text);
     duration();
-    return { symbols: fit.symbols, packetPath: PACKET_PATH, partial: [timeReason, sizeReason(fit.symbols.length)].filter(Boolean).join(" ") || null, durationMs: elapsed, contracts: found, ...contractsLeftOut };
+    const cut = dropped(fit.symbols);
+    return { symbols: fit.symbols, packetPath: PACKET_PATH, partial: [timeReason, sizeReason(fit.symbols)].filter(Boolean).join(" ") || null, cause: causeOf(cut.linked > 0), droppedLinked: cut.linked, droppedOther: cut.other, durationMs: elapsed, contracts: found, ...contractsLeftOut };
   } catch (error) {
     try { duration(); } catch { /* Keep the last duration if the clock failed. */ }
-    return { symbols: [], packetPath: null, partial: redactSecrets(`Could not build code around the change: ${display(error instanceof Error ? error.message : String(error))}`, args.secrets), durationMs: elapsed };
+    return { symbols: [], packetPath: null, partial: redactSecrets(`Could not build code around the change: ${display(error instanceof Error ? error.message : String(error))}`, args.secrets), cause: "error", droppedLinked: 0, droppedOther: 0, durationMs: elapsed };
   }
 }
 
@@ -472,7 +574,7 @@ export function renderNeighbourhoodBlock(packet: Neighbourhood, forFiles?: reado
   const files = forFiles ? new Set(forFiles) : undefined;
   const symbols = packet.symbols.filter((s) => !files || s.changedIn.some((file) => files.has(file)));
   if (symbols.length === 0) return "";
-  return capped(symbols, maxBytes, (kept) => {
+  return capped(symbols, maxBytes, ({ length: kept }) => {
     const notes = packet.partial ? [packet.partial] : [];
     if (kept < symbols.length) notes.push(packet.packetPath ? `Read ${escapeMarkdown(display(packet.packetPath))} for the remaining ${symbols.length - kept} symbols.` : `${symbols.length - kept} symbols left out; no packet was written.`);
     return notes;

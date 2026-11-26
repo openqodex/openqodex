@@ -20,7 +20,7 @@ export { classify } from "./agents/trace.js";
 export type { OwnFiles, ToolCall } from "./agents/trace.js";
 export { claudeHome, claudeStateFile, codexHome } from "./agents/homes.js";
 export { agentReviewer, reviewerContract } from "./reviewer.js";
-export type { AgentReviewer, AuthorizeRequest, Budget, Disposition, Message, ModelRequest, ModelResponse, ModelReviewer, ModelUsage, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult, ReviewStatus, ToolCallRequest, ToolDefinition, ToolParameter } from "./reviewer.js";
+export type { AgentReviewer, AuthorizeRequest, Budget, Disposition, IncompleteCause, IncompleteDetail, Message, ModelRequest, ModelResponse, ModelReviewer, ModelUsage, NeighbourhoodStatus, ReasonCode, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult, ReviewStatus, ToolCallRequest, ToolDefinition, ToolParameter } from "./reviewer.js";
 export { usageTotals } from "./usage.js";
 export type { CallRecord, ModelPurpose, ModelReviewEvidence, ReviewerRole, ToolLogEntry, UsageTotals } from "./usage.js";
 export type { CorrectionRound } from "./conversation.js";

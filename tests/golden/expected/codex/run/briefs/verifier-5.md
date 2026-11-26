@@ -61,6 +61,30 @@ The identifiers on the changed lines, and where the repository declares and uses
 
 ### infra/main.tf
 
+#### cidr\_blocks: 1 snapshot files
+
+used at infra/main.tf:36 (by name, unverified: the same name may be another thing)
+
+```
+34	    to_port     = 443
+35	    protocol    = "tcp"
+36	    cidr_blocks = ["10.0.0.0/16"]
+37	  }
+38	}
+```
+
+#### office: 1 snapshot files
+
+used at infra/main.tf:23 (by name, unverified: the same name may be another thing)
+
+```
+21	
+22	  ingress {
+23	    description = "SSH from the office"
+24	    from_port   = 22
+25	    to_port     = 22
+```
+
 #### the: 7 snapshot files
 
 used at db/migrations/001\_create\_items.sql:1 (by name, unverified: the same name may be another thing)
@@ -148,30 +172,6 @@ used at scripts/deploy.sh:2 (by name, unverified: the same name may be another t
 2	# Copies the app to the deploy folder and lists what was deployed.
 3	set -euo pipefail
 4	
-```
-
-#### cidr\_blocks: 1 snapshot files
-
-used at infra/main.tf:36 (by name, unverified: the same name may be another thing)
-
-```
-34	    to_port     = 443
-35	    protocol    = "tcp"
-36	    cidr_blocks = ["10.0.0.0/16"]
-37	  }
-38	}
-```
-
-#### office: 1 snapshot files
-
-used at infra/main.tf:23 (by name, unverified: the same name may be another thing)
-
-```
-21	
-22	  ingress {
-23	    description = "SSH from the office"
-24	    from_port   = 22
-25	    to_port     = 22
 ```
 
 

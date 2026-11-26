@@ -19,8 +19,9 @@
 // does, which the image cannot import (its build context is
 // benchmark/outside), and which refuses any model boards.json does not record.
 //
-// Exit 0 complete, 1 complete with a blocking finding, 2 incomplete (each
-// with both files written); 3 the review threw, with no file written.
+// Exit 0 complete or nothing to review, 1 complete with a blocking finding,
+// 2 incomplete (each with both files written); 3 the review threw, with no
+// file written.
 // Every line it prints has the key replaced.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -148,7 +149,7 @@ function readOutput(items) {
   return { text, toolCalls };
 }
 
-const EXIT = { complete: 0, complete_blocking: 1, incomplete: 2 };
+const EXIT = { complete: 0, complete_blocking: 1, incomplete: 2, nothing_to_review: 0 };
 
 async function main() {
   const { values: o } = parseArgs({

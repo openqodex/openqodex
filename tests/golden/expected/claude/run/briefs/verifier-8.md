@@ -169,6 +169,17 @@ used at package.json:2 (by name, unverified: the same name may be another thing)
 4	  "private": true,
 ```
 
+#### CREATE: 2 snapshot files
+
+used at db/migrations/001\_create\_items.sql:2 (by name, unverified: the same name may be another thing)
+
+```
+1	-- The items table of the production Postgres database.
+2	CREATE TABLE IF NOT EXISTS items (
+3	    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+4	    name text NOT NULL,
+```
+
 #### items: 5 snapshot files
 
 used at app/server.py:10 (by name, unverified: the same name may be another thing)
@@ -256,57 +267,6 @@ used at deploy/deployment.yaml:60 (by name, unverified: the same name may be ano
 60	              path: /items
 61	              port: 5000
 62	---
-```
-
-#### CREATE: 2 snapshot files
-
-used at db/migrations/001\_create\_items.sql:2 (by name, unverified: the same name may be another thing)
-
-```
-1	-- The items table of the production Postgres database.
-2	CREATE TABLE IF NOT EXISTS items (
-3	    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-4	    name text NOT NULL,
-```
-
-#### The: 4 snapshot files
-
-used at db/migrations/001\_create\_items.sql:1 (by name, unverified: the same name may be another thing)
-
-```
-1	-- The items table of the production Postgres database.
-2	CREATE TABLE IF NOT EXISTS items (
-3	    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-```
-
-used at infra/main.tf:14 (by name, unverified: the same name may be another thing)
-
-```
-12	variable "vpc_id" {
-13	  type        = string
-14	  description = "The VPC the shop API runs in."
-15	}
-16	
-```
-
-used at infra/main.tf:42 (by name, unverified: the same name may be another thing)
-
-```
-40	variable "subnet_id" {
-41	  type        = string
-42	  description = "The private subnet the shop API hosts run in."
-43	}
-44	
-```
-
-used at infra/main.tf:46 (by name, unverified: the same name may be another thing)
-
-```
-44	
-45	resource "aws_network_interface" "api" {
-46	  description     = "The shop API host's interface"
-47	  subnet_id       = var.subnet_id
-48	  security_groups = [aws_security_group.api.id]
 ```
 
 

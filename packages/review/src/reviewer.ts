@@ -196,7 +196,68 @@ export type ReviewChangeOptions = {
   onProgress?: (line: string) => void;
 };
 
-export type ReviewStatus = "complete" | "complete_blocking" | "incomplete";
+// "nothing_to_review": the head adds no change to review (since the merge
+// base, since the previously reviewed commit, or inside the scopes), so no
+// reviewer read anything. It is not a clean review: no file was examined.
+export type ReviewStatus = "complete" | "complete_blocking" | "incomplete" | "nothing_to_review";
+
+// Why a review is not complete, as one code a host can switch on. The
+// review stopped before a reviewer started: "merge_base_unproven" (the
+// merge base or the previous review's commit could not be proved),
+// "missing_objects" (the clone lacks a tree or a file the review needs),
+// "setup_failed" (another step before the reviewer failed), or
+// "reviewer_unavailable" (no reviewer could start). The reviewer ran:
+// "secret_in_change" (a secret the scanners found was in a file name or a
+// changed line, so it was not sent), "brief_too_big" (a part of the change
+// does not fit a reviewer's brief beside its fixed blocks: the
+// instructions, the context items and the code around the change),
+// "boundary_breach" (the snapshot changed, or a tool call went outside the
+// snapshot, the scopes or the tools), "budget_refused" (the host's budget
+// refused a model call), "deadline_timeout" (the deadline passed),
+// "reviewer_failed" (a model call failed, or its reply could not be read),
+// "answer_rejected" (the answer still failed its checks after the
+// correction rounds), "candidates_not_disposed" (a scanner candidate has no
+// disposition) and "range_not_examined" (a changed range was neither shown
+// nor read).
+export type IncompleteCause =
+  | "merge_base_unproven"
+  | "missing_objects"
+  | "setup_failed"
+  | "reviewer_unavailable"
+  | "secret_in_change"
+  | "brief_too_big"
+  | "boundary_breach"
+  | "budget_refused"
+  | "deadline_timeout"
+  | "reviewer_failed"
+  | "answer_rejected"
+  | "candidates_not_disposed"
+  | "range_not_examined";
+
+// `reasonCode`: "nothing_to_review", or the first cause of an incomplete
+// review; null for a complete one.
+export type ReasonCode = "nothing_to_review" | IncompleteCause;
+
+// What an incomplete review lacks. `causes`: every cause found, the one
+// that most decides what to do first (`cause`, as `reasonCode` gives it).
+// `retryable`: true when the same call may complete later (a deadline, a
+// failed model call, an answer the model may get right next time); false
+// when the same inputs fail the same way (a brief too big, a budget the
+// host refused, a clone without the objects). `units`: the staged review's
+// units that were not examined in full, in order (u1, u2, ...); empty for a
+// single pass or when no unit is to blame.
+export type IncompleteDetail = { cause: IncompleteCause; causes: IncompleteCause[]; retryable: boolean; units: string[] };
+
+// The code around the change (neighbourhood.ts) as the briefs got it.
+// `partial`: the brief says the block is partial. `cause`: "time" (the time
+// cap), "bytes" (the packet's byte cap dropped a name the code graph links
+// to the change, or a diff page was over its byte budget) or "error" (the
+// block could not be built or rendered); null when not partial.
+// `droppedLinked`: names the graph links to the change (a touched
+// declaration, a certain caller or callee) cut at the byte cap.
+// `droppedOther`: names found by text alone cut at the byte cap; they are
+// counted, never written in the brief's note.
+export type NeighbourhoodStatus = { partial: boolean; cause: "bytes" | "time" | "error" | null; droppedLinked: number; droppedOther: number };
 
 // A finding that passed every check. `foundBy`: the names of the reviewers
 // that raised it (the model's name), the primary first. `source`: null for
@@ -240,8 +301,13 @@ export type Disposition = {
 
 // The review. `status`: "complete" when every condition of a complete
 // review holds, "complete_blocking" when it also has a finding at or above
-// the config's block_on_severity, else "incomplete" with `reason` (a
-// complete review has a `reason` only when there was nothing to review). An
+// the config's block_on_severity, "nothing_to_review" with `reason` when
+// the head adds no change to review, else "incomplete" with `reason` and
+// `incomplete` (a complete review has no `reason`). `reasonCode`: the
+// same, as a code (ReasonCode). `filesExamined` and `hunksExamined`: the
+// changed files and changed ranges a reviewer was shown or read, as the
+// coverage counts them; 0 when no reviewer ran. `neighbourhood`: how the
+// code around the change reached the briefs; null when no reviewer ran. An
 // incomplete review keeps the findings of an answer that passed every
 // check. `coverage` and `evidence` are null when the review stopped before
 // a reviewer could start (a merge base that could not be proved, nothing
@@ -268,6 +334,11 @@ export type Disposition = {
 export type ReviewResult = {
   status: ReviewStatus;
   reason?: string;
+  reasonCode: ReasonCode | null;
+  incomplete?: IncompleteDetail;
+  filesExamined: number;
+  hunksExamined: number;
+  neighbourhood: NeighbourhoodStatus | null;
   scope: ReviewScope | null;
   findings: ResultFinding[];
   possible: ResultFinding[];

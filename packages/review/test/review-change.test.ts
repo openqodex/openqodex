@@ -700,8 +700,11 @@ it("keeps convention omissions when the review stops with nothing to review", as
     fixtureModel(),
     { profile: "server", workDir: tempDir("oq-rc-work-"), installRoot: tempDir("oq-rc-install-"), tools: { web: false, shell: false }, scanners: "preinstalled", budget: { deadlineMs: 120_000, authorize: async () => true } },
   );
-  expect(result.status).toBe("complete");
+  // A host must tell "read nothing" from "read and found nothing".
+  expect(result).toMatchObject({ status: "nothing_to_review", reasonCode: "nothing_to_review", filesExamined: 0, hunksExamined: 0, neighbourhood: null });
+  expect(result.incomplete).toBeUndefined();
   expect(result.reason).toContain("nothing to review");
+  expect(result.render.markdown()).toMatch(/^# Nothing to review\n/);
   expect(result.notes.join("\n")).toContain("Convention omitted: missing-rule.md");
 });
 
