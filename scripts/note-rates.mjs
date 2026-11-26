@@ -1,6 +1,6 @@
 // How often library reviews end each way, per week, from a review sweep: a
-// JSONL file with one review per line, each with a `steps` list, as a host
-// such as qodeclaw exports it. Each `library_review` step's resultExcerpt
+// JSONL file with one review per line, each with a `steps` list, as a
+// review host exports it. Each `library_review` step's resultExcerpt
 // is a line of key=value pairs: status, reason (free text, last but for
 // source), and, from the release that added them, reasonCode, the
 // incomplete cause and the neighbourhood's partial cause. A step without a
