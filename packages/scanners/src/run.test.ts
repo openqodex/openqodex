@@ -92,6 +92,10 @@
 //      not type-check) reads as ran because another part gave findings, so
 //      the developer is never told a changed package went unchecked; or its
 //      findings are lost.
+//  41. A scanner that quotes an absolute path inside its message text (not
+//      just filePath), such as rubocop's Lint/DuplicateMethods naming both
+//      definitions by the path it was given, carries the developer's
+//      checkout root into a saved finding (toRunDirRelative).
 
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { execFileSync } from "node:child_process";
@@ -525,6 +529,27 @@ describe("toRunDirRelative", () => {
     fs.symlinkSync(real, link);
     const printed = path.join(fs.realpathSync(real), "app", "main.py");
     expect(toRunDirRelative([ruffFinding(printed)], link)[0].filePath).toBe("app/main.py");
+  });
+
+  it("strips the run dir out of the message text too, not only filePath (40)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openqodex-rebase-msg-"));
+    roots.push(dir);
+    const defA = path.join(dir, "app", "models", "optimized_image.rb:145");
+    const defB = path.join(dir, "app", "models", "optimized_image.rb:149");
+    const rubocopFinding = finding({
+      source: "rubocop",
+      ruleId: "Lint/DuplicateMethods",
+      filePath: "app/models/optimized_image.rb",
+      lineStart: 145,
+      lineEnd: 145,
+      severity: "medium",
+      message: `Lint/DuplicateMethods: Method \`OptimizedImage.downsize\` is defined at both ${defA} and ${defB}.`,
+    });
+    const out = toRunDirRelative([rubocopFinding], dir)[0].message;
+    expect(out).not.toContain(dir);
+    expect(out).toBe(
+      "Lint/DuplicateMethods: Method `OptimizedImage.downsize` is defined at both app/models/optimized_image.rb:145 and app/models/optimized_image.rb:149.",
+    );
   });
 });
 
