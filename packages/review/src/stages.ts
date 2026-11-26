@@ -8,6 +8,8 @@ import { fragmentSnapshotText } from "./line-fragments.js";
 import { lineCounter } from "./snapshot.js";
 import { MAX_BRIEF_BYTES, longestBrief, obligations, unitsOf, citedDigest } from "./units.js";
 import { modelToolEntry } from "./model-loop.js";
+import { failureCause } from "./outcome.js";
+import type { StagedCause } from "./outcome.js";
 import { usageTotals } from "./usage.js";
 import type { CallRecord, ReviewerRole, ToolLogEntry } from "./usage.js";
 
@@ -57,6 +59,9 @@ export type StagedResult = {
   usage: { calls: CallRecord[]; totals: ReturnType<typeof usageTotals> };
   rounds: CorrectionRound[];
   missing: string[];
+  // Why each line of `missing` is there, as a code, with its unit when a
+  // finder unit is to blame (outcome.ts).
+  causes: StagedCause[];
   required: number;
   disposed: number;
   obligations: HunkRef[];
@@ -102,6 +107,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const findDeadline = startedAt + (args.deadline - startedAt) / 2;
   const runs: Run[] = [];
   const missing: string[] = [];
+  const causes: StagedCause[] = [];
   // A fragment entry is named by its fragment label, never by a bare line.
   const noteLine = (h: HunkRef, note: string) => `${h.id} ${h.fragment ? hunkFragmentLabel({ ...h, fragment: h.fragment }, oldPathOf(change, h.path)) : `${h.path}:${h.start}-${h.end}`}: ${note}`;
   const notes = hunks.flatMap((h) => h.note ? [noteLine(h, h.note)] : []);
@@ -132,6 +138,11 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     emit(() => args.onRound?.(round));
   };
   const failed = (talk: Conversation) => talk.failure ?? (args.traced && talk.trace.some(leftSnapshot) ? "the reviewer read outside the snapshot" : talk.errors.length > 0 ? talk.errors.join("; ") : null);
+  // The cause of what `failed` says, read from the same conversation.
+  const failedCause = (talk: Conversation): StagedCause["cause"] => talk.failure !== null ? failureCause(talk.failure, args.timedOut) : args.traced && talk.trace.some(leftSnapshot) ? "boundary_breach" : talk.errors.length > 0 ? "answer_rejected" : "reviewer_failed";
+  // A session that could not start because the review stopped: the budget's
+  // refusal, or the host's stop.
+  const stoppedCause = (): StagedCause["cause"] => budgetRefused ? "budget_refused" : "reviewer_failed";
   const recordOf = (r: Run): StagedSessionRecord => ({ role: r.role, ...(r.unit ? { unit: r.unit } : {}), rounds: r.talk.rounds, usage: r.talk.usage, failure: failed(r.talk), ...(r.examined ? { examined: r.examined } : {}), ...(r.dropped?.length ? { dropped: r.dropped } : {}) });
   const start = (role: ReviewerRole, order: number, name: string, brief: string, unit?: string): Run => {
     emit(() => args.onBrief?.(role, brief));
@@ -164,6 +175,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     if (run.session.attempts?.some((c) => c.outcome === "refused")) {
       budgetRefused = true;
       missing.push(run.talk.failure ?? "the budget refused a reviewer call");
+      causes.push({ cause: "budget_refused", ...(run.unit ? { unit: run.unit } : {}) });
     }
   };
   // The hunks of a unit no one has put in front of a finder: the brief left
@@ -186,6 +198,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     await pool(jobs, FINDERS_CONCURRENCY, async ({ unit, pass, index }) => {
       let answer: FindAnswer | null = null;
       let last: string | null = null;
+      let lastCause: StagedCause["cause"] = "reviewer_failed";
       let began = false;
       const passRole = `finder:${unit.id}:${pass}` as const;
       for (let attempt = 0; attempt < 2 && !stopped() && args.now() < findDeadline; attempt++) {
@@ -194,6 +207,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           const brief = args.findBrief(unit, pass);
           if (Buffer.byteLength(brief.text, "utf8") > MAX_BRIEF_BYTES) {
             last = "its finder brief exceeds MAX_BRIEF_BYTES";
+            lastCause = "brief_too_big";
             for (const h of unit.hunks) { h.note = last; notes.push(noteLine(h, last)); }
             break;
           }
@@ -216,6 +230,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
 
           noteRefusal(run);
           last = failed(run.talk);
+          lastCause = failedCause(run.talk);
           const result = checked as ReturnType<typeof checkFindAnswer> | null;
           if (result && result.answerErrors.length === 0 && run.talk.errors.every((error) => result.errors.includes(error)) && run.talk.failure === null && (!args.traced || !run.talk.trace.some(leftSnapshot))) {
             const rejected = new Set(result.rejected.map((r) => r.candidate));
@@ -228,12 +243,14 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         } catch (error) {
           if (hostFailure !== null) throw hostFailure;
           last = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
+          lastCause = stopped() ? stoppedCause() : "reviewer_failed";
           if (run) run.talk.failure = last;
         } finally {
           if (run) await close(run);
         }
       }
       if (answer === null) {
+        causes.push({ cause: last !== null ? lastCause : !began && stopped() ? stoppedCause() : "deadline_timeout", unit: unit.id });
         missing.push(!began ? `unit ${unit.id} was not started: ${last ?? (stopped() ? "the review stopped" : ranOut("the finders' time ran out"))}` : `unit ${unit.id} was not examined by ${pass}: ${last ?? ranOut("the finders' time ran out")}`);
         for (const h of unit.hunks) missing.push(`hunk ${h.id} of ${h.path}:${h.start}-${h.end} was not examined by the ${pass} pass`);
       }
@@ -256,7 +273,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     allCandidates = candidates;
     const files = new Map<string, VerifyCandidate[]>();
     for (const c of candidates) files.set(candidateFile(c), [...(files.get(candidateFile(c)) ?? []), c]);
-    const abandon = (batch: VerifyBatch, reason: string) => {
+    const abandon = (batch: VerifyBatch, reason: string, cause: StagedCause["cause"]) => {
+      causes.push({ cause });
       batch.candidates.forEach((c) => unverified.add(c.id));
       missing.push(`candidates ${batch.candidates.map((c) => c.id).join(", ")} were not verified: ${reason}`);
     };
@@ -300,7 +318,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           const own = parts.filter((p) => p.distance === 0);
           if (bytes + own.reduce((n, p) => n + sizes.get(p.h.id)!, 0) > MAX_BRIEF_BYTES) {
             if (selected.length === 1) {
-              abandon(batch, "its candidate part and fixed blocks exceed MAX_BRIEF_BYTES");
+              abandon(batch, "its candidate part and fixed blocks exceed MAX_BRIEF_BYTES", "brief_too_big");
               return;
             }
             const middle = Math.ceil(selected.length / 2);
@@ -316,7 +334,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           }
           const brief = args.verifyBrief(batch).text;
           if (Buffer.byteLength(brief, "utf8") > MAX_BRIEF_BYTES) {
-            abandon(batch, "its rendered brief exceeds MAX_BRIEF_BYTES");
+            abandon(batch, "its rendered brief exceeds MAX_BRIEF_BYTES", "brief_too_big");
             return;
           }
           briefs.set(batch, brief);
@@ -341,7 +359,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         v.verdict = "unresolved";
         v.reason = "the verifier exhausted its correction rounds";
         v.duplicate_of = null;
-        if (batch.candidates.find((c) => c.id === id)!.kind === "scanner") abandon({ ...batch, candidates: batch.candidates.filter((c) => c.id === id) }, v.reason);
+        if (batch.candidates.find((c) => c.id === id)!.kind === "scanner") abandon({ ...batch, candidates: batch.candidates.filter((c) => c.id === id) }, v.reason, "answer_rejected");
       }
       for (const v of answer.verdicts) if (v.duplicate_of && answer.verdicts.find((target) => target.id === v.duplicate_of)?.verdict !== "confirmed") v.duplicate_of = null;
       return true;
@@ -349,6 +367,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     await pool(batches.map((batch, index) => ({ batch, index })), VERIFIERS_CONCURRENCY, async ({ batch, index }) => {
       let accepted = false;
       const failures: string[] = [];
+      let lastCause: StagedCause["cause"] = "reviewer_failed";
       for (let attempt = 0; attempt < 2 && !stopped() && args.now() < args.deadline; attempt++) {
         let run: Run | null = null;
         try {
@@ -361,16 +380,18 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
             verified.push({ batch, run, answer, brief: brief.text, number: index + 1, corrections: 0 }); accepted = true; break;
           }
           failures.push(failed(run.talk) ?? "the verifier gave no answer that could be checked");
+          lastCause = failed(run.talk) === null ? "answer_rejected" : failedCause(run.talk);
         } catch (error) {
           if (hostFailure !== null) throw hostFailure;
           const failure = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
           failures.push(failure);
+          lastCause = stopped() ? stoppedCause() : "reviewer_failed";
           if (run) run.talk.failure = failure;
         } finally {
           if (run) await close(run);
         }
       }
-      if (!accepted) abandon(batch, stopped() ? "the review stopped" : args.now() >= args.deadline ? ranOut("the verifier did not finish in time") : `the verifier session failed twice (${failures.map((failure, i) => `attempt ${i + 1}: ${failure}`).join("; ")})`);
+      if (!accepted) abandon(batch, stopped() ? "the review stopped" : args.now() >= args.deadline ? ranOut("the verifier did not finish in time") : `the verifier session failed twice (${failures.map((failure, i) => `attempt ${i + 1}: ${failure}`).join("; ")})`, stopped() ? stoppedCause() : args.now() >= args.deadline ? "deadline_timeout" : lastCause);
     });
 
     if (hostFailure !== null) throw hostFailure;
@@ -421,7 +442,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       await pool([...errors], VERIFIERS_CONCURRENCY, async ([owner, problems]) => {
         if (owner.corrections >= MAX_CORRECTIONS || args.now() >= args.deadline || stopped()) {
           if (!isolate(owner.batch, owner.answer, problems)) {
-            abandon(owner.batch, "the verifier exhausted its correction rounds");
+            abandon(owner.batch, "the verifier exhausted its correction rounds", owner.corrections < MAX_CORRECTIONS && args.now() >= args.deadline ? "deadline_timeout" : owner.corrections < MAX_CORRECTIONS && stopped() ? stoppedCause() : "answer_rejected");
             verified.splice(verified.indexOf(owner), 1);
           }
           return;
@@ -438,7 +459,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           if (answer !== null && run.talk.failure === null && (!args.traced || !run.talk.trace.some(leftSnapshot)) && (failed(run.talk) === null || isolate(owner.batch, answer, run.talk.errors))) owner.answer = answer;
           else {
             if (!isolate(owner.batch, owner.answer, problems)) {
-              abandon(owner.batch, "the verifier did not correct its answer");
+              abandon(owner.batch, "the verifier did not correct its answer", run.talk.failure !== null ? failedCause(run.talk) : "answer_rejected");
               verified.splice(verified.indexOf(owner), 1);
             }
           }
@@ -648,7 +669,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     const blocking = config.blockOnSeverity;
     report.verdict = missing.length > 0 ? "incomplete" : blocking && report.findings.some((f) => severityRank(f.severity) >= severityRank(blocking)) ? "blocked" : "passed";
     const calls = runs.flatMap((r) => [...(r.session.calls?.() ?? r.session.attempts ?? [])]);
-    if (timedOut) missing.unshift(args.timedOut ?? TIMED_OUT);
+    if (timedOut) { missing.unshift(args.timedOut ?? TIMED_OUT); causes.unshift({ cause: "deadline_timeout" }); }
     const trace = runs.flatMap((r) => r.talk.trace.map((t) => ({ ...t, session: r.role })));
     const sessions = runs.map(recordOf);
     const submission = { ...built.submission, findings: built.submission.findings.filter((_, i) => {
@@ -666,7 +687,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
     for (const unit of units) if (unit.digest && digested.has(unit.id)) {
       (report.notes ??= []).push(`structural summary coverage (${unit.digest.kind}): ${unit.hunks.filter((h) => unit.digest!.processed.includes(h.id)).map((h) => `${h.path}:${h.start}-${h.end}`).join(", ")}`);
     }
-    return { report, submission, sessions, trace, usage: { calls, totals: usageTotals(calls) }, rounds, missing: [...new Set(missing)], required: requiredCandidates(scan, config).length, disposed: requiredCandidates(scan, config).filter((c) => !unverified.has(c.id)).length, obligations: hunks, briefCarried: sent.flatMap((r) => r.briefCarried), digestCarried: sent.flatMap((r) => r.digestCarried), delivered: runs.flatMap((r) => r.talk.carried.slice(0, Math.max(0, (r.session.sentRounds ?? r.talk.rounds) - 1)).flat()) };
+    return { report, submission, sessions, trace, usage: { calls, totals: usageTotals(calls) }, rounds, missing: [...new Set(missing)], causes, required: requiredCandidates(scan, config).length, disposed: requiredCandidates(scan, config).filter((c) => !unverified.has(c.id)).length, obligations: hunks, briefCarried: sent.flatMap((r) => r.briefCarried), digestCarried: sent.flatMap((r) => r.digestCarried), delivered: runs.flatMap((r) => r.talk.carried.slice(0, Math.max(0, (r.session.sentRounds ?? r.talk.rounds) - 1)).flat()) };
   } finally {
     clearInterval(heartbeat);
     await Promise.all(runs.map(close));

@@ -1,0 +1,5 @@
+---
+"openqodex": minor
+---
+
+The library's `reviewChange` result now says what a review read and why it did not complete. A change with nothing to review ends with the new status `nothing_to_review`, not `complete`, because no reviewer read anything. A host that switches on `status` must handle it: post it as skipped, never as passed. Every result now carries `reasonCode`, `filesExamined`, `hunksExamined` and `neighbourhood`, and an incomplete one carries `incomplete` with its causes, whether a retry can help, and the units it left unexamined. The code around the change now leaves out words in comments, strings, prose files and lock files, puts the names the code graph links to the change first, and says it is partial only when one of those was cut. A large part of a change no longer goes unread beside large context items or instructions: each part is cut small enough to fit its brief. The `openqodex review` command gets the same two brief fixes; its exit codes and the GitHub Action's outputs are unchanged.

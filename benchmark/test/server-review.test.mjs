@@ -52,7 +52,7 @@ import { loadModelEnv } from "../lib/model-env.mjs";
 import { attemptDir, executeRun, jobState, planJobs, resumeProblems, runManifest } from "../lib/runner.mjs";
 import { newWave, settle } from "../lib/wave.mjs";
 import { materialise } from "../lib/suites.mjs";
-import { createModelReviewer, LEAK_REFUSED, recordServed, resolveModelReviewer, serverAttempt } from "../lib/server-review.mjs";
+import { createModelReviewer, LEAK_REFUSED, recordServed, resolveModelReviewer, serverAttempt, serverSampleRecord } from "../lib/server-review.mjs";
 import { createScriptedReviewer, SCRIPTED_PRICES } from "../lib/scripted-model.mjs";
 import { loadRun, renderV3, scoreRun } from "../score.mjs";
 import { removeTempDirs, tempDir } from "../../tests/temp-dirs.mjs";
@@ -220,6 +220,11 @@ describe("an incomplete server review is scored as complete", () => {
     expect(sample.record.failure).toMatch(/budget|refused/i);
     const { score } = scoreRun(loadRun(out));
     expect(score.population).toMatchObject({ planned: 1, complete: 0, incomplete: 0, failed: 1 });
+  });
+
+  it("saves a review that had nothing to review as incomplete, with its reason: it read nothing", () => {
+    const result = { status: "nothing_to_review", reason: "nothing to review: the head adds no change since the merge base", rounds: [], findings: [] };
+    expect(serverSampleRecord({ job: {}, attempt: 1, report: null, result })).toMatchObject({ status: "incomplete", resultStatus: "nothing_to_review", failure: result.reason });
   });
 
   it("saves a complete review as complete, and the score counts it so", { timeout: 180_000 }, async () => {

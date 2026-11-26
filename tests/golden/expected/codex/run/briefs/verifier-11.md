@@ -75,6 +75,18 @@ The identifiers on the changed lines, and where the repository declares and uses
 
 ### app/server.py
 
+#### list\_items: 1 snapshot files
+
+declared at app/server.py:21 (by name, unverified: the same name may be another thing)
+
+```
+19	
+20	@app.get("/items")
+21	def list_items():
+22	    page = max(int(request.args.get("page", "1")), 1)
+23	    offset = page * PAGE_SIZE
+```
+
 #### app: 5 snapshot files
 
 used at .github/workflows/ci.yml:22 (by name, unverified: the same name may be another thing)
@@ -212,18 +224,6 @@ used at app/server.py:27 (by name, unverified: the same name may be another thin
 27	            (PAGE_SIZE, offset),
 28	        ).fetchall()
 29	    return jsonify([dict(row) for row in rows])
-```
-
-#### list\_items: 1 snapshot files
-
-declared at app/server.py:21 (by name, unverified: the same name may be another thing)
-
-```
-19	
-20	@app.get("/items")
-21	def list_items():
-22	    page = max(int(request.args.get("page", "1")), 1)
-23	    offset = page * PAGE_SIZE
 ```
 
 #### offset: 1 snapshot files

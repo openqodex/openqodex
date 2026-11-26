@@ -103,12 +103,14 @@ import { modelSession, modelToolEntry } from "./model-loop.js";
 import type { ModelSession } from "./model-loop.js";
 import { NEIGHBOURHOOD_BLOCK_BYTES, buildNeighbourhood, renderCitedBlock, renderContractsBlock, renderNeighbourhoodBlock } from "./neighbourhood.js";
 import type { Neighbourhood } from "./neighbourhood.js";
-import { longestBrief, obligations, unitsOf } from "./units.js";
+import { longestBrief, obligations, partBudget, unitsOf } from "./units.js";
 import { runStagedReview } from "./stages.js";
 import { modelEvidence } from "./evidence.js";
 import { modelRecord, modelReport, reviewRender } from "./model-record.js";
 import { agentReviewer } from "./reviewer.js";
-import type { Budget, Disposition, ModelReviewer, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult } from "./reviewer.js";
+import type { Budget, Disposition, IncompleteCause, ModelReviewer, NeighbourhoodStatus, ResultFinding, ReviewChangeInput, ReviewChangeOptions, Reviewer, ReviewResult } from "./reviewer.js";
+import { incompleteDetail, stoppedDetail } from "./outcome.js";
+import type { StagedCause } from "./outcome.js";
 import { disagreementsOf, mergeFindings, possibleAfterSecond, runSecondReviewer, withSecondReviewer } from "./second.js";
 import type { SecondRun } from "./second.js";
 import { buildGraphRun, buildHotSpots, nothingToReviewLine, ruleCoverage, scanChange, wholeRepoLenses } from "./pipeline.js";
@@ -319,9 +321,13 @@ export type ReviewCoreResult =
   // `rounds`: every correction round, the second reviewer's after the
   // primary's, as the "round" events carried them.
   // `second`: the second reviewer's run, when one ran. `context`: the context
-  // items as the manifest lists them, when any were given.
+  // items as the manifest lists them, when any were given. `neighbourhood`:
+  // how the code around the change reached the briefs. `causes`: what the
+  // staged review recorded about each part it could not finish.
   | {
       ended: "model-reviewed";
+      neighbourhood: NeighbourhoodStatus;
+      causes: StagedCause[];
       report: Report;
       evidence: ModelReviewEvidence;
       submission: unknown;
@@ -428,6 +434,14 @@ type Prepared = {
   // less of it (an incremental review); else the scan's change is the whole.
   full?: Change;
 };
+
+// How the code around the change reached the briefs, for the result: a
+// packet partial for a reason that names no cause failed while it was
+// built or rendered.
+function neighbourhoodStatus(n: Neighbourhood): NeighbourhoodStatus {
+  const partial = n.partial !== null;
+  return { partial, cause: partial ? (n.cause ?? "error") : null, droppedLinked: n.droppedLinked ?? 0, droppedOther: n.droppedOther ?? 0 };
+}
 
 // A report that carries no finding: an incomplete review. No answer passed
 // the checks, so no reviewer disposed of any scanner candidate: each one is
@@ -639,7 +653,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
     let neighbourhood: Neighbourhood = { symbols: [], packetPath: null, partial: null, durationMs: 0 };
     const neighbourhoodBlock = (files?: readonly string[], maxBytes?: number) => {
       try { return renderNeighbourhoodBlock(neighbourhood, files, maxBytes); }
-      catch (error) { neighbourhood.partial = (error instanceof Error ? error.message : String(error)).split("\n")[0]!; return ""; }
+      catch (error) { neighbourhood.partial = (error instanceof Error ? error.message : String(error)).split("\n")[0]!; neighbourhood.cause = "error"; return ""; }
     };
     // A staged brief's cross-file block (the callers of the changed
     // declarations, or the code a candidate cites in other files) shares the
@@ -678,6 +692,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
         neighbourhood = buildNeighbourhood({ change, snapshotDir: prep.snapshot.tree, impact, secrets: p.secrets, now: deps.now });
       } catch (error) {
         neighbourhood.partial = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
+        neighbourhood.cause = "error";
       }
       clock.enter("brief");
       lenses = selectLenses(change, undefined, ruleCoverage(p));
@@ -769,12 +784,17 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
         graphNote: graph === null ? `the graph is ${impact.status}${impact.reasons.length > 0 ? `: ${impact.reasons.join("; ")}` : ""}` : null,
         ...(deps.scoped?.folderScopes ? { admit: deps.scoped.admit } : {}),
       };
-      const inventory = config.stages && !prep.whole && refused === null ? obligations(change, fragmentSnapshotText(prep.snapshot.tree), stagedDiffCache(change, p.secrets)) : [];
+      const briefArgs = { change, scan, lenses, config, secrets: p.secrets, impactBlock: renderImpactBlock(impact), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown };
+      const findBrief = (unit: ReviewUnit, pass: import("@openqodex/core").FindPass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: pass === "contracts" ? withCrossFile(() => renderContractsBlock(neighbourhood, unit.files), unit.files) : neighbourhoodBlock(unit.files) }, unit, pass);
+      // Each part is cut small enough to fit a brief beside the blocks every
+      // finder brief holds (the instructions, the context items, the graph)
+      // and the most its own unit's code around the change can add.
+      const stageable = config.stages && !prep.whole && refused === null;
+      const partBytes = stageable ? partBudget(Buffer.byteLength(longestBrief({ id: "u1", files: [], hunks: [], diffBytes: 0 }, findBrief, true), "utf8") + NEIGHBOURHOOD_BLOCK_BYTES) : undefined;
+      const inventory = stageable ? obligations(change, fragmentSnapshotText(prep.snapshot.tree), stagedDiffCache(change, p.secrets), partBytes) : [];
       // The single pass builds no inventory, but its pages still cut removed
       // lines into fragments. They need the run's one secrets list on record.
       if (inventory.length === 0) setFragmentSource(change, (path, from, to) => snapshotByteLines(prep.snapshot.tree, path, from, to), p.secrets);
-      const briefArgs = { change, scan, lenses, config, secrets: p.secrets, impactBlock: renderImpactBlock(impact), instructions: instructions.text, instructionFiles: instructions.files, ...(instructions.from ? { instructionsFrom: instructions.from } : {}), target: prep.target, confidenceFloor: inputs.confidenceFloor, context: context?.shown };
-      const findBrief = (unit: ReviewUnit, pass: import("@openqodex/core").FindPass) => buildFindBrief({ ...briefArgs, neighbourhoodBlock: pass === "contracts" ? withCrossFile(() => renderContractsBlock(neighbourhood, unit.files), unit.files) : neighbourhoodBlock(unit.files) }, unit, pass);
       const units = unitsOf(change, inventory, (unit, both) => longestBrief(unit, findBrief, both));
       const unitCount = units.length;
       const staged = config.stages && !prep.whole && refused === null && inventory.length > 0;
@@ -850,7 +870,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
             clock.enter("finalize");
           }
           const calls = [...stagedRun.usage.calls, ...(second?.evidence.attempts ?? [])];
-          return await finish({ ended: "model-reviewed", report, evidence, submission: stagedRun.submission, change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds: redactStored(stagedRun.rounds, p.secrets), ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
+          return await finish({ ended: "model-reviewed", neighbourhood: neighbourhoodStatus(neighbourhood), causes: stagedRun.causes, report, evidence, submission: stagedRun.submission, change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds: redactStored(stagedRun.rounds, p.secrets), ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
         }
         const totals = stagedRun.usage.totals;
         const reviewer: ReviewerRecord = { driver: agent!.driver.name, version: agent!.version, ...tuned, ...(passed.length > 0 ? { passed } : {}), pid: null, started_at: startedIso, ended_at: new Date(deps.now()).toISOString(), duration_ms: deps.now() - started, rounds: stagedRun.sessions.reduce((n, s) => n + s.rounds, 0), usage: { turns: stagedRun.sessions.reduce((n, s) => n + s.usage.turns, 0), input_tokens: totals.inputTokens, output_tokens: totals.outputTokens, cost_usd: totals.costUsd }, sessions: stagedRun.sessions };
@@ -960,7 +980,7 @@ export async function runReviewCore(inputs: ReviewInputs, deps: ReviewDeps): Pro
         // reads it again once it has finished the report.
         const report: Report = { ...(talk.report ?? talk.checked?.report ?? incompleteReport(full, scan, config, deps.now())), ...((instructions.notes?.length || neighbourhood.partial) ? { notes: [...(instructions.notes ?? []), ...(neighbourhood.partial ? [`Code around the change is partial: ${neighbourhood.partial}`] : [])] } : {}), impact, timings: clock.timings() };
         const calls = [...evidence.attempts, ...(second?.evidence.attempts ?? [])];
-        return await finish({ ended: "model-reviewed", report, evidence, submission: talk.report ? talk.submission : (talk.checked?.submission ?? talk.submission), change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds, ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
+        return await finish({ ended: "model-reviewed", neighbourhood: neighbourhoodStatus(neighbourhood), causes: [], report, evidence, submission: talk.report ? talk.submission : (talk.checked?.submission ?? talk.submission), change: full, scan, secrets: p.secrets, usage: { calls, totals: usageTotals(calls) }, rounds, ...(second ? { second } : {}), ...(context ? { context: context.manifest } : {}) });
       }
 
       const reviewer: ReviewerRecord | null = session === null ? null : {
@@ -1114,14 +1134,20 @@ function refuseSecond(second: Reviewer | undefined): void {
 }
 
 // A review that stopped before a reviewer could be given the change: no
-// finding, no usage, and outputs that say why. `scope`: the decision, when
-// the proofs got that far. `scan`: the scan record, when the scanners ran
-// before it stopped.
-function stoppedResult(status: "complete" | "incomplete", reason: string, scope: ReviewScope | null = null, notes: string[] = [], scan: ReviewResult["scan"] = null): Untimed {
-  const lead = status === "complete" ? "Review complete" : "Review incomplete";
+// finding, no usage, nothing examined, and outputs that say why. `cause`:
+// the code of an incomplete stop. `scope`: the decision, when the proofs got
+// that far. `scan`: the scan record, when the scanners ran before it stopped.
+function stoppedResult(stop: "nothing_to_review" | IncompleteCause, reason: string, scope: ReviewScope | null = null, notes: string[] = [], scan: ReviewResult["scan"] = null): Untimed {
+  const status = stop === "nothing_to_review" ? "nothing_to_review" : "incomplete";
+  const lead = status === "nothing_to_review" ? "Nothing to review" : "Review incomplete";
   return {
     status,
     reason,
+    reasonCode: stop,
+    ...(stop === "nothing_to_review" ? {} : { incomplete: stoppedDetail(stop) }),
+    filesExamined: 0,
+    hunksExamined: 0,
+    neighbourhood: null,
     scope,
     findings: [],
     possible: [],
@@ -1218,7 +1244,7 @@ export async function reviewChange(input: ReviewChangeInput, reviewer: Reviewer,
     ...(input.previousReviewedSha !== undefined ? { previousReviewedSha: input.previousReviewedSha } : {}),
     ...(input.fullReviewRequested !== undefined ? { fullReviewRequested: input.fullReviewRequested } : {}),
   });
-  if (!decision.ok) return timed({ result: stoppedResult("incomplete", decision.reason), report: null }, clock);
+  if (!decision.ok) return timed({ result: stoppedResult("merge_base_unproven", decision.reason), report: null }, clock);
   const config = structuredClone(input.config ?? DEFAULT_CONFIG);
   config.instructionsFiles ??= [];
   // Everything the review writes besides its snapshot: the change source's
@@ -1320,15 +1346,18 @@ async function reviewInScope(
   } catch (error) {
     // What the clone could not give (a partial clone's missing tree or
     // file), or a step that could not run, ends the review with its reason.
-    if (error instanceof MissingObjects) return { result: stoppedResult("incomplete", error.message, decision.scope, stoppedNotes(), scan), report: null };
-    if (error instanceof OpenQodexError) return { result: stoppedResult("incomplete", /partial clone/.test(error.message) ? `missing objects: ${error.message}` : error.message, decision.scope, stoppedNotes(), scan), report: null };
+    if (error instanceof MissingObjects) return { result: stoppedResult("missing_objects", error.message, decision.scope, stoppedNotes(), scan), report: null };
+    if (error instanceof OpenQodexError) {
+      const partialClone = /partial clone/.test(error.message);
+      return { result: stoppedResult(partialClone ? "missing_objects" : "setup_failed", partialClone ? `missing objects: ${error.message}` : error.message, decision.scope, stoppedNotes(), scan), report: null };
+    }
     throw error;
   }
   if (r.ended === "nothing") {
     const since = decision.scope.kind === "delta" ? "since the previously reviewed commit" : "since the merge base";
-    return { result: stoppedResult("complete", `nothing to review: the head adds no change ${since}${input.scopes !== undefined ? " inside the review's scopes" : ""}`, decision.scope, stoppedNotes()), report: null };
+    return { result: stoppedResult("nothing_to_review", `nothing to review: the head adds no change ${since}${input.scopes !== undefined ? " inside the review's scopes" : ""}`, decision.scope, stoppedNotes()), report: null };
   }
-  if (r.ended !== "model-reviewed") return { result: stoppedResult("incomplete", r.ended === "unavailable" ? r.reasons.join("; ") : "an agent reviewer ran where a model reviewer was given", decision.scope, stoppedNotes(), scan), report: null };
+  if (r.ended !== "model-reviewed") return { result: stoppedResult(r.ended === "unavailable" ? "reviewer_unavailable" : "setup_failed", r.ended === "unavailable" ? r.reasons.join("; ") : "an agent reviewer ran where a model reviewer was given", decision.scope, stoppedNotes(), scan), report: null };
   // Only an answer that passed every check has dispositions; the empty
   // report of one that did not has no summary.
   const answered = r.report.summary !== null;
@@ -1376,9 +1405,17 @@ async function reviewInScope(
     completion,
   );
   const complete = completion.status === "complete";
+  const incomplete = complete ? null : incompleteDetail({ evidence: r.evidence, calls: r.usage.calls, staged: r.causes });
+  // The changed ranges a reviewer was shown or read, and their files.
+  const examined = (r.evidence.coverage.inventory ?? []).filter((h) => h.by !== undefined);
   const result: Untimed = {
     status: complete ? (report.verdict === "blocked" ? "complete_blocking" : "complete") : "incomplete",
     ...(complete ? {} : { reason: shortenedMissing(completion.missing).join("; ") }),
+    reasonCode: incomplete?.cause ?? null,
+    ...(incomplete ? { incomplete } : {}),
+    filesExamined: new Set(examined.map((h) => h.path)).size,
+    hunksExamined: r.evidence.coverage.inventory ? examined.length : r.evidence.coverage.covered,
+    neighbourhood: r.neighbourhood,
     scope: decision.scope,
     findings: resultFindings(report.findings, foundBy),
     possible: resultFindings(report.possible, report.possible.map((f) => f.found_by ?? [model.model])),

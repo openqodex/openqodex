@@ -7,6 +7,25 @@ import { DELIVER_LINES, pageRows } from "./conversation.js";
 export const GROUP_DIFF_BYTES = 30 * 1024;
 export const MAX_UNIT_DIFF_BYTES = 120 * 1024;
 export const MAX_BRIEF_BYTES = 256 * 1024;
+// Room a part leaves in its brief for the unit's file list, its headings and
+// its answer rows.
+const PART_SLACK_BYTES = 8 * 1024;
+
+// The most a unit's interfaces brief can hold over its local brief: the
+// code around the change and the callers of its declarations share one
+// 24 KB cap (review-change.ts), and each pass adds its own text.
+const PASS_SPREAD_BYTES = 32 * 1024;
+
+// The most diff one part may carry so that a unit holding only that part
+// fits MAX_BRIEF_BYTES: `fixed` is what every finder brief of the unit holds
+// besides its diff (the shared blocks, the instructions and the context
+// items, measured on a unit with no file, plus the most the unit's own
+// blocks, such as the code around its files, can add). Never over
+// MAX_UNIT_DIFF_BYTES, and never under two delivery rows: fixed blocks that
+// leave no room cannot be helped by cutting, and the units say so.
+export function partBudget(fixed: number): number {
+  return Math.max(2 * DELIVERY_ROW_BYTES, Math.min(MAX_UNIT_DIFF_BYTES, MAX_BRIEF_BYTES - fixed - PART_SLACK_BYTES));
+}
 
 type Read = ((path: string) => string | null) & { byteLines?: ByteLines };
 type JsonPage = { start: number; end: number; entries: JsonEntry[]; omitted: Digest["omitted"] };
@@ -42,12 +61,14 @@ function previousText(file: Change["files"][number], diff: string | undefined, t
 // One inventory owns scheduling and coverage. Its parts retain the whole
 // obligation's identity, and deletions retain their distinct old intervals.
 // A change that already has a secrets list keeps it; see setFragmentSource.
-export function obligations(change: Change, read: Read, cache = stagedDiffCache(change, registeredSecrets(change) ?? [])): HunkRef[] {
-  return inventoryOf(change, read, cache, true);
+// `partBytes`: the most diff one part carries (partBudget), so that every
+// part fits a brief beside the brief's fixed blocks.
+export function obligations(change: Change, read: Read, cache = stagedDiffCache(change, registeredSecrets(change) ?? []), partBytes = MAX_UNIT_DIFF_BYTES): HunkRef[] {
+  return inventoryOf(change, read, cache, true, partBytes);
 }
 
 // `register`: whether this inventory registers its byte source and secrets list.
-function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof stagedDiffCache>, register: boolean): HunkRef[] {
+function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof stagedDiffCache>, register: boolean, partBytes = MAX_UNIT_DIFF_BYTES): HunkRef[] {
   let snapshotPath: string | null = null;
   let snapshotLines: string[] | null = null;
   const snapshotOf = (path: string) => {
@@ -279,7 +300,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
       const rendered = rows.length ? rows : !ref.deletion && snapshot ? pageRows(ref.path, ref.start, ref.end, snapshot) : [];
       return { ...ref, rows: rendered.length, bytes: Buffer.byteLength(rendered.join("\n"), "utf8") + (rows.length ? 0 : 1) };
     };
-    const fits = (ref: HunkRef) => ref.rows! <= DELIVER_LINES && ref.bytes! <= MAX_UNIT_DIFF_BYTES;
+    const fits = (ref: HunkRef) => ref.rows! <= DELIVER_LINES && ref.bytes! <= partBytes;
     const parts: HunkRef[] = [];
     // The old side of an oversized replacement is an explicit obligation,
     // rather than repeated in each slice of its new side.
@@ -328,7 +349,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
             // Sizes come from the line's one measuring pass where it has one.
             for (const fragment of fragmentSizes(source)) {
               const size = Buffer.byteLength(`${oldSide ? "-" : "+"}${fragmentLabel(path, at, fragment.from, fragment.to, source.bytes, oldSide ? "old" : "new")}\t\n`) + fragment.size;
-              if (rows && (bytes + size > MAX_UNIT_DIFF_BYTES || rows + 1 > DELIVER_LINES)) flush();
+              if (rows && (bytes + size > partBytes || rows + 1 > DELIVER_LINES)) flush();
               to = fragment.to;
               bytes += size;
               rows++;
@@ -463,6 +484,14 @@ export function unitsOf(change: Change, hunks: HunkRef[], brief?: (unit: ReviewU
     recut.forEach((h, i) => { h.id = `h${i + 1}`; if (h.fragment) h.fragment = { ...h.fragment, of: h.id }; });
     hunks.splice(0, hunks.length, ...recut);
   }
+  // Whether a unit's finder briefs pass MAX_BRIEF_BYTES. The local brief
+  // is measured; the interfaces brief only when the local one is near the
+  // bound, since it can be longer by its callers block and its pass's text
+  // alone (PASS_SPREAD_BYTES).
+  const overBrief = (u: ReviewUnit): boolean => {
+    const local = Buffer.byteLength(brief!(u), "utf8");
+    return local > MAX_BRIEF_BYTES || (local > MAX_BRIEF_BYTES - PASS_SPREAD_BYTES && Buffer.byteLength(brief!(u, true), "utf8") > MAX_BRIEF_BYTES);
+  };
   let unit: ReviewUnit | null = null;
   let rows = 0;
   let estimate = base;
@@ -472,7 +501,7 @@ export function unitsOf(change: Change, hunks: HunkRef[], brief?: (unit: ReviewU
     if (!unit) return;
     // Estimates avoid growing trial renders. Check the real serialization only
     // at closure, and move the last entry out if metadata was underestimated.
-    if (brief && Buffer.byteLength(brief(unit), "utf8") > MAX_BRIEF_BYTES) {
+    if (brief && overBrief(unit)) {
       const last = unit.hunks.pop()!;
       unit.diffBytes -= last.bytes!;
       unit.files = [...new Set(unit.hunks.map((h) => h.path))];

@@ -30,7 +30,8 @@
 //    every saved text has the workDir and clone paths replaced.
 // 2. An incomplete server review is scored as complete: the sample's
 //    status is the result's (complete and complete_blocking are complete;
-//    incomplete stays incomplete, with the library's reason), the saved
+//    incomplete stays incomplete, with the library's reason; a review with
+//    nothing to review read nothing, so it is incomplete too), the saved
 //    report.json is the library's own rendering, whose completion record
 //    the scorer reads, and a review that threw is failed.
 // 3. The model recorded is not the one that answered: the sample records
@@ -308,8 +309,9 @@ function servedOf(result) {
 
 /** The saved record of one server attempt, whatever happened to it. */
 export function serverSampleRecord({ job, attempt, startedAt, wallMs, result, report, error, outside = [], stopped = null, requested }) {
-  const status = result === null ? "failed" : result.status === "incomplete" ? "incomplete" : "complete";
-  const reasons = [...(error ? [`the review threw: ${String(error?.message ?? error).split("\n")[0]}`] : []), ...(result?.status === "incomplete" ? [result.reason ?? "incomplete"] : []), ...outside.map((o) => `the review wrote outside its workDir: ${o}`)];
+  const unscored = result?.status === "incomplete" || result?.status === "nothing_to_review";
+  const status = result === null ? "failed" : unscored ? "incomplete" : "complete";
+  const reasons = [...(error ? [`the review threw: ${String(error?.message ?? error).split("\n")[0]}`] : []), ...(unscored ? [result.reason ?? result.status] : []), ...outside.map((o) => `the review wrote outside its workDir: ${o}`)];
   const t = result?.usage?.totals ?? null;
   return {
     jobId: job.jobId ?? null,
@@ -327,7 +329,8 @@ export function serverSampleRecord({ job, attempt, startedAt, wallMs, result, re
     signal: null,
     wallMs,
     status,
-    // The library's own status: complete, complete_blocking or incomplete.
+    // The library's own status: complete, complete_blocking, incomplete or
+    // nothing_to_review.
     resultStatus: result?.status ?? null,
     failure: reasons.length > 0 ? reasons.join("; ") : null,
     stopped: stopped ?? null,

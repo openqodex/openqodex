@@ -29,6 +29,15 @@
 //     folder) is told to the finder as declared on a removed line.
 // 25. A declaration whose callers are cut at the per-declaration cap pushes
 //     the block past its byte budget.
+// Added for the review result's honesty:
+// 26. Words in prose, comments, strings and lock files on a changed line
+//     seed names no code links to, and fill the packet's byte cap.
+// 27. A name the code graph links to the change (a touched declaration or
+//     a certain callee) is cut at the byte cap while names found by text
+//     alone are kept.
+// 28. Names found by text alone, cut at the byte cap, make the packet
+//     partial, so every brief says the code around the change is partial;
+//     or the cut is not counted at all.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import fs from "node:fs";
@@ -135,49 +144,50 @@ it("selects Kotlin and shell identifiers even where no declaration pattern label
 });
 
 it("skips identifiers present in more files than the configured file cap", () => {
-  const dir = snapshot({ "changed.txt": "commonName rareName\n", "one.txt": "commonName rareName\n", "two.txt": "commonName\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }), { maxFilesPerSymbol: 2 });
+  const dir = snapshot({ "changed.src": "commonName rareName\n", "one.txt": "commonName rareName\n", "two.txt": "commonName\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }), { maxFilesPerSymbol: 2 });
   expect(packet.symbols.map((s) => s.name)).toEqual(["rareName"]);
 });
 
 it("ranks by file count then name and limits each changed file's selections", () => {
   const names = Array.from({ length: NEIGHBOURHOOD_SYMBOLS_PER_FILE + 2 }, (_, i) => `symbol${String(i).padStart(2, "0")}`);
-  const dir = snapshot({ "changed.txt": `${names.toReversed().join(" ")} frequentName\n`, "other.txt": `${names.join(" ")} frequentName\n`, "third.txt": "frequentName\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const dir = snapshot({ "changed.src": `${names.toReversed().join(" ")} frequentName\n`, "other.txt": `${names.join(" ")} frequentName\n`, "third.txt": "frequentName\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   expect(packet.symbols.map((s) => s.name)).toEqual(names.slice(0, NEIGHBOURHOOD_SYMBOLS_PER_FILE));
 });
 
 it("matches whole case-sensitive identifiers and ignores short names and common keywords", () => {
-  const dir = snapshot({ "changed.txt": "return int string self None actualName abc abc2 12abc _id\nabc _id\n", "other.txt": "actualNames ActualName abc2 actualName\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const dir = snapshot({ "changed.src": "return int string self None actualName abc abc2 12abc _id\nabc _id\n", "other.txt": "actualNames ActualName abc2 actualName\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   expect(packet.symbols.map((s) => s.name).sort()).toEqual(["_id", "abc", "abc2", "actualName"]);
   expect(packet.symbols.find((s) => s.name === "abc")?.files).toBe(1);
   expect(packet.symbols.find((s) => s.name === "actualName")?.files).toBe(2);
 });
 
 it("reserves declaration sites even when earlier uses already fill the site cap", () => {
-  const files: Record<string, string> = { "changed.txt": "reprice\n", "z-definition.py": "def reprice():\n  pass\n" };
+  const files: Record<string, string> = { "changed.src": "reprice\n", "z-definition.py": "def reprice():\n  pass\n" };
   for (let i = 0; i < NEIGHBOURHOOD_SITES_PER_SYMBOL + 2; i++) files[`a-use-${i}.py`] = "result = reprice()\n";
   const dir = snapshot(files);
-  const sites = build(dir, change(dir, { "changed.txt": [1] })).symbols[0].sites;
+  const sites = build(dir, change(dir, { "changed.src": [1] })).symbols[0].sites;
   expect(sites).toHaveLength(NEIGHBOURHOOD_SITES_PER_SYMBOL);
   expect(sites[0]).toMatchObject({ path: "z-definition.py", kind: "declared" });
 });
 
 it("excludes only added lines as sites and preserves the snapshot's context numbers", () => {
-  const dir = snapshot({ "changed.txt": "before\nreprice\nchanged reprice\nafter\nreprice\nend\n" });
-  const input = change(dir, { "changed.txt": [3] });
-  input.deletionPoints.set("changed.txt", [{ after: 1, lines: 1, anchors: [1, 2] }]);
+  const dir = snapshot({ "changed.src": "before\nreprice\nchanged reprice\nafter\nreprice\nend\n" });
+  const input = change(dir, { "changed.src": [3] });
+  input.deletionPoints.set("changed.src", [{ after: 1, lines: 1, anchors: [1, 2] }]);
   const sites = build(dir, input).symbols.find((s) => s.name === "reprice")!.sites;
   expect(sites.map((s) => s.line)).toEqual([2, 5]);
   expect(sites[1].context).toBe("3\tchanged reprice\n4\tafter\n5\treprice\n6\tend");
 });
 
 it("returns a partial packet when now steps beyond the time cap during the file scan", () => {
-  const dir = snapshot({ "a.txt": "reprice\n", "b.txt": "result = reprice()\n", "c.txt": "result = reprice()\n" });
+  const dir = snapshot({ "a.src": "reprice\n", "b.txt": "result = reprice()\n", "c.txt": "result = reprice()\n" });
   let ticks = 0;
-  const packet = build(dir, change(dir, { "a.txt": [1] }), { now: () => ticks++ < 8 ? 0 : NEIGHBOURHOOD_TIME_MS + 1 });
+  const packet = build(dir, change(dir, { "a.src": [1] }), { now: () => ticks++ < 8 ? 0 : NEIGHBOURHOOD_TIME_MS + 1 });
   expect(packet.partial).toMatch(/^Time cap reached after 2 of 3 files;/);
+  expect(packet.cause).toBe("time");
   expect(packet.durationMs).toBeGreaterThan(NEIGHBOURHOOD_TIME_MS);
   const symbol = packet.symbols.find((s) => s.name === "reprice")!;
   expect(symbol.files).toBeLessThan(3);
@@ -186,8 +196,8 @@ it("returns a partial packet when now steps beyond the time cap during the file 
 
 it("keeps a shared name when 31 local names have no sites", () => {
   const local = Array.from({ length: 31 }, (_, i) => `local${i}`);
-  const dir = snapshot({ "changed.txt": `${local.join(" ")} sharedName\n`, "use.txt": "return sharedName();\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const dir = snapshot({ "changed.src": `${local.join(" ")} sharedName\n`, "use.txt": "return sharedName();\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   expect(packet.symbols.map((s) => s.name)).toEqual(["sharedName"]);
 });
 
@@ -233,8 +243,8 @@ it("takes candidates from a changed file under src/build", () => {
 });
 
 it("clips a 100 KB site without emptying the packet", () => {
-  const dir = snapshot({ "changed.txt": "rareName sharedName\n", "minified.js": `return rareName(); ${"x".repeat(100 * 1024)}\n`, "use.txt": "return sharedName();\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const dir = snapshot({ "changed.src": "rareName sharedName\n", "minified.js": `return rareName(); ${"x".repeat(100 * 1024)}\n`, "use.txt": "return sharedName();\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   expect(packet.symbols.map((s) => s.name)).toEqual(["rareName", "sharedName"]);
   const context = packet.symbols[0].sites[0].context;
   expect(context.endsWith(" [cut]")).toBe(true);
@@ -266,8 +276,8 @@ it("puts certain graph callers first, including aliases, without promoting likel
 });
 
 it("writes a private packet inside the snapshot", () => {
-  const dir = snapshot({ "changed.txt": "reprice\nreprice\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const dir = snapshot({ "changed.src": "reprice\nreprice\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   expect(packet.packetPath).toBe(".openqodex-review/neighbourhood.md");
   expect(isAbsolute(packet.packetPath!)).toBe(false);
   expect(relative(dir, join(dir, packet.packetPath!))).toBe(packet.packetPath);
@@ -276,16 +286,16 @@ it("writes a private packet inside the snapshot", () => {
 
 it("refuses a repository packet collision without changing its content", () => {
   const path = ".openqodex-review/neighbourhood.md";
-  const dir = snapshot({ "changed.txt": "reprice\nreprice\n", [path]: "repository content\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const dir = snapshot({ "changed.src": "reprice\nreprice\n", [path]: "repository content\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   expect(packet.packetPath).toBeNull();
   expect(packet.partial).toMatch(/collision|already exists/i);
   expect(readFileSync(join(dir, path), "utf8")).toBe("repository content\n");
 });
 
 it("shares only the graph packet's known directory without overwriting either packet", () => {
-  const dir = snapshot({ "changed.txt": "reprice\nreprice\n", ".openqodex-review/graph/index.md": "graph packet\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }), { impact: { ...impact(), packet: ".openqodex-review/graph/" } });
+  const dir = snapshot({ "changed.src": "reprice\nreprice\n", ".openqodex-review/graph/index.md": "graph packet\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }), { impact: { ...impact(), packet: ".openqodex-review/graph/" } });
   expect(packet.partial).toBeNull();
   expect(packet.packetPath).toBe(".openqodex-review/neighbourhood.md");
   expect(readFileSync(join(dir, ".openqodex-review/graph/index.md"), "utf8")).toBe("graph packet\n");
@@ -293,8 +303,8 @@ it("shares only the graph packet's known directory without overwriting either pa
 
 it("refuses a second packet write even beside an existing graph packet", () => {
   const path = ".openqodex-review/neighbourhood.md";
-  const dir = snapshot({ "changed.txt": "reprice\nreprice\n", [path]: "repository content\n", ".openqodex-review/graph/index.md": "graph packet\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }), { impact: { ...impact(), packet: ".openqodex-review/graph/" } });
+  const dir = snapshot({ "changed.src": "reprice\nreprice\n", [path]: "repository content\n", ".openqodex-review/graph/index.md": "graph packet\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }), { impact: { ...impact(), packet: ".openqodex-review/graph/" } });
   expect(packet.packetPath).toBeNull();
   expect(packet.partial).toMatch(/collision|already exists/i);
   expect(readFileSync(join(dir, path), "utf8")).toBe("repository content\n");
@@ -302,9 +312,9 @@ it("refuses a second packet write even beside an existing graph packet", () => {
 
 it("refuses to follow the packet root outside the snapshot", () => {
   const outside = snapshot();
-  const dir = snapshot({ "changed.txt": "reprice\nreprice\n" });
+  const dir = snapshot({ "changed.src": "reprice\nreprice\n" });
   symlinkSync(outside, join(dir, ".openqodex-review"));
-  const packet = build(dir, change(dir, { "changed.txt": [1] }), { impact: { ...impact(), packet: ".openqodex-review/graph/" } });
+  const packet = build(dir, change(dir, { "changed.src": [1] }), { impact: { ...impact(), packet: ".openqodex-review/graph/" } });
   expect(packet.packetPath).toBeNull();
   expect(packet.partial).toMatch(/collision|link/i);
   expect(snapshotFiles(outside)).toEqual([]);
@@ -312,8 +322,8 @@ it("refuses to follow the packet root outside the snapshot", () => {
 
 it("redacts secrets in symbols, paths and context before either output is rendered", () => {
   const secret = ["sensitive", "value"].join("_");
-  const dir = snapshot({ "changed.txt": `reprice ${secret}\n`, [`${secret}.txt`]: `return reprice(); // ${secret}\n`, "clipped.txt": `reprice ${" ".repeat(222)}${secret} tail\n` });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }), { secrets: [secret] });
+  const dir = snapshot({ "changed.src": `reprice ${secret}\n`, [`${secret}.txt`]: `return reprice(); // ${secret}\n`, "clipped.txt": `reprice ${" ".repeat(222)}${secret} tail\n` });
+  const packet = build(dir, change(dir, { "changed.src": [1] }), { secrets: [secret] });
   expect(JSON.stringify(packet)).not.toContain(secret);
   expect(JSON.stringify(packet)).not.toContain(secret.slice(0, 10));
   expect(readFileSync(join(dir, packet.packetPath!), "utf8")).not.toContain(secret);
@@ -321,22 +331,68 @@ it("redacts secrets in symbols, paths and context before either output is render
   expect(renderNeighbourhoodBlock(packet)).toContain("redacted");
 });
 
+// The code graph links each of `names` to the change: touched declarations.
+function touching(names: string[], file = "changed.src"): ImpactSummary {
+  return { ...impact(), symbols: names.map((name, i) => ({ id: `seed${i}`, file, name, kind: "function", startLine: 1, endLine: 1, snapshot: "current" })), touched: names.map((_, i) => `seed${i}`) };
+}
+
 it("cuts the packet on a whole symbol boundary and reports how many symbols were cut", () => {
   const names = Array.from({ length: NEIGHBOURHOOD_SYMBOLS_PER_FILE }, (_, i) => `symbol${i}`);
   const sites = Array.from({ length: NEIGHBOURHOOD_SITES_PER_SYMBOL }, () => `${names.join(" ")} ${"字".repeat(240)}\n`).join("");
-  const dir = snapshot({ "changed.txt": `${names.join(" ")}\n`, "use.txt": sites });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const dir = snapshot({ "changed.src": `${names.join(" ")}\n`, "use.txt": sites });
+  const packet = build(dir, change(dir, { "changed.src": [1] }), { impact: touching(names) });
   const text = readFileSync(join(dir, packet.packetPath!), "utf8");
   expect(Buffer.byteLength(text)).toBeLessThanOrEqual(NEIGHBOURHOOD_MAX_BYTES);
   expect(packet.symbols.length).toBeGreaterThan(0);
   expect(packet.symbols.length).toBeLessThan(names.length);
   expect(text.trimEnd()).toMatch(new RegExp(`${names.length - packet.symbols.length} symbols cut[^\\n]*$`));
+  expect(packet.partial).toBe(`${names.length - packet.symbols.length} symbols cut at the packet byte cap.`);
+  expect(packet).toMatchObject({ cause: "bytes", droppedLinked: names.length - packet.symbols.length, droppedOther: 0 });
   expect((text.match(/^```$/gm) ?? []).length).toBe(packet.symbols.reduce((count, symbol) => count + symbol.sites.length * 2, 0));
 });
 
+it("28. counts the names found by text alone that the byte cap cut, and leaves the packet whole", () => {
+  const names = Array.from({ length: NEIGHBOURHOOD_SYMBOLS_PER_FILE }, (_, i) => `symbol${i}`);
+  const sites = Array.from({ length: NEIGHBOURHOOD_SITES_PER_SYMBOL }, () => `${names.join(" ")} ${"字".repeat(240)}\n`).join("");
+  const dir = snapshot({ "changed.src": `${names.join(" ")}\n`, "use.txt": sites });
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
+  const text = readFileSync(join(dir, packet.packetPath!), "utf8");
+  expect(packet.symbols.length).toBeLessThan(names.length);
+  expect(packet).toMatchObject({ partial: null, cause: null, droppedLinked: 0, droppedOther: names.length - packet.symbols.length });
+  expect(text).not.toContain("symbols cut");
+  expect(renderNeighbourhoodBlock(packet)).not.toContain("symbols cut");
+});
+
+it("27. keeps a name the graph links to the change ahead of rarer names found by text alone", () => {
+  const rare = Array.from({ length: NEIGHBOURHOOD_SYMBOLS_PER_FILE - 1 }, (_, i) => `rare${i}`);
+  const rows = (name: string) => Array.from({ length: NEIGHBOURHOOD_SITES_PER_SYMBOL }, () => `${name} ${"字".repeat(240)}\n`).join("");
+  // The linked name is in more files than any other, so rarity alone ranks it last.
+  const files: Record<string, string> = { "changed.src": `${rare.join(" ")} linkedName\n`, "use.txt": rare.map(rows).join("") + rows("linkedName") };
+  for (let i = 0; i < 5; i++) files[`more-${i}.txt`] = "linkedName\n";
+  const dir = snapshot(files);
+  const packet = build(dir, change(dir, { "changed.src": [1] }), { impact: touching(["linkedName"]) });
+  expect(packet.droppedOther).toBeGreaterThan(0);
+  expect(packet.symbols[0]!.name).toBe("linkedName");
+  expect(packet).toMatchObject({ partial: null, droppedLinked: 0 });
+});
+
+it("26. seeds no name from prose, comments, strings or lock files, and keeps a config key", () => {
+  const prose = "the quick brown fox jumps over every lazy sleeping hound";
+  const dir = snapshot({
+    "notes.md": `${prose} mdName\n`,
+    "app.ts": `const codeName = "${prose} stringName"; // ${prose} commentName\nlet other = \`text \${interpName} more\`;\n`,
+    "job.py": `pyName = 'quoted pyString'  # ${prose} pyComment\n`,
+    "pnpm-lock.yaml": "lockName: 1.0.0\n",
+    "config.yaml": `retryLimit: ${prose}\n`,
+    "use.txt": "codeName interpName pyName retryLimit mdName stringName commentName pyString pyComment lockName other quick brown\n",
+  });
+  const packet = build(dir, change(dir, { "notes.md": [1], "app.ts": [1, 2], "job.py": [1], "pnpm-lock.yaml": [1], "config.yaml": [1] }));
+  expect(packet.symbols.map((s) => s.name).sort()).toEqual(["codeName", "interpName", "other", "pyName", "retryLimit"]);
+});
+
 it("keeps repository backticks inside context fences", () => {
-  const dir = snapshot({ "changed.txt": "reprice\n", "use.txt": "```\nreturn reprice();\n```\n" });
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const dir = snapshot({ "changed.src": "reprice\n", "use.txt": "```\nreturn reprice();\n```\n" });
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   expect(renderNeighbourhoodBlock(packet)).toContain("````\n1\t```\n2\treturn reprice();\n3\t```\n````");
 });
 
@@ -394,22 +450,22 @@ it("returns no inline block for an empty packet or a filter with no symbols", ()
 });
 
 it("does not count ignored directories, binary files, non-UTF8 files or files over 512 KB", () => {
-  const files: Record<string, string | Buffer> = { "changed.txt": "reprice\n", "use.txt": "return reprice();\n", "binary": Buffer.from("reprice\0"), "invalid": Buffer.from([114, 101, 112, 114, 105, 99, 101, 0xff]), "large.txt": `reprice ${" ".repeat(512 * 1024)}` };
+  const files: Record<string, string | Buffer> = { "changed.src": "reprice\n", "use.txt": "return reprice();\n", "binary": Buffer.from("reprice\0"), "invalid": Buffer.from([114, 101, 112, 114, 105, 99, 101, 0xff]), "large.txt": `reprice ${" ".repeat(512 * 1024)}` };
   for (const name of [".git", "node_modules", "vendor", "dist", "build", "target", ".openqodex", ".openqodex-review"]) files[`nested/${name}/use.txt`] = "reprice\n";
   const dir = snapshot(files);
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   expect(packet.symbols[0]).toMatchObject({ name: "reprice", files: 2, sites: [{ path: "use.txt" }] });
 });
 
 it("prunes an ignored directory before listing its many files", () => {
-  const dir = snapshot({ "changed.txt": "reprice\n", "use.txt": "reprice\n" });
+  const dir = snapshot({ "changed.src": "reprice\n", "use.txt": "reprice\n" });
   const ignored = join(dir, "node_modules");
   mkdirSync(ignored);
   for (let i = 0; i < 2000; i++) writeFileSync(join(ignored, `use-${i}.txt`), "reprice\n");
   const reads = vi.spyOn(fs, "readdirSync");
   syncBuiltinESMExports();
   try {
-    const packet = build(dir, change(dir, { "changed.txt": [1] }));
+    const packet = build(dir, change(dir, { "changed.src": [1] }));
     expect(packet.partial).toBeNull();
     expect(reads.mock.calls.map(([path]) => String(path))).not.toContain(ignored);
     expect(packet.symbols[0]!.files).toBe(2);
@@ -417,12 +473,12 @@ it("prunes an ignored directory before listing its many files", () => {
 });
 
 it("stops listing directories at the time cap and marks the walked portion partial", () => {
-  const dir = snapshot({ "a/changed.txt": "reprice\n", "b/use.txt": "reprice\n", "c/use.txt": "reprice\n" });
+  const dir = snapshot({ "a/changed.src": "reprice\n", "b/use.txt": "reprice\n", "c/use.txt": "reprice\n" });
   let ticks = 0;
   const reads = vi.spyOn(fs, "readdirSync");
   syncBuiltinESMExports();
   try {
-    const packet = build(dir, change(dir, { "a/changed.txt": [1] }), { now: () => ticks++ < 3 ? 0 : NEIGHBOURHOOD_TIME_MS + 1 });
+    const packet = build(dir, change(dir, { "a/changed.src": [1] }), { now: () => ticks++ < 3 ? 0 : NEIGHBOURHOOD_TIME_MS + 1 });
     expect(packet.partial).toMatch(/^Time cap reached/);
     expect(reads.mock.calls.map(([path]) => String(path))).not.toContain(join(dir, "b"));
     expect(reads.mock.calls.map(([path]) => String(path))).toContain(join(dir, "a"));
@@ -431,16 +487,16 @@ it("stops listing directories at the time cap and marks the walked portion parti
 
 it("returns a partial packet instead of throwing when the snapshot cannot be listed", () => {
   const dir = snapshot();
-  const packet = build(join(dir, "missing"), change(dir, { "changed.txt": [1] }));
+  const packet = build(join(dir, "missing"), change(dir, { "changed.src": [1] }));
   expect(packet.packetPath).toBeNull();
   expect(packet.symbols).toEqual([]);
   expect(packet.partial).toMatch(/ENOENT/);
 });
 
 it("finishes a 10,000-file snapshot within the time cap", () => {
-  const dir = snapshot({ "changed.txt": "rarePrice\n" });
+  const dir = snapshot({ "changed.src": "rarePrice\n" });
   for (let i = 0; i < 9999; i++) writeFileSync(join(dir, `use-${i}.txt`), "return rarePrice();\n");
-  const packet = build(dir, change(dir, { "changed.txt": [1] }));
+  const packet = build(dir, change(dir, { "changed.src": [1] }));
   process.stdout.write(`Neighbourhood on 10,000 files: ${packet.durationMs.toFixed(1)} ms, partial: ${packet.partial ?? "no"}\n`);
   expect(packet.durationMs).toBeLessThan(NEIGHBOURHOOD_TIME_MS);
   expect(packet.partial).toBeNull();

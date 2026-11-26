@@ -76,158 +76,6 @@ The identifiers on the changed lines, and where the repository declares and uses
 
 ### app/search.py
 
-#### request: 3 snapshot files
-
-used at app/server.py:3 (by name, unverified: the same name may be another thing)
-
-```
-1	import sqlite3
-2	
-3	from flask import Flask, jsonify, request
-4	
-5	from app.search import search
-```
-
-used at app/server.py:22 (by name, unverified: the same name may be another thing)
-
-```
-20	@app.get("/items")
-21	def list_items():
-22	    page = max(int(request.args.get("page", "1")), 1)
-23	    offset = page * PAGE_SIZE
-24	    with get_db() as conn:
-```
-
-#### name: 9 snapshot files
-
-used at .github/workflows/ci.yml:1 (by name, unverified: the same name may be another thing)
-
-```
-1	name: ci
-2	
-3	on:
-```
-
-used at app/server.py:26 (by name, unverified: the same name may be another thing)
-
-```
-24	    with get_db() as conn:
-25	        rows = conn.execute(
-26	            "SELECT id, name, price FROM items ORDER BY id LIMIT ? OFFSET ?",
-27	            (PAGE_SIZE, offset),
-28	        ).fetchall()
-```
-
-used at app/server.py:36 (by name, unverified: the same name may be another thing)
-
-```
-34	    with get_db() as conn:
-35	        row = conn.execute(
-36	            "SELECT id, name, price FROM items WHERE id = ?", (item_id,)
-37	        ).fetchone()
-38	    if row is None:
-```
-
-used at db/migrations/001\_create\_items.sql:4 (by name, unverified: the same name may be another thing)
-
-```
-2	CREATE TABLE IF NOT EXISTS items (
-3	    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-4	    name text NOT NULL,
-5	    price numeric(10, 2) NOT NULL,
-6	    created_at timestamptz NOT NULL DEFAULT now()
-```
-
-used at deploy/deployment.yaml:4 (by name, unverified: the same name may be another thing)
-
-```
-2	kind: Deployment
-3	metadata:
-4	  name: shop-api
-5	  namespace: shop
-6	  labels:
-```
-
-used at deploy/deployment.yaml:35 (by name, unverified: the same name may be another thing)
-
-```
-33	                    app: shop-api
-34	      containers:
-35	        - name: api
-36	          image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/shop-api:1.4.2@sha256:9b1d3c5e7f2a4b6c8d0e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c
-37	          imagePullPolicy: Always
-```
-
-used at deploy/deployment.yaml:67 (by name, unverified: the same name may be another thing)
-
-```
-65	kind: NetworkPolicy
-66	metadata:
-67	  name: shop-api
-68	  namespace: shop
-69	spec:
-```
-
-used at infra/main.tf:18 (by name, unverified: the same name may be another thing)
-
-```
-16	
-17	resource "aws_security_group" "api" {
-18	  name        = "shop-api"
-19	  description = "Traffic to the shop API hosts"
-20	  vpc_id      = var.vpc_id
-```
-
-used at package-lock.json:2 (by name, unverified: the same name may be another thing)
-
-```
-1	{
-2	  "name": "demo-shop",
-3	  "version": "1.0.0",
-4	  "lockfileVersion": 3,
-```
-
-used at package-lock.json:8 (by name, unverified: the same name may be another thing)
-
-```
-6	  "packages": {
-7	    "": {
-8	      "name": "demo-shop",
-9	      "version": "1.0.0",
-10	      "dependencies": {
-```
-
-used at package.json:2 (by name, unverified: the same name may be another thing)
-
-```
-1	{
-2	  "name": "demo-shop",
-3	  "version": "1.0.0",
-4	  "private": true,
-```
-
-#### FROM: 3 snapshot files
-
-used at app/server.py:26 (by name, unverified: the same name may be another thing)
-
-```
-24	    with get_db() as conn:
-25	        rows = conn.execute(
-26	            "SELECT id, name, price FROM items ORDER BY id LIMIT ? OFFSET ?",
-27	            (PAGE_SIZE, offset),
-28	        ).fetchall()
-```
-
-used at app/server.py:36 (by name, unverified: the same name may be another thing)
-
-```
-34	    with get_db() as conn:
-35	        row = conn.execute(
-36	            "SELECT id, name, price FROM items WHERE id = ?", (item_id,)
-37	        ).fetchone()
-38	    if row is None:
-```
-
 #### get: 3 snapshot files
 
 used at app/server.py:20 (by name, unverified: the same name may be another thing)
@@ -270,40 +118,6 @@ used at app/server.py:16 (by name, unverified: the same name may be another thin
 16	    conn.row_factory = sqlite3.Row
 17	    return conn
 18	
-```
-
-#### SELECT: 2 snapshot files
-
-used at app/server.py:26 (by name, unverified: the same name may be another thing)
-
-```
-24	    with get_db() as conn:
-25	        rows = conn.execute(
-26	            "SELECT id, name, price FROM items ORDER BY id LIMIT ? OFFSET ?",
-27	            (PAGE_SIZE, offset),
-28	        ).fetchall()
-```
-
-used at app/server.py:36 (by name, unverified: the same name may be another thing)
-
-```
-34	    with get_db() as conn:
-35	        row = conn.execute(
-36	            "SELECT id, name, price FROM items WHERE id = ?", (item_id,)
-37	        ).fetchone()
-38	    if row is None:
-```
-
-#### WHERE: 2 snapshot files
-
-used at app/server.py:36 (by name, unverified: the same name may be another thing)
-
-```
-34	    with get_db() as conn:
-35	        row = conn.execute(
-36	            "SELECT id, name, price FROM items WHERE id = ?", (item_id,)
-37	        ).fetchone()
-38	    if row is None:
 ```
 
 #### \_\_name\_\_: 2 snapshot files
@@ -611,36 +425,26 @@ used at app/server.py:16 (by name, unverified: the same name may be another thin
 18	
 ```
 
-#### price: 3 snapshot files
+#### request: 3 snapshot files
 
-used at app/server.py:26 (by name, unverified: the same name may be another thing)
+used at app/server.py:3 (by name, unverified: the same name may be another thing)
 
 ```
+1	import sqlite3
+2	
+3	from flask import Flask, jsonify, request
+4	
+5	from app.search import search
+```
+
+used at app/server.py:22 (by name, unverified: the same name may be another thing)
+
+```
+20	@app.get("/items")
+21	def list_items():
+22	    page = max(int(request.args.get("page", "1")), 1)
+23	    offset = page * PAGE_SIZE
 24	    with get_db() as conn:
-25	        rows = conn.execute(
-26	            "SELECT id, name, price FROM items ORDER BY id LIMIT ? OFFSET ?",
-27	            (PAGE_SIZE, offset),
-28	        ).fetchall()
-```
-
-used at app/server.py:36 (by name, unverified: the same name may be another thing)
-
-```
-34	    with get_db() as conn:
-35	        row = conn.execute(
-36	            "SELECT id, name, price FROM items WHERE id = ?", (item_id,)
-37	        ).fetchone()
-38	    if row is None:
-```
-
-used at db/migrations/001\_create\_items.sql:5 (by name, unverified: the same name may be another thing)
-
-```
-3	    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-4	    name text NOT NULL,
-5	    price numeric(10, 2) NOT NULL,
-6	    created_at timestamptz NOT NULL DEFAULT now()
-7	);
 ```
 
 #### flask: 4 snapshot files
@@ -667,95 +471,6 @@ used at requirements.txt:1 (by name, unverified: the same name may be another th
 
 ```
 1	flask==3.1.3
-```
-
-#### items: 5 snapshot files
-
-used at app/server.py:10 (by name, unverified: the same name may be another thing)
-
-```
-8	app.register_blueprint(search)
-9	
-10	DATABASE = "items.db"
-11	PAGE_SIZE = 20
-12	
-```
-
-used at app/server.py:20 (by name, unverified: the same name may be another thing)
-
-```
-18	
-19	
-20	@app.get("/items")
-21	def list_items():
-22	    page = max(int(request.args.get("page", "1")), 1)
-```
-
-used at app/server.py:26 (by name, unverified: the same name may be another thing)
-
-```
-24	    with get_db() as conn:
-25	        rows = conn.execute(
-26	            "SELECT id, name, price FROM items ORDER BY id LIMIT ? OFFSET ?",
-27	            (PAGE_SIZE, offset),
-28	        ).fetchall()
-```
-
-used at app/server.py:32 (by name, unverified: the same name may be another thing)
-
-```
-30	
-31	
-32	@app.get("/items/<int:item_id>")
-33	def get_item(item_id):
-34	    with get_db() as conn:
-```
-
-used at app/server.py:36 (by name, unverified: the same name may be another thing)
-
-```
-34	    with get_db() as conn:
-35	        row = conn.execute(
-36	            "SELECT id, name, price FROM items WHERE id = ?", (item_id,)
-37	        ).fetchone()
-38	    if row is None:
-```
-
-used at db/migrations/001\_create\_items.sql:1 (by name, unverified: the same name may be another thing)
-
-```
-1	-- The items table of the production Postgres database.
-2	CREATE TABLE IF NOT EXISTS items (
-3	    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-```
-
-used at db/migrations/001\_create\_items.sql:2 (by name, unverified: the same name may be another thing)
-
-```
-1	-- The items table of the production Postgres database.
-2	CREATE TABLE IF NOT EXISTS items (
-3	    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-4	    name text NOT NULL,
-```
-
-used at deploy/deployment.yaml:56 (by name, unverified: the same name may be another thing)
-
-```
-54	          readinessProbe:
-55	            httpGet:
-56	              path: /items
-57	              port: 5000
-58	          livenessProbe:
-```
-
-used at deploy/deployment.yaml:60 (by name, unverified: the same name may be another thing)
-
-```
-58	          livenessProbe:
-59	            httpGet:
-60	              path: /items
-61	              port: 5000
-62	---
 ```
 
 
