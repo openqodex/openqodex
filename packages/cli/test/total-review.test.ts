@@ -103,6 +103,10 @@
 // 39. A review stopped at its cap does not say which cap it hit and which
 //     flag raises it, on the terminal or in the report; or a reviewer that
 //     never answers is not stopped at the cap it was given.
+// 40. A tool call naming /dev/null or /dev/zero, the empty device every
+//     shell may redirect to, ends the review incomplete as a read outside
+//     the snapshot (issue 299): classify() now reads neither as a path of
+//     the snapshot or of anything outside it.
 // 42. A reviewer that stopped on a usage or plan limit reads as "stopped with
 //     an error (success)": the reason in its result is dropped.
 // 43. A secret in the reviewer's own error survives into the receipt,
@@ -345,6 +349,14 @@ describe("13. the trace check fails closed", () => {
     ["a Grep file glob that climbs out", { tool: "Grep", input: { pattern: "key", glob: "../*.env" }, ok: true, read: null }],
   ];
   for (const [name, call] of cases) it(`${name} is outside the snapshot`, () => expect(classify(snapshotLike(), call).inside).toBe(false));
+  // 40. The empty device, named as the one path given or as what a read delivered.
+  for (const device of ["/dev/null", "/dev/zero"]) {
+    it(`40. a read of ${device} is not outside the snapshot`, () => {
+      const entry = classify(snapshotLike(), { tool: "Read", input: { file_path: device }, ok: true, read: { path: device, start: 0, lines: 0 } });
+      expect(entry.inside).toBe(true);
+      expect(entry.path).toBeNull();
+    });
+  }
   // Not a path rule: a tool the reviewer was not given fails the run.
   it("an unknown tool makes the run incomplete", async () => {
     const answer: Answer = (text) => ({ finalText: submission(text), calls: [{ tool: "Bash", input: { command: "ls" }, ok: true, read: null }] });
