@@ -3,13 +3,17 @@
 //
 // Ways it could fail, written before the code:
 //  1. A reason that holds spaces or "=" is cut at the first space, or eats
-//     the keys after it.
+//     the keys after it; a reason that quotes "status=429" replaces the
+//     step's status.
 //  2. A step from before reasonCode existed gets no code, or a code the
 //     library would not give that reason; a step that carries reasonCode is
-//     read from its reason instead.
+//     read from its reason instead, or one that writes "null" counts it as
+//     a code. A reason of a changed snapshot, a rejected answer or a
+//     candidate with no disposition gets "other" or the unread ranges.
 //  3. A step is put in the wrong week at a year's end, or a review's other
 //     steps are counted.
 //  4. A share above 20% is not flagged, or the complete status is.
+//  5. A sweep cut off mid-line stops the whole report.
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -39,6 +43,8 @@ const sweep = [
 
 it("1. reads a reason with spaces and '=' whole, and the keys after it", () => {
   expect(parseExcerpt(`status=incomplete ${counts} reason=x=y and more source=sweep`)).toMatchObject({ status: "incomplete", review_ms: "4000", reason: "x=y and more", source: "sweep" });
+  const quoted = parseExcerpt(`status=incomplete ${counts} reason=the model call failed: status=429 scope=too many requests`);
+  expect(quoted).toMatchObject({ status: "incomplete", scope: "delta", reason: "the model call failed: status=429 scope=too many requests" });
 });
 
 it("2. gives an old step the library's code for its reason, and keeps a code a step carries", () => {
@@ -47,6 +53,12 @@ it("2. gives an old step the library's code for its reason, and keeps a code a s
   expect(records[3]!.notes).toEqual(["range_not_examined"]);
   expect(records[4]!.notes).toEqual(["brief_too_big", "unit_not_examined"]);
   expect(records[6]).toMatchObject({ partial: "bytes", notes: ["timed_out"] });
+  const codes = (...reasons: string[]) => stepsOf(reasons.map((r) => review(step(NOV_26, `status=incomplete ${counts} reasonCode=null reason=${r}`))).join("\n")).map((r) => r.code);
+  expect(codes(
+    "the snapshot changed while the reviewer read it",
+    "the reviewer's answer still failed 2 checks after the correction rounds; 1 changed range was not examined; src/a.ts:1-2",
+    "1 scanner candidate has no disposition; 1 changed range was not examined; src/a.ts:1-2",
+  )).toEqual(["boundary_breach", "answer_rejected", "candidates_not_disposed"]);
   // Before the nothing_to_review status, such a review ended complete.
   expect(stepsOf(review(step(NOV_26, `status=complete ${counts} reason=nothing to review: the head adds no change since the previously reviewed commit`)))[0]).toMatchObject({ status: "complete", code: "nothing_to_review" });
 });
@@ -73,4 +85,10 @@ it("4. flags each share above 20%, never the complete status, from the command l
   // One in five is 20%, not above it.
   expect(lines).toContain("  reason code brief_too_big: 1 (20.0%)");
   expect(lines).toContain("  partial cause bytes: 1 (50.0%)  FLAG: above 20%");
+});
+
+it("5. skips a line cut off mid-way, counts it, and reads the rest", () => {
+  const records = stepsOf(`${review(step(NOV_26, `status=complete ${counts}`))}\n{"review": {"id": "cut"}, "steps": [{"na\n`);
+  expect(records).toHaveLength(1);
+  expect(records.unreadable).toBe(1);
 });

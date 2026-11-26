@@ -510,7 +510,10 @@ export function buildNeighbourhood(args: { change: Change; snapshotDir: string; 
     for (const [file, candidates] of byFile) {
       const ranked = [...candidates].map((name) => names.get(name)!)
         .filter((s) => s.graph.length > 0 || (s.files <= maxFiles && s.declared.length + s.used.length > 0))
-        .sort((a, b) => Number(!isLinked(a)) - Number(!isLinked(b)) || a.files - b.files || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, NEIGHBOURHOOD_SYMBOLS_PER_FILE);
+        .sort((a, b) => Number(!isLinked(a)) - Number(!isLinked(b)) || a.files - b.files || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        // Every linked name stays, so only the byte cap, which counts it,
+        // can cut one; names found by text alone fill the file's places.
+        .filter((s, i) => isLinked(s) || i < NEIGHBOURHOOD_SYMBOLS_PER_FILE);
       for (const symbol of ranked) {
         let kept = selected.get(symbol.name);
         if (!kept) {

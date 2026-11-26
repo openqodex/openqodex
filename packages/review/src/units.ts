@@ -125,7 +125,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
     const size = { rows: rendered?.length ?? Infinity, bytes: rendered === null ? Infinity : Buffer.byteLength(rendered.join("\n"), "utf8") };
     const prior = measured.get(h.path) ?? { rows: 0, bytes: 0 };
     measured.set(h.path, { rows: prior.rows + size.rows, bytes: prior.bytes + size.bytes });
-    if (size.rows > DELIVER_LINES || size.bytes > MAX_UNIT_DIFF_BYTES) over.add(h.path);
+    if (size.rows > DELIVER_LINES || size.bytes > partBytes) over.add(h.path);
   }
   for (const path of measured.keys()) {
     const store = storeRoot(path);
@@ -165,7 +165,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
   }
   for (const [path, input] of candidates) {
     const size = stores.get(input.root);
-    if (input.kind === "json" ? over.has(path) : size!.rows > DELIVER_LINES || size!.bytes > MAX_UNIT_DIFF_BYTES) routes.set(path, input);
+    if (input.kind === "json" ? over.has(path) : size!.rows > DELIVER_LINES || size!.bytes > partBytes) routes.set(path, input);
   }
   const wholeByPath = new Map<string, HunkRef[]>();
   for (const h of whole) {
@@ -177,7 +177,7 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
   for (const [path, input] of routes) if (input.kind === "json") {
     const sections = jsonSections(path, input.text!, wholeByPath.get(path)!, input.previous, input.secrets, input.oldUnavailable);
     const fixedBytes = Buffer.byteLength(sections.fixed + "\n", "utf8") + 1024;
-    if (fixedBytes >= MAX_UNIT_DIFF_BYTES / 2) { routes.delete(path); continue; }
+    if (fixedBytes >= partBytes / 2) { routes.delete(path); continue; }
     const groups: { start: number; end: number; entries: JsonEntry[]; bytes: number }[] = [];
     const refs = wholeByPath.get(path)!;
     const metadata = [
@@ -209,13 +209,13 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
       else groups.push({ start: entry.lines[0], end: entry.lines[1], entries: entry.text ? [entry] : [], bytes });
     }
     for (const group of groups) group.bytes += through(starts, group.end) - through(ends, group.start - 1);
-    if (groups.some((group) => fixedBytes + group.bytes > MAX_UNIT_DIFF_BYTES)) { routes.delete(path); continue; }
+    if (groups.some((group) => fixedBytes + group.bytes > partBytes)) { routes.delete(path); continue; }
     const pages: JsonPage[] = [];
     let entries: JsonEntry[] = [];
     let bytes = fixedBytes;
     let start = 1;
     for (const group of groups) {
-      if (bytes > fixedBytes && bytes + group.bytes > MAX_UNIT_DIFF_BYTES) {
+      if (bytes > fixedBytes && bytes + group.bytes > partBytes) {
         pages.push({ start, end: group.start - 1, entries, omitted: [] });
         start = group.start;
         entries = [];
@@ -256,10 +256,11 @@ function inventoryOf(change: Change, read: Read, cache: ReturnType<typeof staged
     }
     for (const page of active) page.entries = entriesByPage.get(page)!;
     // Folding can concentrate an entire file's anomalies on one changed line.
-    // Keep that look bounded too, falling back to parts when it cannot fit.
+    // Keep that look bounded too, falling back to parts when it cannot fit;
+    // a smaller part budget leaves less room by as much.
     if ([...active].some((page) => fixedBytes + page.entries.reduce((sum, e) => sum + Buffer.byteLength(e.text + "\n", "utf8"), 0)
       + page.omitted.reduce((sum, o) => sum + Buffer.byteLength(`${o.path}:${o.lines[0]}-${o.lines[1]}: ${o.why}\n`, "utf8"), 0)
-      + through(starts, page.end) - through(ends, page.start - 1) > MAX_BRIEF_BYTES - MAX_UNIT_DIFF_BYTES)) { routes.delete(path); continue; }
+      + through(starts, page.end) - through(ends, page.start - 1) > MAX_BRIEF_BYTES - 2 * MAX_UNIT_DIFF_BYTES + partBytes)) { routes.delete(path); continue; }
     input.sections = sections;
     input.pages = [...active].sort((a, b) => a.start - b.start);
   }
@@ -502,6 +503,13 @@ export function unitsOf(change: Change, hunks: HunkRef[], brief?: (unit: ReviewU
     // Estimates avoid growing trial renders. Check the real serialization only
     // at closure, and move the last entry out if metadata was underestimated.
     if (brief && overBrief(unit)) {
+      // One entry whose local brief fits keeps its unit: only its interfaces
+      // brief is over, and the staged review notes that pass alone.
+      if (unit.hunks.length === 1 && Buffer.byteLength(brief(unit), "utf8") <= MAX_BRIEF_BYTES) {
+        out.push(unit);
+        unit = null;
+        return;
+      }
       const last = unit.hunks.pop()!;
       unit.diffBytes -= last.bytes!;
       unit.files = [...new Set(unit.hunks.map((h) => h.path))];

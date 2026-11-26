@@ -92,7 +92,7 @@ import type {
 } from "@openqodex/core";
 import { PacketCollision, PacketLeak, renderImpactBlock, writePacket } from "@openqodex/graph";
 import type { Graph, GraphStore, Lease } from "@openqodex/graph";
-import { createToolResolver } from "@openqodex/scanners";
+import { SETTINGS_FILES, createToolResolver } from "@openqodex/scanners";
 import { meterSession } from "./agent-usage.js";
 import { REVIEWER_NAMES, cannotServe, hostAgent } from "./agents/driver.js";
 import type { Detected, ReviewerDriver, ReviewerSession, Turn } from "./agents/driver.js";
@@ -480,13 +480,20 @@ async function headOf(repoRoot: string): Promise<string> {
   return sha;
 }
 
+// A model review (reviewChange) of a change with files but no changed line,
+// no deletion and no whole file to read: a reviewer would read nothing, so
+// it is not given one and the review has nothing to review. A file moved to
+// a scanner's settings path is the exception: the move alone can turn the
+// settings on, and the scan raises it for a reviewer to dispose of.
+const settingsPath = (path: string): boolean => {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  return Object.values(SETTINGS_FILES).some((files) => files.some((f) => (f.anyFolder ? f.path === name : f.path === path)));
+};
+const lineless = (deps: ReviewDeps, change: Change): boolean => deps.model !== undefined && changedHunks(change).length === 0 && (change.uncovered ?? []).length === 0 && !change.changedPaths.some(settingsPath);
+
 // The change and its snapshot, then the scan, each timed on `clock`. `keep`
 // receives the snapshot as soon as it exists, so the caller removes it
 // whatever fails later.
-// A model review (reviewChange) of a change with files but no changed line,
-// no deletion and no whole file to read: a reviewer would read nothing, so
-// it is not given one and the review has nothing to review.
-const lineless = (deps: ReviewDeps, change: Change): boolean => deps.model !== undefined && changedHunks(change).length === 0 && (change.uncovered ?? []).length === 0;
 
 async function prepare(inputs: ReviewInputs, deps: ReviewDeps, scanHost: ScanHost, clock: PhaseClock, keep: (s: Snapshot) => void, keepChange: (c: Change) => void, noLines: () => void): Promise<Prepared | null> {
   const { repoRoot, config, only, skip } = inputs;
@@ -1427,13 +1434,18 @@ async function reviewInScope(
   );
   const complete = completion.status === "complete";
   const incomplete = complete ? null : incompleteDetail({ evidence: r.evidence, calls: r.usage.calls, staged: r.causes });
-  // The changed ranges a reviewer was shown or read, and their files.
-  const examined = (r.evidence.coverage.inventory ?? []).filter((h) => h.by !== undefined);
+  // The files a reviewer was shown or read: from the range list, or, for a
+  // single pass, which saves none, each changed file with a range not unread.
+  const cover = r.evidence.coverage;
+  const unread = new Set(cover.unread.map((h) => `${h.path}:${h.start}:${h.end}`));
+  const examined = cover.inventory
+    ? cover.inventory.filter((h) => h.by !== undefined).map((h) => h.path)
+    : cover.covered === 0 ? [] : [...changedHunks(r.change).filter((h) => !unread.has(`${h.path}:${h.start}:${h.end}`)).map((h) => h.path), ...(r.change.uncovered ?? []).filter((path) => !cover.unread.some((h) => h.path === path))];
   const outcome = incomplete ? { status: "incomplete" as const, reason: shortenedMissing(completion.missing).join("; "), incomplete } : { status: report.verdict === "blocked" ? "complete_blocking" as const : "complete" as const };
   const result: Untimed = {
     ...outcome,
     reasonCode: incomplete?.cause ?? null,
-    filesExamined: new Set(examined.map((h) => h.path)).size,
+    filesExamined: new Set(examined).size,
     hunksExamined: r.evidence.coverage.covered,
     neighbourhood: r.neighbourhood,
     scope: decision.scope,

@@ -14,9 +14,10 @@
 //     beside large context items its brief passes MAX_BRIEF_BYTES and its
 //     ranges are named unread.
 //  4. A result path leaves out the counts, ends complete with no changed
-//     range examined (a change of binary files or renames only, given to a
-//     model that reads nothing), or ends incomplete without a structured
-//     cause. The paths are every return of reviewChange: a merge base not
+//     range examined and nothing disposed of (a change of binary files or
+//     renames only, given to a model that reads nothing), skips a move to a
+//     scanner's settings path that turns the settings on, or ends
+//     incomplete without a structured cause. The paths are every return of reviewChange: a merge base not
 //     proved, missing objects, a step that failed before the reviewer,
 //     nothing to review, a change with no readable line, and a reviewed
 //     change ending complete, complete_blocking or incomplete. The type of
@@ -91,6 +92,14 @@ describe("the result says what a staged review examined and why it is not comple
     expect(result.neighbourhood).toEqual({ partial: false, cause: null, droppedLinked: 0, droppedOther: 0 });
   });
 
+  it("1. a single-pass review, which saves no range list, counts its files too", async () => {
+    const result = await review(repo(), { input: { config: { ...DEFAULT_CONFIG, stages: false } } });
+    expect(result.status, result.reason).toBe("complete");
+    expect(result.coverage!.inventory).toBeUndefined();
+    expect(result.hunksExamined).toBeGreaterThan(0);
+    expect(result.filesExamined).toBe(2);
+  });
+
   it("2. a budget the host refused is not retryable", async () => {
     const result = await review(repo(), { authorize: () => false });
     expect(result.status).toBe("incomplete");
@@ -139,8 +148,10 @@ function honest(result: ReviewResult): void {
   expect(Number.isInteger(result.filesExamined) && result.filesExamined >= 0).toBe(true);
   expect(Number.isInteger(result.hunksExamined) && result.hunksExamined >= 0).toBe(true);
   if (result.status === "complete" || result.status === "complete_blocking") {
-    expect(result.hunksExamined).toBeGreaterThan(0);
-    expect(result.filesExamined).toBeGreaterThan(0);
+    // A reviewer read a changed range, or, for a change with none (a move
+    // to a scanner's settings path), disposed of what the scan raised.
+    if (result.hunksExamined === 0) expect(result.dispositions.length).toBeGreaterThan(0);
+    else expect(result.filesExamined).toBeGreaterThan(0);
     expect(result.reasonCode).toBeNull();
     expect(result.incomplete).toBeUndefined();
   } else if (result.status === "incomplete") {
@@ -206,6 +217,27 @@ describe("4. every result path is honest", () => {
     expect(result.status).toBe("nothing_to_review");
     expect(result.reason).toContain("no line a reviewer can read");
     expect(calls).toBe(0);
+  });
+
+  it("a rename to a scanner's settings path is reviewed: the move alone can turn the settings on", async () => {
+    const r = repo();
+    git(r.dir, "checkout", "-q", "main");
+    git(r.dir, "checkout", "-q", "-b", "settings");
+    writeFileSync(join(r.dir, "ignored-findings.txt"), "src/math.ts:generic-api-key:2\n");
+    git(r.dir, "add", "-A");
+    git(r.dir, "commit", "-qm", "Keep a list of ignored findings");
+    const base = git(r.dir, "rev-parse", "HEAD");
+    git(r.dir, "mv", "ignored-findings.txt", ".gitleaksignore");
+    git(r.dir, "commit", "-qm", "Turn the list on");
+    let calls = 0;
+    const model = provider();
+    const complete = model.complete.bind(model);
+    model.complete = (request) => { calls++; return complete(request); };
+    const result = await review({ dir: r.dir, base, head: git(r.dir, "rev-parse", "HEAD") }, { model });
+    honest(result);
+    expect(result.status, result.reason).toBe("complete");
+    expect(result.dispositions).toMatchObject([{ token: "gitleaks:settings-file", file: ".gitleaksignore" }]);
+    expect(calls).toBeGreaterThan(0);
   });
 
   it("a reviewed change: complete, complete_blocking and incomplete", async () => {

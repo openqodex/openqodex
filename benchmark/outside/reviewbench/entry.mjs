@@ -175,6 +175,8 @@ export function decide({ code, report, usage, attempt, agent, refused = null }) 
   const failing = (reason) => (attempt < 2 ? { fail: reason } : { write: [], note: `${reason}; written with no finding on attempt ${attempt}` });
   if (refused) return failing(`the review's files were refused: ${refused}`);
   if (code === 0 && report === null) return { write: [], note: "nothing to review: the change has no file the review reads" };
+  // The model review's report for a change it skipped: no reviewer ran.
+  if (code === 0 && report.status === "nothing_to_review") return { write: [], note: report.reason ?? "nothing to review" };
   if (report === null) return failing(code === null ? "the review was stopped at its deadline and wrote no report" : `openqodex exited ${code} and wrote no report`);
   if (code !== 0 && code !== 1 && code !== 2) return failing(`openqodex exited ${code}`);
   const status = report.completion?.status ?? null;

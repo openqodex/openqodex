@@ -38,6 +38,8 @@
 // 28. Names found by text alone, cut at the byte cap, make the packet
 //     partial, so every brief says the code around the change is partial;
 //     or the cut is not counted at all.
+// 29. A changed file with more linked names than its 30 places loses one
+//     at that limit, where no count or note sees it.
 import { makeLineSet } from "../../../tests/line-set.mjs";
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import fs from "node:fs";
@@ -374,6 +376,14 @@ it("27. keeps a name the graph links to the change ahead of rarer names found by
   expect(packet.droppedOther).toBeGreaterThan(0);
   expect(packet.symbols[0]!.name).toBe("linkedName");
   expect(packet).toMatchObject({ partial: null, droppedLinked: 0 });
+});
+
+it("29. keeps every linked name of a changed file past its 30 places, and fills them with names found by text alone", () => {
+  const linked = Array.from({ length: NEIGHBOURHOOD_SYMBOLS_PER_FILE + 1 }, (_, i) => `linked${i}`);
+  const dir = snapshot({ "changed.src": `${linked.join(" ")} textOnly\n`, "use.txt": `${linked.join(" ")} textOnly\n` });
+  const packet = build(dir, change(dir, { "changed.src": [1] }), { impact: touching(linked) });
+  expect(packet.symbols.map((s) => s.name).sort()).toEqual([...linked].sort());
+  expect(packet).toMatchObject({ partial: null, droppedLinked: 0, droppedOther: 0 });
 });
 
 it("26. seeds no name from prose, comments, strings or lock files, and keeps a config key", () => {

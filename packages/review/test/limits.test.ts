@@ -19,6 +19,9 @@
 //     the cap, or loses a row when cut.
 //  4. MAX_BRIEF_BYTES: fixed blocks that put a 120 KB part just over the
 //     brief bound leave that part unread instead of cutting parts smaller.
+//     The same for the pages of a large JSON file, which are cut apart from
+//     the parts of other files. A part whose interfaces brief alone is over
+//     the bound loses its correctness finder too.
 //  5. NEIGHBOURHOOD_BLOCK_BYTES: code around the change one symbol over
 //     24 KB renders over the cap, or leaves symbols out without naming the
 //     packet that holds them.
@@ -162,6 +165,42 @@ it("4. MAX_BRIEF_BYTES: fixed blocks that put a 120 KB part just over the bound 
   expect(cut.some((h) => h.note)).toBe(false);
   expect(readCoverage({ change: f.change, obligations: cut, briefCarried: units.flatMap((u) => u.hunks), trace: [] }).unread).toEqual([]);
   expect(added(f.change, cut).size).toBe(400);
+});
+
+it("4. MAX_BRIEF_BYTES: the pages of a large JSON file are cut to the room the fixed blocks leave, and every page is carried", () => {
+  const f = fixture(["runs.json"]);
+  const records = Array.from({ length: 3000 }, (_, i) => Object.fromEntries(Array.from({ length: 10 }, (_, k) => [`key${k}`, `${i}-${k}`.padEnd(40, "x")])));
+  const text = JSON.stringify(records, null, 2);
+  writeFileSync(join(f.dir, "runs.json"), text);
+  f.change.files[0]!.status = "added";
+  f.change.coverage.set("runs.json", makeLineSet(Array.from({ length: text.split("\n").length }, (_, i) => i + 1)));
+  f.change.diffs = [];
+  const empty: ReviewUnit = { id: "u1", files: [], hunks: [], diffBytes: 0 };
+  const bare = Buffer.byteLength(buildFindBrief({ ...f, secrets: [], lenses: [] }, empty, "local").text);
+  // A JSON page cut to the unit budget renders about 62 KB of digest; these
+  // instructions leave 56 KB for it.
+  const instructions = "r".repeat(MAX_BRIEF_BYTES - 56 * 1024 - bare);
+  const render = (unit: ReviewUnit) => buildFindBrief({ ...f, secrets: [], lenses: [], instructions }, unit, "local").text;
+  const refs = obligations(f.change, () => text, undefined, partBudget(Buffer.byteLength(render(empty))));
+  const units = unitsOf(f.change, refs, render);
+  expect(units.length).toBeGreaterThan(1);
+  expect(units.every((u) => u.digest?.kind === "json")).toBe(true);
+  expect(units.every((u) => Buffer.byteLength(render(u)) <= MAX_BRIEF_BYTES)).toBe(true);
+  expect(readCoverage({ change: f.change, obligations: refs, trace: [], digestCarried: units.flatMap((u) => u.hunks) }).unread).toEqual([]);
+});
+
+it("4. MAX_BRIEF_BYTES: a part whose interfaces brief alone passes the bound keeps its correctness finder", () => {
+  const { f, refs } = newFile(100, (i) => `${String(i).padStart(4, "0")}${"k".repeat(996)}`);
+  // Beside the 100 KB part, 125 KB of text in the local brief, which still
+  // fits, near the bound, and 160 KB in the interfaces brief, which does not.
+  const find = (unit: ReviewUnit, pass: "local" | "contracts") => buildFindBrief({ ...f, secrets: [], lenses: [], instructions: pass === "contracts" ? "c".repeat(160 * 1024) : "l".repeat(125 * 1024) }, unit, pass);
+  const parts = refs();
+  expect(parts).toHaveLength(1);
+  const units = unitsOf(f.change, parts, (u, both) => longestBrief(u, find, both));
+  expect(units).toHaveLength(1);
+  expect(Buffer.byteLength(find(units[0]!, "local").text)).toBeLessThanOrEqual(MAX_BRIEF_BYTES);
+  expect(Buffer.byteLength(find(units[0]!, "contracts").text)).toBeGreaterThan(MAX_BRIEF_BYTES);
+  expect(parts[0]!.note).toBeUndefined();
 });
 
 // `n` symbols of about 1 KB each, as the inline block renders them.
