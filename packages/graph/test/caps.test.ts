@@ -155,6 +155,11 @@ describe("the caps of a build", () => {
     expect(g.status.filesParsed).toBe(2);
     expect(g.status.status).toBe("partial");
     expect(g.unknowns.filter((u) => u.cause === "budget").map((u) => u.file).sort()).toEqual(["a.ts", "b.ts"]);
+    // What to do next names the memory bound, never a larger time budget.
+    expect(g.unknowns.filter((u) => u.cause === "budget").every((u) => u.next.includes("graph.max_heap_mb"))).toBe(true);
+    const skipped = g.frameworks.plugins.filter((p) => p.status === "stopped");
+    expect(skipped.length).toBeGreaterThan(0);
+    expect(skipped.map((p) => p.reason).filter((reason) => !reason?.includes("memory bound"))).toEqual([]);
     expect(g.exportChanges).toEqual([]);
     expect(g.status.reasons).toContain("the export surface was not compared: the heap passed the 1 MB memory bound");
     expect(g.status.reasons.some((r) => r.startsWith("the 1 MB memory bound was reached with the calls of 2 files not resolved"))).toBe(true);

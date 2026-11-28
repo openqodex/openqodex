@@ -88,6 +88,9 @@ export type StageInput = {
   projectOf: (file: string) => string;
   plugins?: readonly FrameworkPlugin[];
   stop?: () => boolean;
+  // What ran out when `stop` said yes, for the reason of a plugin it kept
+  // from running: "the budget ran out" when not set.
+  stopCause?: () => string;
   // Where the plugins' calls go (PluginOutput.calls), each checked; the
   // build adds them to the code graph's calls edges.
   calls?: FrameworkCall[];
@@ -191,7 +194,7 @@ export function runFrameworks(input: StageInput): FrameworkData {
     data.plugins.push(run);
     if (input.stop?.()) {
       run.status = "stopped";
-      run.reason = "the budget ran out before this plugin ran";
+      run.reason = `${input.stopCause?.() ?? "the budget ran out"} before this plugin ran`;
       continue;
     }
     const dropped: FrameworkUnknown[] = [];

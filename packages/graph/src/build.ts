@@ -513,6 +513,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     let heapStopped = false;
     let heapReadAt = Number.NEGATIVE_INFINITY;
     const overHeap = () => (heapStopped ||= heapUsed() > maxHeap);
+    const heapNote = `the heap passed the ${config.maxHeapMb} MB memory bound`;
     const stop = () => {
       if (overBudget() || heapStopped) return true;
       const now = performance.now();
@@ -541,7 +542,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // After symbol resolution, on every build: a file whose content did not
     // change is re-read when a framework is newly detected around it.
     const frameworkCalls: FrameworkCall[] = [];
-    const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop, calls: frameworkCalls });
+    const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop, stopCause: () => (heapStopped ? heapNote : "the budget ran out"), calls: frameworkCalls });
     addFrameworkCalls(resolved.edges, frameworkCalls);
     for (const p of frameworks.plugins) if (p.status === "failed" || (p.status === "stopped" && inputs.some((i) => i.facts.frameworks?.[p.id]))) reasons.push(p.reason ?? `the ${p.id} plugin did not run`);
     // A function written in place that no plugin bound is the code around it again.
@@ -554,7 +555,6 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // ---------- removed, moved and the export surface ----------
     const removed = removedSymbols(args.base?.files ?? [], baseFacts, resolved);
     let exportsDiff: ImpactExportChange[] = [];
-    const heapNote = `the heap passed the ${config.maxHeapMb} MB memory bound`;
     if (args.base && args.base.files.length > 0 && !overBudget() && !overHeap()) {
       const compared = await compareWorlds({
         args,
@@ -598,7 +598,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     const unknowns: UnknownSite[] = [...resolved.unknowns];
     for (const file of resolved.budgetFiles) {
       // What the file's unresolved calls run is not known: no narrower target.
-      unknowns.push(gap({ cause: "budget", place: { file, line: 0 }, reaches: "scope", next: NEXT.budget, note: `the ${resolveHeap ? "memory bound was reached" : "budget ran out"} before every call of this file was resolved` }));
+      unknowns.push(gap({ cause: "budget", place: { file, line: 0 }, reaches: "scope", next: resolveHeap ? NEXT.memory : NEXT.budget, note: `the ${resolveHeap ? "memory bound was reached" : "budget ran out"} before every call of this file was resolved` }));
     }
     const unknownNames = new Map<string, number>();
     const valueCalls = new Map<string, number>();
