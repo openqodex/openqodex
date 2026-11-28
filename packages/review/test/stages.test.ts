@@ -611,6 +611,44 @@ it("still verifies what the finders found after the budget refuses a find call",
   expect(r.missing.some((line) => line.includes("were not verified"))).toBe(false);
 });
 
+// The refused finder's own turn has not returned yet when another finder
+// finishes: its pool worker must still not open the next finder session.
+it("opens no finder session once a finder call was refused, before the refused session returns", async () => {
+  // The approved finders answer after the refusal, so their workers look for
+  // the next job only once the budget has refused.
+  const f = setup(async (answer) => {
+    if (answer.version === "find-1") await new Promise((resolve) => setTimeout(resolve, 30));
+    return answer;
+  }, ["a.txt", "b.txt", "c.txt"]);
+  f.budgetBy((call) => call.reviewer !== "finder:u2:contracts");
+  const open = f.args.openSession;
+  const roles: string[] = [];
+  let ended = 0;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  f.args.openSession = (role) => {
+    roles.push(role);
+    const session = open(role);
+    return {
+      send: async (text) => {
+        const turn = await session.send(text);
+        if (turn.failure?.startsWith("budget refused")) await Promise.race([held, new Promise((resolve) => setTimeout(resolve, 1000))]);
+        return turn;
+      },
+      attempts: session.attempts,
+      kill: () => session.kill?.(),
+      close: async () => {
+        await session.close();
+        if (++ended === 3) setTimeout(release, 50);
+      },
+    };
+  };
+  const r = await runStagedReview(f.args);
+  expect(r.usage.calls.filter((c) => c.outcome === "refused").map((c) => c.reviewer)).toEqual(["finder:u2:contracts"]);
+  expect(roles.filter((role) => role.startsWith("finder:u3:"))).toEqual([]);
+  expect(r.missing.some((line) => line.startsWith("unit u3 was not started"))).toBe(true);
+});
+
 it("refuses a live finder's next tool-result call without asking authorize after another session was refused", async () => {
   const f = setup();
   const shared: import("../src/usage.js").CallRecord[] = [];

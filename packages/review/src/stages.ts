@@ -120,7 +120,10 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   let findRefused = false;
   let verifyRefused = false;
   let hostFailure: unknown = null;
-  const stopped = (stage: "find" | "verify") => args.stopped?.() === true || (stage === "find" ? findRefused : verifyRefused) || hostFailure !== null;
+  // A finder refused while its turn still runs counts at once, read from the
+  // attempts its session records, so no further finder session opens.
+  const finderRefused = () => findRefused || runs.some((r) => r.role.startsWith("finder:") && r.session.attempts?.some((c) => c.outcome === "refused") === true);
+  const stopped = (stage: "find" | "verify") => args.stopped?.() === true || (stage === "find" ? finderRefused() : verifyRefused) || hostFailure !== null;
   const emit = (send: () => void) => {
     try { send(); }
     catch (error) {
@@ -145,7 +148,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const failedCause = (talk: Conversation): StagedCause["cause"] => talk.failure !== null ? failureCause(talk.failure, args.timedOut) : args.traced && talk.trace.some(leftSnapshot) ? "boundary_breach" : talk.errors.length > 0 ? "answer_rejected" : "reviewer_failed";
   // A session that could not start because the review stopped: the budget's
   // refusal, or the host's stop.
-  const stoppedCause = (stage: "find" | "verify"): StagedCause["cause"] => (stage === "find" ? findRefused : verifyRefused) ? "budget_refused" : "reviewer_failed";
+  const stoppedCause = (stage: "find" | "verify"): StagedCause["cause"] => (stage === "find" ? finderRefused() : verifyRefused) ? "budget_refused" : "reviewer_failed";
   const recordOf = (r: Run): StagedSessionRecord => ({ role: r.role, ...(r.unit ? { unit: r.unit } : {}), rounds: r.talk.rounds, usage: r.talk.usage, failure: failed(r.talk), ...(r.examined ? { examined: r.examined } : {}), ...(r.dropped?.length ? { dropped: r.dropped } : {}) });
   const start = (role: ReviewerRole, order: number, name: string, brief: string, unit?: string): Run => {
     emit(() => args.onBrief?.(role, brief));
