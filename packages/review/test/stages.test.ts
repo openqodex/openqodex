@@ -63,6 +63,7 @@ function setup(answerer?: Answerer, files?: string[]) {
   const opened: ModelSession[] = [];
   let stopped = false;
   let allow = true;
+  let decide = (_call: import("../src/reviewer.js").AuthorizeRequest) => allow;
   let clock = Date.now();
   const closed = new Set<number>();
   const budgets: import("../src/reviewer.js").AuthorizeRequest[] = [];
@@ -80,12 +81,12 @@ function setup(answerer?: Answerer, files?: string[]) {
     findBrief: (unit, pass) => ({ text: JSON.stringify({ unit, pass }), diffFiles: new Set(unit.files), carried: unit.hunks }),
     verifyBrief: (batch) => ({ text: JSON.stringify({ batch }) }),
     openSession: (role) => {
-      const session = modelSession({ reviewer: model, role, shared, budgetState, box: { snapshotDir: f.dir, change: f.change, secrets: [], graph: null, graphNote: null }, now: () => clock, budget: { deadlineMs: 60_000, authorize: async (call) => { budgets.push(call); await new Promise((resolve) => setTimeout(resolve, 0)); return allow; } } });
+      const session = modelSession({ reviewer: model, role, shared, budgetState, box: { snapshotDir: f.dir, change: f.change, secrets: [], graph: null, graphNote: null }, now: () => clock, budget: { deadlineMs: 60_000, authorize: async (call) => { budgets.push(call); await new Promise((resolve) => setTimeout(resolve, 0)); return decide(call); } } });
       const id = opened.push(session);
       return { send: (text) => session.send(text), attempts: session.attempts, get sentRounds() { return session.sentRounds; }, kill: () => session.kill(), close: async () => { closed.add(id); await session.close(); } };
     },
   };
-  return { ...f, args, requests, realBriefs, opened, budgets, closed, refuse: () => { allow = false; }, advance: (ms: number) => { clock += ms; }, stop: () => { stopped = true; opened.forEach((s) => s.kill()); } };
+  return { ...f, args, requests, realBriefs, opened, budgets, closed, refuse: () => { allow = false; }, budgetBy: (fn: typeof decide) => { decide = fn; }, advance: (ms: number) => { clock += ms; }, stop: () => { stopped = true; opened.forEach((s) => s.kill()); } };
 }
 function completion(r: Awaited<ReturnType<typeof runStagedReview>>, f: ReturnType<typeof setup>) {
   return completionRecord({ change: f.change, reviewer: { driver: "model", version: "fixture", pid: null, started_at: "now", ended_at: "now", duration_ms: 0, rounds: r.sessions.reduce((n, s) => n + s.rounds, 0), usage: r.sessions[0]!.usage, sessions: r.sessions }, snapshot: { tree: null, before: "same", after: "same" }, candidates: { total: r.required, disposed: r.disposed }, coverage: readCoverage({ change: f.change, trace: [], obligations: r.obligations, briefCarried: r.briefCarried, delivered: r.delivered }), trace: [], submissionErrors: [], wholeRepo: false, missing: r.missing });
@@ -589,6 +590,63 @@ it("makes no new calls after a budget refusal and keeps it in missing work", asy
   expect(r.missing.join(" ")).toContain("budget refused");
   expect(f.requests.some((r) => r.purpose === "verify")).toBe(false);
   expect(f.budgets).toHaveLength(1);
+});
+
+// A host that keeps money for verification refuses find calls past a
+// threshold. That refusal stops the finders only: the verifiers still run,
+// each of their calls is still put to the host, and the units the finders
+// never reached stay in missing work.
+it("still verifies what the finders found after the budget refuses a find call", async () => {
+  const f = setup(undefined, ["a.txt", "b.txt", "c.txt", "d.txt"]);
+  let finds = 0;
+  f.budgetBy((call) => call.reviewer.startsWith("finder:") ? ++finds <= 2 : true);
+  const r = await runStagedReview(f.args);
+  expect(r.usage.calls.filter((c) => c.outcome === "refused").every((c) => c.reviewer.startsWith("finder:"))).toBe(true);
+  expect(r.usage.calls.some((c) => c.outcome === "refused")).toBe(true);
+  expect(f.requests.some((request) => request.purpose === "verify")).toBe(true);
+  expect(f.budgets.filter((call) => call.reviewer.startsWith("verifier:")).length).toBeGreaterThan(0);
+  expect(r.report.findings.length).toBeGreaterThan(0);
+  expect(r.missing.join(" ")).toContain("budget refused");
+  expect(r.missing.some((line) => / was not (?:started|examined by )/.test(line))).toBe(true);
+  expect(r.missing.some((line) => line.includes("were not verified"))).toBe(false);
+});
+
+// The refused finder's own turn has not returned yet when another finder
+// finishes: its pool worker must still not open the next finder session.
+it("opens no finder session once a finder call was refused, before the refused session returns", async () => {
+  // The approved finders answer after the refusal, so their workers look for
+  // the next job only once the budget has refused.
+  const f = setup(async (answer) => {
+    if (answer.version === "find-1") await new Promise((resolve) => setTimeout(resolve, 30));
+    return answer;
+  }, ["a.txt", "b.txt", "c.txt"]);
+  f.budgetBy((call) => call.reviewer !== "finder:u2:contracts");
+  const open = f.args.openSession;
+  const roles: string[] = [];
+  let ended = 0;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  f.args.openSession = (role) => {
+    roles.push(role);
+    const session = open(role);
+    return {
+      send: async (text) => {
+        const turn = await session.send(text);
+        if (turn.failure?.startsWith("budget refused")) await Promise.race([held, new Promise((resolve) => setTimeout(resolve, 1000))]);
+        return turn;
+      },
+      attempts: session.attempts,
+      kill: () => session.kill?.(),
+      close: async () => {
+        await session.close();
+        if (++ended === 3) setTimeout(release, 50);
+      },
+    };
+  };
+  const r = await runStagedReview(f.args);
+  expect(r.usage.calls.filter((c) => c.outcome === "refused").map((c) => c.reviewer)).toEqual(["finder:u2:contracts"]);
+  expect(roles.filter((role) => role.startsWith("finder:u3:"))).toEqual([]);
+  expect(r.missing.some((line) => line.startsWith("unit u3 was not started"))).toBe(true);
 });
 
 it("refuses a live finder's next tool-result call without asking authorize after another session was refused", async () => {

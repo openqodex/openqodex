@@ -59,6 +59,9 @@ export const DEFAULT_MAX_FILE_BYTES = 512 * 1024;
 // 1 GB of heap (it fails under 900 MB) and 1.7 GB resident. The bound is
 // checked as files are admitted.
 export const DEFAULT_MAX_HEAP_MB = 1536;
+// After the files are read, the stages ask whether to stop many times a
+// file: the heap is read at most this often there.
+const HEAP_CHECK_MS = 10;
 export const POLICY_VERSION = 1;
 
 
@@ -78,6 +81,9 @@ export type BuildArgs = {
   maxFiles?: number;
   maxFileBytes?: number;
   maxHeapMb?: number;
+  // How the heap in use is read, in bytes: process.memoryUsage().heapUsed
+  // when not set. A test gives its own so it need not fill the heap.
+  heapUsed?: () => number;
   // Where facts and generations are kept: the owning repository's
   // .openqodex/graph/. Null keeps nothing (the GitHub Action's
   // --report-dir runs write nothing under .openqodex/).
@@ -296,6 +302,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
   const maxFiles = args.maxFiles ?? DEFAULT_MAX_FILES;
   const maxFileBytes = args.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const maxHeap = (args.maxHeapMb ?? DEFAULT_MAX_HEAP_MB) * 1024 * 1024;
+  const heapUsed = args.heapUsed ?? (() => process.memoryUsage().heapUsed);
   const store = args.store ?? null;
   const stages: Record<string, number> = {};
   let mark = performance.now();
@@ -444,7 +451,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
         for (const rest of order.slice(i)) notRead.push({ file: rest.path, reason: "budget" });
         break;
       }
-      if (process.memoryUsage().heapUsed > maxHeap) {
+      if (heapUsed() > maxHeap) {
         stoppedBy = "memory";
         for (const rest of order.slice(i)) notRead.push({ file: rest.path, reason: "memory" });
         break;
@@ -488,7 +495,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       // Base versions count against the same caps: the size is asked
       // before the bytes are read, and the budget, the memory bound and the
       // parse cap hold.
-      const admitted = !overBudget() && process.memoryUsage().heapUsed <= maxHeap;
+      const admitted = !overBudget() && heapUsed() <= maxHeap;
       const bytes = admitted ? await readBase(basePath, maxFileBytes) : null;
       const got = bytes === null ? null : await factsFor(lang, blobId(bytes), () => bytes, !overBudget() && parsers.count < maxFiles);
       if (!got?.facts) {
@@ -499,6 +506,22 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     }
     stage("base");
 
+    // ---------- the memory bound past the files ----------
+    // Resolution, the framework plugins and the export comparison hold the
+    // memory bound too: past it they stop as they stop at the budget, and
+    // the graph is partial.
+    let heapStopped = false;
+    let heapReadAt = Number.NEGATIVE_INFINITY;
+    const overHeap = () => (heapStopped ||= heapUsed() > maxHeap);
+    const heapNote = `the heap passed the ${config.maxHeapMb} MB memory bound`;
+    const stop = () => {
+      if (overBudget() || heapStopped) return true;
+      const now = performance.now();
+      if (now - heapReadAt < HEAP_CHECK_MS) return false;
+      heapReadAt = now;
+      return overHeap();
+    };
+
     // ---------- projects and resolution ----------
     // Asked once per file by the resolver and by every framework plugin: kept per file.
     const projects = new Map<string, string>();
@@ -508,16 +531,18 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       return p;
     };
     const declared = await declaredPlain(declarations, deadline, maxParseMs);
-    const world = createWorld({ files: inputs, known, model, goModules, declared, stop: overBudget });
+    const world = createWorld({ files: inputs, known, model, goModules, declared, stop });
     const resolved = world.resolveAll();
-    if (resolved.budgetFiles.length > 0 || resolved.escapesCut) stoppedBy ??= "budget";
+    // What resolution left undone, the memory bound's when it stopped it.
+    const resolveHeap = heapStopped;
+    if (resolved.budgetFiles.length > 0 || resolved.escapesCut) stoppedBy ??= resolveHeap ? "memory" : "budget";
     stage("resolve");
 
     // ---------- frameworks ----------
     // After symbol resolution, on every build: a file whose content did not
     // change is re-read when a framework is newly detected around it.
     const frameworkCalls: FrameworkCall[] = [];
-    const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop: overBudget, calls: frameworkCalls });
+    const frameworks = runFrameworks({ files: inputs, paths: inv.all, nodes: resolved.nodes, defsByFile: resolved.defsByFile, edges: resolved.edges, world, model, projectOf, stop, stopCause: () => (heapStopped ? heapNote : "the budget ran out"), calls: frameworkCalls });
     addFrameworkCalls(resolved.edges, frameworkCalls);
     for (const p of frameworks.plugins) if (p.status === "failed" || (p.status === "stopped" && inputs.some((i) => i.facts.frameworks?.[p.id]))) reasons.push(p.reason ?? `the ${p.id} plugin did not run`);
     // A function written in place that no plugin bound is the code around it again.
@@ -530,8 +555,8 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // ---------- removed, moved and the export surface ----------
     const removed = removedSymbols(args.base?.files ?? [], baseFacts, resolved);
     let exportsDiff: ImpactExportChange[] = [];
-    if (args.base && args.base.files.length > 0 && !overBudget()) {
-      exportsDiff = await compareWorlds({
+    if (args.base && args.base.files.length > 0 && !overBudget() && !overHeap()) {
+      const compared = await compareWorlds({
         args,
         inputs,
         baseFacts,
@@ -545,10 +570,14 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
         // Removed and moved definitions are reported with the removed symbols, never again as public names.
         removedKeys: new Set([...removed.values()].flat().map((n) => stableKey(n.id.replace(/^base:/, "")))),
         cuts,
+        overHeap,
       });
+      if (compared === null) reasons.push(`the export surface was not compared: ${heapNote}`);
+      else exportsDiff = compared;
     } else if (args.base && args.base.files.length > 0) {
-      reasons.push("the export surface was not compared: the budget ran out");
+      reasons.push(`the export surface was not compared: ${overBudget() ? "the budget ran out" : heapNote}`);
     }
+    if (heapStopped) stoppedBy ??= "memory";
     // The walks of export * and the export lookups stop with a cut, in either version.
     addWalkCuts(cuts, world);
     stage("compare");
@@ -569,7 +598,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     const unknowns: UnknownSite[] = [...resolved.unknowns];
     for (const file of resolved.budgetFiles) {
       // What the file's unresolved calls run is not known: no narrower target.
-      unknowns.push(gap({ cause: "budget", place: { file, line: 0 }, reaches: "scope", next: NEXT.budget, note: "the budget ran out before every call of this file was resolved" }));
+      unknowns.push(gap({ cause: "budget", place: { file, line: 0 }, reaches: "scope", next: resolveHeap ? NEXT.memory : NEXT.budget, note: `the ${resolveHeap ? "memory bound was reached" : "budget ran out"} before every call of this file was resolved` }));
     }
     const unknownNames = new Map<string, number>();
     const valueCalls = new Map<string, number>();
@@ -591,8 +620,11 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     }
     if (stoppedBy === "memory") {
       const left = notRead.filter((n) => n.reason === "memory").length;
-      reasons.push(`the ${config.maxHeapMb} MB memory bound left out ${plural(left, "file")}`);
-      cuts.push({ by: "memory", at: null, omitted: left, exact: true, unit: "files", note: `the heap passed ${config.maxHeapMb} MB` });
+      const unresolved = resolveHeap ? resolved.budgetFiles.length : 0;
+      const escapesCut = resolveHeap && resolved.escapesCut;
+      const lost = [left > 0 ? `${plural(left, "file")} not read` : "", unresolved > 0 ? `the calls of ${plural(unresolved, "file")} not resolved` : ""].filter(Boolean).join(" and ");
+      reasons.push(!heapStopped ? `the ${config.maxHeapMb} MB memory bound left out ${plural(left, "file")}` : `the ${config.maxHeapMb} MB memory bound was reached${lost ? ` with ${lost}` : ""}${escapesCut ? ", before every way a function escapes was found" : ""}`);
+      cuts.push({ by: "memory", at: null, omitted: left + unresolved, exact: true, unit: "files", note: `the heap passed ${config.maxHeapMb} MB` });
     }
     if (parseCapped > 0) {
       reasons.push(`the ${plural(maxFiles, "parse")} cap left out ${plural(parseCapped, "file")}; run \`openqodex graph build\` once to complete it`);
@@ -652,7 +684,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
       frameworks,
       digest,
       status: {
-        status: skipped > 0 || removalUnchecked > 0 || resolved.budgetFiles.length > 0 || resolved.escapesCut || hidingGaps.length > 0 ? "partial" : "ok",
+        status: skipped > 0 || removalUnchecked > 0 || resolved.budgetFiles.length > 0 || resolved.escapesCut || heapStopped || hidingGaps.length > 0 ? "partial" : "ok",
         reason: reasons[0] ?? null,
         reasons,
         filesParsed: inputs.length,
@@ -681,7 +713,7 @@ export async function buildGraph(args: BuildArgs): Promise<Graph> {
     // a build whose project model lacks a manifest or tsconfig that can hide
     // a relation: its index is never loaded as if nothing were missing.
     const later = new Set<NotRead["reason"]>(["budget", "parse-cap", "memory", "slow-parse", "unreadable"]);
-    const complete = !notRead.some((n) => later.has(n.reason)) && resolved.budgetFiles.length === 0 && !resolved.escapesCut && hidingGaps.length === 0;
+    const complete = !notRead.some((n) => later.has(n.reason)) && resolved.budgetFiles.length === 0 && !resolved.escapesCut && !heapStopped && hidingGaps.length === 0;
     // Under the five-second line too, a complete build of the work tree keeps
     // its index, so the next question on the same tree loads it (the kept
     // index above), but only when what it says is what any build of these
@@ -885,7 +917,9 @@ async function compareWorlds(c: {
   world: World;
   removedKeys: Set<string>;
   cuts: Cut[]; // the walk of export * adds its cut here
-}): Promise<ImpactExportChange[]> {
+  // True once the heap passed the memory bound: the comparison is then not made.
+  overHeap: () => boolean;
+}): Promise<ImpactExportChange[] | null> {
   const changed = c.args.base?.files ?? [];
   const drop = new Set(changed.map((f) => f.path));
   const baseInputs: FileInput[] = c.inputs.filter((i) => !drop.has(i.path));
@@ -925,6 +959,7 @@ async function compareWorlds(c: {
     }
   }
   const baseWorld = createWorld({ files: baseInputs, known: baseKnown, model: baseModel, goModules: c.goModules });
+  if (c.overHeap()) return null;
   const changes = exportChanges({
     current: c.world,
     base: baseWorld,

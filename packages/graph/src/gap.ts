@@ -66,6 +66,7 @@ export const NEXT = {
   byName: "Open this call: it finds a method by a name given at run time (reflection); check which names it can be given and on which objects, and count it as a caller if the target is one.",
   unread: "Read the code here, which the parser could not read (a syntax error, or a shape the grammar does not know): a call in it may run the target.",
   budget: "Build again with a larger budget (`openqodex graph build`) so the calls of this file are resolved.",
+  memory: "Build again with a larger memory bound (`graph.max_heap_mb`) so the calls of this file are resolved.",
   metadata: "Fix or restore this manifest so the graph can read it, then build again.",
   framework: "Read the framework registrations near this place: a handler, middleware or job past the plugin's limit may be the target.",
   frameworkFile: "Read the framework registrations in this file yourself: the plugin did not read it, so a handler it registers may be the target.",

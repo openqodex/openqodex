@@ -44,7 +44,11 @@ export const MAX_TOOL_CALLS_PER_REPLY = 16;
 // ---------- callModel: the boundary every model attempt crosses ----------
 
 type Called = { response: ModelResponse; callId: string } | { failure: string };
-export type ModelBudgetState = { pending: Promise<void>; refused: boolean };
+// `refused`: a refusal stopped every later call; each is refused without
+// asking the budget again. `findRefused`: a finder's call was refused, which
+// stops only the finders' later calls, so a host can keep money for the
+// verifiers by refusing finders past a threshold.
+export type ModelBudgetState = { pending: Promise<void>; refused: boolean; findRefused?: boolean };
 
 export type ModelCaller = {
   // One model attempt for `purpose` on the transcript so far. `onInvoke` runs
@@ -154,7 +158,8 @@ export function callModel(args: { reviewer: ModelReviewer; role: ReviewerRole; b
         if (budget) {
           // Reserve the call before another session asks against shared usage.
           let yes = false;
-          if (!budgetState.refused) try {
+          const finder = role.startsWith("finder:");
+          if (!budgetState.refused && !(finder && budgetState.findRefused === true)) try {
             const requestChars = JSON.stringify(request.messages).length + JSON.stringify(request.tools).length;
             yes = (await Promise.race([budget.authorize({ callId, attempt: 1, reviewer: role, purpose, model: reviewer.model, maxOutputTokens: reviewer.maxOutputTokens, requestChars, usageSoFar: usageTotals(args.shared ?? [...(args.earlier ?? []), ...attempts]) }), stopReply])) === true;
           } catch {
@@ -162,7 +167,8 @@ export function callModel(args: { reviewer: ModelReviewer; role: ReviewerRole; b
           }
           if (stopped !== null) return { failure: stopped };
           if (!yes) {
-            budgetState.refused = true;
+            if (finder) budgetState.findRefused = true;
+            else budgetState.refused = true;
             keep({ ...record, outcome: "refused" });
             return { failure: budgetRefusedLine(purpose, n) };
           }

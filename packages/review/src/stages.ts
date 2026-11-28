@@ -115,9 +115,15 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const closedRuns = new Map<Run, Promise<void>>();
   let live = 0;
   let done = 0;
-  let budgetRefused = false;
+  // A refused finder call stops the finders only; a refused verifier call
+  // stops the verifiers.
+  let findRefused = false;
+  let verifyRefused = false;
   let hostFailure: unknown = null;
-  const stopped = () => args.stopped?.() === true || budgetRefused || hostFailure !== null;
+  // A finder refused while its turn still runs counts at once, read from the
+  // attempts its session records, so no further finder session opens.
+  const finderRefused = () => findRefused || runs.some((r) => r.role.startsWith("finder:") && r.session.attempts?.some((c) => c.outcome === "refused") === true);
+  const stopped = (stage: "find" | "verify") => args.stopped?.() === true || (stage === "find" ? finderRefused() : verifyRefused) || hostFailure !== null;
   const emit = (send: () => void) => {
     try { send(); }
     catch (error) {
@@ -142,7 +148,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const failedCause = (talk: Conversation): StagedCause["cause"] => talk.failure !== null ? failureCause(talk.failure, args.timedOut) : args.traced && talk.trace.some(leftSnapshot) ? "boundary_breach" : talk.errors.length > 0 ? "answer_rejected" : "reviewer_failed";
   // A session that could not start because the review stopped: the budget's
   // refusal, or the host's stop.
-  const stoppedCause = (): StagedCause["cause"] => budgetRefused ? "budget_refused" : "reviewer_failed";
+  const stoppedCause = (stage: "find" | "verify"): StagedCause["cause"] => (stage === "find" ? finderRefused() : verifyRefused) ? "budget_refused" : "reviewer_failed";
   const recordOf = (r: Run): StagedSessionRecord => ({ role: r.role, ...(r.unit ? { unit: r.unit } : {}), rounds: r.talk.rounds, usage: r.talk.usage, failure: failed(r.talk), ...(r.examined ? { examined: r.examined } : {}), ...(r.dropped?.length ? { dropped: r.dropped } : {}) });
   const start = (role: ReviewerRole, order: number, name: string, brief: string, unit?: string): Run => {
     emit(() => args.onBrief?.(role, brief));
@@ -173,7 +179,8 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
   const ranOut = (text: string) => { timedOut = true; return text; };
   const noteRefusal = (run: Run) => {
     if (run.session.attempts?.some((c) => c.outcome === "refused")) {
-      budgetRefused = true;
+      if (run.role.startsWith("finder:")) findRefused = true;
+      else verifyRefused = true;
       missing.push(run.talk.failure ?? "the budget refused a reviewer call");
       causes.push({ cause: "budget_refused", ...(run.unit ? { unit: run.unit } : {}) });
     }
@@ -201,7 +208,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       let lastCause: StagedCause["cause"] = "reviewer_failed";
       let began = false;
       const passRole = `finder:${unit.id}:${pass}` as const;
-      for (let attempt = 0; attempt < 2 && !stopped() && args.now() < findDeadline; attempt++) {
+      for (let attempt = 0; attempt < 2 && !stopped("find") && args.now() < findDeadline; attempt++) {
         let run: Run | null = null;
         try {
           const brief = args.findBrief(unit, pass);
@@ -243,15 +250,15 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
         } catch (error) {
           if (hostFailure !== null) throw hostFailure;
           last = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
-          lastCause = stopped() ? stoppedCause() : "reviewer_failed";
+          lastCause = stopped("find") ? stoppedCause("find") : "reviewer_failed";
           if (run) run.talk.failure = last;
         } finally {
           if (run) await close(run);
         }
       }
       if (answer === null) {
-        causes.push({ cause: last !== null ? lastCause : !began && stopped() ? stoppedCause() : "deadline_timeout", unit: unit.id });
-        missing.push(!began ? `unit ${unit.id} was not started: ${last ?? (stopped() ? "the review stopped" : ranOut("the finders' time ran out"))}` : `unit ${unit.id} was not examined by ${pass}: ${last ?? ranOut("the finders' time ran out")}`);
+        causes.push({ cause: last !== null ? lastCause : !began && stopped("find") ? stoppedCause("find") : "deadline_timeout", unit: unit.id });
+        missing.push(!began ? `unit ${unit.id} was not started: ${last ?? (stopped("find") ? "the review stopped" : ranOut("the finders' time ran out"))}` : `unit ${unit.id} was not examined by ${pass}: ${last ?? ranOut("the finders' time ran out")}`);
         for (const h of unit.hunks) missing.push(`hunk ${h.id} of ${h.path}:${h.start}-${h.end} was not examined by the ${pass} pass`);
       }
     });
@@ -368,7 +375,7 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       let accepted = false;
       const failures: string[] = [];
       let lastCause: StagedCause["cause"] = "reviewer_failed";
-      for (let attempt = 0; attempt < 2 && !stopped() && args.now() < args.deadline; attempt++) {
+      for (let attempt = 0; attempt < 2 && !stopped("verify") && args.now() < args.deadline; attempt++) {
         let run: Run | null = null;
         try {
           const brief = { text: briefs.get(batch)! };
@@ -385,13 +392,13 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
           if (hostFailure !== null) throw hostFailure;
           const failure = (error instanceof Error ? error.message : String(error)).split("\n")[0]!;
           failures.push(failure);
-          lastCause = stopped() ? stoppedCause() : "reviewer_failed";
+          lastCause = stopped("verify") ? stoppedCause("verify") : "reviewer_failed";
           if (run) run.talk.failure = failure;
         } finally {
           if (run) await close(run);
         }
       }
-      if (!accepted) abandon(batch, stopped() ? "the review stopped" : args.now() >= args.deadline ? ranOut("the verifier did not finish in time") : `the verifier session failed twice (${failures.map((failure, i) => `attempt ${i + 1}: ${failure}`).join("; ")})`, stopped() ? stoppedCause() : args.now() >= args.deadline ? "deadline_timeout" : lastCause);
+      if (!accepted) abandon(batch, stopped("verify") ? "the review stopped" : args.now() >= args.deadline ? ranOut("the verifier did not finish in time") : `the verifier session failed twice (${failures.map((failure, i) => `attempt ${i + 1}: ${failure}`).join("; ")})`, stopped("verify") ? stoppedCause("verify") : args.now() >= args.deadline ? "deadline_timeout" : lastCause);
     });
 
     if (hostFailure !== null) throw hostFailure;
@@ -440,9 +447,9 @@ export async function runStagedReview(args: StagedArgs): Promise<StagedResult> {
       }
       if (errors.size === 0) break;
       await pool([...errors], VERIFIERS_CONCURRENCY, async ([owner, problems]) => {
-        if (owner.corrections >= MAX_CORRECTIONS || args.now() >= args.deadline || stopped()) {
+        if (owner.corrections >= MAX_CORRECTIONS || args.now() >= args.deadline || stopped("verify")) {
           if (!isolate(owner.batch, owner.answer, problems)) {
-            abandon(owner.batch, "the verifier exhausted its correction rounds", owner.corrections < MAX_CORRECTIONS && args.now() >= args.deadline ? "deadline_timeout" : owner.corrections < MAX_CORRECTIONS && stopped() ? stoppedCause() : "answer_rejected");
+            abandon(owner.batch, "the verifier exhausted its correction rounds", owner.corrections < MAX_CORRECTIONS && args.now() >= args.deadline ? "deadline_timeout" : owner.corrections < MAX_CORRECTIONS && stopped("verify") ? stoppedCause("verify") : "answer_rejected");
             verified.splice(verified.indexOf(owner), 1);
           }
           return;

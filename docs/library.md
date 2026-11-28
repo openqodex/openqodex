@@ -148,7 +148,7 @@ The host's adapter adds no prompt, no rule, no filter and no retry. What the rev
 
 ### The budget
 
-`budget.authorize(call)` is asked before every model attempt, with `{ callId, attempt, reviewer, purpose, model, maxOutputTokens, requestChars, usageSoFar }`. `requestChars` is the size of the request about to be sent: the characters of its messages and its tool definitions written as JSON. With `maxOutputTokens` it bounds what the call can cost, so a host can hold a dollar cap before the call is made. When it returns false, or throws, nothing is sent and the whole review ends as incomplete, with the usage so far and the findings already checked. This holds for a correction round and for the second reviewer too. `budget.deadlineMs` is how long the review may run, from the call to `reviewChange`: once it has passed, the budget is not asked again and no model call starts. A call without a budget throws before any work.
+`budget.authorize(call)` is asked before every model attempt, with `{ callId, attempt, reviewer, purpose, model, maxOutputTokens, requestChars, usageSoFar }`. `requestChars` is the size of the request about to be sent: the characters of its messages and its tool definitions written as JSON. With `maxOutputTokens` it bounds what the call can cost, so a host can hold a dollar cap before the call is made. When it returns false, or throws, nothing is sent and the whole review ends as incomplete, with the usage so far and the findings already checked. This holds for a correction round and for the second reviewer too. In a staged review, a refused finder call (`reviewer` starting `finder:`) stops only the finders: no finder call or session starts after it, the units they did not reach are named as not examined, and the verifiers still check what the finders found, each of their calls asked of `authorize` as before. To keep money for verification, refuse finder calls past a share of the cap. A refused verifier call stops the verifiers. `budget.deadlineMs` is how long the review may run, from the call to `reviewChange`: once it has passed, the budget is not asked again and no model call starts. A call without a budget throws before any work.
 
 ### The five tools
 
@@ -168,7 +168,7 @@ Each call is checked before it runs. A path outside the snapshot is refused and 
 - It never writes outside `workDir`: no file in the clone's work tree, no receipt, no `last-review`, nothing in `~/.openqodex`. Scanners get `HOME` and `TMPDIR` inside `workDir`.
 - It never prints, never adds a signal handler and never writes a `process.env` variable.
 - It never gives the reviewer a web tool or a shell.
-- It never retries a model call, and never calls the model after the budget refused.
+- It never retries a model call, and never calls the model after the budget refused, except the verifiers of a staged review after a refused finder call, which still ask the budget first.
 - The host gives config and custom instructions. Only explicitly chosen convention files are read from the clone, from the merge base and inside the scopes. Links and files over 32 KB or past the 64 KB total are skipped whole and named in the notes. Conventions adopted on the base branch after divergence are not seen.
 - It never updates itself.
 
