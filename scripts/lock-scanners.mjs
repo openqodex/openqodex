@@ -31,6 +31,8 @@ export const MAX_METADATA_BYTES = 16 * 1024 * 1024;
 const MAX_GEM_BYTES = 64 * 1024 * 1024;
 const MAX_UV_BYTES = 200 * 1024 * 1024;
 const readTable = () => JSON.parse(readFileSync(join(root, "packages", "scanners", "toolchain.json"), "utf8"));
+// The platforms a lock file is written for. FreeBSD is not one of them: no
+// uv or gem recipe supports FreeBSD, so no wheel or gem is locked there.
 const PLATFORMS = {
   "darwin-arm64": "aarch64-apple-darwin",
   "darwin-x64": "x86_64-apple-darwin",
@@ -58,6 +60,8 @@ function uvLock(uv, recipe, triple, file) {
 // downloaded (redirects only to GitHub's asset hosts) and checked against the
 // pinned sha256 before it is unpacked. Returns the path of the binary.
 async function pinnedUv(table) {
+  // The table pins uv for darwin and linux only: a FreeBSD host has no uv
+  // download to take, so it must name one with UV=<file>.
   const platform = { "darwin:arm64": "darwin-arm64", "darwin:x64": "darwin-x64", "linux:x64": "linux-x64", "linux:arm64": "linux-arm64" }[`${process.platform}:${process.arch}`];
   const asset = platform ? table.tools.uv?.assets?.[platform] : null;
   if (!asset) throw new Error("no pinned uv for this machine; name one with UV=<file>");

@@ -485,6 +485,62 @@ else {
   else if (!same(named, questions)) fail(GRAPH_PAGE, `"At a glance" groups the questions ${named.join(", ") || "nowhere"}; \`openqodex graph help\` lists ${questions.join(", ")}`);
 }
 
+// 11. The FreeBSD facts of the scanner page: one row per tool that has a
+// FreeBSD entry in the pinned table, holding the version that entry pins,
+// and a pkg command that holds every package a FreeBSD system asset names.
+const freebsdText = read(SCANNERS_PAGE);
+const freebsdAt = freebsdText.indexOf("\n## FreeBSD\n");
+if (freebsdAt === -1) fail(SCANNERS_PAGE, 'has no section "## FreeBSD"');
+else {
+  const section = freebsdText.slice(freebsdAt + 1, freebsdText.indexOf("\n## ", freebsdAt + 1));
+  const rows = section
+    .split("\n")
+    .filter((l) => l.trim().startsWith("|") && !/^\|?\s*:?-+/.test(l.trim()))
+    .map((l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim()));
+  const header = rows.shift() ?? [];
+  // Each column names the platform it holds.
+  const platforms = header.slice(1).map((h) => (h.toLowerCase().includes("arm64") ? "freebsd-arm64" : "freebsd-x64"));
+  const onPage = new Map();
+  for (const cells of rows) {
+    if (onPage.has(cells[0])) fail(SCANNERS_PAGE, `names ${cells[0]} twice in its FreeBSD table`);
+    onPage.set(cells[0], cells.slice(1));
+  }
+  // What each FreeBSD platform holds for each tool: a package and the
+  // version it must have (a system asset), the pinned release of a download,
+  // or nothing.
+  const wanted = new Map();
+  for (const [key, recipe] of Object.entries(toolchain)) {
+    const assets = recipe.assets ?? {};
+    const named = platforms.filter((p) => assets[p] !== undefined);
+    if (named.length === 0) continue;
+    const name = display(key);
+    const cells = named.map((p) => {
+      const asset = assets[p];
+      if (asset === null) return "none";
+      if (asset.system) return `${asset.system.package} ${asset.version}`;
+      return recipe.version;
+    });
+    wanted.set(name, { cells, packages: named.map((p) => assets[p]?.system?.package).filter(Boolean) });
+  }
+  for (const [name, { cells }] of wanted) {
+    const shown = onPage.get(name);
+    if (shown === undefined) {
+      fail(SCANNERS_PAGE, `leaves ${name} out of its FreeBSD table; the pinned table has a FreeBSD entry for it`);
+      continue;
+    }
+    for (const [i, cell] of cells.entries()) {
+      if (shown[i] !== cell) fail(SCANNERS_PAGE, `says ${name} is ${shown[i]} on ${platforms[i]}; the pinned table holds ${cell}`);
+    }
+  }
+  for (const name of onPage.keys()) if (!wanted.has(name)) fail(SCANNERS_PAGE, `names ${name} in its FreeBSD table; the pinned table has no FreeBSD entry for it`);
+  // The pkg command: every package a system asset names must be in it.
+  const command = [...section.matchAll(/^pkg install (.+)$/gm)].map((m) => m[1]).join(" ");
+  const named = new Set(command.split(/\s+/).filter(Boolean));
+  for (const [, { packages }] of wanted) {
+    for (const pkg of packages) if (!named.has(pkg)) fail(SCANNERS_PAGE, `does not say to install ${pkg}; the pinned table names it for FreeBSD`);
+  }
+}
+
 if (errors.length) {
   for (const error of errors) console.error(`docs-facts: ${error}`);
   process.exit(1);

@@ -41,6 +41,13 @@
 // Added with kubeconform:
 //  15. A release checksum file named CHECKSUMS, as kubeconform publishes it,
 //      is not read, so its sums are never checked against the bytes.
+// Added with FreeBSD:
+//  16. A bump rewrites a FreeBSD download like the other downloads, or writes
+//      a system asset as if it were a download.
+//  17. A bump whose FreeBSD download the new release does not publish is
+//      refused with a plain message, or writes a URL that is not there.
+//  18. The report does not say what a tool has on FreeBSD, so a person
+//      cannot tell a system asset from a download there.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -56,6 +63,12 @@ afterAll(removeTempDirs);
 const here = dirname(fileURLToPath(import.meta.url));
 const runner = join(here, "pin-bump-runner.mjs");
 const PLATFORMS = { "darwin-arm64": "darwin_arm64", "darwin-x64": "darwin_amd64", "linux-x64": "linux_amd64", "linux-arm64": "linux_arm64" } as const;
+// The platforms the fixture's release publishes a download for: the four the
+// table has always had, and FreeBSD on amd64.
+const RELEASES = { ...PLATFORMS, "freebsd-x64": "freebsd_amd64" } as const;
+// The FreeBSD system asset of the fixture: a program the host's package
+// manager installs. A bump leaves it as it is.
+const SYSTEM = { system: { package: "demo", path: "bin/demo", versionArgs: ["--version"], versionPattern: "^demo (\\d+\\.\\d+\\.\\d+)$" }, version: "1.2.3" };
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -71,6 +84,9 @@ type Release = {
   checksums?: (names: string[]) => string;
   // The checksum file's name; demo_<version>_checksums.txt when not given.
   checksumsName?: string;
+  // The name the release publishes the FreeBSD download under, when the
+  // upstream names it differently from the other downloads.
+  freebsdName?: (version: string) => string;
   assetUrlRepo?: string;
   redirectTo?: string;
   apiRedirect?: boolean;
@@ -82,7 +98,7 @@ let other = "";
 const servers: Server[] = [];
 
 function assetNames(version: string): string[] {
-  return Object.values(PLATFORMS).map((p) => `demo_${version}_${p}.tar.gz`);
+  return Object.entries(RELEASES).map(([platform, p]) => (platform === "freebsd-x64" && release.freebsdName ? release.freebsdName(version) : `demo_${version}_${p}.tar.gz`));
 }
 
 function sumsName(version: string): string {
@@ -202,17 +218,19 @@ afterAll(() => {
   for (const s of servers) s.close();
 });
 
-// A repo root holding only the pinned table, with demo 1.0.0 in it.
+// A repo root holding only the pinned table, with demo 1.0.0 in it. The table
+// holds a FreeBSD download and a FreeBSD system asset, as the real table does.
 function repoRoot(): { root: string; table: string; before: string } {
   const root = tempDir("oq-pin-bump-");
   mkdirSync(join(root, "packages", "scanners"), { recursive: true });
   mkdirSync(join(root, ".changeset"));
   const assets = Object.fromEntries(
-    Object.entries(PLATFORMS).map(([platform, p]) => [
+    Object.entries(RELEASES).map(([platform, p]) => [
       platform,
       { name: `demo_1.0.0_${p}.tar.gz`, url: `https://example.invalid/demo_1.0.0_${p}.tar.gz`, sha256: "0".repeat(64), archive: "tar.gz", binaryPath: "demo" },
     ]),
   );
+  assets["freebsd-arm64"] = SYSTEM;
   const text = `${JSON.stringify({ schema: 1, tools: { demo: { version: "1.0.0", method: "github-release", repo: "acme/demo", tag: "v1.0.0", binary: "demo", assets } } }, null, 2)}\n`;
   const table = join(root, "packages", "scanners", "toolchain.json");
   writeFileSync(table, text);
@@ -299,6 +317,45 @@ describe("pin-bump pins a good release (8)", () => {
       binaryPath: "demo",
     });
     expect(files(root)).toEqual([".changeset/pin-demo-2-0-0.md", "packages/scanners/toolchain.json"]);
+  });
+});
+
+describe("a bump moves the FreeBSD pins too (16)", () => {
+  it("rewrites a FreeBSD download like the other downloads and leaves a system asset as it is", async () => {
+    release = good();
+    const { root, table } = repoRoot();
+    const r = await bump(root);
+    expect(r.code, r.stderr).toBe(0);
+    const demo = JSON.parse(readFileSync(table, "utf8")).tools.demo;
+    expect(demo.assets["freebsd-x64"]).toEqual({
+      name: "demo_2.0.0_freebsd_amd64.tar.gz",
+      url: `${origin}/acme/demo/releases/download/v2.0.0/demo_2.0.0_freebsd_amd64.tar.gz`,
+      sha256: sha(Buffer.from("the real demo_2.0.0_freebsd_amd64.tar.gz")),
+      archive: "tar.gz",
+      binaryPath: "demo",
+    });
+    expect(demo.assets["freebsd-arm64"]).toEqual(SYSTEM);
+  });
+
+  it("refuses a bump whose FreeBSD download the release does not publish, and changes nothing (17)", async () => {
+    release = { ...good(), freebsdName: (version) => `demo_${version}_freebsd_amd64_v2.tar.gz` };
+    const { root, table, before } = repoRoot();
+    const r = await bump(root);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.stderr).toMatch(/freebsd-x64/);
+    expect(r.stderr).toMatch(/pin it by hand/);
+    expect(readFileSync(table, "utf8")).toBe(before);
+    expect(files(root)).toEqual(["packages/scanners/toolchain.json"]);
+  });
+
+  it("says what a tool has on FreeBSD in the report (18)", async () => {
+    release = good();
+    const { root } = repoRoot();
+    const r = await bump(root, ["--report"]);
+    expect(r.code, r.stderr).toBe(0);
+    const row = r.stdout.split("\n").find((l) => l.startsWith("| demo |"));
+    expect(row, r.stdout).toBeDefined();
+    expect(row).toContain("| x64 1.0.0; arm64 demo 1.2.3 |");
   });
 });
 

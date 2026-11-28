@@ -168,7 +168,7 @@ Other ways to install:
 - The Claude Code plugin. The openqodex/openqodex repository holds a plugin marketplace with an `openqodex` plugin. The plugin carries the skill and the push gate hook. Its hook calls `npx -y openqodex@<version>`.
 - The skill alone: `npx skills add openqodex/openqodex -g`. This writes the skill but no hook, launcher or scanner download.
 
-OpenQodex needs Node 22 or newer and git. It runs on macOS and Linux. On Windows, use WSL.
+OpenQodex needs Node 22 or newer and git. It runs on macOS and Linux, and on FreeBSD 15 or later on amd64 and on arm64. On Windows, use WSL.
 
 ## Run a review
 

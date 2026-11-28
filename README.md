@@ -172,7 +172,7 @@ OpenQodex is free and open source under Apache 2.0. It runs on your machine, on 
 ## Requirements
 
 - Node 22 or newer, and git.
-- macOS or Linux. CI runs the gate on Node 22, on macOS and on Ubuntu Linux. No test runs on Windows or WSL.
+- macOS or Linux, or FreeBSD 15 or later on amd64 or on arm64. CI runs the gate on Node 22, on macOS and on Ubuntu Linux. No test runs on Windows or WSL, and the gate does not run on FreeBSD yet.
 - For a full review: Claude Code or Codex, installed and logged in. OpenQodex needs no account or API key of its own.
 - Some scanners need a language runtime that OpenQodex does not install. brakeman and rubocop need Ruby. golangci-lint needs Go. cargo-deny needs Cargo.
 

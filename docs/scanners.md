@@ -131,6 +131,40 @@ OpenQodex keeps the schema cache per commit, so a new commit downloads the schem
 
 OpenQodex does not install Ruby or Go. Without them, the report lists the scanners that need them as not installed, with the reason.
 
+## FreeBSD
+
+OpenQodex runs on FreeBSD 15 or later, on amd64 and on arm64. Each scanner comes from FreeBSD's package manager, from a download, or from nowhere yet.
+
+| Scanner | FreeBSD amd64 | FreeBSD arm64 |
+|---|---|---|
+| gitleaks | gitleaks 8.30.1 | gitleaks 8.30.1 |
+| osv-scanner | osv-scanner 2.7.0 | osv-scanner 2.7.0 |
+| ruff | ruff 0.17.5 | ruff 0.17.5 |
+| oxlint | 1.86.0 | none |
+| golangci-lint | 2.14.0 | 2.14.0 |
+| shellcheck | hs-ShellCheck 0.11.0 | hs-ShellCheck 0.11.0 |
+| actionlint | 1.7.7 | none |
+| zizmor | zizmor 1.33.1 | zizmor 1.32.0 |
+| hadolint | hs-hadolint 2.14.0 | hs-hadolint 2.14.0 |
+
+The scanners that FreeBSD's package manager installs come from one command:
+
+```
+pkg install hs-ShellCheck ruff hs-hadolint gitleaks osv-scanner zizmor
+```
+
+OpenQodex does not run that command. It also does not take a scanner from your `PATH`, because a built-in scanner must give the same findings on every machine. It looks for each of these scanners in one place: `/usr/local/bin` under the FreeBSD LOCALBASE, or `$OPENQODEX_LOCALBASE/bin` when that variable holds an absolute path. So shellcheck is at `/usr/local/bin/shellcheck`, or at `$OPENQODEX_LOCALBASE/bin/shellcheck` when the variable is set.
+
+The version beside a package name in the table above is the version that package must have. The program found there must be that version, or a newer one in the same series: the same major and minor, and a patch at or above the pin's patch. A program whose patch is older than the pin's is not accepted, and neither is one in another series. OpenQodex looks at the program entry and not at the package database, and it never asks `pkg` about it: a program that is not there at all is not installed, and a program that is there but cannot be run, prints no version this build understands, is a link whose target is missing, or cannot be trusted is installed but cannot be used. The report says which one it is, and it says why.
+
+The trust of a program covers the program itself, the folders that hold it and the folders that hold the link to it, up to the localbase root. The localbase root and everything above it are the administrator's trust boundary, and OpenQodex looks at nothing above it.
+
+Each architecture pins the version that architecture's package has: zizmor 1.33.1 on amd64 and zizmor 1.32.0 on arm64, as the packages had them on 2026-11-27. A newer patch of the same series still fits, as the rule above says.
+
+The scanners that come as a download on FreeBSD are golangci-lint, actionlint and oxlint, as they do elsewhere. golangci-lint needs Go on your `PATH`. actionlint and oxlint have no FreeBSD build for arm64, so they are not installed on that platform.
+
+The other scanners have no FreeBSD support yet. semgrep, bandit, SQLFluff and Checkov install from PyPI, and brakeman and rubocop from RubyGems; neither registry has a FreeBSD wheel or gem to lock. The pinned table has no FreeBSD entry for trivy, TFLint, kube-linter, kubeconform, squawk or cargo-deny either. OpenQodex reports each of them as not installed on a FreeBSD host.
+
 ## Download and disk sizes
 
 A download size is the size of the release asset, as GitHub reported it on 2026-10-12. The command was `gh api repos/<owner>/<repo>/releases/tags/<tag>`. An installed size is the output of `du -sk ~/.openqodex/tools/<scanner>` on an Apple Silicon Mac on 2026-10-12, divided by 1,024. Download sizes are in MB of 1,000,000 bytes. Installed sizes are in MiB of 1,048,576 bytes. The file size limits elsewhere on this page are in KiB and MiB, of 1,024 and 1,048,576 bytes.

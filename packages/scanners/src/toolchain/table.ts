@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type Platform = "darwin-arm64" | "darwin-x64" | "linux-x64" | "linux-arm64";
+export type Platform = "darwin-arm64" | "darwin-x64" | "freebsd-arm64" | "freebsd-x64" | "linux-x64" | "linux-arm64";
 
 export type ArchiveKind = "tar.gz" | "tar.xz" | "zip";
 
@@ -17,6 +17,29 @@ export type ReleaseAsset = {
   archive: ArchiveKind | "none";
   binaryPath: string; // path of the executable inside the archive, or the asset name
 };
+
+// A tool the host's package manager installs: on FreeBSD, pkg installs
+// shellcheck, ruff, hadolint, gitleaks, osv-scanner and zizmor under
+// LOCALBASE. Nothing is downloaded for it, and it is never taken from PATH:
+// the only place looked at is the path under LOCALBASE. `path` is relative
+// to the localbase, `versionArgs` and `versionPattern` read the version out
+// of what the program prints, and `version` is the version this build
+// pins.
+export type SystemAsset = {
+  system: {
+    package: string;
+    path: string;
+    versionArgs: string[];
+    versionPattern: string;
+  };
+  version: string;
+};
+
+// Whether an asset under a platform is a system asset rather than a release
+// download.
+export function isSystemAsset(asset: ReleaseAsset | SystemAsset | null | undefined): asset is SystemAsset {
+  return typeof asset === "object" && asset !== null && "system" in asset;
+}
 
 type RecipeBase = { version: string; binary: string; needs?: string };
 
@@ -31,7 +54,7 @@ type RecipeBase = { version: string; binary: string; needs?: string };
 export type SchemaPin = { repo: string; commit: string; kubernetes: string };
 
 export type Recipe =
-  | (RecipeBase & { method: "github-release"; repo: string; tag: string; assets: Partial<Record<Platform, ReleaseAsset | null>>; schemas?: SchemaPin })
+  | (RecipeBase & { method: "github-release"; repo: string; tag: string; assets: Partial<Record<Platform, ReleaseAsset | SystemAsset | null>>; schemas?: SchemaPin })
   // `with`: extra packages pinned beside the tool, for a dependency the tool
   // itself leaves unpinned (semgrep needs a setuptools that still ships pkg_resources).
   | (RecipeBase & { method: "uv"; package: string; python: string; with?: string[] })
@@ -94,7 +117,10 @@ export function markerPath(root: string, tool: string, recipe: Recipe): string {
 export function currentPlatform(): Platform | null {
   const os = process.platform;
   const arch = process.arch;
-  if ((os === "darwin" || os === "linux") && (arch === "arm64" || arch === "x64")) return `${os}-${arch}`;
+  if (arch !== "arm64" && arch !== "x64") return null;
+  if (os === "darwin") return arch === "arm64" ? "darwin-arm64" : "darwin-x64";
+  if (os === "linux") return arch === "arm64" ? "linux-arm64" : "linux-x64";
+  if (os === "freebsd") return arch === "arm64" ? "freebsd-arm64" : "freebsd-x64";
   return null;
 }
 

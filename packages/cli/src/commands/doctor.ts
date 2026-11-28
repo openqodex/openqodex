@@ -103,6 +103,8 @@ const STATE_WORDS: Record<ToolStatus["state"], string> = {
   needs_runtime: "needs a runtime",
   installing: "installing",
   unsupported: "not available on this machine",
+  not_installed: "not installed",
+  unusable: "installed but cannot be used",
 };
 
 function text(r: Report): string {

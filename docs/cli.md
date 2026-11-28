@@ -262,6 +262,7 @@ Asks the code graph of the repository a question: `callers`, `callees`, `impleme
 ## Environment variables
 
 - `OPENQODEX_HOME`: where OpenQodex keeps scanners, the launcher and approvals. The default is `~/.openqodex`.
+- `OPENQODEX_LOCALBASE`: where OpenQodex looks for the scanners that FreeBSD's package manager installs. The default is `/usr/local`, the FreeBSD LOCALBASE. It must hold an absolute path; anything else is ignored.
 - `OPENQODEX_SKIP=1`: the push gate lets the push through and says so. It is your switch, not your agent's.
 - `OPENQODEX_AUTO_UPDATE=0`: no daily version check. `OPENQODEX_OFFLINE=1` and a set `CI` variable do the same.
 - `OPENQODEX_TELEMETRY=0`: no usage data. `DO_NOT_TRACK=1`, `OPENQODEX_OFFLINE=1` and a `CI` variable, even an empty one, do the same.

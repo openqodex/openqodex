@@ -4,6 +4,8 @@
 //   1. A registry answer (metadata JSON) is read whole, with no limit, before
 //      it is parsed, so an endless answer fills memory.
 //   2. A registry answer that redirects is followed.
+//   3. A lock file for a platform that has no lock files (FreeBSD) is checked
+//      as if it were a Linux one.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
@@ -53,5 +55,12 @@ describe("lock-scanners reads registry answers within limits", () => {
   it("refuses an answer that redirects (2)", async () => {
     const { fetchMetadata } = await import(join(here, "..", "..", "..", "scripts", "lock-scanners.mjs"));
     await expect(fetchMetadata(`${origin}/moved.json`)).rejects.toThrow(/redirect/);
+  });
+
+  it("refuses a lock file for a platform that has none (3)", async () => {
+    const { markerEnv } = await import(join(here, "..", "..", "..", "scripts", "lock-check.mjs"));
+    expect(() => markerEnv("freebsd-x64", "3.11")).toThrow(/FreeBSD/);
+    expect(markerEnv("linux-x64", "3.11").sys_platform).toBe("linux");
+    expect(markerEnv("darwin-arm64", "3.11").sys_platform).toBe("darwin");
   });
 });
