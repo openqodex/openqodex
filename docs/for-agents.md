@@ -38,7 +38,7 @@ Run these commands from the developer's repository.
 
 Without Claude Code or Codex, OpenQodex still installs. A review then prints "Full review unavailable". Tell the developer before you install. At the end of the install, `init` prints "Reviewer ready" or what to fix.
 
-CI tests OpenQodex on Node 22, on macOS and on Ubuntu Linux. No test runs on Windows or WSL.
+CI tests OpenQodex on Node 22, on macOS and on Ubuntu Linux. No test runs on Windows or WSL, and the gate does not run on FreeBSD yet. OpenQodex itself runs on FreeBSD 15 or later, on amd64 and on arm64: see the FreeBSD section of `docs/scanners.md` for what each scanner needs there.
 
 ## Install
 
@@ -104,7 +104,7 @@ The developer can ask you to add a scanner by its GitHub link. You write the con
 
 1. Read the scanner's README. Find the flag that makes it write SARIF.
 2. If it cannot write SARIF, find the flag that makes it write one JSON document. OpenQodex cannot read JSON Lines or plain text.
-3. Find how it installs. OpenQodex can use a GitHub release asset for macOS or Linux. It can also use an exact npm or PyPI version, or a program on `PATH`.
+3. Find how it installs. OpenQodex can use a GitHub release asset for macOS, Linux or FreeBSD. It can also use an exact npm or PyPI version, or a program on `PATH`.
 4. Add the entry under `scanners.custom` in `.openqodex/config.yaml`.
 5. Ask the developer to approve it with `~/.openqodex/bin/openqodex trust`. `trust` downloads the release asset into a quarantine folder. Then it shows what will run and asks yes or no. The skill's rule: never run `openqodex trust` without asking the developer first.
 6. After the approval, run `~/.openqodex/bin/openqodex scan --only custom:<name>`. Tell the developer its status and its findings.

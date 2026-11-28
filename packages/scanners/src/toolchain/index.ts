@@ -23,11 +23,12 @@ import {
   type Runtime,
 } from "./install.js";
 import { homePlace, loadToolchain, openqodexHome, toolsDir, type Recipe } from "./table.js";
+import { resolveSystemAsset, systemAssetFor } from "./system.js";
 
 export { downloadVerified, extractArchive, InstallError } from "./fetch.js";
 export { installTool } from "./install.js";
 export { loadToolchain, openqodexHome, toolchainHash, toolsDir } from "./table.js";
-export type { Recipe, ReleaseAsset, Toolchain } from "./table.js";
+export type { Recipe, ReleaseAsset, SystemAsset, Toolchain } from "./table.js";
 
 // Every builtin scanner, checked against the type so a new one is not missed.
 const builtins: Record<BuiltinScanner, true> = {
@@ -233,10 +234,17 @@ async function resolveOne(scanner: BuiltinScanner, opts: Resolver): Promise<Tool
   // One runtime check for the scanner: what it says, and the environment the
   // resolved tool is given.
   const check = checkRuntime(recipe, opts.probeHome);
-  const probe = check.then((r) => r.reason);
-  const runtime = deadline === null ? await probe : await withDeadline(probe, remaining(deadline));
+  const runtime = deadline === null ? await check : await withDeadline(check, remaining(deadline));
   if (runtime === TIMED_OUT) return { ok: false, status: "not_installed", reason: "still checking for the runtime; it will be included next run" };
-  if (runtime) return { ok: false, status: "not_installed", reason: runtime };
+  if (runtime.reason) return { ok: false, status: "not_installed", reason: runtime.reason };
+  // A tool the host's package manager installs: it runs from there, or it is
+  // not there and the reason says how to get it. Nothing is installed.
+  const system = systemAssetFor(recipe);
+  if (system !== null) {
+    const resolution = await resolveSystemAsset(scanner, recipe, system);
+    if (resolution.ok) return { ok: true, tool: { path: resolution.path, version: resolution.version, env: { ...runtime.env } } };
+    return { ok: false, status: "not_installed", reason: resolution.reason };
+  }
   if (isInstalled(root, scanner, recipe)) return installedResolution(root, scanner, recipe, check);
   const unsupported = unsupportedReason(table, recipe);
   if (unsupported) return { ok: false, status: "not_installed", reason: unsupported };
@@ -311,6 +319,18 @@ async function statusOf(scanner: BuiltinScanner): Promise<ToolStatus> {
   const version = recipe.version;
   const runtime = await missingRuntime(recipe);
   if (runtime) return { scanner, state: "needs_runtime", version, detail: runtime };
+  // A tool the host's package manager installs: it is ready when it is
+  // there, with the version it reports, it is not installed when the package
+  // is not there, and it is unusable when it is there but this build must
+  // not run it. An unusable tool that printed a version is reported with
+  // that version, and with the pin only when it printed nothing.
+  const system = systemAssetFor(recipe);
+  if (system !== null) {
+    const resolution = await resolveSystemAsset(scanner, recipe, system);
+    if (resolution.ok) return { scanner, state: "ready", version: resolution.version, detail: resolution.path };
+    if (resolution.kind === "missing") return { scanner, state: "not_installed", version: system.version, detail: resolution.reason };
+    return { scanner, state: "unusable", version: resolution.version ?? system.version, detail: resolution.reason };
+  }
   if (isInstalled(root, scanner, recipe)) {
     return { scanner, state: "ready", version, detail: (await resolvedTool(root, scanner, recipe)).path };
   }
@@ -346,6 +366,8 @@ export function installToolsDetached(scanners: BuiltinScanner[] | null): void {
   for (const scanner of scanners ?? ALL_SCANNERS) {
     const recipe = table.tools[scanner];
     if (!recipe || isInstalled(root, scanner, recipe) || isLocked(root, scanner) || unsupportedReason(table, recipe)) continue;
+    // A tool the host's package manager installs is never installed here.
+    if (systemAssetFor(recipe) !== null) continue;
     // The install process checks the runtime itself and records why it stopped.
     const child = startWorker(worker.entry, scanner, home);
     child.once("error", () => undefined);

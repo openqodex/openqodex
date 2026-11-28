@@ -140,7 +140,11 @@ describe("toolchain", () => {
   it("refuses a download whose checksum differs and leaves no version folder", async () => {
     const home = freshHome();
     const bad = structuredClone(table);
-    for (const asset of Object.values(bad.tools.actionlint.assets) as { sha256: string }[]) asset.sha256 = "0".repeat(64);
+    // Only a release download has a checksum: a system asset is installed by
+    // the host's package manager, and a null asset is no asset at all.
+    for (const asset of Object.values(bad.tools.actionlint.assets)) {
+      if (asset && "sha256" in asset) asset.sha256 = "0".repeat(64);
+    }
     await expect(tc.installTool("actionlint", { table: bad })).rejects.toMatchObject({ message: "checksum mismatch" });
     expect(existsSync(join(home, "tools", "actionlint", actionlintVersion))).toBe(false);
     expect(readdirSync(join(home, "tools", "actionlint")).filter((n) => !n.startsWith(".lock"))).toEqual([]);

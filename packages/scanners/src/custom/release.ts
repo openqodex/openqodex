@@ -9,8 +9,9 @@ import type { CustomScanner } from "@openqodex/core";
 import { downloadVerified } from "../toolchain/fetch.js";
 import { currentPlatform, openqodexHome, type Platform } from "../toolchain/table.js";
 
-const OS_TOKENS: Record<"darwin" | "linux", string[]> = {
+const OS_TOKENS: Record<"darwin" | "freebsd" | "linux", string[]> = {
   darwin: ["darwin", "macos", "osx", "apple"],
+  freebsd: ["freebsd"],
   linux: ["linux"],
 };
 const ARCH_TOKENS: Record<"arm64" | "x64", string[]> = {
@@ -24,8 +25,8 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // A token counts only between separators, so "arm" never matches inside "arm64".
 const tokenRe = (tokens: string[]) => new RegExp(`(?<![a-z0-9])(?:${tokens.map(escape).join("|")})(?![a-z0-9])`, "i");
 
-function splitPlatform(platform: Platform): { os: "darwin" | "linux"; arch: "arm64" | "x64" } {
-  const [os, arch] = platform.split("-") as ["darwin" | "linux", "arm64" | "x64"];
+function splitPlatform(platform: Platform): { os: "darwin" | "freebsd" | "linux"; arch: "arm64" | "x64" } {
+  const [os, arch] = platform.split("-") as ["darwin" | "freebsd" | "linux", "arm64" | "x64"];
   return { os, arch };
 }
 

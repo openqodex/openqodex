@@ -189,9 +189,12 @@ export function readRequirement(text) {
 }
 
 // The marker environment for one lock file: the platform it was made for and
-// the recipe's Python.
+// the recipe's Python. Only the platforms a lock file exists for are read: a
+// PyPI or RubyGems scanner has no FreeBSD lock file, because no uv or gem
+// recipe supports FreeBSD.
 export function markerEnv(platform, python) {
   const [os, arch] = platform.split("-");
+  if (os !== "darwin" && os !== "linux") throw new LockRefused(`${platform}: there is no lock file for this platform; FreeBSD has no PyPI or RubyGems lock file`);
   const darwin = os === "darwin";
   return {
     python_version: python,

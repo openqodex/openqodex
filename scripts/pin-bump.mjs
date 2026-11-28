@@ -37,6 +37,9 @@
 //   checksum file, the one in that file too. The last line of --apply says
 //   which: sums=checksum-file-and-digest or sums=digest-only. A download may
 //   redirect only to GitHub's own asset host.
+// - A system asset is not a download: the host's package manager installs it
+//   and the host checks it at run time. A bump leaves it as it is, and a
+//   FreeBSD download is bumped like any other download.
 // - A PyPI or RubyGems pin is re-locked by scripts/lock-scanners.mjs, which
 //   starts the pinned uv and checks each gem's download against RubyGems'
 //   sha256; a gem's lowest Ruby comes from its own metadata. With --locks
@@ -56,6 +59,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkGemTree, checkPyTree, LockRefused, pyName, readGemLock, readUvLock, writeGemLock, writeUvLock } from "./lock-check.mjs";
+import { FREEBSD_PLATFORMS, assetKind } from "./toolchain-assets.mjs";
 
 const MIN_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const PLATFORM_COUNT_LIMIT = 16;
@@ -253,6 +257,13 @@ async function verifiedAssets(tool, recipe, found, up) {
       assets[platform] = asset;
       continue;
     }
+    // A system asset is not a download: the host's package manager installs
+    // it and the host checks it at run time. A bump leaves it as it is, so
+    // the pin the host checks stays the one a person set.
+    if (assetKind(asset) === "system") {
+      assets[platform] = asset;
+      continue;
+    }
     const name = asset.name.split(recipe.version).join(version);
     const a = listed.get(name);
     if (!a) throw new Refused(`${tool} ${version}: no asset named ${name} for ${platform}; the names changed, pin it by hand`);
@@ -279,11 +290,34 @@ async function verifiedAssets(tool, recipe, found, up) {
     withFile += inFile === null ? 0 : 1;
     assets[platform] = { ...asset, name, url: a.browser_download_url, sha256: actual, binaryPath: asset.binaryPath.split(recipe.version).join(version) };
   }
-  const pinned = Object.values(assets).filter(Boolean).length;
+  // Only the downloads count here: a system asset has no checksum file and no
+  // digest, so it is never one of the assets a project publishes sums for.
+  const pinned = Object.values(assets).filter((asset) => asset && assetKind(asset) === "release").length;
   // Never silently one of two: either every asset matched a checksum file of
   // the project's and GitHub's digest, or the project publishes none at all.
   if (withFile !== 0 && withFile !== pinned) throw new Refused(`${tool} ${version}: the project publishes a checksum for some assets only; pin it by hand`);
   return { assets, sums: withFile === 0 ? "digest-only" : "checksum-file-and-digest" };
+}
+
+// What a tool has on FreeBSD, one part per platform: the package and the pin
+// of a system asset (the version the host's package manager must have), the
+// pinned release of a download, or nothing at all.
+function freebsdPins(recipe) {
+  const parts = [];
+  for (const platform of FREEBSD_PLATFORMS) {
+    const asset = recipe.assets?.[platform];
+    const arch = platform === "freebsd-x64" ? "x64" : "arm64";
+    if (asset === undefined || asset === null) {
+      parts.push(`${arch} none`);
+      continue;
+    }
+    if (assetKind(asset) === "system") {
+      parts.push(`${arch} ${asset.system.package} ${asset.version}`);
+      continue;
+    }
+    parts.push(`${arch} ${recipe.version}`);
+  }
+  return parts.join("; ");
 }
 
 async function report(table, up, now) {
@@ -291,7 +325,7 @@ async function report(table, up, now) {
   for (const [tool, recipe] of Object.entries(table.tools)) {
     const l = await latest(recipe, up, now);
     const due = l !== null && compare(l.version, recipe.version) > 0;
-    rows.push({ tool, pinned: recipe.version, latest: l?.version ?? "-", released: l?.date?.slice(0, 10) ?? "-", due });
+    rows.push({ tool, pinned: recipe.version, latest: l?.version ?? "-", released: l?.date?.slice(0, 10) ?? "-", due, freebsd: freebsdPins(recipe) });
   }
   return rows;
 }
@@ -419,6 +453,9 @@ async function apply(tool, table, up, now, given) {
   process.stdout.write(`${tool}: ${from} -> ${found.version}\nsums=${sums}\n`);
 }
 
+// The platforms a lock file is written for. A PyPI or RubyGems recipe has no
+// FreeBSD lock file: no uv or gem recipe supports FreeBSD, so there is
+// nothing to lock there.
 const PLATFORM_TRIPLES = { "darwin-arm64": 1, "darwin-x64": 1, "linux-x64": 1, "linux-arm64": 1 };
 
 // One sha256 over every file a bump of `tool` writes, name and bytes, in
@@ -452,8 +489,8 @@ export async function run(argv, options = {}) {
       throw new Refused(`unknown arguments: ${rest.join(" ")}`);
     }
     if (mode === "--report" && arg === undefined) {
-      process.stdout.write("| Scanner | Pinned | Newest 7 days old | Released | Bump due |\n|---|---|---|---|---|\n");
-      for (const r of await report(table, up, now)) process.stdout.write(`| ${r.tool} | ${r.pinned} | ${r.latest} | ${r.released} | ${r.due ? "yes" : "no"} |\n`);
+      process.stdout.write("| Scanner | Pinned | Newest 7 days old | Released | Bump due | FreeBSD |\n|---|---|---|---|---|---|\n");
+      for (const r of await report(table, up, now)) process.stdout.write(`| ${r.tool} | ${r.pinned} | ${r.latest} | ${r.released} | ${r.due ? "yes" : "no"} | ${r.freebsd} |\n`);
     } else if (mode === "--matrix" && arg === undefined) {
       process.stdout.write(`${JSON.stringify((await report(table, up, now)).filter((r) => r.due).map((r) => r.tool))}\n`);
     } else if (mode === "--apply" && arg !== undefined) {

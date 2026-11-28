@@ -8,6 +8,9 @@
 //      passes.
 //   3. A version with no tool to hold it to passes unchecked.
 //   4. The current page fails, so the gate is red on a true page.
+//   5. A version that is only a FreeBSD system pin (the version the host's
+//      package manager must have) is not held to its tool, so the page
+//      cannot name it.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { pinsOf, scannerPageVersionProblems } from "../../../scripts/scanner-page-versions.mjs";
@@ -43,5 +46,14 @@ describe("versions on the scanners page", () => {
   it("fails a version with no tool to hold it to", () => {
     const loose = `${page}\n## Notes\n\nSome release 9.9.9 changed this.\n`;
     expect(check(loose)).toEqual([expect.stringMatching(/names version 9\.9\.9 outside any tool's section or row/)]);
+  });
+
+  it("holds a FreeBSD system pin to its tool, and still fails a version that is no pin (5)", () => {
+    const version = (tools.shellcheck.assets["freebsd-x64"] as { version: string }).version;
+    expect(version).not.toBe(tools.shellcheck.version);
+    const named = `${page}\n## shellcheck\n\nOn FreeBSD the package pins shellcheck ${version}.\n`;
+    expect(check(named)).toEqual([]);
+    const other = `${page}\n## shellcheck\n\nOn FreeBSD the package pins shellcheck 0.12.0.\n`;
+    expect(check(other)).toEqual([expect.stringMatching(/names shellcheck at 0\.12\.0/)]);
   });
 });

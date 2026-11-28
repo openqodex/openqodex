@@ -28,12 +28,19 @@ export const DISPLAY = { golangci: "golangci-lint", checkov: "Checkov", tflint: 
 
 // `tools`: the "tools" object of toolchain.json. Each tool is found by its
 // key and by its name in DISPLAY.
+// A tool's pins are its version, the gem versions installed with it, the
+// Kubernetes version of its schemas, and the version of each FreeBSD system
+// asset: a system asset has a pin of its own, the version the host's package
+// manager must have, and the page may name it.
 export function pinsOf(tools, names = DISPLAY) {
   const pins = new Map();
   for (const [key, tool] of Object.entries(tools)) {
     const set = new Set([tool.version]);
     for (const gem of tool.gems ?? []) set.add(gem.split(":")[1]);
     if (tool.schemas?.kubernetes) set.add(tool.schemas.kubernetes);
+    for (const asset of Object.values(tool.assets ?? {})) {
+      if (asset && typeof asset === "object" && asset.system) set.add(asset.version);
+    }
     for (const name of [key, ...(names[key] ? [names[key]] : [])]) pins.set(name.toLowerCase(), set);
   }
   return pins;

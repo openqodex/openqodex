@@ -35,6 +35,28 @@
           "sha256": "654c935542c89f565aabe7bf7c6c500830f116c114f0aeb509d2460c1ac2e6da",
           "archive": "tar.gz",
           "binaryPath": "gitleaks"
+        },
+        "freebsd-arm64": {
+          "system": {
+            "package": "gitleaks",
+            "path": "bin/gitleaks",
+            "versionArgs": [
+              "version"
+            ],
+            "versionPattern": "^v(\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "8.30.1"
+        },
+        "freebsd-x64": {
+          "system": {
+            "package": "gitleaks",
+            "path": "bin/gitleaks",
+            "versionArgs": [
+              "version"
+            ],
+            "versionPattern": "^v(\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "8.30.1"
         }
       }
     },
@@ -72,6 +94,28 @@
           "sha256": "2c71403eb443d05891c4f268c3ad771cf4f16e5443463fd7851ef8f454d3c7e4",
           "archive": "none",
           "binaryPath": "osv-scanner_linux_arm64"
+        },
+        "freebsd-arm64": {
+          "system": {
+            "package": "osv-scanner",
+            "path": "bin/osv-scanner",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^osv-scanner version: (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "2.7.0"
+        },
+        "freebsd-x64": {
+          "system": {
+            "package": "osv-scanner",
+            "path": "bin/osv-scanner",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^osv-scanner version: (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "2.7.0"
         }
       }
     },
@@ -109,7 +153,15 @@
           "sha256": "401942f9c24ed71e4fe71b76c7d638f66d8633575c4016efd2977ce7c28317d0",
           "archive": "tar.gz",
           "binaryPath": "actionlint"
-        }
+        },
+        "freebsd-x64": {
+          "name": "actionlint_1.7.7_freebsd_amd64.tar.gz",
+          "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_freebsd_amd64.tar.gz",
+          "sha256": "f6eec0e5efd17183a954f0d88280885b7a58f39808050cdfcd7f068fc1734bc8",
+          "archive": "tar.gz",
+          "binaryPath": "actionlint"
+        },
+        "freebsd-arm64": null
       }
     },
     "hadolint": {
@@ -146,6 +198,28 @@
           "sha256": "f6198ef8090f404dbb771abfee086eb8c48ac177f30da7fd3510aca35b344b5d",
           "archive": "none",
           "binaryPath": "hadolint-linux-arm64"
+        },
+        "freebsd-arm64": {
+          "system": {
+            "package": "hs-hadolint",
+            "path": "bin/hadolint",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^Haskell Dockerfile Linter (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "2.14.0"
+        },
+        "freebsd-x64": {
+          "system": {
+            "package": "hs-hadolint",
+            "path": "bin/hadolint",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^Haskell Dockerfile Linter (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "2.14.0"
         }
       }
     },
@@ -183,6 +257,28 @@
           "sha256": "324a7e89de8fa2aed0d0c28f3dab59cf84c6d74264022c00c22af665ed1a09bb",
           "archive": "tar.xz",
           "binaryPath": "shellcheck-v0.10.0/shellcheck"
+        },
+        "freebsd-arm64": {
+          "system": {
+            "package": "hs-ShellCheck",
+            "path": "bin/shellcheck",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^version: (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "0.11.0"
+        },
+        "freebsd-x64": {
+          "system": {
+            "package": "hs-ShellCheck",
+            "path": "bin/shellcheck",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^version: (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "0.11.0"
         }
       }
     },
@@ -220,6 +316,28 @@
           "sha256": "3f4639152c0e42bb5938e6c23d53d527a38f3133e000102934518f90529fa299",
           "archive": "tar.gz",
           "binaryPath": "ruff-aarch64-unknown-linux-gnu/ruff"
+        },
+        "freebsd-arm64": {
+          "system": {
+            "package": "ruff",
+            "path": "bin/ruff",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^ruff (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "0.17.5"
+        },
+        "freebsd-x64": {
+          "system": {
+            "package": "ruff",
+            "path": "bin/ruff",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^ruff (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "0.17.5"
         }
       }
     },
@@ -257,6 +375,20 @@
           "sha256": "ee7ec5f3453d15ddf106fae5a4d6c71737712348a979d1fe9cd52ec7ea299bae",
           "archive": "tar.gz",
           "binaryPath": "golangci-lint-2.14.0-linux-arm64/golangci-lint"
+        },
+        "freebsd-x64": {
+          "name": "golangci-lint-2.14.0-freebsd-amd64.tar.gz",
+          "url": "https://github.com/golangci/golangci-lint/releases/download/v2.14.0/golangci-lint-2.14.0-freebsd-amd64.tar.gz",
+          "sha256": "5224b2e8637cb9036025d1b028c4b509c7fc7857708840e31b5a79743762d9bf",
+          "archive": "tar.gz",
+          "binaryPath": "golangci-lint-2.14.0-freebsd-amd64/golangci-lint"
+        },
+        "freebsd-arm64": {
+          "name": "golangci-lint-2.14.0-freebsd-arm64.tar.gz",
+          "url": "https://github.com/golangci/golangci-lint/releases/download/v2.14.0/golangci-lint-2.14.0-freebsd-arm64.tar.gz",
+          "sha256": "f6810108716c7c602943b988dfa1af469d6e97e5fe6e0595784c45dff0c245dc",
+          "archive": "tar.gz",
+          "binaryPath": "golangci-lint-2.14.0-freebsd-arm64/golangci-lint"
         }
       },
       "needs": "go"
@@ -332,7 +464,15 @@
           "sha256": "c31f8b8b7e61924a3ac2a8d1223e34fe249baa4e0e7ba6a4984b96a946371aa2",
           "archive": "tar.gz",
           "binaryPath": "oxlint-aarch64-unknown-linux-gnu"
-        }
+        },
+        "freebsd-x64": {
+          "name": "oxlint-x86_64-unknown-freebsd.tar.gz",
+          "url": "https://github.com/oxc-project/oxc/releases/download/oxlint_v1.86.0/oxlint-x86_64-unknown-freebsd.tar.gz",
+          "sha256": "509d91a9617dbbf5a2442ef8852c425dbe93dfe59e36db6ff329fa2b98f81c72",
+          "archive": "tar.gz",
+          "binaryPath": "oxlint-x86_64-unknown-freebsd"
+        },
+        "freebsd-arm64": null
       }
     },
     "semgrep": {
@@ -406,6 +546,28 @@
           "sha256": "7ff1dce33bdd18fd2a4affe63bdd47efcccca97b2cec1c1863ec26e9e2647540",
           "archive": "tar.gz",
           "binaryPath": "zizmor"
+        },
+        "freebsd-arm64": {
+          "system": {
+            "package": "zizmor",
+            "path": "bin/zizmor",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^zizmor (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "1.32.0"
+        },
+        "freebsd-x64": {
+          "system": {
+            "package": "zizmor",
+            "path": "bin/zizmor",
+            "versionArgs": [
+              "--version"
+            ],
+            "versionPattern": "^zizmor (\\d+\\.\\d+\\.\\d+)$"
+          },
+          "version": "1.33.1"
         }
       }
     },

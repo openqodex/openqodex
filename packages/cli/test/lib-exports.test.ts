@@ -455,7 +455,11 @@ describe("a bundled program with openqodex external", () => {
     for (const [tool, recipe] of tools) {
       expect(recipe.version, `${tool} has no version`).toMatch(/^\d+\.\d+/);
       if (recipe.method === "github-release") {
-        const assets = Object.values(recipe.assets as Record<string, { sha256: string } | null>).filter((a) => a !== null);
+        // A release download has a checksum. A system asset is installed by
+        // the host's package manager and has a pinned version instead.
+        const assets = Object.values(recipe.assets as Record<string, { sha256?: string } | null>).filter(
+          (a): a is { sha256: string } => a !== null && typeof a.sha256 === "string",
+        );
         expect(assets.length, `${tool} has no release asset`).toBeGreaterThan(0);
         for (const asset of assets) expect(asset.sha256, `${tool} has an asset with no sha256`).toMatch(/^[0-9a-f]{64}$/);
       } else {

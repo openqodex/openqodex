@@ -19,6 +19,7 @@ import { runScanners } from "../run.js";
 import { checkCase, type CheckCase } from "./check-cases.js";
 import { createToolResolver } from "./index.js";
 import { installTool, isInstalled, missingRuntime, unsupportedReason } from "./install.js";
+import { resolveSystemAsset, systemAssetFor } from "./system.js";
 import { loadToolchain, markerPath, type InstallPlace, type Recipe } from "./table.js";
 
 // `installRoot`: the folder the tools go into, one folder per tool.
@@ -71,6 +72,9 @@ export async function preinstallScanners(opts: PreinstallOptions): Promise<Prein
         .filter((s): s is BuiltinScanner => isBuiltin(s) && !IN_PROCESS.has(s) && table.tools[s] !== undefined)
         .map(async (scanner) => {
           if (isInstalled(root, scanner, table.tools[scanner]!)) return;
+          // A tool the host's package manager installs is never installed
+          // here: the check reads it where it is.
+          if (systemAssetFor(table.tools[scanner]!) !== null) return;
           opts.onProgress?.(`installing ${scanner} ${table.tools[scanner]!.version}`);
           try {
             await installTool(scanner, { table, place, probeHome });
@@ -123,6 +127,16 @@ async function checkOne(scanner: ScannerSource, root: string, probeHome: string,
   const version = recipe.version;
   const runtime = await missingRuntime(recipe, probeHome);
   if (runtime) return { scanner, version, ok: false, detail: runtime };
+  // A tool the host's package manager installs: it is checked where it is,
+  // and nothing is installed in the install root.
+  const system = systemAssetFor(recipe);
+  if (system !== null) {
+    const resolution = await resolveSystemAsset(scanner, recipe, system);
+    if (!resolution.ok) return { scanner, version: system.version, ok: false, detail: resolution.reason };
+    opts.onProgress?.(`checking ${scanner} ${resolution.version} on its check case`);
+    const outcome = await runCheckCase(checkCase(scanner)!, root);
+    return { scanner, version: resolution.version, ...outcome };
+  }
   if (!isInstalled(root, scanner, recipe)) {
     const why = opts.installFailures?.get(scanner) ?? unsupportedReason(table, recipe) ?? `not installed at ${version}`;
     return { scanner, version, ok: false, detail: why };

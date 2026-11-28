@@ -16,7 +16,7 @@ The skill alone, with no push gate, launcher or scanner download: `npx skills ad
 
 - Node 22 or newer, and git.
 - Claude Code or Codex, installed and logged in. It is the reviewer OpenQodex starts. Without either, `review` runs the scanners, says "Full review unavailable", and names the command with which the agent you are in reviews the change itself.
-- macOS or Linux. On Windows, use WSL.
+- macOS or Linux, or FreeBSD 15 or later on amd64 or on arm64. On Windows, use WSL.
 - A git repository with a change in it.
 
 ## 1. Install into your agent

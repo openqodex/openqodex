@@ -194,7 +194,7 @@ export type AdapterResult = {
 // One row of `openqodex doctor`.
 export type ToolStatus = {
   scanner: BuiltinScanner;
-  state: "ready" | "will_install" | "needs_runtime" | "installing" | "unsupported";
+  state: "ready" | "will_install" | "needs_runtime" | "installing" | "unsupported" | "not_installed" | "unusable";
   version: string;
   detail: string | null;
 };

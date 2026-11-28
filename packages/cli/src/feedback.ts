@@ -399,6 +399,15 @@ function readKey(): Promise<string> {
   });
 }
 
+// The program that opens a page in a browser, or null when the platform has
+// none. macOS has "open"; Linux and FreeBSD have "xdg-open", which pkg
+// installs on FreeBSD.
+export function browserOpener(platform: NodeJS.Platform): string | null {
+  if (platform === "darwin") return "open";
+  if (platform === "linux" || platform === "freebsd") return "xdg-open";
+  return null;
+}
+
 // Choice 1. With a signed-in GitHub CLI the issue is created as shown;
 // otherwise the new-issue page opens with the same title and body filled in.
 // Never signs in.
@@ -415,7 +424,7 @@ export async function sendIssue(issue: Issue): Promise<string> {
     // no gh, not signed in, or the create failed: the browser page instead
   }
   const url = `https://github.com/${ISSUE_REPO}/issues/new?title=${encodeURIComponent(issue.title)}&body=${encodeURIComponent(issue.body)}`;
-  const opener = process.platform === "darwin" ? "open" : process.platform === "linux" ? "xdg-open" : null;
+  const opener = browserOpener(process.platform);
   if (opener !== null) {
     try {
       await execFileAsync(opener, [url], { timeout: 15_000 });

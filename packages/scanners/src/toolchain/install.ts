@@ -32,6 +32,7 @@ import {
   binaryPath,
   currentPlatform,
   homePlace,
+  isSystemAsset,
   loadToolchain,
   lockFile,
   markerPath,
@@ -42,6 +43,7 @@ import {
   type Recipe,
   type Toolchain,
 } from "./table.js";
+import { resolveSystemAsset, systemAssetFor } from "./system.js";
 
 const INSTALL_TIMEOUT_MS = 20 * 60_000;
 const PROBE_TIMEOUT_MS = 15_000;
@@ -354,7 +356,10 @@ export async function resolvedTool(root: string, tool: string, recipe: Recipe, c
 export function unsupportedReason(table: Toolchain, recipe: Recipe): string | null {
   const platform = currentPlatform();
   if (recipe.method === "github-release") {
-    return platform && recipe.assets[platform] ? null : "no download for this platform";
+    // A system asset is a way to get the tool: the host's package manager
+    // installs it. A plain "none", or no asset at all, is no way.
+    const asset = platform === null ? null : recipe.assets[platform];
+    return asset ? null : "no download for this platform";
   }
   if (recipe.method === "uv") {
     if (which("uv")) return null;
@@ -557,6 +562,9 @@ async function installRelease(
   const platform = currentPlatform();
   const asset = platform ? recipe.assets[platform] : null;
   if (!asset) throw new InstallError("not_installed", "no download for this platform");
+  // A system asset is not downloaded: the host's package manager installs
+  // it, and installTool answers for it before this is reached.
+  if (isSystemAsset(asset)) throw new InstallError("not_installed", "the host's package manager installs this tool");
   const dir = toolDir(root, tool);
   const staging = mkdtempSync(join(dir, ".staging-"));
   try {
@@ -695,8 +703,17 @@ export async function installTool(
   const place = opts.place ?? homePlace();
   const root = place.root;
   const check = checkRuntime(recipe, opts.probeHome);
-  const runtime = (await check).reason;
-  if (runtime) throw new InstallError("not_installed", runtime);
+  const runtime = await check;
+  if (runtime.reason) throw new InstallError("not_installed", runtime.reason);
+  // A tool the host's package manager installs: there is nothing to install
+  // here. It is either there, and the tool runs from there, or it is not,
+  // and the reason says how to get it.
+  const system = systemAssetFor(recipe);
+  if (system !== null) {
+    const resolution = await resolveSystemAsset(tool, recipe, system);
+    if (!resolution.ok) throw new InstallError("not_installed", resolution.reason);
+    return { path: resolution.path, version: resolution.version, env: { ...runtime.env } };
+  }
   if (isInstalled(root, tool, recipe)) return resolvedTool(root, tool, recipe, check);
   const unsupported = unsupportedReason(table, recipe);
   if (unsupported) throw new InstallError("not_installed", unsupported);
