@@ -15,11 +15,14 @@
 // 7. A file stopped at the parse time limit makes the build partial, which
 //    floors every answer, but no reason names it, so a floor in another
 //    project says nothing of why.
+// 8. The memory bound holds only while files are read: resolution, the
+//    framework plugins and the second world of the export comparison run
+//    past it until the process runs out of memory.
 import { afterAll, describe, expect, it } from "vitest";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getChange } from "@openqodex/core";
-import { buildGraph, openStore } from "../src/index.js";
+import { buildGraph, openStore, showBlob } from "../src/index.js";
 import { query } from "../src/query/engine.js";
 import type { Request } from "../src/query/answer.js";
 import { growthTests, LOOSE_BOUND_MS, onceOnCpu } from "../src/test-timing.js";
@@ -133,5 +136,27 @@ describe("the caps of a build", () => {
       const { cpuMs } = await onceOnCpu(() => buildRunaway(root));
       expect(cpuMs, `${cpuMs.toFixed(0)} ms of CPU time`).toBeLessThan(LOOSE_BOUND_MS);
     });
+  });
+
+  it("stops resolution and the export comparison once the heap passes the bound after the files are read (8)", async () => {
+    const root = repo({ "a.ts": "export function a() {\n  return 1;\n}\n", "b.ts": "import { a } from \"./a\";\nexport function b() {\n  return a();\n}\n" });
+    commitAll(root);
+    writeFiles(root, { "a.ts": "export function a() {\n  return 2;\n}\nexport function c() {\n  return 3;\n}\n" });
+    const change = await getChange({ repoRoot: root, scope: { uncommitted: true }, exclude: [] });
+    // The heap is under the bound while the files and the base version are
+    // read, and over it from then on.
+    let over = false;
+    const read = async (path: string, maxBytes: number) => {
+      const bytes = await showBlob(root, change.baseSha, path, maxBytes);
+      over = true;
+      return bytes;
+    };
+    const g = await buildGraph({ repoRoot: root, store: null, maxHeapMb: 1, heapUsed: () => (over ? 2 * 1024 * 1024 : 0), files: change.changedPaths, base: { sha: change.baseSha, files: change.files, read } });
+    expect(g.status.filesParsed).toBe(2);
+    expect(g.status.status).toBe("partial");
+    expect(g.unknowns.filter((u) => u.cause === "budget").map((u) => u.file).sort()).toEqual(["a.ts", "b.ts"]);
+    expect(g.exportChanges).toEqual([]);
+    expect(g.status.reasons).toContain("the export surface was not compared: the heap passed the 1 MB memory bound");
+    expect(g.status.reasons.some((r) => r.startsWith("the 1 MB memory bound was reached with the calls of 2 files not resolved"))).toBe(true);
   });
 });

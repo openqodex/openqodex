@@ -289,7 +289,7 @@ The brief lists a function, class or type the change deletes as removed, with ea
 - `graph.max_files`: the most files one build parses. Files whose facts are already in `.openqodex/graph/` do not count, so a large repository completes over a few reviews, or in one `openqodex graph build`. The default is `4000`.
 - `graph.max_file_bytes`: a file larger than this, in bytes, is left out of the graph. The default is `524288`.
 - `graph.max_cache_mb`: the size bound of `.openqodex/graph/`, in MB. The oldest builds and facts no kept build names are removed first; builds in use are never removed. The default is `512`.
-- `graph.max_heap_mb`: the memory the graph may take, in MB. Past it no more files are read, and the graph says how many it left out. The default is `1536`: a whole build of a 14,000-file repository from cached facts needs about 1 GB.
+- `graph.max_heap_mb`: the memory the graph may take, in MB. Past it no more files are read, and the graph says how many it left out. The bound holds after the files are read too: past it, the calls not yet resolved stay unresolved, the framework plugins not yet run are skipped, the export surface is not compared, and the graph is partial and says so. The default is `1536`: a whole build of a 14,000-file repository from cached facts needs about 1 GB.
 
 ## Reviewers
 
