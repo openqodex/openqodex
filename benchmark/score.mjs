@@ -437,7 +437,7 @@ export function renderV3(s) {
     ["Unresolved findings (no ruling yet)", (c) => String(c.precision.unresolved)],
     ["Unique-issue precision, lower to upper", (c) => bounds(c.uniqueIssuePrecision)],
     ["Redundancy (findings beyond one per issue)", (c) => pct(c.redundancy)],
-    ["F1 (on the lower precision bound)", (c) => c.f1.toFixed(2)],
+    ["F1 (on the lower precision bound)", (c) => (c.f1 === null ? "n/a" : c.f1.toFixed(2))],
     ["Clean changes with no finding", (c) => pct(c.controls)],
     ["Findings per clean change", (c) => (c.cleanFindingsPerCase.cases === 0 ? "n/a" : (c.cleanFindingsPerCase.findings / c.cleanFindingsPerCase.cases).toFixed(2))],
     ["Reviews complete / incomplete / failed / never started", (c) => `${c.population.complete} / ${c.population.incomplete} / ${c.population.failed} / ${c.population.unstarted}`],

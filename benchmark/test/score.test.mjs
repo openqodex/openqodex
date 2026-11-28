@@ -329,6 +329,8 @@ describe("a rule constant changes without a version bump, and old and new scores
     12: "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
     // Issue 284: a health result on every review; an unhealthy one credits nothing and is failed.
     13: "157a833899f0edcb185874b856d1303c0532b22c05006ea1f6e939b7047e8e91",
+    // A run that scores nothing has no f1.
+    14: "f2644a3b484fc7e96ffea723de597b40acd59b5d0f6e52b84db2bc6cea4b28b8",
   };
 
   it("pins the hash of the rules block, constants and matching code included, to its version", () => {
@@ -689,4 +691,19 @@ it("lists under-floor outside-change items after observations, like possible ite
   const outside = { ...SQLI, origin: "agent", confidence: 0.55, floor: 0.7, title: "Outside possible" };
   const counted = { ...SQLI, origin: "agent", confidence: 0.9, title: "Outside counted" };
   expect(shownFindings(report([], { outside_change: [outside, counted], observations: [observation] })).map((f) => [f.title, f.tier])).toEqual([["Outside counted", "finding"], ["Observation", "observation"], ["Outside possible", "possible"]]);
+});
+
+describe("a run that scores nothing has no f1", () => {
+  const nothing = () => scoreJob({
+    job: { jobId: "planted/hand@abababab/c/1", caseId: "planted/hand@abababab", case: "hand", config: "c", repeat: 1 },
+    spec: { ...spec, bugs: [] },
+    report: null,
+    row: { reviewer: "control", status: "complete", nativeBody: "the control's answer", modelStatus: "known", models: ["claude-4-1"], usage: { input_tokens: 1, output_tokens: 1 } },
+    brief: null,
+    origin: "planted",
+  });
+
+  it("records f1 null when precision and recall both have zero denominators", () => {
+    expect(summarizeJobs([nothing()]).f1).toBeNull();
+  });
 });
