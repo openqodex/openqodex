@@ -329,6 +329,8 @@ describe("a rule constant changes without a version bump, and old and new scores
     12: "d26295aaeb026a6f65646436beadfc9704e78d672c314d50318cbf099926318a",
     // Issue 284: a health result on every review; an unhealthy one credits nothing and is failed.
     13: "157a833899f0edcb185874b856d1303c0532b22c05006ea1f6e939b7047e8e91",
+    // A native control review is scored as its sample row says, not failed by the missing report.
+    14: "f6ef14c74d37d2273afaa2fc3aa2177522e9151a9b5aae6b86f21c225d456991",
   };
 
   it("pins the hash of the rules block, constants and matching code included, to its version", () => {
@@ -428,6 +430,37 @@ describe("a successful retry replaces a failed first attempt", () => {
     // Format 2 scored both attempts; the difference is stated.
     expect(c.allAttempts.recall).toEqual({ hit: 1, of: 10 });
     expect(renderV3(score)).toMatch(/every saved attempt/);
+  });
+});
+
+describe("a native control attempt's population entry", () => {
+  const controlRow = {
+    reviewer: "control",
+    status: "complete",
+    nativeBody: "the control's answer",
+    modelStatus: "known",
+    models: ["claude-4-1"],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+  const controlJob = (status) => scoreJob({
+    job: { jobId: "planted/hand@abababab/c/1", caseId: "planted/hand@abababab", case: "hand", config: "c", repeat: 1 },
+    spec,
+    report: null,
+    row: status === "failed" ? { ...controlRow, status: "failed" } : controlRow,
+    brief: null,
+    origin: "planted",
+  });
+
+  it("counts a complete control review as complete, not failed", () => {
+    const j = controlJob("complete");
+    expect(j.status).toBe("complete");
+    expect(summarizeJobs([j]).population).toMatchObject({ planned: 1, complete: 1, failed: 0, unstarted: 0 });
+  });
+
+  it("counts a failed control attempt as failed, not complete", () => {
+    const j = controlJob("failed");
+    expect(j.status).toBe("failed");
+    expect(summarizeJobs([j]).population).toMatchObject({ planned: 1, failed: 1, complete: 0 });
   });
 });
 
